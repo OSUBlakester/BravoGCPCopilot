@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Sensitive files
+*.key
+*.pem
+*.env
+.env
+config.ini
+secrets.json
+
+# API Keys and sensitive configuration
+APIKEYS.reg
+*.reg
+
+# User data directories (contains personal information)
+user_data/
+user_docs/
+
+# ChromaDB data
+my_chroma_db/
+
+# Temporary files
+*.tmp
+*.temp
+*.save
+*.bak
+*.backup
+
+# Cloud SQL Proxy
+cloud-sql-proxy
+
+# Audio files (might be large)
+*.wav
+*.mp3
+*.ogg
+*.m4a
+
+# Backup files
+*copy*.py.txt
+*Copy*.py.txt
+server*.py.txt
