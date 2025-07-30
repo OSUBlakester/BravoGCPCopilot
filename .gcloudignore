@@ -1,0 +1,65 @@
+# Google Cloud Build ignore file
+# This file specifies files that are ignored by gcloud when uploading source code
+
+# User data directories - these should not be deployed
+user_data/
+user_docs/
+my_chroma_db/
+
+# Registry and configuration files that aren't needed for deployment
+APIKEYS.reg
+
+# Binary files
+cloud-sql-proxy
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Backup and temporary files
+*.save
+*copy*.py.txt
+*Copy*.py.txt
+server - Copy*.py.txt
+server copy*.py.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+*.log
+logs/
+
+# Node modules (if any)
+node_modules/
+
+# Git
+.git/
+.gitignore
+
+# Documentation that's not needed for deployment
+README.md
+*.md

@@ -1,0 +1,13 @@
+{
+    "scanDelay": 3000,
+    "wakeWordInterjection": "Hey",
+    "wakeWordName": "Brady",
+    "CountryCode": "US",
+    "primary_llm_model": "models/gemini-2.0-flash",
+    "speech_rate": 160,
+    "LLMOptions": 10,
+    "ScanningOff": false,
+    "SummaryOff": false,
+    "selected_tts_voice_name": "en-US-Standard-I",
+    "StateCode": "CO"
+}

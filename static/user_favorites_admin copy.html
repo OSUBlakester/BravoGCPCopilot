@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Current Event Sources</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="/static/user_favorites_admin.js" defer></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+        h1, h2 {
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        td input[type="text"], td input[type="url"] {
+            width: 95%;
+            padding: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 8px 15px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .action-buttons button {
+             padding: 4px 8px;
+             margin: 2px;
+        }
+        .status-message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        fieldset {
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            padding: 15px;
+        }
+        legend {
+            font-weight: bold;
+            font-size: 1.1em;
+            padding: 0 10px;
+        }
+         #hamburger-btn:hover {
+        background-color: #2D3748; /* Darker shade for hover */
+        }
+        .dropdown-content {
+            display: none; /* Hidden by default */
+            position: absolute;
+            background-color: #ffffff; /* White background for dropdown */
+            min-width: 260px; /* Adjust as needed */
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 1000; /* Ensure it's on top */
+            left: 0; /* Align to the left of the button */
+            border-radius: 5px;
+            border: 1px solid #ddd; /* Light border for the dropdown */
+        }
+        .dropdown-content a {
+            color: #333; /* Dark text for links */
+            padding: 10px 15px;
+            text-decoration: none;
+            display: block;
+            font-size: 14px; /* Standard font size for menu items */
+        }
+        .dropdown-content a:hover {
+            background-color: #f0f0f0; /* Hover effect for links */
+        }
+        .dropdown-content hr {
+            border: 0;
+            height: 1px;
+            background-color: #e0e0e0; /* Separator color */
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <script>
+        // Firebase Configuration - REPLACE WITH YOUR ACTUAL CONFIG
+        const firebaseConfig = {
+            apiKey: "AIzaSyARWoyZuGJPb4DzyKa7SRIj_A25ya7fqPA",
+            authDomain: "bravopoc.firebaseapp.com",
+            projectId: "bravopoc",
+            storageBucket: "bravopoc.appspot.com",
+            messagingSenderId: "374725441777",
+            appId: "1:374725441777:web:af90d3a996d57f91515150"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+
+        const SERVER_URL = "https://talkwithbravo.com"; // Ensure this is correct
+        const AAC_USER_ID_SESSION_KEY = "currentAacUserId";
+        const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
+
+        let currentAacUserId = null;
+        let firebaseIdToken = null;
+
+        async function initializeAdminUserContext() {
+            firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+            currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.log("Admin Settings: No Firebase ID Token or AAC User ID found. Redirecting to auth.html.");
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                return false;
+            }
+            console.log(`Admin Settings: User context initialized. AAC User ID: ${currentAacUserId}`);
+            return true;
+        }
+
+        async function authenticatedFetch(url, options = {}) {
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.error("Admin Settings Auth: Token or User ID missing. Redirecting.");
+                sessionStorage.clear(); window.location.href = 'auth.html'; throw new Error("Authentication required.");
+            }
+            const headers = options.headers || {};
+            headers['Authorization'] = `Bearer ${firebaseIdToken}`;
+            headers['X-User-ID'] = currentAacUserId;
+            options.headers = headers;
+            const response = await fetch(url, options);
+            if (response.status === 401 || response.status === 403) {
+                console.warn(`Admin Settings Auth failed (${response.status}) for ${url}. Redirecting to login.`);
+                sessionStorage.clear(); window.location.href = 'auth.html'; throw new Error("Session expired or invalid.");
+            }
+            return response;
+        }
+
+        (async () => {
+            const userReady = await initializeAdminUserContext();
+            if (userReady) {
+                window.currentAacUserId = currentAacUserId;
+                window.firebaseIdToken = firebaseIdToken;
+                window.authenticatedFetch = authenticatedFetch;
+                window.adminContextInitializedByInlineScript = true;
+                document.dispatchEvent(new Event('adminUserContextReady'));
+            }
+        })();
+    </script>
+
+
+
+    <header class="bg-gray-800 text-white p-4 shadow-md sticky top-0 z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center">
+                <!-- Hamburger Menu -->
+                <div class="hamburger-menu mr-4">
+                    <button id="hamburger-btn" aria-label="Open navigation menu" aria-expanded="false" aria-controls="admin-nav-dropdown">&#9776;</button>
+                    <div id="admin-nav-dropdown" class="dropdown-content">
+                        <a href="admin_pages.html">Pages and Buttons Settings</a>
+                        <a href="admin_settings.html">Global Settings</a>
+                        <a href="audio_admin.html">Audio Devices Settings</a>
+                        <a href="user_current_admin.html">User Current Location</a>
+                        <a href="user_info_admin.html">User General Info</a>
+                        <a href="user_diary_admin.html">User Diary</a>
+                        <a href="user_favorites_admin.html">User Favorites (Events Sources)</a>
+                        <a href="admin_audit_report.html">Activity Reports</a>
+                    </div>
+                </div>
+                <h1 class="text-xl font-semibold">Current Event Sources</h1>
+            </div>
+            <div class="space-x-4">
+                <a href="gridpage.html?page=home" class="button-link button-secondary">
+                     <i class="fas fa-home"></i> Home
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <h1>Manage Current Event Sources</h1>
+
+    <div id="status-message-area"></div>
+    <button id="save-all-button">Save All Changes</button>
+    <hr>
+
+    <fieldset>
+        <legend>News Sources</legend>
+        <table id="news-sources-table">
+            <thead>
+                <tr>
+                    <th>URL</th>
+                    <th>Keywords (comma-sep)</th>
+                    <th>Headline Selector</th>
+                    <th>Link Selector</th>
+                    <th>Link Attribute</th>
+                    <th>URL Prefix</th>
+                    <th>Sample HTML Element (Optional)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="news-sources-tbody">
+                </tbody>
+        </table>
+        <button class="add-source-btn" data-category="news">Add News Source</button>
+    </fieldset>
+
+    <fieldset>
+        <legend>Sports Sources</legend>
+        <table id="sports-sources-table">
+            <thead>
+                 <tr>
+                    <th>URL</th>
+                    <th>Keywords (comma-sep)</th>
+                    <th>Headline Selector</th>
+                    <th>Link Selector</th>
+                    <th>Link Attribute</th>
+                    <th>URL Prefix</th>
+                    <th>Sample HTML Element (Optional)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="sports-sources-tbody">
+                </tbody>
+        </table>
+         <button class="add-source-btn" data-category="sports">Add Sports Source</button>
+    </fieldset>
+
+    <fieldset>
+        <legend>Entertainment Sources</legend>
+        <table id="entertainment-sources-table">
+             <thead>
+                 <tr>
+                    <th>URL</th>
+                    <th>Keywords (comma-sep)</th>
+                    <th>Headline Selector</th>
+                    <th>Link Selector</th>
+                    <th>Link Attribute</th>
+                    <th>URL Prefix</th>
+                    <th>Sample HTML Element (Optional)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="entertainment-sources-tbody">
+                </tbody>
+        </table>
+         <button class="add-source-btn" data-category="entertainment">Add Entertainment Source</button>
+    </fieldset>
+
+</body>
+</html>

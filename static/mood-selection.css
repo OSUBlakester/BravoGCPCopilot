@@ -1,0 +1,247 @@
+/* Mood Selection Styles */
+.mood-selection-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.mood-selection-container {
+    background-color: white;
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    text-align: center;
+    outline: none; /* Remove focus outline for modal container */
+    /* Prevent keyboard scrolling within the modal */
+    scroll-behavior: auto;
+}
+
+.mood-selection-title {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #2d3748;
+    margin-bottom: 1rem;
+}
+
+.mood-selection-subtitle {
+    font-size: 1.2rem;
+    color: #4a5568;
+    margin-bottom: 2rem;
+}
+
+.mood-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.mood-button {
+    background-color: #f7fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.5rem 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: #2d3748;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 80px;
+    justify-content: center;
+}
+
+.mood-button:hover {
+    background-color: #edf2f7;
+    border-color: #cbd5e0;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.mood-button:focus {
+    outline: none;
+    border-color: #3182ce;
+    box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.3);
+}
+
+.mood-button.selected {
+    background-color: #3182ce;
+    border-color: #2c5282;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(49, 130, 206, 0.3);
+}
+
+.mood-button.selected:hover {
+    background-color: #2c5282;
+}
+
+.mood-emoji {
+    font-size: 2rem;
+    margin-bottom: 0.25rem;
+}
+
+.mood-actions {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.mood-action-button {
+    padding: 0.75rem 2rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 120px;
+}
+
+.mood-action-button:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.3);
+}
+
+.mood-continue-button {
+    background-color: #48bb78;
+    color: white;
+}
+
+.mood-continue-button:hover {
+    background-color: #38a169;
+}
+
+.mood-continue-button:disabled {
+    background-color: #a0aec0;
+    cursor: not-allowed;
+}
+
+.mood-skip-button {
+    background-color: #e2e8f0;
+    color: #4a5568;
+}
+
+.mood-skip-button:hover {
+    background-color: #cbd5e0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .mood-selection-container {
+        padding: 1.5rem;
+        margin: 1rem;
+    }
+    
+    .mood-selection-title {
+        font-size: 1.75rem;
+    }
+    
+    .mood-selection-subtitle {
+        font-size: 1rem;
+    }
+    
+    .mood-grid {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+    
+    .mood-button {
+        padding: 1rem 0.75rem;
+        font-size: 1rem;
+        min-height: 70px;
+    }
+    
+    .mood-emoji {
+        font-size: 1.5rem;
+    }
+    
+    .mood-actions {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .mood-action-button {
+        width: 100%;
+        max-width: 200px;
+    }
+}
+
+/* Animation for smooth appearance */
+.mood-selection-overlay {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.mood-selection-container {
+    animation: slideIn 0.3s ease-out;
+}
+
+/* Active state for button feedback */
+.mood-button.active,
+.mood-action-button.active {
+    transform: scale(0.95) !important;
+    background-color: #1976d2 !important;
+    color: white !important;
+}
+
+/* Scanning highlight styles */
+.mood-button.scan-highlight,
+.mood-action-button.scan-highlight,
+.mood-button.scanning,
+.mood-action-button.scanning {
+    border: 3px solid #007bff !important;
+    background-color: #e3f2fd !important;
+    box-shadow: 0 0 10px rgba(0, 123, 255, 0.5) !important;
+    animation: pulse 0.5s ease-in-out infinite alternate;
+}
+
+.mood-button.scan-highlight.selected,
+.mood-button.scanning.selected {
+    background-color: #2196f3 !important;
+    color: white !important;
+}
+
+@keyframes pulse {
+    from { 
+        transform: scale(1);
+        box-shadow: 0 0 10px rgba(0, 123, 255, 0.5);
+    }
+    to { 
+        transform: scale(1.02);
+        box-shadow: 0 0 15px rgba(0, 123, 255, 0.8);
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideIn {
+    from { 
+        transform: scale(0.9) translateY(-20px);
+        opacity: 0;
+    }
+    to { 
+        transform: scale(1) translateY(0);
+        opacity: 1;
+    }
+}

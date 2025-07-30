@@ -1,0 +1,1611 @@
+// --- Freestyle Communication JavaScript ---
+
+// --- Global Variables (Similar to gridpage.js) ---
+let currentlyScannedButton = null; // Tracks the currently highlighted button
+let lastGamepadInputTime = 0; // For gamepad debounce/rate limiting
+let isLLMProcessing = false; // Flag to detect if LLM query is running
+const clickDebounceDelay = 300; // Debounce for button clicks
+let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from settings
+let scanningInterval; // Holds the interval ID for scanning
+let currentButtonIndex = -1; // Tracks the index for scanning
+let scanCycleCount = 0; // Tracks how many complete cycles have been performed
+let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
+let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to scan limit
+let gamepadIndex = null; // To store the index of the connected gamepad
+let gamepadPollInterval = null; // Interval ID for gamepad polling
+let scanningPaused = false; // Global scanning pause flag
+let gridColumns = 6; // Default number of grid columns for alphabet grid sizing
+let autoClean = false; // Auto Clean setting for automatic cleanup on Speak Display
+
+// --- User Management Variables (Same as gridpage.js) ---
+let currentAacUserId = null;
+let firebaseIdToken = null;
+const AAC_USER_ID_SESSION_KEY = "currentAacUserId";
+const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
+const SELECTED_DISPLAY_NAME_SESSION_KEY = "selectedDisplayName";
+const SPEECH_HISTORY_LOCAL_STORAGE_KEY = (aacUserId) => `speechHistory_${aacUserId}`;
+
+// --- Audio Variables ---
+let personalSpeakerId = localStorage.getItem('bravoPersonalSpeakerId') || 'default';
+let systemSpeakerId = localStorage.getItem('bravoSystemSpeakerId') || 'default';
+let currentTtsVoiceName = 'en-US-Neural2-A';
+let currentSpeechRate = 180;
+
+// --- Announcement Queue Variables ---
+let announcementQueue = [];
+let isAnnouncingNow = false;
+let audioContextResumeAttempted = false;
+
+// --- Freestyle Specific Variables ---
+let currentBuildSpaceText = "";
+let currentWordOptions = [];
+let currentSpellingWord = "";
+let currentPredictions = [];
+let isSpellingModalOpen = false;
+let currentScanningContext = "main"; // "main", "spelling-letters", "spelling-predictions"
+
+// --- Initialize on Page Load ---
+document.addEventListener('DOMContentLoaded', async () => {
+    const userReady = await initializeUserContext();
+    if (!userReady) {
+        window.location.href = '/static/auth.html';
+        return;
+    }
+
+    // Initialize the page (loads settings first)
+    await initializeFreestylePage();
+    
+    // Setup input listeners
+    setupKeyboardListener();
+    setupGamepadListeners();
+    
+    // Setup audio context resume listeners
+    document.body.addEventListener('mousedown', tryResumeAudioContext, { once: true });
+    document.body.addEventListener('touchstart', tryResumeAudioContext, { once: true });
+    document.body.addEventListener('keydown', tryResumeAudioContext, { once: true });
+    
+    // Setup PIN modal functionality
+    setupPinModal();
+    
+    // Auto-start scanning regardless of previous state
+    setTimeout(() => {
+        scanningPaused = false;
+        startScanning();
+    }, 1000); // Small delay to ensure page is fully loaded
+});
+
+// --- User Context Initialization (Same as gridpage.js) ---
+async function initializeUserContext() {
+    firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+    currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+
+    if (!firebaseIdToken || !currentAacUserId) {
+        console.error('User authentication not found. Redirecting to auth page.');
+        return false;
+    }
+    console.log(`User context initialized. AAC User ID: ${currentAacUserId}`);
+    return true;
+}
+
+// --- Core Fetch Wrapper (Same as gridpage.js) ---
+async function authenticatedFetch(url, options = {}) {
+    if (!firebaseIdToken || !currentAacUserId) {
+        throw new Error('User not authenticated');
+    }
+
+    const headers = options.headers || {};
+    headers['Authorization'] = `Bearer ${firebaseIdToken}`;
+    headers['X-User-ID'] = currentAacUserId;
+    options.headers = headers;
+
+    const response = await fetch(url, options);
+    if (response.status === 401 || response.status === 403) {
+        console.error('Authentication failed. Redirecting to auth page.');
+        window.location.href = '/static/auth.html';
+        throw new Error('Authentication failed');
+    }
+    return response;
+}
+
+// --- Settings Loading (Similar to gridpage.js) ---
+async function loadScanSettings() {
+    try {
+        const response = await authenticatedFetch('/api/settings');
+        if (response.ok) {
+            const settings = await response.json();
+            defaultDelay = settings.scanDelay || 3500;
+            scanLoopLimit = settings.scanLoopLimit || 0;
+            currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
+            currentSpeechRate = settings.speech_rate || 180;
+            autoClean = settings.autoClean || false; // Load Auto Clean setting
+            
+            // Load gridColumns setting
+            if (settings && typeof settings.gridColumns === 'number' && !isNaN(settings.gridColumns)) {
+                gridColumns = Math.max(2, Math.min(18, parseInt(settings.gridColumns)));
+                console.log(`Grid Columns loaded: ${gridColumns}`);
+            } else {
+                gridColumns = 6; // Default value for alphabet grid
+            }
+            
+            console.log('Scan settings loaded:', { defaultDelay, scanLoopLimit, gridColumns, autoClean });
+        }
+    } catch (error) {
+        console.error('Error loading scan settings:', error);
+    }
+}
+
+// --- Grid Layout Update Function (Similar to gridpage.js) ---
+function updateAlphabetGridLayout() {
+    const grid = document.getElementById('alphabet-grid');
+    if (!grid) return;
+    
+    // Update the CSS grid template columns based on gridColumns setting
+    grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+    
+    // Calculate font size based on number of columns
+    // Fewer columns (larger buttons) = larger font size
+    // More columns (smaller buttons) = smaller font size
+    const baseFontSize = 16; // Base font size in pixels for letters
+    const minFontSize = 10;  // Minimum font size
+    const maxFontSize = 20;  // Maximum font size
+    
+    // Calculate font size: inversely proportional to number of columns
+    // Formula: baseFontSize * (baseFactor / gridColumns) where baseFactor is calibrated for good results
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
+    
+    // Set the CSS custom property for letter button font size
+    grid.style.setProperty('--letter-font-size', `${fontSize}px`);
+    
+    console.log(`Alphabet grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
+}
+
+// --- Update Word Options Grid Layout ---
+function updateWordOptionsGridLayout() {
+    const grid = document.getElementById('word-options-grid');
+    if (!grid) return;
+    
+    // Update the CSS grid template columns based on gridColumns setting
+    grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+    
+    // Calculate font size for word options
+    const baseFontSize = 16; // Base font size for word options
+    const minFontSize = 12;  // Minimum font size
+    const maxFontSize = 18;  // Maximum font size
+    
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
+    grid.style.setProperty('--word-option-font-size', `${fontSize}px`);
+    
+    console.log(`Word options grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
+}
+
+// --- Update Word Predictions Grid Layout ---
+function updateWordPredictionsGridLayout() {
+    const grid = document.getElementById('word-predictions');
+    if (!grid) return;
+    
+    // Update the CSS grid template columns based on gridColumns setting
+    grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+    
+    // Calculate font size for predictions
+    const baseFontSize = 14; // Base font size for predictions
+    const minFontSize = 10;  // Minimum font size
+    const maxFontSize = 16;  // Maximum font size
+    
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
+    grid.style.setProperty('--prediction-font-size', `${fontSize}px`);
+    
+    console.log(`Word predictions grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
+}
+
+// --- Initialize Freestyle Page ---
+async function initializeFreestylePage() {
+    // Load settings first before setting up PIN modal
+    await loadScanSettings();
+    
+    // Setup event listeners for control buttons
+    document.getElementById('speak-display-btn').addEventListener('click', speakDisplayText);
+    document.getElementById('clear-display-btn').addEventListener('click', clearDisplayText);
+    document.getElementById('go-back-btn').addEventListener('click', goBackToGrid);
+    document.getElementById('spell-btn').addEventListener('click', openSpellingModal);
+    
+    // Setup build space text area
+    const buildSpaceTextarea = document.getElementById('build-space');
+    buildSpaceTextarea.addEventListener('input', onBuildSpaceChange);
+    
+    // Load initial word options
+    await loadWordOptions();
+    
+    // Setup spelling modal
+    setupSpellingModal();
+    
+    console.log('Freestyle page initialized');
+}
+
+// --- Build Space Management ---
+function onBuildSpaceChange() {
+    const buildSpaceTextarea = document.getElementById('build-space');
+    currentBuildSpaceText = buildSpaceTextarea.value;
+    
+    // Debounced reload of word options when build space changes
+    clearTimeout(window.buildSpaceDebounceTimer);
+    window.buildSpaceDebounceTimer = setTimeout(() => {
+        loadWordOptions();
+    }, 1000); // Wait 1 second after user stops typing
+}
+
+function addWordToBuildSpace(word) {
+    const buildSpaceTextarea = document.getElementById('build-space');
+    if (currentBuildSpaceText.trim()) {
+        currentBuildSpaceText += ' ' + word;
+    } else {
+        currentBuildSpaceText = word;
+    }
+    buildSpaceTextarea.value = currentBuildSpaceText;
+    
+    // Reload word options with new context
+    loadWordOptions();
+}
+
+async function speakDisplayText() {
+    if (!currentBuildSpaceText.trim()) {
+        await announce("Nothing to speak", "system", false);
+        return;
+    }
+    console.log('Auto Clean enabled? ', autoClean);
+    // If Auto Clean is enabled, automatically clean up the text first
+    if (autoClean) {
+        console.log('Auto Clean enabled - cleaning text before speaking');
+        await cleanupTextInternal(); // Use internal cleanup to avoid duplicate loading indicators
+    }
+    
+    await announce(currentBuildSpaceText, "system", true);
+    
+    // Record to speech history (following gridpage.js pattern)
+    recordToSpeechHistory(currentBuildSpaceText);
+    
+    // Pause scanning for the scanning interval duration, then reset to Clear Display button
+    if (scanningInterval) {
+        stopScanning();
+        
+        setTimeout(() => {
+            // Reset to Clear Display button and resume scanning
+            const clearDisplayBtn = document.getElementById('clear-display-btn');
+            if (clearDisplayBtn && !scanningPaused) {
+                // Find the index of the Clear Display button in the current scanning context
+                if (currentScanningContext === "main") {
+                    const controlButtons = document.querySelectorAll('#speak-display-btn, #clear-display-btn, #spell-btn, #go-back-btn');
+                    const wordButtons = document.querySelectorAll('.word-option-btn');
+                    const allButtons = [...controlButtons, ...wordButtons];
+                    
+                    // Find the index of the Clear Display button (should be index 1)
+                    const clearDisplayIndex = Array.from(allButtons).findIndex(btn => btn.id === 'clear-display-btn');
+                    if (clearDisplayIndex !== -1) {
+                        currentButtonIndex = clearDisplayIndex;
+                    }
+                }
+                
+                startScanning();
+            }
+        }, defaultDelay); // Wait for the scanning interval duration
+    }
+}
+
+function clearDisplayText() {
+    const buildSpaceTextarea = document.getElementById('build-space');
+    currentBuildSpaceText = "";
+    buildSpaceTextarea.value = "";
+    
+    // Reload word options
+    loadWordOptions();
+}
+
+async function cleanupDisplayText() {
+    if (!currentBuildSpaceText.trim()) {
+        await announce("Nothing to clean up", "system", false);
+        return;
+    }
+    
+    if (isLLMProcessing) {
+        await announce("Please wait, processing", "system", false);
+        return;
+    }
+    
+    try {
+        isLLMProcessing = true;
+        showLoadingIndicator(true);
+        
+        await cleanupTextInternal();
+        
+        // Announce the change
+        await announce("Text cleaned up", "system", false);
+    } catch (error) {
+        console.error('Error cleaning up text:', error);
+        await announce("Cleanup error", "system", false);
+    } finally {
+        isLLMProcessing = false;
+        showLoadingIndicator(false);
+    }
+}
+
+// Internal cleanup function without loading indicators (for auto-clean)
+async function cleanupTextInternal() {
+    const response = await authenticatedFetch('/api/freestyle/cleanup-text', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            text_to_cleanup: currentBuildSpaceText
+        })
+    });
+    
+    if (response.ok) {
+        const data = await response.json();
+        const cleanedText = data.cleaned_text || currentBuildSpaceText;
+        console.log("Original text:", currentBuildSpaceText);
+        console.log("Cleaned text:", cleanedText);
+        // Update the build space with cleaned text
+        currentBuildSpaceText = cleanedText;
+        const buildSpaceTextarea = document.getElementById('build-space');
+        buildSpaceTextarea.value = currentBuildSpaceText;
+        
+        // Reload word options with new context
+        loadWordOptions();
+    } else {
+        console.error('Failed to cleanup text:', response.statusText);
+        throw new Error('Cleanup failed');
+    }
+}
+
+function goBackToGrid() {
+    // Navigate back to gridpage.html with the home page
+    window.location.href = '/static/gridpage.html?page=home';
+}
+
+// --- Word Options Management ---
+async function loadWordOptions() {
+    if (isLLMProcessing) return;
+    
+    try {
+        isLLMProcessing = true;
+        showLoadingIndicator(true);
+        
+        const response = await authenticatedFetch('/api/freestyle/word-options', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                build_space_text: currentBuildSpaceText
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`Loaded word options: ${JSON.stringify(data.word_options)}`);
+            currentWordOptions = data.word_options || [];
+            renderWordOptionsGrid();
+        } else {
+            console.error('Failed to load word options:', response.statusText);
+            // Show fallback options
+            currentWordOptions = ["I", "want", "need", "can", "please", "thank you", "help", "yes", "no", "good"];
+            renderWordOptionsGrid();
+        }
+    } catch (error) {
+        console.error('Error loading word options:', error);
+        currentWordOptions = ["I", "want", "need", "can", "please", "thank you", "help", "yes", "no", "good"];
+        renderWordOptionsGrid();
+    } finally {
+        isLLMProcessing = false;
+        showLoadingIndicator(false);
+        
+        // Restart scanning after new options are loaded and rendered
+        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused) {
+            setTimeout(() => {
+                if (!scanningInterval) { // Double check
+                    startScanning();
+                }
+            }, 500);
+        }
+    }
+}
+
+function renderWordOptionsGrid() {
+    const grid = document.getElementById('word-options-grid');
+    grid.innerHTML = '';
+    
+    // Update grid layout to use current gridColumns setting
+    updateWordOptionsGridLayout();
+    
+    currentWordOptions.forEach((word, index) => {
+        const button = document.createElement('button');
+        button.className = 'word-option-btn';
+        button.textContent = word;
+        button.setAttribute('data-index', index);
+        button.addEventListener('click', () => handleWordOptionClick(word));
+        grid.appendChild(button);
+    });
+    
+    // Add "More Options" button
+    const moreButton = document.createElement('button');
+    moreButton.className = 'word-option-btn more-options-btn';
+    moreButton.textContent = 'More Options';
+    moreButton.addEventListener('click', () => loadMoreWordOptions());
+    grid.appendChild(moreButton);
+    
+    console.log(`Rendered ${currentWordOptions.length} word options + More Options button`);
+}
+
+async function loadMoreWordOptions() {
+    if (isLLMProcessing) return;
+    
+    try {
+        isLLMProcessing = true;
+        showLoadingIndicator(true);
+        
+        const response = await authenticatedFetch('/api/freestyle/word-options', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                build_space_text: currentBuildSpaceText,
+                request_different_options: true // Signal to generate different options
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            currentWordOptions = data.word_options || [];
+            renderWordOptionsGrid();
+        } else {
+            console.error('Failed to load more word options:', response.statusText);
+        }
+    } catch (error) {
+        console.error('Error loading more word options:', error);
+    } finally {
+        isLLMProcessing = false;
+        showLoadingIndicator(false);
+        
+        // Restart scanning after new options are loaded
+        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused) {
+            setTimeout(() => {
+                if (!scanningInterval) { // Double check
+                    startScanning();
+                }
+            }, 500);
+        }
+    }
+}
+
+function handleWordOptionClick(word) {
+    addWordToBuildSpace(word);
+    
+    // Stop scanning completely and restart only after word options are reloaded
+    if (scanningInterval) {
+        stopScanning();
+    }
+}
+
+// --- Spelling Modal Management ---
+function setupSpellingModal() {
+    // Setup close modal listeners
+    document.getElementById('cancel-spelling-btn').addEventListener('click', closeSpellingModal);
+    document.getElementById('spelling-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'spelling-modal') {
+            closeSpellingModal();
+        }
+    });
+    
+    // Setup word control buttons
+    document.getElementById('add-word-btn').addEventListener('click', addCurrentWordToBuildSpace);
+    document.getElementById('clear-word-btn').addEventListener('click', clearCurrentWord);
+    document.getElementById('backspace-btn').addEventListener('click', backspaceCurrentWord);
+    
+    // Generate alphabet grid
+    generateAlphabetGrid();
+}
+
+
+// Add this after the existing spelling modal setup
+document.getElementById('current-word').addEventListener('input', async (e) => {
+    const currentWord = e.target.value;
+    
+    // Update letter availability based on current word
+    updateLetterAvailability(currentWord);
+    
+    const fullText = currentBuildSpaceText + ' ' + currentWord;
+    if (currentWord.length > 0) {
+        await getWordPredictionsForSpelling(fullText);
+    } else {
+        currentPredictions = [];
+        renderWordPredictions();
+    }
+});
+
+async function getWordPredictionsForSpelling(fullText) {
+    if (isLLMProcessing) return;
+    
+    try {
+        isLLMProcessing = true;
+        
+        // Extract the current word from the full text
+        const currentWord = currentSpellingWord || "";
+        
+        const response = await authenticatedFetch('/api/freestyle/word-prediction', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: currentBuildSpaceText || "", // Context from build space
+                spelling_word: currentWord, // Current partial word
+                predict_full_words: true // Flag to ensure complete words are returned
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            currentPredictions = data.predictions || [];
+            renderWordPredictions();
+        } else {
+            console.error('Failed to get word predictions for spelling:', response.statusText);
+            currentPredictions = [];
+            renderWordPredictions();
+        }
+    } catch (error) {
+        console.error('Error getting word predictions for spelling:', error);
+        currentPredictions = [];
+        renderWordPredictions();
+    } finally {
+        isLLMProcessing = false;
+    }
+}
+
+function openSpellingModal() {
+    isSpellingModalOpen = true;
+    document.getElementById('spelling-modal').classList.remove('hidden');
+    currentSpellingWord = "";
+    document.getElementById('current-word').value = "";
+    
+    // COMPLETELY stop any current scanning
+    stopScanning();
+    scanningPaused = true; // Prevent auto-restart
+    
+    // Initialize smart letter filtering
+    updateLetterAvailability("");
+    
+    // Clear predictions
+    currentPredictions = [];
+    renderWordPredictions();
+    
+    // Change context and start spell modal scanning
+    currentScanningContext = "spelling-letters";
+    
+    // Start scanning for the spell modal after a brief delay
+    setTimeout(() => {
+        scanningPaused = false; // Re-enable scanning for spell modal
+        startScanning();
+    }, 800);
+    
+    console.log('Spelling modal opened, main scanning stopped');
+}
+
+function closeSpellingModal() {
+    isSpellingModalOpen = false;
+    document.getElementById('spelling-modal').classList.add('hidden');
+    
+    // Stop spell modal scanning completely
+    stopScanning();
+    scanningPaused = true; // Prevent auto-restart
+    
+    // Change context back to main
+    currentScanningContext = "main";
+    
+    // Restart main scanning after a delay
+    setTimeout(() => {
+        scanningPaused = false; // Re-enable scanning
+        startScanning();
+    }, 800);
+    
+    console.log('Spelling modal closed, returning to main scanning');
+}
+
+function generateAlphabetGrid() {
+    const grid = document.getElementById('alphabet-grid');
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    
+    // Update grid layout to use current gridColumns setting
+    updateAlphabetGridLayout();
+    
+    alphabet.forEach((letter, index) => {
+        const button = document.createElement('button');
+        button.className = 'letter-btn';
+        button.textContent = letter;
+        button.setAttribute('data-letter', letter);
+        button.setAttribute('data-index', index);
+        button.addEventListener('click', () => handleLetterClick(letter));
+        grid.appendChild(button);
+    });
+}
+
+async function handleLetterClick(letter) {
+    currentSpellingWord += letter.toLowerCase();
+    document.getElementById('current-word').value = currentSpellingWord;
+    
+    // Update letter availability immediately
+    updateLetterAvailability(currentSpellingWord);
+    
+    // Get word predictions
+    await getWordPredictions();
+    
+    // If scanning is active, restart with updated button list
+    if (scanningInterval) {
+        stopScanning();
+        setTimeout(() => {
+            if (!scanningPaused) {
+                startScanning();
+            }
+        }, 400);
+    }
+}
+
+async function getWordPredictions() {
+    if (isLLMProcessing) return;
+    
+    try {
+        isLLMProcessing = true;
+        
+        // Send spelling word and build space separately to ensure full word predictions
+        const response = await authenticatedFetch('/api/freestyle/word-prediction', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: currentBuildSpaceText || "", // Context from build space
+                spelling_word: currentSpellingWord || "", // Current partial word
+                predict_full_words: true // Flag to ensure complete words are returned
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            currentPredictions = data.predictions || [];
+            renderWordPredictions();
+        } else {
+            console.error('Failed to get word predictions:', response.statusText);
+            currentPredictions = [];
+            renderWordPredictions();
+        }
+    } catch (error) {
+        console.error('Error getting word predictions:', error);
+        currentPredictions = [];
+        renderWordPredictions();
+    } finally {
+        isLLMProcessing = false;
+    }
+}
+
+function renderWordPredictions() {
+    const grid = document.getElementById('word-predictions');
+    grid.innerHTML = '';
+    
+    // Update grid layout to use current gridColumns setting
+    updateWordPredictionsGridLayout();
+    
+    currentPredictions.forEach((word, index) => {
+        const button = document.createElement('button');
+        button.className = 'prediction-btn';
+        button.textContent = word;
+        button.setAttribute('data-index', index);
+        button.addEventListener('click', () => handlePredictionClick(word));
+        grid.appendChild(button);
+    });
+}
+
+function handlePredictionClick(word) {
+    // Immediately add the selected prediction to Build Space and close modal
+    currentSpellingWord = word;
+    document.getElementById('current-word').value = currentSpellingWord;
+    
+    // Add word to build space and close modal
+    addWordToBuildSpace(currentSpellingWord);
+    clearCurrentWord();
+    closeSpellingModal();
+}
+
+function addCurrentWordToBuildSpace() {
+    if (currentSpellingWord.trim()) {
+        addWordToBuildSpace(currentSpellingWord);
+        clearCurrentWord();
+        closeSpellingModal();
+    }
+}
+
+function clearCurrentWord() {
+    currentSpellingWord = "";
+    document.getElementById('current-word').value = "";
+    
+    // Reset letter availability
+    updateLetterAvailability("");
+    
+    currentPredictions = [];
+    renderWordPredictions();
+    
+    // If scanning is active, restart to account for all letters being enabled again
+    if (scanningInterval) {
+        stopScanning();
+        setTimeout(() => {
+            if (!scanningPaused) {
+                startScanning();
+            }
+        }, 400);
+    }
+}
+
+function backspaceCurrentWord() {
+    if (currentSpellingWord.length > 0) {
+        currentSpellingWord = currentSpellingWord.slice(0, -1);
+        document.getElementById('current-word').value = currentSpellingWord;
+        
+        // Update letter availability immediately
+        updateLetterAvailability(currentSpellingWord);
+        
+        getWordPredictions();
+        
+        // If scanning is active, restart to account for newly enabled letters
+        if (scanningInterval) {
+            stopScanning();
+            setTimeout(() => {
+                if (!scanningPaused) {
+                    startScanning();
+                }
+            }, 400);
+        }
+    }
+}
+
+// --- Speech History Management (Following gridpage.js pattern) ---
+function recordToSpeechHistory(textToRecord) {
+    if (!currentAacUserId || !textToRecord.trim()) {
+        return;
+    }
+    
+    try {
+        // Get existing history from localStorage
+        let history = (localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId)) || '').split('\n').filter(Boolean);
+        
+        // Add new text to the beginning of the array
+        history.unshift(textToRecord.trim());
+        
+        // Limit to 20 entries (same as gridpage.js)
+        if (history.length > 20) { 
+            history = history.slice(0, 20); 
+        }
+        
+        // Save back to localStorage
+        localStorage.setItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId), history.join('\n'));
+        
+        console.log('Speech history recorded:', textToRecord);
+    } catch (error) {
+        console.error('Error recording speech history:', error);
+    }
+}
+
+// --- Auditory Scanning (Similar to gridpage.js but adapted for freestyle) ---
+function startScanning() {
+    if (scanningPaused) {
+        console.log('Scanning is paused, not starting');
+        return;
+    }
+    
+    if (scanningInterval) {
+        stopScanning();
+    }
+    
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
+    
+    if (currentScanningContext === "main") {
+        startMainScanning();
+    } else if (currentScanningContext === "spelling-letters") {
+        startSpellingLettersScanning();
+    } else if (currentScanningContext === "spelling-predictions") {
+        startSpellingPredictionsScanning();
+    }
+}
+
+function startMainScanning() {
+    console.log('Starting main scanning');
+    
+    // Context-aware scanning: control buttons first, then word options
+    // Skip Speak Display and Clear Display buttons if Build Space is empty
+    let controlButtonSelectors = '#spell-btn, #go-back-btn';
+    if (currentBuildSpaceText.trim()) {
+        controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #spell-btn, #go-back-btn';
+    }
+    
+    const controlButtons = document.querySelectorAll(controlButtonSelectors);
+    const wordButtons = document.querySelectorAll('.word-option-btn');
+    const allButtons = [...controlButtons, ...wordButtons];
+    
+    if (allButtons.length === 0) {
+        console.log('No buttons found for main scanning');
+        return;
+    }
+    
+    console.log(`Found ${allButtons.length} buttons for main scanning (Build space ${currentBuildSpaceText.trim() ? 'has content' : 'is empty'})`);
+    currentButtonIndex = 0;
+    
+    const scanNext = async () => {
+        // Remove highlight from previous button
+        if (currentlyScannedButton) {
+            currentlyScannedButton.classList.remove('scanning-highlight');
+        }
+        
+        // Check scan limit
+        if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
+            stopScanning();
+            isPausedFromScanLimit = true;
+            return;
+        }
+        
+        // Get current button
+        const button = allButtons[currentButtonIndex];
+        if (button) {
+            currentlyScannedButton = button;
+            speakAndHighlight(button);
+        }
+        
+        // Move to next button
+        currentButtonIndex++;
+        if (currentButtonIndex >= allButtons.length) {
+            currentButtonIndex = 0;
+            scanCycleCount++;
+        }
+    };
+    
+    scanNext(); // Start immediately
+    scanningInterval = setInterval(scanNext, defaultDelay);
+}
+
+function startSpellingLettersScanning() {
+    console.log('Starting spell letters scanning');
+    
+    const scanNext = async () => {
+        // Get fresh button lists each time to account for disabled letters and current word content
+        // Skip Add Word, Clear, and Backspace buttons if Current Word is empty
+        let controlButtonSelectors = '#cancel-spelling-btn';
+        if (currentSpellingWord.trim()) {
+            controlButtonSelectors = '#add-word-btn, #clear-word-btn, #backspace-btn, #cancel-spelling-btn';
+        }
+        
+        const controlButtons = document.querySelectorAll(controlButtonSelectors);
+        const predictionButtons = document.querySelectorAll('.prediction-btn');
+        const letterButtons = document.querySelectorAll('.letter-btn:not(.disabled-letter):not([disabled])'); // Skip disabled letters
+        const allButtons = [...controlButtons, ...predictionButtons, ...letterButtons];
+        
+        if (allButtons.length === 0) {
+            console.log('No available buttons for spell scanning');
+            return;
+        }
+        
+        // Remove highlight from previous button
+        if (currentlyScannedButton) {
+            currentlyScannedButton.classList.remove('scanning-highlight');
+        }
+        
+        // Check scan limit
+        if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
+            stopScanning();
+            isPausedFromScanLimit = true;
+            return;
+        }
+        
+        // Reset index if we've gone beyond the updated list
+        if (currentButtonIndex >= allButtons.length) {
+            currentButtonIndex = 0;
+            scanCycleCount++;
+        }
+        
+        // Get current button
+        const button = allButtons[currentButtonIndex];
+        if (button && !button.disabled && !button.classList.contains('disabled-letter')) {
+            currentlyScannedButton = button;
+            speakAndHighlight(button);
+        }
+        
+        // Move to next button
+        currentButtonIndex++;
+        if (currentButtonIndex >= allButtons.length) {
+            currentButtonIndex = 0;
+            scanCycleCount++;
+        }
+    };
+    
+    currentButtonIndex = 0;
+    scanNext(); // Start immediately
+    scanningInterval = setInterval(scanNext, defaultDelay);
+}
+
+function startSpellingPredictionsScanning() {
+    const buttons = document.querySelectorAll('.prediction-btn');
+    if (buttons.length === 0) return;
+    
+    currentButtonIndex = 0;
+    
+    const scanNext = async () => {
+        // Remove highlight from previous button
+        if (currentlyScannedButton) {
+            currentlyScannedButton.classList.remove('scanning-highlight');
+        }
+        
+        // Check scan limit
+        if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
+            stopScanning();
+            isPausedFromScanLimit = true;
+            return;
+        }
+        
+        // Get current button
+        const button = buttons[currentButtonIndex];
+        if (button) {
+            currentlyScannedButton = button;
+            speakAndHighlight(button);
+        }
+        
+        // Move to next button
+        currentButtonIndex++;
+        if (currentButtonIndex >= buttons.length) {
+            currentButtonIndex = 0;
+            scanCycleCount++;
+        }
+    };
+    
+    scanNext(); // Start immediately
+    scanningInterval = setInterval(scanNext, defaultDelay);
+}
+
+function stopScanning() {
+    if (scanningInterval) {
+        clearInterval(scanningInterval);
+        scanningInterval = null;
+        console.log('Scanning stopped');
+    }
+    
+    // Remove highlight from current button
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning-highlight');
+        currentlyScannedButton = null;
+    }
+    
+    currentButtonIndex = -1;
+    window.speechSynthesis.cancel(); // Cancel any ongoing speech
+}
+
+function speakAndHighlight(button) {
+    // Remove scanning class from all buttons
+    document.querySelectorAll('.scanning-highlight').forEach(btn => {
+        btn.classList.remove('scanning-highlight');
+    });
+    
+    // Add scanning class to current button
+    button.classList.add('scanning-highlight');
+    
+    try {
+        let textToSpeak = button.textContent;
+        
+        // Special case: if this is the Speak Display button, use Build Space text instead
+        if (button.id === 'speak-display-btn' && currentBuildSpaceText.trim()) {
+            textToSpeak = currentBuildSpaceText.trim();
+        }
+        
+        // Special case: if this is the Add Word button, use Current Word text instead
+        if (button.id === 'add-word-btn' && currentSpellingWord.trim()) {
+            textToSpeak = currentSpellingWord.trim();
+        }
+        
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+    } catch (e) {
+        console.error("Speech synthesis error:", e);
+    }
+}
+
+function resumeScanning() {
+    if (isPausedFromScanLimit) {
+        scanCycleCount = 0;
+        isPausedFromScanLimit = false;
+        startScanning();
+    }
+}
+
+// --- Input Handling (Same as gridpage.js) ---
+function setupKeyboardListener() {
+    document.addEventListener('keydown', (event) => {
+        if (event.code === 'Space') {
+            event.preventDefault();
+            handleSpacebarPress();
+        }
+    });
+}
+
+function handleSpacebarPress() {
+    if (currentlyScannedButton) {
+        // Simulate click on the currently scanned button
+        currentlyScannedButton.click();
+    } else if (!scanningInterval && !isPausedFromScanLimit) {
+        // Start scanning if not active
+        startScanning();
+    } else if (isPausedFromScanLimit) {
+        // Resume scanning if paused
+        resumeScanning();
+    }
+}
+
+function setupGamepadListeners() {
+    window.addEventListener('gamepadconnected', (e) => {
+        console.log('Gamepad connected:', e.gamepad);
+        gamepadIndex = e.gamepad.index;
+        startGamepadPolling();
+    });
+
+    window.addEventListener('gamepaddisconnected', (e) => {
+        console.log('Gamepad disconnected:', e.gamepad);
+        if (gamepadIndex === e.gamepad.index) {
+            gamepadIndex = null;
+            stopGamepadPolling();
+        }
+    });
+}
+
+function startGamepadPolling() {
+    if (gamepadPollInterval) return;
+    
+    const pollGamepad = () => {
+        if (gamepadIndex === null) return;
+        
+        const gamepad = navigator.getGamepads()[gamepadIndex];
+        if (gamepad) {
+            const currentTime = Date.now();
+            if (currentTime - lastGamepadInputTime > clickDebounceDelay) {
+                if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+                    lastGamepadInputTime = currentTime;
+                    handleSpacebarPress();
+                }
+            }
+        }
+        
+        gamepadPollInterval = requestAnimationFrame(pollGamepad);
+    };
+    
+    gamepadPollInterval = requestAnimationFrame(pollGamepad);
+}
+
+function stopGamepadPolling() {
+    if (gamepadPollInterval) {
+        cancelAnimationFrame(gamepadPollInterval);
+        gamepadPollInterval = null;
+    }
+}
+
+// --- Audio Functions (Similar to gridpage.js) ---
+function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) {
+    try {
+        if (!window.AudioContext && !window.webkitAudioContext) {
+            console.error('Web Audio API not supported');
+            return;
+        }
+
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContext();
+
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
+
+        const audioBuffer = await audioContext.decodeAudioData(audioDataBuffer);
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.start();
+
+        return new Promise((resolve) => {
+            source.onended = () => {
+                audioContext.close();
+                resolve();
+            };
+        });
+    } catch (error) {
+        console.error('Error playing audio:', error);
+    }
+}
+
+async function processAnnouncementQueue() {
+    if (isAnnouncingNow || announcementQueue.length === 0) {
+        return;
+    }
+
+    isAnnouncingNow = true;
+
+    while (announcementQueue.length > 0) {
+        const announcement = announcementQueue.shift();
+        const { textToAnnounce, announcementType, recordHistory } = announcement;
+
+        // Show splash screen if enabled
+        if (typeof showSplashScreen === 'function') {
+            showSplashScreen(textToAnnounce);
+        }
+
+        try {
+            const routingTarget = announcementType === "personal" ? "personal" : "system";
+            
+            const response = await authenticatedFetch('/play-audio', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: textToAnnounce,
+                    routing_target: routingTarget
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.audio_data) {
+                    const audioBuffer = base64ToArrayBuffer(data.audio_data);
+                    await playAudioToDevice(audioBuffer, data.sample_rate || 24000, announcementType);
+                }
+            } else {
+                console.error('TTS request failed:', response.statusText);
+            }
+
+            if (recordHistory && announcementType === "personal") {
+                await recordChatHistory(textToAnnounce, null);
+            }
+
+        } catch (error) {
+            console.error('Error in announcement processing:', error);
+        }
+    }
+
+    isAnnouncingNow = false;
+}
+
+async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
+    if (!textToAnnounce || textToAnnounce.trim() === "") {
+        return;
+    }
+
+    announcementQueue.push({
+        textToAnnounce: textToAnnounce.trim(),
+        announcementType,
+        recordHistory
+    });
+
+    processAnnouncementQueue();
+}
+
+async function recordChatHistory(question, response) {
+    try {
+        await authenticatedFetch('/record_chat_history', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                question: question || "",
+                response: response || ""
+            })
+        });
+    } catch (error) {
+        console.error('Failed to record chat history:', error);
+    }
+}
+
+function tryResumeAudioContext() {
+    if (audioContextResumeAttempted) return;
+    audioContextResumeAttempted = true;
+    
+    if (window.AudioContext || window.webkitAudioContext) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const tempContext = new AudioContext();
+        if (tempContext.state === 'suspended') {
+            tempContext.resume().then(() => {
+                tempContext.close();
+                console.log('AudioContext resumed successfully');
+            }).catch(err => {
+                console.error('Failed to resume AudioContext:', err);
+            });
+        } else {
+            tempContext.close();
+        }
+    }
+}
+
+// --- Loading Indicator ---
+function showLoadingIndicator(show) {
+    const indicator = document.getElementById('loading-indicator');
+    if (show) {
+        indicator.style.display = 'flex';
+    } else {
+        indicator.style.display = 'none';
+    }
+}
+
+// --- PIN Modal Setup (Same as gridpage.js) ---
+function setupPinModal() {
+    // --- PIN Protection for Admin Toolbar ---
+    const lockButton = document.getElementById('lock-icon');
+    const adminIcons = document.getElementById('admin-icons');
+    const pinModal = document.getElementById('pin-modal');
+    const pinInput = document.getElementById('pin-input');
+    const pinSubmitButton = document.getElementById('pin-submit');
+    const pinCancelButton = document.getElementById('pin-cancel');
+    const pinError = document.getElementById('pin-error');
+
+    // Function to show PIN modal
+    function showPinModal() {
+        if (pinModal) {
+            pinModal.classList.remove('hidden');
+            if (pinInput) {
+                pinInput.value = '';
+                pinInput.focus();
+            }
+            if (pinError) {
+                pinError.classList.add('hidden');
+            }
+        }
+    }
+
+    // Function to hide PIN modal
+    function hidePinModal() {
+        if (pinModal) {
+            pinModal.classList.add('hidden');
+        }
+        if (pinInput) {
+            pinInput.value = '';
+        }
+        if (pinError) {
+            pinError.classList.add('hidden');
+        }
+    }
+
+    // Function to validate PIN with backend
+    async function validatePin(pin) {
+        try {
+            const response = await authenticatedFetch('/api/account/toolbar-pin', {
+                method: 'GET'
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                return data.pin === pin;
+            }
+        } catch (error) {
+            console.error('Error validating PIN:', error);
+        }
+        return false;
+    }
+
+    // Function to unlock admin toolbar
+    function unlockToolbar() {
+        if (adminIcons) {
+            adminIcons.classList.remove('hidden');
+        }
+        if (lockButton) {
+            lockButton.style.display = 'none';
+        }
+        hidePinModal();
+    }
+
+    // Function to lock admin toolbar
+    function lockToolbar() {
+        if (adminIcons) {
+            adminIcons.classList.add('hidden');
+        }
+        if (lockButton) {
+            lockButton.style.display = 'block';
+        }
+    }
+
+    // Event listener for lock button
+    if (lockButton) {
+        lockButton.addEventListener('click', showPinModal);
+    }
+
+    // Event listener for lock toolbar button (locks the toolbar back)
+    const lockToolbarButton = document.getElementById('lock-toolbar-button');
+    if (lockToolbarButton) {
+        lockToolbarButton.addEventListener('click', lockToolbar);
+    }
+
+    // Event listener for back to grid admin button
+    const backToGridAdmin = document.getElementById('back-to-grid-admin');
+    if (backToGridAdmin) {
+        backToGridAdmin.addEventListener('click', () => {
+            window.location.href = '/static/gridpage.html?page=home';
+        });
+    }
+
+    // Event listener for switch user button
+    const switchUserButton = document.getElementById('switch-user-button');
+    if (switchUserButton) {
+        switchUserButton.addEventListener('click', () => {
+            console.log("Switching user profile. Clearing session and redirecting to auth page for profile selection.");
+            // Only set flag to prevent auto-proceed with default user - keep user authenticated
+            localStorage.setItem('bravoSkipDefaultUser', 'true');
+            console.log('Set bravoSkipDefaultUser flag for profile selection');
+            sessionStorage.clear();
+            
+            // Small delay to ensure localStorage is written before navigation
+            setTimeout(() => {
+                window.location.href = '/static/auth.html';
+            }, 100);
+        });
+    }
+
+    // Event listener for logout button
+    const logoutButton = document.getElementById('logout-button');
+    if (logoutButton) {
+        logoutButton.addEventListener('click', () => {
+            console.log("Logging out. Clearing session and redirecting to auth page for login.");
+            // Set both flags to prevent automatic re-login and auto-profile selection
+            localStorage.setItem('bravoIntentionalLogout', 'true');
+            localStorage.setItem('bravoSkipDefaultUser', 'true');
+            console.log('Set bravoIntentionalLogout and bravoSkipDefaultUser flags');
+            sessionStorage.clear();
+            
+            // Small delay to ensure localStorage is written before navigation
+            setTimeout(() => {
+                window.location.href = '/static/auth.html';
+            }, 100);
+        });
+    }
+
+    // Event listener for PIN submit
+    if (pinSubmitButton) {
+        pinSubmitButton.addEventListener('click', async () => {
+            const pin = pinInput.value;
+            if (pin.length >= 3 && pin.length <= 10) {
+                const isValid = await validatePin(pin);
+                if (isValid) {
+                    unlockToolbar();
+                } else {
+                    if (pinError) {
+                        pinError.textContent = 'Invalid PIN. Please try again.';
+                        pinError.classList.remove('hidden');
+                    }
+                    if (pinInput) {
+                        pinInput.value = '';
+                        pinInput.focus();
+                    }
+                }
+            } else {
+                if (pinError) {
+                    pinError.textContent = 'PIN must be 3-10 characters.';
+                    pinError.classList.remove('hidden');
+                }
+            }
+        });
+    }
+
+    // Event listener for PIN cancel
+    if (pinCancelButton) {
+        pinCancelButton.addEventListener('click', hidePinModal);
+    }
+
+    // Event listener for Enter key in PIN input
+    if (pinInput) {
+        pinInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                if (pinSubmitButton) {
+                    pinSubmitButton.click();
+                }
+            }
+        });
+    }
+
+    // Event listener for Escape key to close modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && pinModal && !pinModal.classList.contains('hidden')) {
+            hidePinModal();
+        }
+    });
+
+    // Initialize toolbar state on page load
+    lockToolbar();
+}
+
+// --- Smart Letter Filtering ---
+function getValidLetters(currentWord) {
+    console.log(`DEBUG: getValidLetters called with: "${currentWord}"`);
+    
+    if (!currentWord || currentWord.length === 0) {
+        console.log(`DEBUG: Empty word, returning all letters`);
+        return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    }
+    
+    const lastChar = currentWord.slice(-1).toUpperCase();
+    const lastTwoChars = currentWord.slice(-2).toUpperCase();
+    const wordSoFar = currentWord.toUpperCase();
+    
+    console.log(`DEBUG: Last char: "${lastChar}", Last two chars: "${lastTwoChars}", Word so far: "${wordSoFar}"`);
+    
+    // Define likely letter combinations based on common English patterns
+    const likelyAfter = {
+        // Single letters - what commonly follows each letter
+        'A': ['B', 'C', 'D', 'F', 'G', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'W', 'Y'],
+        'B': ['A', 'E', 'I', 'L', 'O', 'R', 'U', 'Y'], // BA, BE, BI, BL, BO, BR, BU, BY
+        'C': ['A', 'E', 'H', 'I', 'L', 'O', 'R', 'U'], // CA, CE, CH, CI, CL, CO, CR, CU
+        'D': ['A', 'E', 'I', 'O', 'R', 'U', 'Y'], // DA, DE, DI, DO, DR, DU, DY
+        'E': ['A', 'D', 'L', 'M', 'N', 'R', 'S', 'T', 'V', 'W', 'X'], // EA, ED, EL, EM, EN, ER, ES, ET, EV, EW, EX
+        'F': ['A', 'E', 'I', 'L', 'O', 'R', 'U'], // FA, FE, FI, FL, FO, FR, FU
+        'G': ['A', 'E', 'I', 'L', 'O', 'R', 'U'], // GA, GE, GI, GL, GO, GR, GU
+        'H': ['A', 'E', 'I', 'O', 'U', 'Y'], // HA, HE, HI, HO, HU, HY
+        'I': ['C', 'D', 'F', 'G', 'L', 'M', 'N', 'R', 'S', 'T'], // IC, ID, IF, IG, IL, IM, IN, IR, IS, IT
+        'J': ['A', 'E', 'O', 'U'], // JA, JE, JO, JU
+        'K': ['A', 'E', 'I', 'N'], // KA, KE, KI, KN
+        'L': ['A', 'E', 'I', 'O', 'U', 'Y'], // LA, LE, LI, LO, LU, LY
+        'M': ['A', 'E', 'I', 'O', 'U', 'Y'], // MA, ME, MI, MO, MU, MY
+        'N': ['A', 'C', 'D', 'E', 'G', 'I', 'K', 'O', 'S', 'T', 'U', 'Y', 'Z'], // NA, NC, ND, NE, NG, NI, NK, NO, NS, NT, NU, NY, NZ
+        'O': ['B', 'C', 'D', 'F', 'G', 'K', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'W'], // OB, OC, OD, OF, OG, OK, OL, OM, ON, OP, OR, OS, OT, OV, OW
+        'P': ['A', 'E', 'I', 'L', 'O', 'R', 'U'], // PA, PE, PI, PL, PO, PR, PU
+        'Q': ['U'], // QU (almost always)
+        'R': ['A', 'E', 'I', 'O', 'U', 'Y'], // RA, RE, RI, RO, RU, RY
+        'S': ['A', 'C', 'E', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'T', 'U', 'W'], // SA, SC, SE, SH, SI, SK, SL, SM, SN, SO, SP, ST, SU, SW
+        'T': ['A', 'E', 'H', 'I', 'O', 'R', 'U', 'W'], // TA, TE, TH, TI, TO, TR, TU, TW
+        'U': ['B', 'C', 'G', 'L', 'M', 'N', 'P', 'R', 'S', 'T'], // UB, UC, UG, UL, UM, UN, UP, UR, US, UT
+        'V': ['A', 'E', 'I', 'O'], // VA, VE, VI, VO
+        'W': ['A', 'E', 'H', 'I', 'O'], // WA, WE, WH, WI, WO
+        'X': ['A', 'E', 'I'], // XA, XE, XI (rare)
+        'Y': ['A', 'E', 'O', 'U'], // YA, YE, YO, YU
+        'Z': ['A', 'E', 'I', 'O'] // ZA, ZE, ZI, ZO
+    };
+    
+    // Two-letter patterns - what commonly follows specific two-letter combinations
+    const likelyAfterTwoLetters = {
+        'TH': ['A', 'E', 'I', 'O', 'R'], // THE, THI, THO, THR
+        'CH': ['A', 'E', 'I', 'O', 'U'], // CHA, CHE, CHI, CHO, CHU
+        'SH': ['A', 'E', 'I', 'O', 'U'], // SHA, SHE, SHI, SHO, SHU
+        'WH': ['A', 'E', 'I', 'O', 'U'], // WHA, WHE, WHI, WHO, WHU
+        'PH': ['A', 'E', 'I', 'O', 'U'], // PHA, PHE, PHI, PHO, PHU
+        'ST': ['A', 'E', 'I', 'O', 'R', 'U'], // STA, STE, STI, STO, STR, STU
+        'SP': ['A', 'E', 'I', 'O', 'R'], // SPA, SPE, SPI, SPO, SPR
+        'SC': ['A', 'E', 'I', 'O', 'R'], // SCA, SCE, SCI, SCO, SCR
+        'FL': ['A', 'E', 'I', 'O', 'U'], // FLA, FLE, FLI, FLO, FLU
+        'BL': ['A', 'E', 'I', 'O', 'U'], // BLA, BLE, BLI, BLO, BLU
+        'CL': ['A', 'E', 'I', 'O', 'U'], // CLA, CLE, CLI, CLO, CLU
+        'GL': ['A', 'E', 'I', 'O', 'U'], // GLA, GLE, GLI, GLO, GLU
+        'PL': ['A', 'E', 'I', 'O', 'U'], // PLA, PLE, PLI, PLO, PLU
+        'BR': ['A', 'E', 'I', 'O', 'U'], // BRA, BRE, BRI, BRO, BRU
+        'CR': ['A', 'E', 'I', 'O', 'U'], // CRA, CRE, CRI, CRO, CRU
+        'DR': ['A', 'E', 'I', 'O', 'U'], // DRA, DRE, DRI, DRO, DRU
+        'FR': ['A', 'E', 'I', 'O', 'U'], // FRA, FRE, FRI, FRO, FRU
+        'GR': ['A', 'E', 'I', 'O', 'U'], // GRA, GRE, GRI, GRO, GRU
+        'PR': ['A', 'E', 'I', 'O', 'U'], // PRA, PRE, PRI, PRO, PRU
+        'TR': ['A', 'E', 'I', 'O', 'U'], // TRA, TRE, TRI, TRO, TRU
+        'ON': ['A', 'C', 'D', 'E', 'G', 'K', 'S', 'T', 'Y', 'Z'], // ONA, ONC, OND, ONE, ONG, ONK, ONS, ONT, ONY, ONZ - for words like "bronze", "bronco"
+        'RO': ['A', 'B', 'C', 'D', 'E', 'G', 'L', 'M', 'N', 'O', 'P', 'S', 'T', 'U', 'W'], // Common RO combinations
+        'RN': ['A', 'E', 'I', 'O'], // RNA, RNE, RNI, RNO - for words ending in -orn, -urn
+    };
+    
+    let validLetters = [];
+    
+    // For longer words (4+ letters), be more permissive to allow complex combinations
+    if (currentWord.length >= 4) {
+        // For longer words, use a combination approach:
+        // 1. Check for specific three/four letter patterns
+        const lastThreeChars = currentWord.slice(-3).toUpperCase();
+        const lastFourChars = currentWord.slice(-4).toUpperCase();
+        
+        // Specific patterns for common word endings/structures
+        const longerPatterns = {
+            'RON': ['C', 'G', 'T', 'Y', 'Z'], // bronco, strong, front, sony, bronze
+            'ION': ['A', 'E', 'S'], // iona, ione, ions
+            'ING': ['A', 'E', 'L', 'S', 'T'], // inga, inge, ingl, ings, ingt
+            'ING': ['E', 'L', 'S'], // inge, ingl, ings
+            'URN': ['A', 'E', 'I', 'S'], // urna, urne, urni, urns
+            'ORN': ['E', 'I', 'S'], // orne, orni, orns
+        };
+        
+        if (longerPatterns[lastThreeChars]) {
+            validLetters = longerPatterns[lastThreeChars];
+            console.log(`DEBUG: Using three-letter pattern "${lastThreeChars}": ${validLetters.length} letters`);
+        }
+        // If no specific pattern found for longer words, be more permissive
+        else {
+            // Use two-letter pattern if available, but expand it
+            if (likelyAfterTwoLetters[lastTwoChars]) {
+                validLetters = likelyAfterTwoLetters[lastTwoChars];
+                // Add common consonants for longer words
+                const additionalConsonants = ['C', 'D', 'G', 'K', 'S', 'T', 'W', 'Y', 'Z'];
+                additionalConsonants.forEach(letter => {
+                    if (!validLetters.includes(letter)) {
+                        validLetters.push(letter);
+                    }
+                });
+                console.log(`DEBUG: Using expanded two-letter pattern "${lastTwoChars}": ${validLetters.length} letters`);
+            }
+            // Fall back to single letter with expansion
+            else if (likelyAfter[lastChar]) {
+                validLetters = likelyAfter[lastChar];
+                // For longer words, add more consonants that commonly appear
+                const extraConsonants = ['C', 'D', 'G', 'K', 'S', 'T', 'W', 'Z'];
+                extraConsonants.forEach(letter => {
+                    if (!validLetters.includes(letter)) {
+                        validLetters.push(letter);
+                    }
+                });
+                console.log(`DEBUG: Using expanded single letter pattern "${lastChar}": ${validLetters.length} letters`);
+            }
+            // Ultimate fallback for long words - allow most common letters
+            else {
+                validLetters = 'ABCDEFGHIKLMNOPRSTUVWYZ'.split(''); // Exclude less common J, Q, X
+                console.log(`DEBUG: Using permissive pattern for long word: ${validLetters.length} letters`);
+            }
+        }
+    }
+    // For shorter words (2-3 letters), use existing logic but be slightly more permissive
+    else if (currentWord.length >= 2 && likelyAfterTwoLetters[lastTwoChars]) {
+        validLetters = likelyAfterTwoLetters[lastTwoChars];
+        console.log(`DEBUG: Using two-letter pattern "${lastTwoChars}": ${validLetters.length} letters`);
+    }
+    // Otherwise use single letter pattern
+    else if (likelyAfter[lastChar]) {
+        validLetters = likelyAfter[lastChar];
+        console.log(`DEBUG: Using single letter pattern "${lastChar}": ${validLetters.length} letters`);
+    }
+    // Fallback to all letters if no pattern found
+    else {
+        validLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+        console.log(`DEBUG: No pattern found, allowing all letters: ${validLetters.length} letters`);
+    }
+    
+    console.log(`DEBUG: Final valid letters for "${currentWord}":`, validLetters);
+    return validLetters;
+}
+
+function updateLetterAvailability(currentWord) {
+    const validLetters = getValidLetters(currentWord);
+    const letterButtons = document.querySelectorAll('.letter-btn');
+    
+    console.log(`DEBUG: updateLetterAvailability called with word: "${currentWord}"`);
+    console.log(`DEBUG: Valid letters calculated:`, validLetters);
+    console.log(`DEBUG: Found ${letterButtons.length} letter buttons`);
+    
+    letterButtons.forEach(button => {
+        const letter = button.textContent.toUpperCase();
+        if (validLetters.includes(letter)) {
+            button.classList.remove('disabled-letter');
+            button.disabled = false;
+            console.log(`DEBUG: Enabled letter: ${letter}`);
+        } else {
+            button.classList.add('disabled-letter');
+            button.disabled = true;
+            console.log(`DEBUG: Disabled letter: ${letter}`);
+        }
+    });
+    
+    console.log(`DEBUG: After update, disabled buttons:`, 
+        document.querySelectorAll('.letter-btn.disabled-letter').length);
+}
+
+// --- Cleanup on page unload ---
+window.addEventListener('beforeunload', () => {
+    stopScanning();
+    stopGamepadPolling();
+});
