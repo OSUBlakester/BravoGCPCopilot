@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Navigation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Custom base styles */
+        body {
+            font-family: 'Inter', sans-serif; /* Consistent font */
+        }
+        /* Shared button styling */
+        .nav-button-base {
+             @apply w-full flex items-center justify-center text-center font-bold py-3 px-4 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-offset-2;
+        }
+        /* Specific styling for navigation buttons */
+        .nav-button {
+            @apply nav-button-base bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500;
+        }
+        /* Specific styling for the back button */
+        .back-button {
+             @apply nav-button-base bg-gray-500 hover:bg-gray-600 text-white focus:ring-gray-400;
+        }
+        /* Ensure icons have consistent spacing */
+        .nav-button i, .back-button i {
+            @apply mr-2; /* Margin to the right of the icon */
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="bg-white p-6 sm:p-8 rounded-xl shadow-lg w-full max-w-2xl"> <h1 class="text-3xl font-bold text-center text-gray-800 mb-8">Admin Pages</h1>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-10">
+
+            <a href="admin.html" class="nav-button">
+                <i class="fas fa-tools"></i> General
+            </a>
+
+            <a href="audio_admin.html" class="nav-button">
+                <i class="fas fa-volume-up"></i> Audio
+            </a>
+
+            <a href="user_current_admin.html" class="nav-button">
+                <i class="fas fa-map-marker-alt"></i> Current State
+            </a>
+
+            <a href="user_diary_admin.html" class="nav-button">
+                <i class="fas fa-book"></i> Diary
+            </a>
+
+            <a href="user_favorites_admin.html" class="nav-button">
+                <i class="fas fa-star"></i> Favorites
+            </a>
+
+            <a href="user_info_admin.html" class="nav-button">
+                <i class="fas fa-user-cog"></i> User Info
+            </a>
+        </div> <div class="flex justify-center">
+            <a href="gridpage.html?page=home" class="back-button w-full sm:w-auto"> <i class="fas fa-arrow-left"></i> Go Back to Main Page
+            </a>
+        </div>
+    </div>
+
+</body>
+</html>

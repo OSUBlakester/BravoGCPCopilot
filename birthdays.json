@@ -1,0 +1,25 @@
+{
+    "userBirthdate": "1999-05-13",
+    "friendsFamily": [
+        {
+            "name": "Mom",
+            "monthDay": "03-18"
+        },
+        {
+            "name": "Dad",
+            "monthDay": "02-24"
+        },
+        {
+            "name": "Matthew",
+            "monthDay": "09-16"
+        },
+        {
+            "name": "Nana",
+            "monthDay": "06-30"
+        },
+        {
+            "name": "Papa",
+            "monthDay": "02-07"
+        }
+    ]
+}
