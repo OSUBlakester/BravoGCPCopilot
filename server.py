@@ -1,8 +1,9 @@
 import os
 import sys
 
-print("DEBUG: GOOGLE_API_KEY =", os.environ.get("GOOGLE_API_KEY"))
-#print("DEBUG: GOOGLE_APPLICATION_CREDENTIALS =", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+# Security: Remove debug prints of sensitive environment variables
+# print("DEBUG: GOOGLE_API_KEY =", os.environ.get("GOOGLE_API_KEY"))
+# print("DEBUG: GOOGLE_APPLICATION_CREDENTIALS =", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
 print("DEBUG: HOME =", os.environ.get("HOME")) # Also check HOME
 
 # Import environment configuration
@@ -123,7 +124,8 @@ template_user_data_paths = {
         "lightColorValue": 4294659860,
         "darkColorValue": 4278198852,
         "toolbarPIN": "1234",  # Default PIN for toolbar
-        "autoClean": False  # Default Auto Clean setting for freestyle (automatic cleanup on Speak Display)
+        "autoClean": False,  # Default Auto Clean setting for freestyle (automatic cleanup on Speak Display)
+        "enablePictograms": False  # Default AAC pictograms disabled
     }, indent=4),
     "birthdays.json": json.dumps({"userBirthdate": None, "friendsFamily": []}, indent=4),
     "user_diary.json": json.dumps([], indent=4),
@@ -839,7 +841,8 @@ DEFAULT_SETTINGS = {
     "displaySplash": False,  # Default splash screen display setting
     "displaySplashTime": 3000,  # Default splash screen duration (3 seconds)
     "enableMoodSelection": False,  # Default mood selection disabled
-    "currentMood": None  # Default no mood selected
+    "currentMood": None,  # Default no mood selected
+    "enablePictograms": False  # Default AAC pictograms disabled
 }
 
 
@@ -1434,6 +1437,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     # Load user settings to get LLMOptions value for placeholder replacement
     user_settings = await load_settings_from_file(account_id, aac_user_id)
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
+    current_mood = user_settings.get("currentMood")  # Get current mood from settings
     
     # Replace #LLMOptions placeholder in the prompt
     if "#LLMOptions" in user_prompt_content:
@@ -1523,6 +1527,13 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
 
     # Add basic info
     context_parts.insert(0, f"Current Date: {current_date_str}")
+    
+    # Add mood context if available
+    if current_mood:
+        mood_context = f"User's Current Mood: {current_mood} - Please tailor responses to be appropriate for someone feeling {current_mood.lower()}."
+        context_parts.append(mood_context)
+        logging.info(f"Added mood context to LLM prompt: {mood_context}")
+    
     if user_info_content.strip(): # Only add if not empty after strip
         context_parts.append(f"General User Information:\n{user_info_content}")
     if user_current_content.strip(): # Only add if not empty after strip
@@ -3025,6 +3036,7 @@ class SettingsModel(BaseModel):
     displaySplashTime: Optional[int] = Field(None, description="Duration in milliseconds to display splash screen.", ge=500, le=10000)
     enableMoodSelection: Optional[bool] = Field(None, description="Enable/disable mood selection at session start.")
     currentMood: Optional[str] = Field(None, description="Currently selected mood for the session.", max_length=50)
+    enablePictograms: Optional[bool] = Field(None, description="Enable/disable AAC pictogram display on buttons.")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
