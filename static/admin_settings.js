@@ -17,6 +17,7 @@ const autoCleanInput = document.getElementById('autoClean');
 const displaySplashInput = document.getElementById('displaySplash');
 const displaySplashTimeInput = document.getElementById('displaySplashTime');
 const enableMoodSelectionInput = document.getElementById('enableMoodSelection');
+const enablePictogramsInput = document.getElementById('enablePictograms');
 const currentMoodSelect = document.getElementById('currentMood');
 const clearMoodBtn = document.getElementById('clearMoodBtn');
 const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
@@ -154,6 +155,7 @@ async function loadSettings() {
         if (displaySplashInput) { displaySplashInput.checked = currentSettings.displaySplash || false; }
         if (displaySplashTimeInput) { displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000; }
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
+        if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms || false; }
         if (currentMoodSelect) { 
             currentMoodSelect.value = currentSettings.currentMood || ''; 
             // Also update from session storage to show current session mood
@@ -211,6 +213,7 @@ async function saveSettings() {
     const newDisplaySplash = displaySplashInput.checked;
     const newDisplaySplashTime = displaySplashTimeInput.value ? parseInt(displaySplashTimeInput.value) : 3000;
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
+    const newEnablePictograms = enablePictogramsInput.checked;
     const newCurrentMood = currentMoodSelect.value || null;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
     const newGridColumns = gridColumnsSlider ? parseInt(gridColumnsSlider.value) : 6;
@@ -287,6 +290,7 @@ async function saveSettings() {
         displaySplash: newDisplaySplash,
         displaySplashTime: newDisplaySplashTime,
         enableMoodSelection: newEnableMoodSelection,
+        enablePictograms: newEnablePictograms,
         currentMood: newCurrentMood,
         selected_tts_voice_name: newSelectedTtsVoice,
         primary_llm_model: newPrimaryLlmModel, // Add to payload

@@ -1,0 +1,164 @@
+"""
+SECURE Configuration Template for Bravo AAC Application
+=====================================================
+
+SECURITY NOTICE: This template replaces config.py which contained exposed API keys.
+
+SETUP INSTRUCTIONS:
+1. Copy this file to config.py 
+2. Replace ALL placeholder values with your actual credentials
+3. NEVER commit config.py to version control
+4. Use environment variables in production
+
+WARNING: The original config.py contained exposed Firebase API keys and has been 
+removed from Git tracking for security.
+"""
+import os
+from typing import Dict, Any
+
+# Environment detection
+ENVIRONMENT = os.getenv('ENVIRONMENT', 'development').lower()
+
+# Environment-specific configurations
+ENVIRONMENT_CONFIGS = {
+    'development': {
+        # GCP Project Configuration  
+        'gcp_project_id': os.getenv('GCP_PROJECT_ID_DEV', 'your-dev-project-id'),
+        'firestore_project': os.getenv('FIRESTORE_PROJECT_DEV', 'your-dev-project-id'),
+        'firebase_config_path': '/keys/bravo-dev-firebase-key.json',
+        
+        # CORS Settings
+        'allowed_origins': [
+            'http://localhost:3000',
+            'http://localhost:8080', 
+            'https://dev.talkwithbravo.com'
+        ],
+        
+        # Debug Settings
+        'debug': True,
+        'log_level': 'DEBUG',
+        
+        # Service Account Paths
+        'service_account_key_path': '/keys/bravo-dev-service-account.json',
+        
+        # Domain Configuration
+        'domain': 'dev.talkwithbravo.com',
+        'environment_name': 'Development',
+        
+        # Client Firebase Configuration - USE ENVIRONMENT VARIABLES
+        'client_firebase_config': {
+            'apiKey': os.getenv('FIREBASE_API_KEY_DEV', 'your-dev-firebase-api-key'),
+            'authDomain': os.getenv('FIREBASE_AUTH_DOMAIN_DEV', 'your-dev-project.firebaseapp.com'),
+            'projectId': os.getenv('FIREBASE_PROJECT_ID_DEV', 'your-dev-project-id'),
+            'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET_DEV', 'your-dev-project.firebasestorage.app'),
+            'messagingSenderId': os.getenv('FIREBASE_MESSAGING_SENDER_ID_DEV', 'your-messaging-sender-id'),
+            'appId': os.getenv('FIREBASE_APP_ID_DEV', 'your-dev-app-id'),
+            'measurementId': os.getenv('FIREBASE_MEASUREMENT_ID_DEV', 'your-measurement-id')
+        }
+    },
+        
+    'testing': {
+        # GCP Project Configuration
+        'gcp_project_id': os.getenv('GCP_PROJECT_ID_TEST', 'your-test-project-id'),
+        'firestore_project': os.getenv('FIRESTORE_PROJECT_TEST', 'your-test-project-id'),
+        'firebase_config_path': '/keys/bravo-test-firebase-key.json',
+        
+        # CORS Settings
+        'allowed_origins': [
+            'https://test.talkwithbravo.com'
+        ],
+        
+        # Debug Settings
+        'debug': False,
+        'log_level': 'INFO',
+        
+        # Service Account Paths
+        'service_account_key_path': '/keys/bravo-test-service-account.json',
+        
+        # Domain Configuration
+        'domain': 'test.talkwithbravo.com',
+        'environment_name': 'Testing',
+        
+        # Client Firebase Configuration - USE ENVIRONMENT VARIABLES
+        'client_firebase_config': {
+            'apiKey': os.getenv('FIREBASE_API_KEY_TEST', 'your-test-firebase-api-key'),
+            'authDomain': os.getenv('FIREBASE_AUTH_DOMAIN_TEST', 'your-test-project.firebaseapp.com'),
+            'projectId': os.getenv('FIREBASE_PROJECT_ID_TEST', 'your-test-project-id'),
+            'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET_TEST', 'your-test-project.firebasestorage.app'),
+            'messagingSenderId': os.getenv('FIREBASE_MESSAGING_SENDER_ID_TEST', 'your-messaging-sender-id'),
+            'appId': os.getenv('FIREBASE_APP_ID_TEST', 'your-test-app-id')
+        }
+    },
+
+    'production': {
+        # GCP Project Configuration
+        'gcp_project_id': os.getenv('GCP_PROJECT_ID_PROD', 'your-prod-project-id'),
+        'firestore_project': os.getenv('FIRESTORE_PROJECT_PROD', 'your-prod-project-id'),
+        'firebase_config_path': '/keys/bravo-prod-firebase-key.json',
+        
+        # CORS Settings
+        'allowed_origins': [
+            'https://talkwithbravo.com'
+        ],
+        
+        # Debug Settings
+        'debug': False,
+        'log_level': 'WARNING',
+        
+        # Service Account Paths
+        'service_account_key_path': '/keys/bravo-prod-service-account.json',
+        
+        # Domain Configuration
+        'domain': 'talkwithbravo.com',
+        'environment_name': 'Production',
+
+        # Client Firebase Configuration - USE ENVIRONMENT VARIABLES
+        'client_firebase_config': {
+            'apiKey': os.getenv('FIREBASE_API_KEY_PROD', 'your-prod-firebase-api-key'),
+            'authDomain': os.getenv('FIREBASE_AUTH_DOMAIN_PROD', 'your-prod-project.firebaseapp.com'),
+            'projectId': os.getenv('FIREBASE_PROJECT_ID_PROD', 'your-prod-project-id'),
+            'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET_PROD', 'your-prod-project.firebasestorage.app'),
+            'messagingSenderId': os.getenv('FIREBASE_MESSAGING_SENDER_ID_PROD', 'your-messaging-sender-id'),
+            'appId': os.getenv('FIREBASE_APP_ID_PROD', 'your-prod-app-id')
+        }
+    }
+}
+
+# Get current environment config
+def get_config() -> Dict[str, Any]:
+    """Get configuration for the current environment"""
+    if ENVIRONMENT not in ENVIRONMENT_CONFIGS:
+        raise ValueError(f"Unknown environment: {ENVIRONMENT}. Must be one of: {list(ENVIRONMENT_CONFIGS.keys())}")
+    
+    config = ENVIRONMENT_CONFIGS[ENVIRONMENT].copy()
+    config['environment'] = ENVIRONMENT
+    
+    return config
+
+# Current configuration
+CONFIG = get_config()
+
+# Convenience accessors
+GCP_PROJECT_ID = CONFIG['gcp_project_id']
+FIRESTORE_PROJECT = CONFIG['firestore_project']
+FIREBASE_CONFIG_PATH = CONFIG['firebase_config_path']
+SERVICE_ACCOUNT_KEY_PATH = CONFIG['service_account_key_path']
+ALLOWED_ORIGINS = CONFIG['allowed_origins']
+DEBUG = CONFIG['debug']
+LOG_LEVEL = CONFIG['log_level']
+DOMAIN = CONFIG['domain']
+ENVIRONMENT_NAME = CONFIG['environment_name']
+
+# Health check endpoint data
+HEALTH_INFO = {
+    'environment': ENVIRONMENT,
+    'environment_name': ENVIRONMENT_NAME,
+    'domain': DOMAIN,
+    'gcp_project': GCP_PROJECT_ID,
+    'debug_mode': DEBUG
+}
+
+print(f"🚀 Bravo AAC Application - {ENVIRONMENT_NAME} Environment")
+print(f"   Domain: {DOMAIN}")
+print(f"   GCP Project: {GCP_PROJECT_ID}")
+print(f"   Debug Mode: {DEBUG}")
