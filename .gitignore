@@ -65,6 +65,25 @@ secrets.json
 APIKEYS.reg
 *.reg
 
+# Database credentials and export scripts with hardcoded passwords
+exportdb.py
+*_credentials.py
+
+# Configuration files that may contain secrets
+config_local.py
+local_config.py
+config.py
+
+# Backup and temporary files that might contain sensitive data
+*.backup
+*.bak
+*.old
+*.tmp
+*~
+*copy.html
+*copy.js
+*copy.txt
+
 # User data directories (contains personal information)
 user_data/
 user_docs/

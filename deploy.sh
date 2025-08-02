@@ -64,12 +64,14 @@ gcloud builds submit . --tag "$IMAGE_TAG" --region="$REGION"
 
 # Deploy to Cloud Run
 echo "🚀 Deploying to Cloud Run..."
+echo "ℹ️ Note: This deployment will preserve existing environment variables"
+echo "ℹ️ Only updating ENVIRONMENT and GCP_PROJECT_ID, all other vars preserved"
 gcloud run deploy $SERVICE_NAME \
     --image "$IMAGE_TAG" \
     --platform managed \
     --region $REGION \
     --allow-unauthenticated \
-    --set-env-vars=ENVIRONMENT=$ENV_NAME \
+    --update-env-vars=ENVIRONMENT=$ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID \
     --set-secrets=GOOGLE_API_KEY=bravo-google-api-key:latest \
     --memory 2Gi \
     --cpu 1 \

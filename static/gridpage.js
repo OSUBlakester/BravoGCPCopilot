@@ -48,6 +48,209 @@ let systemSpeakerId = localStorage.getItem('bravoSystemSpeakerId') || 'default';
 let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
 let currentSpeechRate = 180;                 // Default words-per-minute
 
+// --- AAC Pictogram Support ---
+let enablePictograms = false; // Global setting for pictogram display
+
+// Simple mapping of button text to Unicode emoji or icons
+// This can be extended with more sophisticated matching or external APIs
+const PICTOGRAM_MAP = {
+    // Emotions & Feelings
+    'happy': '😊', 'joy': '😊', 'glad': '😊', 'cheerful': '😊', 'delighted': '😊',
+    'sad': '😢', 'unhappy': '😢', 'crying': '😭', 'tears': '😭', 'weep': '😭',
+    'angry': '😠', 'mad': '😠', 'furious': '😡', 'rage': '😡', 'upset': '😠',
+    'tired': '😴', 'sleepy': '😴', 'exhausted': '😴', 'weary': '😴',
+    'excited': '🤩', 'thrilled': '🤩', 'enthusiastic': '🤩',
+    'confused': '😕', 'puzzled': '🤔', 'thinking': '🤔', 'wonder': '🤔',
+    'surprised': '😲', 'shocked': '😱', 'amazed': '😲',
+    'scared': '😨', 'afraid': '😨', 'frightened': '😨', 'worried': '😟',
+    'love': '❤️', 'heart': '❤️', 'care': '❤️', 'affection': '❤️',
+    'like': '👍', 'enjoy': '😊', 'prefer': '👍',
+    'hurt': '🤕', 'pain': '🤕', 'injured': '🤕', 'sore': '🤕',
+    'sick': '🤢', 'ill': '🤢', 'unwell': '🤢', 'nauseous': '🤮',
+    'calm': '😌', 'peaceful': '😌', 'relaxed': '😌', 'serene': '😌',
+
+    // Basic Communication
+    'hello': '👋', 'hi': '👋', 'hey': '👋', 'greetings': '👋', 'wave': '👋',
+    'goodbye': '👋', 'bye': '👋', 'farewell': '👋', 'see you': '👋',
+    'yes': '✅', 'okay': '✅', 'ok': '✅', 'agree': '✅', 'correct': '✅',
+    'no': '❌', 'nope': '❌', 'disagree': '❌', 'wrong': '❌', 'incorrect': '❌',
+    'please': '🙏', 'thank you': '🙏', 'thanks': '🙏', 'grateful': '🙏',
+    'help': '🆘', 'assist': '🆘', 'support': '🆘', 'aid': '🆘',
+    'sorry': '😞', 'apologize': '😞', 'excuse me': '🙏',
+
+    // Actions & Activities
+    'eat': '🍽️', 'eating': '🍽️', 'meal': '🍽️', 'dining': '🍽️',
+    'drink': '🥤', 'drinking': '🥤', 'sip': '🥤', 'beverage': '🥤',
+    'sleep': '😴', 'sleeping': '😴', 'nap': '😴', 'rest': '😴',
+    'wake up': '⏰', 'awake': '⏰', 'get up': '⏰',
+    'walk': '🚶', 'walking': '🚶', 'stroll': '🚶', 'hike': '🥾',
+    'run': '🏃', 'running': '🏃', 'jog': '🏃', 'sprint': '🏃',
+    'sit': '🪑', 'sitting': '🪑', 'chair': '🪑',
+    'stand': '🧍', 'standing': '🧍',
+    'play': '🎮', 'playing': '🎮', 'game': '🎮', 'fun': '🎉',
+    'work': '💼', 'working': '💼', 'job': '💼', 'office': '🏢',
+    'study': '📚', 'studying': '📚', 'learn': '📚', 'education': '🎓',
+    'read': '📖', 'reading': '📚', 'book': '📚',
+    'write': '✍️', 'writing': '✍️', 'pen': '🖊️', 'pencil': '✏️',
+    'listen': '👂', 'hearing': '👂', 'sound': '🔊',
+    'watch': '👀', 'look': '👀', 'see': '👀', 'observe': '👀',
+    'talk': '💬', 'speak': '💬', 'say': '💬', 'tell': '💬',
+    'sing': '🎤', 'singing': '🎤', 'song': '🎵', 'music': '🎵',
+    'dance': '💃', 'dancing': '💃',
+    'cook': '👨‍🍳', 'cooking': '👨‍🍳', 'chef': '👨‍🍳',
+    'clean': '🧹', 'cleaning': '🧹', 'tidy': '🧹',
+    'drive': '🚗', 'driving': '🚗',
+
+    // Food & Drink
+    'food': '🍽️', 'hungry': '🍽️', 'appetite': '🍽️',
+    'water': '💧', 'thirsty': '💧',
+    'coffee': '☕', 'tea': '🍵',
+    'bread': '🍞', 'toast': '🍞',
+    'fruit': '🍎', 'apple': '🍎', 'orange': '🍊', 'banana': '🍌',
+    'vegetables': '🥕', 'carrot': '🥕', 'broccoli': '🥦',
+    'meat': '🥩', 'chicken': '🍗', 'beef': '🥩', 'fish': '🐟',
+    'milk': '🥛', 'cheese': '🧀', 'egg': '🥚',
+    'pizza': '🍕', 'burger': '🍔', 'sandwich': '🥪',
+    'cake': '🎂', 'cookie': '🍪', 'candy': '🍬',
+    'hot': '🔥', 'warm': '🔥', 'cold': '🧊', 'cool': '❄️',
+
+    // Places & Locations
+    'home': '🏠', 'house': '🏠', 'apartment': '🏢',
+    'school': '🏫', 'classroom': '🏫', 'university': '🎓',
+    'hospital': '🏥', 'doctor': '👩‍⚕️', 'nurse': '👩‍⚕️',
+    'store': '🏪', 'shop': '🏪', 'market': '🏪',
+    'restaurant': '🍽️', 'cafe': '☕',
+    'park': '🌳', 'garden': '🌻', 'outdoors': '🌲',
+    'beach': '🏖️', 'ocean': '🌊', 'water': '💧',
+    'bathroom': '🚻', 'toilet': '🚽', 'shower': '🚿',
+    'bedroom': '🛏️', 'bed': '🛏️',
+    'kitchen': '🍽️', 'living room': '🛋️',
+    'car': '🚗', 'bus': '🚌', 'train': '🚆', 'plane': '✈️',
+
+    // People & Relationships
+    'family': '👨‍👩‍👧‍👦', 'mom': '👩', 'mother': '👩', 'dad': '👨', 'father': '👨',
+    'child': '👶', 'baby': '👶', 'kid': '🧒', 'boy': '👦', 'girl': '👧',
+    'friend': '👫', 'buddy': '👫', 'pal': '👫',
+    'person': '👤', 'people': '👥', 'everyone': '👥',
+    'teacher': '👩‍🏫', 'student': '👨‍🎓',
+
+    // Objects & Technology
+    'phone': '📱', 'computer': '💻', 'tablet': '📲',
+    'tv': '📺', 'television': '📺', 'screen': '📺',
+    'book': '📚', 'magazine': '📖', 'newspaper': '📰',
+    'toy': '🧸', 'ball': '⚽', 'game': '🎮',
+    'clothes': '👕', 'shirt': '👕', 'pants': '👖', 'shoes': '👟',
+    'glasses': '👓', 'hat': '👒',
+    'money': '💰', 'dollar': '💵', 'coin': '🪙',
+    'key': '🔑', 'door': '🚪', 'window': '🪟',
+    'light': '💡', 'lamp': '🔦',
+
+    // Time & Weather
+    'morning': '🌅', 'afternoon': '☀️', 'evening': '🌅', 'night': '🌙',
+    'today': '📅', 'tomorrow': '📅', 'yesterday': '📅',
+    'time': '🕐', 'clock': '🕐', 'hour': '🕐', 'minute': '⏰',
+    'sun': '☀️', 'sunny': '☀️', 'rain': '🌧️', 'rainy': '🌧️',
+    'snow': '❄️', 'snowy': '❄️', 'wind': '💨', 'windy': '💨',
+    'cloud': '☁️', 'cloudy': '☁️', 'storm': '⛈️',
+
+    // Body Parts & Health
+    'head': '🗣️', 'face': '😊', 'eye': '👁️', 'nose': '👃', 'mouth': '👄',
+    'ear': '👂', 'hand': '🤚', 'finger': '👆', 'arm': '💪', 'leg': '🦵',
+    'foot': '🦶', 'body': '🧍', 'hair': '💇',
+    'medicine': '💊', 'pill': '💊', 'bandage': '🩹',
+    'healthy': '💪', 'strong': '💪', 'weak': '😞',
+
+    // Directions & Movement
+    'up': '⬆️', 'down': '⬇️', 'left': '⬅️', 'right': '➡️',
+    'forward': '⬆️', 'back': '⬇️', 'backward': '⬇️',
+    'here': '👇', 'there': '👆', 'where': '❓',
+    'come': '👈', 'go': '🏃', 'stop': '✋', 'wait': '⏸️',
+    'fast': '💨', 'slow': '🐌', 'quick': '⚡',
+
+    // Colors
+    'red': '🔴', 'blue': '🔵', 'green': '🟢', 'yellow': '🟡',
+    'orange': '🟠', 'purple': '🟣', 'pink': '🩷', 'brown': '🟤',
+    'black': '⚫', 'white': '⚪', 'gray': '🔘', 'grey': '🔘',
+
+    // Numbers (basic)
+    'one': '1️⃣', 'two': '2️⃣', 'three': '3️⃣', 'four': '4️⃣', 'five': '5️⃣',
+    'six': '6️⃣', 'seven': '7️⃣', 'eight': '8️⃣', 'nine': '9️⃣', 'ten': '🔟',
+    'first': '1️⃣', 'second': '2️⃣', 'third': '3️⃣',
+
+    // Size & Quantity
+    'big': '📏', 'large': '📏', 'huge': '📏', 'giant': '📏',
+    'small': '🤏', 'little': '🤏', 'tiny': '🤏', 'mini': '🤏',
+    'more': '➕', 'less': '➖', 'many': '📊', 'few': '🤏',
+    'all': '💯', 'some': '📊', 'none': '⭕',
+
+    // Actions/States
+    'on': '🔛', 'off': '📴', 'open': '📂', 'close': '📁', 'closed': '📁',
+    'start': '▶️', 'begin': '▶️', 'finish': '⏹️', 'end': '⏹️',
+    'finished': '✅', 'done': '✅', 'complete': '✅',
+    'good': '👍', 'great': '👍', 'excellent': '⭐', 'perfect': '💯',
+    'bad': '👎', 'terrible': '👎', 'awful': '👎',
+    'new': '🆕', 'old': '📜', 'broken': '💔', 'fix': '🔧',
+    'clean': '✨', 'dirty': '🧽', 'messy': '🌪️',
+    'full': '💯', 'empty': '⭕', 'half': '½',
+
+    // Questions
+    'what': '❓', 'where': '📍', 'when': '🕐', 'who': '👤', 'why': '❓', 'how': '❓',
+    'question': '❓', 'answer': '💡', 'know': '🧠', 'understand': '🧠',
+
+    // Emergency & Safety
+    'emergency': '🚨', 'danger': '⚠️', 'safe': '🛡️', 'careful': '⚠️',
+    'fire': '🔥', 'police': '👮', 'ambulance': '🚑',
+
+    // Technology & Communication
+    'internet': '🌐', 'wifi': '📶', 'email': '📧', 'message': '💬',
+    'call': '📞', 'video': '📹', 'photo': '📷', 'picture': '🖼️',
+
+    // Shopping & Money
+    'buy': '🛒', 'sell': '💰', 'pay': '💳', 'cost': '💰', 'price': '💰',
+    'expensive': '💸', 'cheap': '💰', 'free': '🆓',
+
+    // Feelings about activities
+    'boring': '😴', 'interesting': '🤔', 'fun': '🎉', 'exciting': '🤩',
+    'easy': '👍', 'hard': '😤', 'difficult': '😤',
+
+    // Transportation
+    'bike': '🚲', 'bicycle': '🚲', 'motorcycle': '🏍️', 'truck': '🚚',
+    'taxi': '🚕', 'subway': '🚇', 'boat': '⛵', 'ship': '🚢',
+
+    // Animals
+    'dog': '🐕', 'cat': '🐱', 'bird': '🐦', 'fish': '🐟',
+    'horse': '🐴', 'cow': '🐄', 'pig': '🐷', 'chicken': '🐔',
+
+    // Nature
+    'tree': '🌳', 'flower': '🌸', 'grass': '🌱', 'mountain': '⛰️',
+    'river': '🏞️', 'lake': '🏞️', 'forest': '🌿', 'desert': '🏜️'
+};
+
+/**
+ * Gets a pictogram for the given text
+ * @param {string} text - The button text to find a pictogram for
+ * @returns {string|null} - Unicode emoji/symbol or null if none found
+ */
+function getPictogramForText(text) {
+    if (!enablePictograms || !text) return null;
+    
+    const lowerText = text.toLowerCase().trim();
+    
+    // Direct match
+    if (PICTOGRAM_MAP[lowerText]) {
+        return PICTOGRAM_MAP[lowerText];
+    }
+    
+    // Partial matches for phrases containing key words
+    for (const [key, symbol] of Object.entries(PICTOGRAM_MAP)) {
+        if (lowerText.includes(key)) {
+            return symbol;
+        }
+    }
+    
+    return null;
+}
+
 
 // --- Utility to convert Base64 to ArrayBuffer (Needed for playing audio) ---
 function base64ToArrayBuffer(base64) {
@@ -148,6 +351,7 @@ async function loadScanSettings() {
         // Load booleans
         ScanningOff = settings.ScanningOff === true;
         SummaryOff = settings.SummaryOff === true;
+        enablePictograms = settings.enablePictograms === true;
 
         // Load Grid Columns (for standardized button sizing)
         if (settings && typeof settings.gridColumns === 'number' && !isNaN(settings.gridColumns)) {
@@ -677,7 +881,34 @@ function generateGrid(page, container) {
             currentRow++;
         }
         const button = document.createElement('button');
-        button.textContent = buttonData.text;
+        
+        // Add pictogram support
+        const pictogram = getPictogramForText(buttonData.text);
+        if (pictogram) {
+            // Create container for pictogram and text
+            const buttonContent = document.createElement('div');
+            buttonContent.style.display = 'flex';
+            buttonContent.style.flexDirection = 'column';
+            buttonContent.style.alignItems = 'center';
+            buttonContent.style.gap = '4px';
+            
+            const pictogramSpan = document.createElement('span');
+            pictogramSpan.textContent = pictogram;
+            pictogramSpan.style.fontSize = '1.5em';
+            pictogramSpan.style.lineHeight = '1';
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = buttonData.text;
+            textSpan.style.fontSize = '0.9em';
+            textSpan.style.lineHeight = '1.2';
+            
+            buttonContent.appendChild(pictogramSpan);
+            buttonContent.appendChild(textSpan);
+            button.appendChild(buttonContent);
+        } else {
+            button.textContent = buttonData.text;
+        }
+        
         button.dataset.llmQuery = buttonData.LLMQuery || '';
         button.dataset.targetPage = buttonData.targetPage || '';
         button.dataset.speechPhrase = buttonData.speechPhrase || '';
@@ -796,11 +1027,7 @@ async function handleButtonClick(buttonData) {
                 'The "summary" key should contain the exact same FULL text as the "option" key.' :
                 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
 
-            // Include mood context if available
-            const currentMood = getCurrentMood ? getCurrentMood() : null;
-            const moodContext = currentMood ? ` Consider that the user's current mood is "${currentMood}" and tailor the responses to be appropriate for someone feeling ${currentMood.toLowerCase()}.` : '';
-
-            const promptForLLM = `"${llmQuery}".${moodContext} Format as a JSON list... ${summaryInstruction} ...`;
+            const promptForLLM = `"${llmQuery}". Format as a JSON list... ${summaryInstruction} ...`;
             const tLLM0 = performance.now();
             const options = await getLLMResponse(promptForLLM);
             const tLLM1 = performance.now();
@@ -1794,7 +2021,34 @@ function generateLlmButtons(options) {
     options.forEach(optionData => {
         if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') { console.warn("Skipping invalid option data:", optionData); return; }
         const button = document.createElement('button');
-        button.textContent = optionData.summary;
+        
+        // Add pictogram support for LLM-generated buttons
+        const pictogram = getPictogramForText(optionData.summary);
+        if (pictogram) {
+            // Create container for pictogram and text
+            const buttonContent = document.createElement('div');
+            buttonContent.style.display = 'flex';
+            buttonContent.style.flexDirection = 'column';
+            buttonContent.style.alignItems = 'center';
+            buttonContent.style.gap = '4px';
+            
+            const pictogramSpan = document.createElement('span');
+            pictogramSpan.textContent = pictogram;
+            pictogramSpan.style.fontSize = '1.5em';
+            pictogramSpan.style.lineHeight = '1';
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = optionData.summary;
+            textSpan.style.fontSize = '0.9em';
+            textSpan.style.lineHeight = '1.2';
+            
+            buttonContent.appendChild(pictogramSpan);
+            buttonContent.appendChild(textSpan);
+            button.appendChild(buttonContent);
+        } else {
+            button.textContent = optionData.summary;
+        }
+        
         button.dataset.option = optionData.option;
         button.dataset.speechPhrase = optionData.option;
         // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
