@@ -130,10 +130,8 @@ template_user_data_paths = {
     "birthdays.json": json.dumps({"userBirthdate": None, "friendsFamily": []}, indent=4),
     "user_diary.json": json.dumps([], indent=4),
     "chat_history.json": json.dumps([], indent=4),
-    "user_favorites.json": json.dumps({ # Keep this consistent with DEFAULT_SCRAPING_CONFIG structure
-        "news_sources": [],
-        "sports_sources": [],
-        "entertainment_sources": []
+    "user_favorites.json": json.dumps({ # Updated for new favorites system
+        "buttons": []  # New structure: list of topic buttons with scraping configs
     }, indent=4),
     "audio_config.json": json.dumps({"personal_device": None, "system_device": None}, indent=4),
     "button_activity_log.json": json.dumps([], indent=4),
@@ -298,6 +296,41 @@ class CopyUserRequest(BaseModel):
     source_aac_user_id: str = Field(..., min_length=1)
     new_display_name: str = Field(..., min_length=1, max_length=50)
 
+# --- Favorites System Models ---
+class ScrapingConfig(BaseModel):
+    url: str = Field(..., description="Website URL to scrape")
+    headline_selector: str = Field(..., description="CSS selector for headlines")
+    url_selector: str = Field(..., description="CSS selector for article links")
+    url_attribute: str = Field(default="href", description="Attribute containing the URL")
+    url_prefix: str = Field(default="", description="Prefix to add to relative URLs")
+    keywords: List[str] = Field(default=[], description="Keywords to filter content")
+
+class FavoriteButton(BaseModel):
+    row: int = Field(..., ge=0, description="Grid row position")
+    col: int = Field(..., ge=0, description="Grid column position")
+    text: str = Field(..., min_length=1, max_length=50, description="Button display text")
+    speechPhrase: Optional[str] = Field(None, description="Optional speech phrase before scraping")
+    scraping_config: ScrapingConfig = Field(..., description="Web scraping configuration")
+    hidden: bool = Field(default=False, description="Whether button is hidden")
+
+class FavoritesData(BaseModel):
+    buttons: List[FavoriteButton] = Field(default=[], description="List of favorite topic buttons")
+
+class CreateFavoriteButtonRequest(BaseModel):
+    button: FavoriteButton
+
+class UpdateFavoriteButtonRequest(BaseModel):
+    old_row: int
+    old_col: int
+    button: FavoriteButton
+
+class DeleteFavoriteButtonRequest(BaseModel):
+    row: int
+    col: int
+
+class TestScrapingRequest(BaseModel):
+    scraping_config: ScrapingConfig
+
 
 @app.get("/")
 async def root():
@@ -316,6 +349,7 @@ STATIC_PAGES = [
     "currentevents.html",
     "user_info_admin.html",
     "user_favorites_admin.html",
+    "favorites_admin.html",
     "web_scraping_help_page.html",
     "admin_nav.html",
     "admin_audit_report.html",
@@ -866,10 +900,16 @@ DEFAULT_DIARY: List[Dict] = [] # Diary is a list of entries
 DEFAULT_CHAT_HISTORY: List[Dict] = [] # Chat history is a list of entries
 DEFAULT_BUTTON_ACTIVITY_LOG: List[Dict] = [] # For button clicks
 
+# Legacy scraping config (kept for migration)
 DEFAULT_SCRAPING_CONFIG = {
     "news_sources": [],
     "sports_sources": [],
     "entertainment_sources": []
+}
+
+# New favorites structure - grid of topic buttons with scraping configs
+DEFAULT_FAVORITES_CONFIG = {
+    "buttons": []  # List of favorite topic buttons
 }
 
 
@@ -1275,6 +1315,21 @@ async def _copy_user_data(account_id: str, source_user_id: str, target_user_id: 
             data_to_save=source_scraping_config
         )
         logging.info(f"Copied scraping config from {source_user_id} to {target_user_id}")
+        
+        # 6.5. Copy new favorites config (config/favorites_config)
+        source_favorites_config = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=source_user_id,
+            doc_subpath="config/favorites_config",
+            default_data=DEFAULT_FAVORITES_CONFIG.copy()
+        )
+        await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=target_user_id,
+            doc_subpath="config/favorites_config",
+            data_to_save=source_favorites_config
+        )
+        logging.info(f"Copied favorites config from {source_user_id} to {target_user_id}")
         
         # 7. Copy audio config (config/audio_config)
         source_audio_config = await load_firestore_document(
@@ -2016,6 +2071,139 @@ async def save_dynamic_scraping_config(account_id: str, aac_user_id: str, config
         doc_subpath="config/scraping_config",
         data_to_save=config_data
     )
+
+# --- NEW FAVORITES SYSTEM ENDPOINTS ---
+
+@app.get("/api/favorites", response_model=FavoritesData)
+async def get_favorites(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get all favorite topic buttons with their scraping configurations"""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    
+    try:
+        config = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/favorites_config",
+            default_data=DEFAULT_FAVORITES_CONFIG.copy()
+        )
+        return FavoritesData(**config)
+    except Exception as e:
+        logging.error(f"Error loading favorites for user {aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to load favorites configuration")
+
+@app.post("/api/favorites")
+async def save_favorites(favorites_data: FavoritesData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save all favorite topic buttons"""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    
+    try:
+        success = await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/favorites_config",
+            data_to_save=favorites_data.dict()
+        )
+        if success:
+            return JSONResponse(content={"message": "Favorites saved successfully"})
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save favorites")
+    except Exception as e:
+        logging.error(f"Error saving favorites for user {aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to save favorites configuration")
+
+@app.post("/api/favorites/test-scraping")
+async def test_scraping_config(test_request: TestScrapingRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Test a scraping configuration and return sample results"""
+    try:
+        # Convert scraping config to dict format expected by scrape_website
+        config_dict = test_request.scraping_config.dict()
+        
+        # Test the scraping
+        articles = await scrape_website(config_dict)
+        
+        return JSONResponse(content={
+            "success": True,
+            "sample_count": len(articles),
+            "sample_articles": articles[:5],  # Return first 5 articles as sample
+            "message": f"Successfully scraped {len(articles)} articles"
+        })
+    except Exception as e:
+        logging.error(f"Error testing scraping config: {e}", exc_info=True)
+        return JSONResponse(content={
+            "success": False,
+            "error": str(e),
+            "message": "Failed to test scraping configuration"
+        })
+
+@app.post("/api/favorites/get-topic-content")
+async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get content for a specific topic by scraping and processing with LLM"""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    
+    try:
+        data = await request.json()
+        topic_text = data.get("topic", "")
+        
+        if not topic_text:
+            raise HTTPException(status_code=400, detail="Missing topic parameter")
+        
+        # Load favorites to find matching button
+        favorites_config = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/favorites_config",
+            default_data=DEFAULT_FAVORITES_CONFIG.copy()
+        )
+        
+        # Find the button with matching text
+        target_button = None
+        for button in favorites_config.get("buttons", []):
+            if button.get("text", "").lower() == topic_text.lower():
+                target_button = button
+                break
+        
+        if not target_button:
+            raise HTTPException(status_code=404, detail=f"No favorite topic found for '{topic_text}'")
+        
+        # Get scraping config
+        scraping_config = target_button.get("scraping_config", {})
+        
+        if not scraping_config:
+            raise HTTPException(status_code=400, detail="No scraping configuration found for this topic")
+        
+        # Scrape articles
+        articles = await scrape_website(scraping_config)
+        
+        if not articles:
+            return JSONResponse(content={
+                "summaries": [],
+                "message": "No articles found for this topic"
+            })
+        
+        # Process with LLM (similar to get_current_events)
+        import random
+        random.shuffle(articles)
+        num_articles_to_process = 10
+        top_articles = articles[:num_articles_to_process]
+        
+        # Process articles with LLM
+        llm_tasks = [_process_single_article(item, topic_text) for item in top_articles]
+        llm_results = await asyncio.gather(*llm_tasks)
+        
+        # Filter successful results
+        successful_results = [result for result in llm_results if result is not None]
+        
+        return JSONResponse(content={
+            "summaries": successful_results,
+            "topic": topic_text
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting topic content for {topic_text}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get content for topic: {e}")
 
 
 async def scrape_website(config):

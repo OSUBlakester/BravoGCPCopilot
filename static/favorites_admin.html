@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Manage Favorites</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <script src="/static/favorites_admin.js" defer></script>
+  <style>
+    /* Custom base styles */
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+    
+    /* Style for the button grid cells */
+    #buttonGrid {
+      display: grid;
+      grid-template-columns: repeat(10, minmax(120px, 1fr));
+      gap: 8px;
+      width: 100%;
+      border: 1px solid #ccc;
+      margin-top: 1rem;
+      margin-bottom: 1rem;
+      background-color: #f0f0f0;
+      overflow-x: auto;
+      padding: 8px;
+    }
+
+    .visual-button {
+      border: 2px solid #d1d5db;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: white;
+      min-height: 80px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 0.875rem;
+      font-weight: 500;
+      text-align: center;
+      word-wrap: break-word;
+      position: relative;
+    }
+
+    .visual-button:hover {
+      border-color: #3b82f6;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      transform: translateY(-1px);
+    }
+
+    .visual-button.filled {
+      background-color: #e0f2fe;
+      border-color: #0288d1;
+      color: #01579b;
+    }
+
+    .visual-button.empty {
+      background-color: #f9f9f9;
+      border-color: #e0e0e0;
+      color: #9e9e9e;
+      font-style: italic;
+    }
+
+    .visual-button.drag-over {
+      background-color: #fff3cd;
+      border-color: #ffc107;
+    }
+
+    .button-actions {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .visual-button:hover .button-actions {
+      opacity: 1;
+    }
+
+    .action-btn {
+      background: rgba(255, 255, 255, 0.9);
+      border: none;
+      border-radius: 4px;
+      width: 20px;
+      height: 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 2px;
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .action-btn:hover {
+      background: white;
+    }
+
+    /* Modal styles */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal.show {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background-color: white;
+      padding: 20px;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 600px;
+      max-height: 90vh;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .wizard-step {
+      display: none;
+    }
+
+    .wizard-step.active {
+      display: block;
+    }
+
+    .test-results {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #d1d5db;
+    }
+
+    .test-results.success {
+      background-color: #f0f9ff;
+      border-color: #0ea5e9;
+      color: #0c4a6e;
+    }
+
+    .test-results.error {
+      background-color: #fef2f2;
+      border-color: #f87171;
+      color: #7f1d1d;
+    }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <!-- Header -->
+  <div class="bg-white shadow-sm border-b border-gray-200 p-4 flex justify-between items-center">
+    <div class="flex items-center">
+      <button id="backButton" class="mr-4 h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600">
+        <i class="fas fa-arrow-left"></i>
+      </button>
+      <h1 class="text-xl font-semibold text-gray-900">Manage Favorites Topics</h1>
+    </div>
+    <div class="flex items-center space-x-2">
+      <button id="logout-button" title="Logout" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600">
+        <i class="fas fa-sign-out-alt"></i>
+      </button>
+      <button id="help-button" title="Help" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-green-100 hover:text-green-600">
+        <i class="fas fa-question-circle"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="max-w-7xl mx-auto p-6">
+    <!-- Status Message Area -->
+    <div id="status-message-area" class="mb-4"></div>
+
+    <!-- Action Buttons -->
+    <div class="flex flex-wrap gap-4 mb-6">
+      <button id="saveChangesBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+        <i class="fas fa-save mr-2"></i>Save Changes
+      </button>
+      <button id="addTopicBtn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">
+        <i class="fas fa-plus mr-2"></i>Add Topic
+      </button>
+      <button id="clearAllBtn" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors">
+        <i class="fas fa-trash mr-2"></i>Clear All
+      </button>
+    </div>
+
+    <!-- Button Grid -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <h2 class="text-lg font-medium text-gray-900 mb-4">Favorites Topics Grid</h2>
+      <div id="buttonGrid">
+        <!-- Grid cells will be generated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Button Editor Modal -->
+  <div id="buttonEditorModal" class="modal">
+    <div class="modal-content">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-semibold">Edit Favorite Topic</h3>
+        <button id="closeEditorModal" class="text-gray-400 hover:text-gray-600">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      
+      <form id="buttonEditorForm">
+        <div class="mb-4">
+          <label for="buttonText" class="block text-sm font-medium text-gray-700 mb-2">Topic Name *</label>
+          <input type="text" id="buttonText" name="buttonText" required maxlength="50" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="e.g., Denver Broncos, Disney Movies">
+        </div>
+
+        <div class="mb-4">
+          <label for="speechPhrase" class="block text-sm font-medium text-gray-700 mb-2">Speech Phrase (Optional)</label>
+          <input type="text" id="speechPhrase" name="speechPhrase" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="What to say before scraping, e.g., 'Let me get the latest Denver Broncos news'">
+        </div>
+
+        <div class="mb-6">
+          <button type="button" id="configureScrapingBtn" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+            <i class="fas fa-cog mr-2"></i>Configure Web Scraping
+          </button>
+          <div id="scrapingConfigStatus" class="mt-2 text-sm text-gray-600"></div>
+        </div>
+
+        <div class="flex justify-end space-x-3">
+          <button type="button" id="deleteButtonBtn" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors">
+            <i class="fas fa-trash mr-2"></i>Delete
+          </button>
+          <button type="button" id="cancelEditorBtn" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition-colors">Cancel</button>
+          <button type="submit" id="saveButtonBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scraping Configuration Wizard Modal -->
+  <div id="scrapingWizardModal" class="modal">
+    <div class="modal-content">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-semibold">Web Scraping Configuration Wizard</h3>
+        <button id="closeWizardModal" class="text-gray-400 hover:text-gray-600">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <!-- Step 1: Basic Setup -->
+      <div id="wizardStep1" class="wizard-step active">
+        <h4 class="text-md font-medium mb-4">Step 1: Website URL</h4>
+        <div class="mb-4">
+          <label for="sampleUrl" class="block text-sm font-medium text-gray-700 mb-2">Sample Article URL *</label>
+          <input type="url" id="sampleUrl" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="https://example.com/sports/broncos/sample-article">
+          <p class="text-sm text-gray-600 mt-1">Paste a URL of a typical article from the website you want to scrape</p>
+        </div>
+        <div class="mb-4">
+          <label for="baseUrl" class="block text-sm font-medium text-gray-700 mb-2">Section URL *</label>
+          <input type="url" id="baseUrl" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="https://example.com/sports/broncos/">
+          <p class="text-sm text-gray-600 mt-1">URL of the section page that lists multiple articles</p>
+        </div>
+        <div class="flex justify-end">
+          <button type="button" id="step1NextBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">Next</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Selectors -->
+      <div id="wizardStep2" class="wizard-step">
+        <h4 class="text-md font-medium mb-4">Step 2: CSS Selectors</h4>
+        <div class="mb-4">
+          <label for="headlineSelector" class="block text-sm font-medium text-gray-700 mb-2">Headline Selector *</label>
+          <input type="text" id="headlineSelector" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="h2.article-title, .headline, h3 a">
+          <p class="text-sm text-gray-600 mt-1">CSS selector for article headlines</p>
+        </div>
+        <div class="mb-4">
+          <label for="linkSelector" class="block text-sm font-medium text-gray-700 mb-2">Link Selector *</label>
+          <input type="text" id="linkSelector" required 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="h2.article-title a, .headline a, h3 a">
+          <p class="text-sm text-gray-600 mt-1">CSS selector for article links</p>
+        </div>
+        <div class="mb-4">
+          <label for="urlAttribute" class="block text-sm font-medium text-gray-700 mb-2">Link Attribute</label>
+          <input type="text" id="urlAttribute" value="href" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <p class="text-sm text-gray-600 mt-1">Usually 'href' for standard links</p>
+        </div>
+        <div class="mb-4">
+          <label for="urlPrefix" class="block text-sm font-medium text-gray-700 mb-2">URL Prefix (Optional)</label>
+          <input type="text" id="urlPrefix" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="https://example.com">
+          <p class="text-sm text-gray-600 mt-1">Added to relative URLs (leave empty if links are absolute)</p>
+        </div>
+        <div class="flex justify-between">
+          <button type="button" id="step2BackBtn" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition-colors">Back</button>
+          <button type="button" id="step2NextBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">Next</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Keywords and Testing -->
+      <div id="wizardStep3" class="wizard-step">
+        <h4 class="text-md font-medium mb-4">Step 3: Keywords & Testing</h4>
+        <div class="mb-4">
+          <label for="keywords" class="block text-sm font-medium text-gray-700 mb-2">Keywords (Optional)</label>
+          <input type="text" id="keywords" 
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="Broncos, Denver, NFL (comma-separated)">
+          <p class="text-sm text-gray-600 mt-1">Filter content by these keywords</p>
+        </div>
+        
+        <div class="mb-4">
+          <button type="button" id="testScrapingBtn" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+            <i class="fas fa-vial mr-2"></i>Test Configuration
+          </button>
+        </div>
+
+        <div id="testResults" class="test-results" style="display: none;">
+          <!-- Test results will be displayed here -->
+        </div>
+
+        <div class="flex justify-between">
+          <button type="button" id="step3BackBtn" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition-colors">Back</button>
+          <button type="button" id="saveScrapingConfigBtn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors">Save Configuration</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Include authentication script -->
+  <script src="/static/auth-context.js"></script>
+</body>
+</html>
