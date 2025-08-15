@@ -163,3 +163,4 @@ wrapt==1.17.2
 yarl==1.20.0
 zipp==3.22.0
 firebase-admin
+openai==1.61.0

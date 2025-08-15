@@ -429,22 +429,18 @@
             </div>
             
             <div class="mt-6 pt-4 border-t border-gray-200">
-                <h4 class="text-lg font-semibold text-gray-700 mb-4">LLM Model Configuration</h4>
+                <h4 class="text-lg font-semibold text-gray-700 mb-4">AI Provider Configuration</h4>
                 <div class="grid grid-cols-1 gap-4">
                     <div>
-                        <label for="primaryLlmModel" class="block text-sm font-medium text-gray-700 mb-2">Primary LLM Model:</label>
-                        <select id="primaryLlmModel" name="primaryLlmModel" class="w-full" aria-describedby="llmModelHelp"></select>
-                        <small id="llmModelHelp" class="text-xs text-gray-500 mt-1 block">
-                            Select the primary LLM. Models ending in "-latest" are generally recommended for the most up-to-date version.
-                            "Flash" models are optimized for speed and cost, while "Pro" models offer a balance of performance and capability.
-                            Avoid models with "exp" (experimental) or specific version numbers (e.g., -001) for production use.
-                            For more details, refer to the <a href="https://ai.google.dev/gemini-api/docs/models/gemini" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">official Gemini Models documentation</a>.
+                        <label for="llmProvider" class="block text-sm font-medium text-gray-700 mb-2">AI Provider:</label>
+                        <select id="llmProvider" name="llmProvider" class="w-full" aria-describedby="llmProviderHelp">
+                            <option value="gemini" selected>Google Gemini</option>
+                            <option value="chatgpt">OpenAI ChatGPT</option>
+                        </select>
+                        <small id="llmProviderHelp" class="text-xs text-gray-500 mt-1 block">
+                            Choose your preferred AI provider. The specific models used are configured by your system administrator.
+                            Both providers offer high-quality responses with different strengths and capabilities.
                         </small>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Fallback LLM Model:</label>
-                        <p class="text-sm text-gray-600 bg-gray-50 p-2 rounded" id="fallbackLlmModelInfo">models/gemini-pro (fixed)</p>
-                        <small class="text-xs text-gray-500 mt-1 block">Used if the primary model encounters resource exhaustion errors.</small>
                     </div>
                 </div>
             </div>
