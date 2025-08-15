@@ -249,6 +249,14 @@
                         const headers = options.headers || {};
                         headers['Authorization'] = `Bearer ${tokenFromUser}`;
                         headers['X-User-ID'] = currentAacUserId;
+                        
+                        // For admin access, include the target account ID
+                        const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+                        if (adminTargetAccountId) {
+                            headers['X-Admin-Target-Account'] = adminTargetAccountId;
+                            console.log(`Setting admin target account header: ${adminTargetAccountId}`);
+                        }
+                        
                         options.headers = headers;
                         const response = await fetch(url, options);
                         if (response.status === 401 || response.status === 403) {
@@ -261,6 +269,27 @@
                     window.currentAacUserId = currentAacUserId;
                     window.firebaseIdToken = tokenFromUser;
                     window.adminContextInitializedByInlineScript = true;
+                    
+                    // Global function to update page title with profile name
+                    window.updatePageTitleWithProfile = async (baseTitle) => {
+                        try {
+                            const response = await window.authenticatedFetch('/api/account/users');
+                            if (!response.ok) return;
+                            
+                            const profiles = await response.json();
+                            const currentProfile = profiles.find(profile => profile.aac_user_id === currentAacUserId);
+                            
+                            if (currentProfile && currentProfile.display_name) {
+                                const titleElement = document.getElementById('dynamic-page-title');
+                                if (titleElement) {
+                                    titleElement.textContent = `${baseTitle} - ${currentProfile.display_name}`;
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Error updating page title with profile:', error);
+                        }
+                    };
+                    
                     document.dispatchEvent(new Event('adminUserContextReady'));
                     console.log(`Admin context ready for AAC User ID: ${currentAacUserId}`);
 
@@ -287,7 +316,7 @@
             <a href="user_info_admin.html" title="User Info &amp; Birthdays" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-info-circle"></i></a>
             <a href="user_diary_admin.html" title="User Diary" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-book-open"></i></a>
             <a href="audio_admin.html" title="Audio Devices" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-volume-up"></i></a>
-            <a href="user_favorites_admin.html" title="Event Sources" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-star"></i></a>
+            <a href="favorites_admin.html" title="Event Sources" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-star"></i></a>
             <a href="admin_audit_report.html" title="Activity Reports" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-clipboard-list"></i></a>
             <span class="border-l border-gray-300 h-6 mx-1"></span>
             <button id="switch-user-button" title="Switch User Profile" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-users"></i></button>
@@ -498,6 +527,15 @@
             <p id="settings-status" class="text-sm text-green-600 mt-2 h-4"></p>
         </div>
     </div>
+
+    <script>
+        // Update page title when admin context is ready
+        document.addEventListener('adminUserContextReady', async function() {
+            if (window.updatePageTitleWithProfile) {
+                await window.updatePageTitleWithProfile('Global Settings Administration');
+            }
+        });
+    </script>
 
 </body>
 </html>

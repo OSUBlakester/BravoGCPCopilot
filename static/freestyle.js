@@ -84,7 +84,33 @@ async function initializeUserContext() {
         return false;
     }
     console.log(`User context initialized. AAC User ID: ${currentAacUserId}`);
+    
+    // Load and update page title with profile name
+    await updatePageTitleWithProfile();
+    
     return true;
+}
+
+// Function to update page title with profile name
+async function updatePageTitleWithProfile() {
+    try {
+        const response = await authenticatedFetch('/api/account/users');
+        if (!response.ok) return;
+        
+        const profiles = await response.json();
+        const currentProfile = profiles.find(profile => profile.aac_user_id === currentAacUserId);
+        
+        if (currentProfile && currentProfile.display_name) {
+            const titleElement = document.getElementById('dynamic-page-title');
+            if (titleElement) {
+                const baseTitle = 'Free Style Communication';
+                titleElement.textContent = `${baseTitle} - ${currentProfile.display_name}`;
+                console.log(`Updated freestyle page title to include profile: ${currentProfile.display_name}`);
+            }
+        }
+    } catch (error) {
+        console.error('Error updating page title with profile:', error);
+    }
 }
 
 // --- Core Fetch Wrapper (Same as gridpage.js) ---
@@ -96,6 +122,13 @@ async function authenticatedFetch(url, options = {}) {
     const headers = options.headers || {};
     headers['Authorization'] = `Bearer ${firebaseIdToken}`;
     headers['X-User-ID'] = currentAacUserId;
+    
+    // Check for admin context and add target account header if needed
+    const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+    if (adminTargetAccountId) {
+        headers['X-Admin-Target-Account'] = adminTargetAccountId;
+    }
+    
     options.headers = headers;
 
     const response = await fetch(url, options);

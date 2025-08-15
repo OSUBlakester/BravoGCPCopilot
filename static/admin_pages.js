@@ -30,6 +30,7 @@ let draggedButton = null;
 const SPECIAL_PAGES = [
     { name: 'freestyle', displayName: 'Freestyle Page' },
     { name: 'threads', displayName: 'Threads Page' },
+    { name: 'favorites', displayName: 'Favorites Page' },
     // Add more special pages here as needed
 ];
 
@@ -64,6 +65,11 @@ async function initializePage() {
 
         // Load initial data
         await loadPages();
+        
+        // Update page title with profile name
+        if (window.updatePageTitleWithProfile) {
+            await window.updatePageTitleWithProfile('Page & Button Administration');
+        }
     }
 }
 
