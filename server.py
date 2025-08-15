@@ -97,6 +97,23 @@ async def health_check():
         }
     })
 
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """Get cache performance statistics for monitoring"""
+    try:
+        stats = cache_manager.get_cache_stats()
+        return JSONResponse(content={
+            "status": "success",
+            "cache_stats": stats,
+            "timestamp": dt.now().isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Error getting cache stats: {e}")
+        return JSONResponse(
+            content={"status": "error", "message": str(e)},
+            status_code=500
+        )
+
 
 # NEW: Endpoint to provide frontend with the correct Firebase config
 @app.get("/api/frontend-config")
@@ -752,6 +769,12 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
         doc_subpath="info/current_state",
         data_to_save=data_to_save
     )
+    
+    # Cache invalidation for user current state changes (location, people, activity)
+    if success:
+        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/user_current")
+    
+    return {"success": success}
 
 # --- User Current Favorites Endpoints ---
 
@@ -1018,6 +1041,224 @@ DEFAULT_SCRAPING_CONFIG = {
 }
 
 # New favorites structure - grid of topic buttons with scraping configs
+
+# === CACHE MANAGER SERVICE ===
+class CacheType:
+    """Cache type constants"""
+    USER_PROFILE = "user_profile"
+    LOCATION_DATA = "location_data" 
+    FRIENDS_FAMILY = "friends_family"
+    USER_SETTINGS = "user_settings"
+    HOLIDAYS_BIRTHDAYS = "holidays_birthdays"
+    RAG_CONTEXT = "rag_context"
+    CONVERSATION_SESSION = "conversation_session"
+
+class GeminiCacheManager:
+    """Manages Gemini context caching and conversation sessions for performance optimization"""
+    
+    def __init__(self):
+        self.gemini_caches = {}  # {user_key: {cache_type: cache_info}}
+        self.conversation_sessions = {}  # {user_key: conversation_object}
+        self.cache_refresh_times = {}  # {user_key: {cache_type: last_refresh_timestamp}}
+        
+        # Cache invalidation rules - which admin changes invalidate which caches
+        self.invalidation_rules = {
+            "/update-user-info": [CacheType.USER_PROFILE, CacheType.RAG_CONTEXT],
+            "/user_current": [CacheType.USER_PROFILE, CacheType.LOCATION_DATA, CacheType.RAG_CONTEXT],
+            "/update-user-favorites": [CacheType.RAG_CONTEXT],
+            "/api/favorites": [CacheType.RAG_CONTEXT],
+            "/api/user-current-favorites": [CacheType.RAG_CONTEXT],
+            "/pages": [CacheType.RAG_CONTEXT],  # Page layout changes might affect context
+        }
+        
+        # Cache TTL settings (in seconds)
+        self.cache_ttl = {
+            CacheType.USER_PROFILE: 24 * 3600,      # 24 hours - changes rarely
+            CacheType.LOCATION_DATA: 6 * 3600,      # 6 hours - changes moderately  
+            CacheType.FRIENDS_FAMILY: 12 * 3600,    # 12 hours - changes rarely
+            CacheType.USER_SETTINGS: 1 * 3600,      # 1 hour - changes more often
+            CacheType.HOLIDAYS_BIRTHDAYS: 24 * 3600, # 24 hours - daily refresh
+            CacheType.RAG_CONTEXT: 1 * 3600,        # 1 hour - depends on other data
+            CacheType.CONVERSATION_SESSION: 4 * 3600 # 4 hours - conversation session
+        }
+    
+    def _get_user_key(self, account_id: str, aac_user_id: str) -> str:
+        """Generate unique key for user cache storage"""
+        return f"{account_id}_{aac_user_id}"
+    
+    async def is_cache_valid(self, account_id: str, aac_user_id: str, cache_type: str) -> bool:
+        """Check if cache is still valid based on TTL"""
+        user_key = self._get_user_key(account_id, aac_user_id)
+        
+        if user_key not in self.cache_refresh_times:
+            return False
+            
+        if cache_type not in self.cache_refresh_times[user_key]:
+            return False
+            
+        last_refresh = self.cache_refresh_times[user_key][cache_type]
+        ttl = self.cache_ttl.get(cache_type, 3600)  # Default 1 hour
+        
+        return (dt.now().timestamp() - last_refresh) < ttl
+    
+    async def get_cached_context(self, account_id: str, aac_user_id: str, cache_type: str) -> Optional[str]:
+        """Retrieve cached context if valid, None if expired or missing"""
+        if not await self.is_cache_valid(account_id, aac_user_id, cache_type):
+            return None
+            
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cache_info = self.gemini_caches.get(user_key, {}).get(cache_type)
+        
+        if not cache_info:
+            return None
+            
+        try:
+            # In a full implementation, this would retrieve from Gemini cache
+            # For now, we'll store context directly in memory
+            return cache_info.get("context")
+        except Exception as e:
+            logging.error(f"Error retrieving cached context for {user_key}/{cache_type}: {e}")
+            return None
+    
+    async def store_cached_context(self, account_id: str, aac_user_id: str, cache_type: str, context: str) -> bool:
+        """Store context in cache with TTL"""
+        try:
+            user_key = self._get_user_key(account_id, aac_user_id)
+            
+            # Initialize user cache if needed
+            if user_key not in self.gemini_caches:
+                self.gemini_caches[user_key] = {}
+            if user_key not in self.cache_refresh_times:
+                self.cache_refresh_times[user_key] = {}
+            
+            # Store cache info (in full implementation, this would use Gemini context caching API)
+            self.gemini_caches[user_key][cache_type] = {
+                "context": context,
+                "created_at": dt.now().timestamp(),
+                "ttl": self.cache_ttl.get(cache_type, 3600)
+            }
+            
+            # Update refresh time
+            self.cache_refresh_times[user_key][cache_type] = dt.now().timestamp()
+            
+            logging.info(f"Cached context for {user_key}/{cache_type} (length: {len(context)})")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error storing cached context for {account_id}/{aac_user_id}/{cache_type}: {e}")
+            return False
+    
+    async def invalidate_cache(self, account_id: str, aac_user_id: str, cache_types: List[str], endpoint: str = None):
+        """Invalidate specific cache types for a user"""
+        user_key = self._get_user_key(account_id, aac_user_id)
+        
+        invalidated = []
+        for cache_type in cache_types:
+            if user_key in self.gemini_caches and cache_type in self.gemini_caches[user_key]:
+                del self.gemini_caches[user_key][cache_type]
+                invalidated.append(cache_type)
+            
+            if user_key in self.cache_refresh_times and cache_type in self.cache_refresh_times[user_key]:
+                del self.cache_refresh_times[user_key][cache_type]
+        
+        if invalidated:
+            logging.info(f"Cache invalidated for {user_key} by {endpoint}: {invalidated}")
+        
+        # Special handling for RAG context refresh
+        if CacheType.RAG_CONTEXT in cache_types:
+            await self.refresh_rag_context(account_id, aac_user_id)
+    
+    async def invalidate_by_endpoint(self, account_id: str, aac_user_id: str, endpoint: str):
+        """Invalidate caches based on admin endpoint that was called"""
+        cache_types = self.invalidation_rules.get(endpoint, [])
+        if cache_types:
+            await self.invalidate_cache(account_id, aac_user_id, cache_types, endpoint)
+    
+    async def refresh_rag_context(self, account_id: str, aac_user_id: str):
+        """Refresh RAG context when user data changes"""
+        try:
+            # This would rebuild and update ChromaDB vectors based on new user data
+            # For now, we'll just log the refresh
+            logging.info(f"Refreshing RAG context for {account_id}/{aac_user_id}")
+            # TODO: Implement RAG context refresh logic
+            return True
+        except Exception as e:
+            logging.error(f"Error refreshing RAG context for {account_id}/{aac_user_id}: {e}")
+            return False
+    
+    async def get_or_create_conversation_session(self, account_id: str, aac_user_id: str):
+        """Get existing conversation session or create new one with cached context"""
+        user_key = self._get_user_key(account_id, aac_user_id)
+        
+        # Check if session exists and is valid
+        if user_key in self.conversation_sessions:
+            session_info = self.conversation_sessions[user_key]
+            session_age = dt.now().timestamp() - session_info.get("created_at", 0)
+            
+            if session_age < self.cache_ttl[CacheType.CONVERSATION_SESSION]:
+                return session_info.get("session")
+        
+        # Create new session with cached static context
+        try:
+            static_context = await self.build_static_context(account_id, aac_user_id)
+            
+            # In full implementation, this would create a Gemini conversation session
+            # For now, we'll store context information
+            session_info = {
+                "session": f"conversation_session_{user_key}",
+                "static_context": static_context,
+                "created_at": dt.now().timestamp(),
+                "message_count": 0
+            }
+            
+            self.conversation_sessions[user_key] = session_info
+            logging.info(f"Created new conversation session for {user_key}")
+            
+            return session_info["session"]
+            
+        except Exception as e:
+            logging.error(f"Error creating conversation session for {account_id}/{aac_user_id}: {e}")
+            return None
+    
+    async def build_static_context(self, account_id: str, aac_user_id: str) -> str:
+        """Build static context from cached components"""
+        context_parts = []
+        
+        # Try to get cached contexts, build if missing
+        for cache_type in [CacheType.USER_PROFILE, CacheType.FRIENDS_FAMILY, 
+                          CacheType.LOCATION_DATA, CacheType.USER_SETTINGS, 
+                          CacheType.HOLIDAYS_BIRTHDAYS]:
+            
+            cached_context = await self.get_cached_context(account_id, aac_user_id, cache_type)
+            if cached_context:
+                context_parts.append(cached_context)
+            else:
+                # Cache miss - would need to rebuild this context
+                logging.info(f"Cache miss for {cache_type}, would need to rebuild")
+        
+        return "\n\n".join(context_parts)
+    
+    def get_cache_stats(self) -> Dict:
+        """Get cache statistics for monitoring"""
+        total_users = len(self.gemini_caches)
+        total_caches = sum(len(caches) for caches in self.gemini_caches.values())
+        
+        cache_types_count = {}
+        for user_caches in self.gemini_caches.values():
+            for cache_type in user_caches.keys():
+                cache_types_count[cache_type] = cache_types_count.get(cache_type, 0) + 1
+        
+        return {
+            "total_users": total_users,
+            "total_caches": total_caches,
+            "cache_types": cache_types_count,
+            "active_sessions": len(self.conversation_sessions)
+        }
+
+# Initialize global cache manager
+cache_manager = GeminiCacheManager()
+
+# === END CACHE MANAGER SERVICE ===
 DEFAULT_FAVORITES_CONFIG = {
     "buttons": []  # List of favorite topic buttons
 }
@@ -2250,6 +2491,12 @@ async def update_user_info_endpoint(payload: UserInfoNarrative, current_ids: Ann
         doc_subpath="info/user_narrative",
         data_to_save={"narrative": narrative} 
     )
+    
+    # Cache invalidation for user info changes
+    if success:
+        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/update-user-info")
+    
+    return {"success": success}
 
 
 @app.get("/get-user-favorites")
@@ -2289,7 +2536,9 @@ async def update_user_favorites(request: Request, current_ids: Annotated[Dict[st
     # Call the existing, correct Firestore-based function
     success = await save_dynamic_scraping_config(account_id, aac_user_id, incoming_config_data)
 
+    # Cache invalidation for user favorites changes
     if success:
+        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/update-user-favorites")
         return JSONResponse(content={"message": "User favorites saved successfully"})
     else:
         raise HTTPException(status_code=500, detail="Failed to save user favorites (scraping configuration) to Firestore.")
@@ -2359,6 +2608,8 @@ async def save_favorites(favorites_data: FavoritesData, current_ids: Annotated[D
             data_to_save=favorites_data.dict()
         )
         if success:
+            # Cache invalidation for favorites changes
+            await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/api/favorites")
             return JSONResponse(content={"message": "Favorites saved successfully"})
         else:
             raise HTTPException(status_code=500, detail="Failed to save favorites")
