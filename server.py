@@ -140,16 +140,69 @@ template_user_data_paths = {
         "name": "home",
         "displayName": "Home",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters. Each item should be a single sentence and have varying levels of energy, creativity and engagement. The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "Feelings", "LLMQuery": "Generate #LLMOptions common feelings or emotions to express, ranging from happy to sad, excited to calm.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 2,"text": "Needs", "LLMQuery": "Generate #LLMOptions common personal needs to express, like needing help, food, water, rest, or a break.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 3,"text": "Questions", "LLMQuery": "Generate #LLMOptions some general spoken questions that an AAC user might ask to lead to further options, e.g. 'Can I ask a question?' or 'Tell me about something'.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 4,"text": "About Me", "LLMQuery": "Generate #LLMOptions common facts or personal details about myself, my likes, dislikes, or interests, suitable for sharing in conversation.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 5,"text": "My Day", "LLMQuery": "Generate #LLMOptions common activities or events that might occur during my day, e.g., work, therapy, social events, meals.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 6,"text": "Current Events", "targetPage": "currentevents", "queryType": "currentevents", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 7,"text": "Thread", "targetPage": "", "queryType": "thread", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 8,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 9,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "", "targetPage": "greetings", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "Going On", "LLMQuery": "", "targetPage": "goingon", "queryType": "", "speechPhrase": "Let's talk about things that are going on", "hidden": False},
+            {"row": 0,"col": 2,"text": "Describe", "LLMQuery": "", "targetPage": "describe", "queryType": "", "speechPhrase": "Here's what I think", "hidden": False},
+            {"row": 0,"col": 3,"text": "Favorite Topics", "LLMQuery": "", "targetPage": "!favorites", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "About Me", "LLMQuery": "Based on the details provided in the context, generate #LLMOptions different statements about the user.  The statements should be in first person, as if the user was telling someone about the user.  Statements can include information like age, family, disability and favorites.  The statements should also be conversational, not just presenting a fact.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Help", "LLMQuery": "Refer to the user info for most common physical issues and needs that can impact the user. Also include general physical issues that could be impacting someone with a similar condition to the user. Create up to #LLMOptions different statements that the user would announce if one of these physical issues was making the user uncomfortable or needing something addressed.  Each statement should be formed as if they are coming from the user and letting someone close by that the user is physically uncomfortable or needing something.  If there is a simple resolution for the issue, include it in the phrase with politely, including words like Please and Thank You, asking for the resolution.", "targetPage": "", "queryType": "options", "speechPhrase": "I need some help", "hidden": False},
+            {"row": 0,"col": 6,"text": "Questions", "targetPage": "questions", "queryType": "", "speechPhrase": "I have a question", "hidden": False},
+            {"row": 0,"col": 7,"text": "Free Style", "targetPage": "!freestyle", "queryType": "", "speechPhrase": "I'm picking my words.  Give me a minute:", "hidden": False},
+            {"row": 0,"col": 8,"text": "Open Thread", "targetPage": "!threads", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 9,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 10,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+        ]
+    },
+    {
+        "name": "greetings",
+        "displayName": "Greetings",
+        "buttons": [
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "Goodbye for now!", "hidden": False},
+            {"row": 0,"col": 2,"text": "Current Location", "LLMQuery": "Using the 'People Present' values from context, generate #LLMOptions expressive greetings.  Each item should be a single sentence and be very energetic and engaging.  The greetings should be in first person from the user, as if the user was speaking to someone in the room or a general greeting.  If there is information about one of the People Present in the user data, use that information to craft a more personal greeting.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Jokes", "LLMQuery": "Generate 100 random, unique jokes or one-liners for the user.  Randomly select #LLMOptions of them from the 100 and return just those #LLMOptions", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "Would you rather", "LLMQuery": "Generate #LLMOptions creative and fun would-you-rather type questions that could be used to start a conversation.  The more obscure comparison, the better.  Begin each option with Would you rather...", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Did you know", "LLMQuery": "Generate #LLMOptions random, creative and possibly obscure trivia facts that can be used start a conversation.  You can user some of the user context select most of the trivia topics, but do not limit the topics on just the user's context.  The funnier that trivia fact, the better.'", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Affirmations", "LLMQuery": "Generate #LLMOptions positive affirmations for the user to share with everyone around", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+        ]
+
+    },
+    {
+        "name": "goingon",
+        "displayName": "Going On",
+        "buttons": [
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions  statements based on the most recent activities.  Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Based on the user diary, generate #LLMOptions statements based on any upcoming planned activities. Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "hidden": False},
+            {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "hidden": False}
+        ]
+    },
+    {
+        "name": "describe",
+        "displayName": "Describe",
+        "buttons": [
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 1,"text": "Positive", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something positive, as if someone was very excited", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "Negative", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something negative, as if someone was very upset", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Strange", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something the user just heard or saw that was strange, odd or weird, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "Funny", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases to describe something the user just heard or saw that was funny as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Scary", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was scary, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Sad", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was sad.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            [{"row": 0,"col": 7,"text": "Beautiful", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was beautiful, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},]
+        ]
+    },
+    {
+        "name": "questions",
+        "displayName": "Questions",
+        "buttons": [
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 1,"text": "What?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with what, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as What is That?  Phrase each question as if it was asked by the user. All options must begin with What...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 2,"text": "Who?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with who, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Who is that?  Phrase each question as if it was asked by the user. All options must begin with Who...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 3,"text": "Where?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with where, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Where is that?  Phrase each question as if it was asked by the user. All options must begin with Where...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 4,"text": "When?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with when, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as When is that?  Phrase each question as if it was asked by the user. All options must begin with When...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 5,"text": "Why?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with why, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Why is that?  Phrase each question as if it was asked by the user. All options must begin with Why...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
+            {"row": 0,"col": 6,"text": "How?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with how, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as How is that?  Phrase each question as if it was asked by the user. All options must begin with How...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False}
         ]
     }
 ], indent=4),
@@ -182,7 +235,8 @@ async def verify_firebase_token_only(
 
 async def get_current_account_and_user_ids(
     token: Annotated[HTTPAuthorizationCredentials, Depends(oauth2_scheme)],
-    x_user_id: str = Header(..., alias="X-User-ID")
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    x_admin_target_account: str = Header(None, alias="X-Admin-Target-Account")  # NEW: Optional admin target account
 ) -> Dict[str, str]:
     global firebase_app, firestore_db
 
@@ -207,37 +261,79 @@ async def get_current_account_and_user_ids(
             raise HTTPException(status_code=401, detail="Account not found.")
 
         account_data = account_doc.to_dict()
+        
+        # NEW: Handle admin/therapist context
+        target_account_id = account_id  # Default to the authenticated account
+        if x_admin_target_account:
+            # Admin/therapist is trying to access another account
+            user_email = account_data.get("email", "")
+            is_admin = user_email == "admin@talkwithbravo.com"
+            is_therapist = account_data.get("is_therapist", False)
+            
+            if not is_admin and not is_therapist:
+                logging.warning(f"User {user_email} attempted admin access without permissions")
+                raise HTTPException(status_code=403, detail="Access denied: Not an admin or therapist")
+            
+            # Verify access to target account
+            target_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(x_admin_target_account)
+            target_account_doc = await asyncio.to_thread(target_account_doc_ref.get)
+            
+            if not target_account_doc.exists:
+                logging.warning(f"Target account {x_admin_target_account} not found")
+                raise HTTPException(status_code=404, detail="Target account not found")
+            
+            target_account_data = target_account_doc.to_dict()
+            
+            # Check permissions
+            has_access = False
+            if is_admin and target_account_data.get("allow_admin_access", True):
+                has_access = True
+            elif is_therapist and target_account_data.get("therapist_email") == user_email:
+                has_access = True
+            
+            if not has_access:
+                logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
+                raise HTTPException(status_code=403, detail="Access denied to target account")
+            
+            target_account_id = x_admin_target_account
+            logging.info(f"Admin/therapist {user_email} accessing account {target_account_id}")
 
         # 3. Authorize access to the specific AAC user_id (x_user_id)
-        # Check if the requested x_user_id exists under this account
-        aac_user_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(x_user_id)
+        # Check if the requested x_user_id exists under the target account
+        aac_user_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(x_user_id)
         aac_user_doc = await asyncio.to_thread(aac_user_doc_ref.get)
 
         if not aac_user_doc.exists:
             # Check if this is an authorized therapist/admin accessing a *different* account's user
-            # This logic needs to be robust. For now, we assume x_user_id belongs to the `account_id` derived from the token.
-            # We'll refine "Authorized User" access in a later step when implementing the admin dashboard.
-            logging.warning(f"AAC user_id '{x_user_id}' not found under account '{account_id}'.")
+            # This logic needs to be robust. For now, we assume x_user_id belongs to the `target_account_id`.
+            logging.warning(f"AAC user_id '{x_user_id}' not found under account '{target_account_id}'.")
             raise HTTPException(status_code=403, detail="Access denied to this user profile.")
 
-        # 4. Check Subscription Status (Basic check for POC/Trial)
-        if not account_data.get("is_active"):
-            if account_data.get("promo_status") == "TRIALING":
-                trial_end = dt.fromisoformat(account_data["trial_ends_at"])
+        # 4. Check Subscription Status (Basic check for POC/Trial) - use target account data
+        target_account_data = account_data  # Default to authenticated account data
+        if target_account_id != account_id:
+            # Get target account data for subscription check
+            target_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id)
+            target_account_doc = await asyncio.to_thread(target_account_doc_ref.get)
+            if target_account_doc.exists:
+                target_account_data = target_account_doc.to_dict()
+        
+        if not target_account_data.get("is_active"):
+            if target_account_data.get("promo_status") == "TRIALING":
+                trial_end = dt.fromisoformat(target_account_data["trial_ends_at"])
                 if dt.now() > trial_end:
-                    logging.warning(f"Account {account_id} trial expired.")
+                    logging.warning(f"Account {target_account_id} trial expired.")
                     # In a real app, you'd trigger Chargebee webhook to update is_active to False
                     # and potentially disable user access.
-                    raise HTTPException(status_code=403, detail="Your trial has expired. Please subscribe.")
-            elif account_data.get("promo_status") == "POC_FREE":
+                    raise HTTPException(status_code=403, detail="Target account trial has expired.")
+            elif target_account_data.get("promo_status") == "POC_FREE":
                 # Always allow if POC_FREE
                 pass
             else:
-                logging.warning(f"Account {account_id} is not active and not on trial/POC.")
-                raise HTTPException(status_code=403, detail="Account not active. Please subscribe.")
+                logging.warning(f"Account {target_account_id} is not active and not on trial/POC.")
+                raise HTTPException(status_code=403, detail="Target account not active.")
 
-
-        return {"account_id": account_id, "aac_user_id": x_user_id}
+        return {"account_id": target_account_id, "aac_user_id": x_user_id}
 
     except auth.InvalidIdTokenError:
         logging.warning("Invalid Firebase ID token received.")
@@ -350,6 +446,7 @@ STATIC_PAGES = [
     "user_info_admin.html",
     "user_favorites_admin.html",
     "favorites_admin.html",
+    "favorites.html",
     "web_scraping_help_page.html",
     "admin_nav.html",
     "admin_audit_report.html",
@@ -924,9 +1021,10 @@ DEFAULT_HOME_PAGE_CONTENT = [
             {"row": 0,"col": 3,"text": "Questions", "LLMQuery": "Generate #LLMOptions some general spoken questions that an AAC user might ask to lead to further options, e.g. 'Can I ask a question?' or 'Tell me about something'.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
             {"row": 0,"col": 4,"text": "About Me", "LLMQuery": "Generate #LLMOptions common facts or personal details about myself, my likes, dislikes, or interests, suitable for sharing in conversation.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
             {"row": 0,"col": 5,"text": "My Day", "LLMQuery": "Generate #LLMOptions common activities or events that might occur during my day, e.g., work, therapy, social events, meals.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 6,"text": "Current Events", "targetPage": "currentevents", "queryType": "currentevents", "speechPhrase": None, "hidden": False}, # Example: a simple navigation button to a specific page
-            {"row": 0,"col": 7,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 8,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Current Events", "targetPage": "!currentevents", "queryType": "currentevents", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 7,"text": "Favorites", "targetPage": "!favorites", "queryType": "favorites", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 8,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 9,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
         ]
     }
 ]
@@ -2113,6 +2211,624 @@ async def save_favorites(favorites_data: FavoritesData, current_ids: Annotated[D
         logging.error(f"Error saving favorites for user {aac_user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save favorites configuration")
 
+@app.post("/api/favorites/smart-analysis")
+async def smart_analysis_endpoint(request: Request):
+    """Super simple smart analysis that tries multiple approaches automatically"""
+    try:
+        data = await request.json()
+        url = data.get('url', '').strip()
+        sample_article_url = data.get('sample_article_url', '').strip() if data.get('sample_article_url') else None
+        keywords = data.get('keywords', [])
+        
+        if not url:
+            return {"success": False, "message": "URL is required"}
+        
+        # Try to analyze the website automatically
+        config, analysis_info = perform_smart_website_analysis(url, sample_article_url, keywords)
+        
+        if config:
+            return {
+                "success": True,
+                "config": config,
+                "message": f"Successfully analyzed {url}",
+                "articles_found": analysis_info.get('articles_found', 'multiple'),
+                "analysis_method": analysis_info.get('method', 'automatic')
+            }
+        else:
+            # Provide more specific error messages
+            error_msg = "Could not automatically configure this website."
+            suggestions = []
+            
+            if not sample_article_url:
+                suggestions.append("Try providing a sample article URL from this site")
+            
+            if 'denverpost.com' in url.lower() or 'oklahoman.com' in url.lower():
+                suggestions.append("This site may have anti-bot protection")
+            
+            suggestions.append("Try a pre-built template instead")
+            
+            full_message = error_msg
+            if suggestions:
+                full_message += ". Suggestions: " + "; ".join(suggestions)
+            
+            return {
+                "success": False,
+                "message": full_message,
+                "suggestions": suggestions
+            }
+            
+    except Exception as e:
+        print(f"Smart analysis error: {str(e)}")
+        return {"success": False, "message": "Analysis failed due to technical error"}
+
+def perform_smart_website_analysis(url, sample_article_url=None, keywords=None):
+    """Intelligent website analysis that tries multiple approaches"""
+    try:
+        if keywords is None:
+            keywords = []
+            
+        # Normalize URL
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        # Send a request to the website
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        analysis_info = {'method': 'automatic', 'articles_found': 0}
+        
+        # If we have a sample article URL, use it to understand the structure
+        if sample_article_url:
+            try:
+                article_response = requests.get(sample_article_url, headers=headers, timeout=10, allow_redirects=True)
+                article_soup = BeautifulSoup(article_response.content, 'html.parser')
+                
+                # Extract patterns from the sample article
+                config = analyze_from_sample_article(article_soup, sample_article_url, url)
+                if config:
+                    # Add keywords to the configuration
+                    config['keywords'] = keywords if keywords else []
+                    analysis_info['method'] = 'sample_article'
+                    # Test the config on the main URL
+                    main_response = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+                    main_soup = BeautifulSoup(main_response.content, 'html.parser')
+                    if validate_smart_config(config, main_soup):
+                        articles = main_soup.select(config['headline_selector'])
+                        analysis_info['articles_found'] = len(articles)
+                        return config, analysis_info
+            except Exception as e:
+                print(f"Sample article analysis failed: {e}")
+        
+        # Regular analysis of the main URL
+        response = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Try multiple strategies in order of likelihood
+        strategies = [
+            analyze_common_news_patterns,
+            analyze_semantic_patterns,
+            analyze_structural_patterns,
+            analyze_fallback_patterns
+        ]
+        
+        for strategy in strategies:
+            result = strategy(soup, url)
+            if result and validate_smart_config(result, soup):
+                # Add keywords to the configuration
+                result['keywords'] = keywords if keywords else []
+                articles = soup.select(result['headline_selector'])
+                analysis_info['articles_found'] = len(articles)
+                analysis_info['method'] = strategy.__name__
+                return result, analysis_info
+        
+        return None, analysis_info
+        
+    except Exception as e:
+        print(f"Smart analysis failed for {url}: {str(e)}")
+        return None, {'method': 'error', 'articles_found': 0}
+
+def analyze_from_sample_article(article_soup, sample_url, base_url):
+    """Analyze a sample article to understand the site structure"""
+    try:
+        # Get the domain pattern
+        from urllib.parse import urlparse
+        sample_parsed = urlparse(sample_url)
+        base_parsed = urlparse(base_url)
+        
+        # Look at the sample article's structure to understand link patterns
+        title_element = None
+        
+        # Common article title patterns
+        title_selectors = [
+            'h1', 'h1.headline', 'h1.title', '.article-title', '.headline', 
+            '[data-testid="headline"]', '.story-headline', '.entry-title'
+        ]
+        
+        for selector in title_selectors:
+            elements = article_soup.select(selector)
+            if elements and len(elements[0].get_text().strip()) > 10:
+                title_element = elements[0]
+                break
+        
+        if not title_element:
+            return None
+        
+        # Now create selectors that would work on the main page
+        # Common patterns for article listing pages
+        headline_selectors = [
+            'h2 a', 'h3 a', '.headline a', '.article-title a',
+            'h2', 'h3', '.headline', '.article-title',
+            '[data-testid="card-headline"]', '.story-headline'
+        ]
+        
+        link_selectors = [
+            'h2 a', 'h3 a', '.headline a', '.article-title a',
+            'a[href*="/story/"]', 'a[href*="/article/"]', 
+            'a[href*="/sports/"]', 'a[href*="/news/"]'
+        ]
+        
+        # Return a configuration based on common patterns
+        return {
+            'url': base_url,
+            'headline_selector': 'h2, h3, .headline, .article-title',
+            'url_selector': 'h2 a, h3 a, .headline a, .article-title a',
+            'url_attribute': 'href',
+            'url_prefix': f"{base_parsed.scheme}://{base_parsed.netloc}",
+            'keywords': []
+        }
+        
+    except Exception as e:
+        print(f"Sample article analysis error: {e}")
+        return None
+
+def analyze_common_news_patterns(soup, url):
+    """Try common news website patterns"""
+    # Site-specific patterns for known sites
+    site_patterns = {
+        'denverpost.com': {
+            'headline_selector': 'h3 a, h2 a, .headline a',
+            'url_selector': 'h3 a, h2 a, .headline a'
+        },
+        'oklahoman.com': {
+            'headline_selector': 'h3 a, h2 a, .story-headline a',
+            'url_selector': 'h3 a, h2 a, .story-headline a'
+        },
+        'espn.com': {
+            'headline_selector': 'h1 a, h2 a, h3 a',
+            'url_selector': 'h1 a, h2 a, h3 a'
+        }
+    }
+    
+    # Check if this is a known site
+    for domain, pattern in site_patterns.items():
+        if domain in url.lower():
+            headlines = soup.select(pattern['headline_selector'])
+            links = soup.select(pattern['url_selector'])
+            
+            if len(headlines) >= 2 and len(links) >= 2:
+                return {
+                    'url': url,
+                    'headline_selector': pattern['headline_selector'],
+                    'url_selector': pattern['url_selector'],
+                    'url_attribute': 'href',
+                    'url_prefix': get_url_prefix(url),
+                    'keywords': []
+                }
+    
+    # Generic common patterns
+    common_patterns = [
+        # BBC-style
+        {
+            'headline_selector': 'h3[data-testid="card-headline"], [data-testid="card-headline"]',
+            'url_selector': 'a[data-testid="internal-link"]'
+        },
+        # CNN-style
+        {
+            'headline_selector': 'h3.cd__headline a span, .cd__headline',
+            'url_selector': 'h3.cd__headline a, .cd__headline a'
+        },
+        # Generic news patterns - more specific first
+        {
+            'headline_selector': 'h2 a, h3 a',
+            'url_selector': 'h2 a, h3 a'
+        },
+        {
+            'headline_selector': 'h2, h3',
+            'url_selector': 'h2 a, h3 a'
+        },
+        # Article tags
+        {
+            'headline_selector': 'article h2, article h3',
+            'url_selector': 'article a'
+        },
+        # WordPress/CMS patterns
+        {
+            'headline_selector': '.entry-title, .post-title, .story-headline',
+            'url_selector': '.entry-title a, .post-title a, .story-headline a'
+        }
+    ]
+    
+    for pattern in common_patterns:
+        headlines = soup.select(pattern['headline_selector'])
+        links = soup.select(pattern['url_selector'])
+        
+        if len(headlines) >= 3 and len(links) >= 3:
+            return {
+                'url': url,
+                'headline_selector': pattern['headline_selector'],
+                'url_selector': pattern['url_selector'],
+                'url_attribute': 'href',
+                'url_prefix': get_url_prefix(url),
+                'keywords': []
+            }
+    
+    return None
+
+def analyze_semantic_patterns(soup, url):
+    """Look for semantic patterns in the HTML"""
+    # Find elements that look like article headlines
+    potential_headlines = []
+    
+    # Look for headings with article-like text
+    for tag in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+        text = tag.get_text().strip()
+        if len(text) > 10 and looks_like_article_title(text):
+            potential_headlines.append(tag)
+    
+    if len(potential_headlines) >= 3:
+        # Create selector for these headlines
+        tag_names = set(tag.name for tag in potential_headlines)
+        headline_selector = ', '.join(tag_names)
+        
+        # Look for links within or near these headlines
+        url_selector = ', '.join(f'{tag} a' for tag in tag_names)
+        
+        return {
+            'url': url,
+            'headline_selector': headline_selector,
+            'url_selector': url_selector,
+            'url_attribute': 'href',
+            'url_prefix': get_url_prefix(url),
+            'keywords': []
+        }
+    
+    return None
+
+def analyze_structural_patterns(soup, url):
+    """Analyze the overall structure of the page"""
+    # Find repeated structures that might be article cards
+    potential_containers = soup.find_all(['div', 'article', 'section'])
+    
+    # Look for containers with both headings and links
+    good_containers = []
+    for container in potential_containers:
+        headings = container.find_all(['h1', 'h2', 'h3', 'h4'])
+        links = container.find_all('a')
+        
+        if len(headings) > 0 and len(links) > 0:
+            # Check if this looks like an article snippet
+            text_content = container.get_text().strip()
+            if 20 < len(text_content) < 500:  # Reasonable length for article preview
+                good_containers.append(container)
+    
+    if len(good_containers) >= 3:
+        # Try to find common class names
+        class_names = []
+        for container in good_containers[:5]:  # Look at first 5
+            if container.get('class'):
+                class_names.extend(container['class'])
+        
+        # Find most common class
+        if class_names:
+            from collections import Counter
+            common_class = Counter(class_names).most_common(1)[0][0]
+            
+            return {
+                'url': url,
+                'headline_selector': f'.{common_class} h2, .{common_class} h3',
+                'url_selector': f'.{common_class} a',
+                'url_attribute': 'href',
+                'url_prefix': get_url_prefix(url),
+                'keywords': []
+            }
+    
+    return None
+
+def analyze_fallback_patterns(soup, url):
+    """Last resort - very basic patterns"""
+    # Just try to find any headings and links
+    headings = soup.find_all(['h2', 'h3'])
+    links = soup.find_all('a')
+    
+    if len(headings) >= 2 and len(links) >= 5:
+        return {
+            'url': url,
+            'headline_selector': 'h2, h3',
+            'url_selector': 'a',
+            'url_attribute': 'href',
+            'url_prefix': get_url_prefix(url),
+            'keywords': []
+        }
+    
+    return None
+
+def looks_like_article_title(text):
+    """Check if text looks like an article title"""
+    # Basic heuristics
+    if len(text) < 10 or len(text) > 200:
+        return False
+    
+    # Should have some capitalization
+    if text.islower() or text.isupper():
+        return False
+    
+    # Shouldn't be navigation or common website elements
+    skip_patterns = [
+        'menu', 'navigation', 'search', 'login', 'signup', 'subscribe',
+        'follow us', 'contact', 'about', 'privacy', 'terms'
+    ]
+    
+    text_lower = text.lower()
+    for pattern in skip_patterns:
+        if pattern in text_lower:
+            return False
+    
+    return True
+
+def validate_smart_config(config, soup):
+    """Validate that the smart config actually works"""
+    try:
+        headlines = soup.select(config['headline_selector'])
+        links = soup.select(config['url_selector'])
+        
+        # Must find at least 2 of each
+        if len(headlines) < 2 or len(links) < 2:
+            return False
+        
+        # Check that links actually have href attributes
+        valid_links = 0
+        for link in links[:5]:  # Check first 5
+            href = link.get(config['url_attribute'])
+            if href and href.strip():
+                valid_links += 1
+        
+        return valid_links >= 2
+        
+    except Exception:
+        return False
+
+def get_url_prefix(url):
+    """Extract the base URL for prefixing relative links"""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    except:
+        return ""
+
+@app.post("/api/favorites/auto-detect-selectors")
+async def auto_detect_selectors(
+    request: dict,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Auto-detect CSS selectors for web scraping from sample URLs"""
+    try:
+        sample_url = request.get("sample_url")
+        base_url = request.get("base_url")
+        
+        if not sample_url or not base_url:
+            return {"success": False, "message": "Both sample_url and base_url are required"}
+        
+        # Import requests for web scraping
+        import requests
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin, urlparse
+        
+        # Fetch the base URL page
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(base_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return {"success": False, "message": f"Could not fetch base URL: {response.status_code}"}
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Auto-detect selectors using common patterns
+        detected_selectors = detect_article_selectors(soup, sample_url, base_url)
+        
+        if not detected_selectors["headline_selector"] or not detected_selectors["link_selector"]:
+            return {
+                "success": False, 
+                "message": "Could not auto-detect selectors. Please configure manually.",
+                "selectors": detected_selectors
+            }
+        
+        # Test the detected selectors
+        test_config = {
+            "url": base_url,
+            "headline_selector": detected_selectors["headline_selector"],
+            "url_selector": detected_selectors["link_selector"],
+            "url_attribute": "href",
+            "url_prefix": detected_selectors.get("url_prefix", ""),
+            "keywords": []
+        }
+        
+        test_result = test_scraping_config(test_config)
+        
+        return {
+            "success": True,
+            "message": f"Auto-detected selectors successfully! Found {len(test_result.get('articles', []))} articles.",
+            "selectors": detected_selectors,
+            "confidence": detected_selectors.get("confidence", 0.8),
+            "sample_count": len(test_result.get('articles', []))
+        }
+        
+    except Exception as e:
+        logging.error(f"Error auto-detecting selectors: {e}", exc_info=True)
+        return {"success": False, "message": f"Auto-detection failed: {str(e)}"}
+
+def detect_article_selectors(soup, sample_url, base_url):
+    """Analyze webpage structure to detect the best CSS selectors for articles"""
+    from urllib.parse import urljoin, urlparse
+    
+    parsed_sample = urlparse(sample_url)
+    parsed_base = urlparse(base_url)
+    
+    # Common article link patterns to look for
+    link_patterns = [
+        'a[href*="/article/"]',
+        'a[href*="/story/"]',
+        'a[href*="/news/"]',
+        'a[href*="/post/"]',
+        'h1 a', 'h2 a', 'h3 a',
+        '.article-link', '.story-link', '.news-link',
+        'article a', '.entry a', '.post a'
+    ]
+    
+    # Common headline patterns
+    headline_patterns = [
+        'h1', 'h2', 'h3',
+        '.headline', '.title', '.article-title', '.story-title',
+        'h1 a', 'h2 a', 'h3 a',
+        'article h1', 'article h2', 'article h3'
+    ]
+    
+    best_link_selector = None
+    best_headline_selector = None
+    best_score = 0
+    
+    # Test each combination of patterns
+    for link_pattern in link_patterns:
+        links = soup.select(link_pattern)
+        if not links:
+            continue
+            
+        # Filter links that could be articles
+        article_links = []
+        for link in links:
+            href = link.get('href', '')
+            if href:
+                full_url = urljoin(base_url, href)
+                # Check if this could be an article URL
+                if is_likely_article_url(full_url, sample_url):
+                    article_links.append(link)
+        
+        if len(article_links) < 2:  # Need at least 2 articles
+            continue
+            
+        # Find corresponding headline pattern
+        for headline_pattern in headline_patterns:
+            headlines = soup.select(headline_pattern)
+            if not headlines:
+                continue
+                
+            # Score this combination
+            score = score_selector_combination(article_links, headlines, soup)
+            
+            if score > best_score:
+                best_score = score
+                best_link_selector = link_pattern
+                best_headline_selector = headline_pattern
+    
+    # Determine URL prefix
+    url_prefix = ""
+    if best_link_selector:
+        sample_links = soup.select(best_link_selector)
+        if sample_links:
+            first_href = sample_links[0].get('href', '')
+            if first_href and not first_href.startswith('http'):
+                parsed = urlparse(base_url)
+                url_prefix = f"{parsed.scheme}://{parsed.netloc}"
+    
+    return {
+        "headline_selector": best_headline_selector,
+        "link_selector": best_link_selector,
+        "url_prefix": url_prefix,
+        "confidence": min(best_score / 10, 1.0)  # Normalize score to 0-1
+    }
+
+def is_likely_article_url(url, sample_url):
+    """Check if a URL looks like it could be an article similar to the sample"""
+    from urllib.parse import urlparse
+    
+    parsed_url = urlparse(url)
+    parsed_sample = urlparse(sample_url)
+    
+    # Must be from same domain
+    if parsed_url.netloc != parsed_sample.netloc:
+        return False
+    
+    # Look for common article URL patterns
+    path = parsed_url.path.lower()
+    sample_path = parsed_sample.path.lower()
+    
+    # Common article indicators
+    article_indicators = ['article', 'story', 'news', 'post', 'blog']
+    has_indicator = any(indicator in path for indicator in article_indicators)
+    
+    # Similar path structure to sample
+    sample_parts = [p for p in sample_path.split('/') if p]
+    url_parts = [p for p in path.split('/') if p]
+    
+    # Should have similar depth
+    depth_similar = abs(len(sample_parts) - len(url_parts)) <= 2
+    
+    # Look for date patterns (articles often have dates in URLs)
+    import re
+    has_date_pattern = bool(re.search(r'/20\d{2}/', path))
+    
+    return has_indicator and depth_similar
+
+def score_selector_combination(links, headlines, soup):
+    """Score how good a selector combination is"""
+    score = 0
+    
+    # Prefer more matches (but not too many)
+    link_count = len(links)
+    headline_count = len(headlines)
+    
+    if 3 <= link_count <= 50:
+        score += 5
+    elif 2 <= link_count <= 100:
+        score += 3
+    
+    if 3 <= headline_count <= 50:
+        score += 5
+    elif 2 <= headline_count <= 100:
+        score += 3
+    
+    # Prefer when link and headline counts are similar
+    count_diff = abs(link_count - headline_count)
+    if count_diff <= 2:
+        score += 3
+    elif count_diff <= 5:
+        score += 1
+    
+    # Prefer links that have meaningful text
+    meaningful_links = 0
+    for link in links[:10]:  # Sample first 10
+        text = link.get_text(strip=True)
+        if text and len(text) > 10:  # Has substantial text
+            meaningful_links += 1
+    
+    score += meaningful_links
+    
+    # Prefer headlines that have meaningful text
+    meaningful_headlines = 0
+    for headline in headlines[:10]:  # Sample first 10
+        text = headline.get_text(strip=True)
+        if text and len(text) > 10:
+            meaningful_headlines += 1
+    
+    score += meaningful_headlines
+    
+    return score
+
 @app.post("/api/favorites/test-scraping")
 async def test_scraping_config(test_request: TestScrapingRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     """Test a scraping configuration and return sample results"""
@@ -2259,7 +2975,7 @@ Title: {title}
 URL: {url}
 
 Please perform the following two tasks based *only* on the provided Title and URL:
-1. Generate a natural-sounding, expressive, and engaging conversational starter sentence or two about this news story, suitable for initiating a discussion with someone nearby (e.g., "Did you hear about...", "Interesting story about..."). Keep it brief, energetic and focus on the main point indicated by the title. This will be the spoken output.
+1. Generate a natural-sounding, expressive, and engaging conversational starter sentence or two about this news story, suitable for initiating a discussion with someone nearby (e.g., "Did you hear about...", "I just saw..."). Do not use something obvious like "Did you see the article...". Keep it brief, energetic and focus on the main point indicated by the title. Add a question or prompt to encourage conversation.
 2. Generate a very short (3-5 word) phrase that captures the absolute key message or topic (suitable for displaying on a button).
 
 Format your response STRICTLY as a single JSON object with two keys:
@@ -2633,8 +3349,17 @@ async def get_favorite_thread_by_name(account_id: str, aac_user_id: str, favorit
     return None
 
 async def load_thread_messages(account_id: str, aac_user_id: str, thread_id: str) -> List[dict]:
-    """Load all messages for a specific thread."""
-    return await load_firestore_collection(account_id, aac_user_id, f"favorite_threads/{thread_id}/messages")
+    """Load all messages for a specific thread, sorted by created_at timestamp."""
+    messages = await load_firestore_collection(account_id, aac_user_id, f"favorite_threads/{thread_id}/messages")
+    
+    # Sort messages by created_at timestamp to ensure chronological order
+    if messages:
+        try:
+            messages.sort(key=lambda msg: msg.get('created_at', ''))
+        except Exception as e:
+            logging.warning(f"Failed to sort thread messages by created_at: {e}")
+    
+    return messages
 
 async def save_thread_message(account_id: str, aac_user_id: str, thread_id: str, message_data: dict) -> bool:
     """Save a message to a thread and update thread's last_message_at."""
@@ -2727,14 +3452,24 @@ async def open_thread_endpoint(
         existing_thread = await get_favorite_thread_by_name(account_id, aac_user_id, payload.favorite_name)
         
         if existing_thread:
-            # Load recent messages for summary
+            # Load ALL messages for display
             messages = await load_thread_messages(account_id, aac_user_id, existing_thread["thread_id"])
-            recent_messages = messages[-5:] if len(messages) > 0 else []
+            
+            # Sort messages by created_at timestamp to ensure chronological order
+            if messages:
+                try:
+                    messages.sort(key=lambda msg: msg.get('created_at', ''))
+                except Exception as e:
+                    logging.warning(f"Failed to sort thread messages by created_at: {e}")
+            
+            # Return all messages for display, and recent 5 for LLM context
+            recent_messages_for_llm = messages[-5:] if len(messages) > 0 else []
             
             return {
                 "success": True, 
                 "thread": existing_thread,
-                "recent_messages": recent_messages,
+                "all_messages": messages,  # All messages for display
+                "recent_messages": recent_messages_for_llm,  # Last 5 for LLM context
                 "is_new": False
             }
         else:
@@ -3353,6 +4088,283 @@ async def update_toolbar_pin(
     except Exception as e:
         logging.error(f"Error updating toolbar PIN: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update toolbar PIN: {str(e)}")
+
+# NEW: Model for account update requests
+class UpdateAccountRequest(BaseModel):
+    account_name: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    therapist_email: Optional[str] = None
+    is_therapist: Optional[bool] = None
+    allow_admin_access: Optional[bool] = None
+
+# NEW: Model for admin account selection
+class SelectAccountRequest(BaseModel):
+    account_id: str
+
+# NEW: Get account details for editing
+@app.get("/api/account/details")
+async def get_account_details(current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+    """Get account details for editing."""
+    global firestore_db
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
+    
+    try:
+        account_id = current_account["account_id"]
+        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        account_doc = await asyncio.to_thread(account_doc_ref.get)
+        
+        if not account_doc.exists:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        account_data = account_doc.to_dict()
+        
+        # Return only the fields that can be edited
+        return {
+            "email": account_data.get("email", ""),
+            "account_name": account_data.get("account_name", ""),
+            "address": account_data.get("address", ""),
+            "phone": account_data.get("phone", ""),
+            "therapist_email": account_data.get("therapist_email", ""),
+            "is_therapist": account_data.get("is_therapist", False),
+            "allow_admin_access": account_data.get("allow_admin_access", True)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error fetching account details: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch account details")
+
+# NEW: Update account details
+@app.post("/api/account/update")
+async def update_account_details(
+    update_data: UpdateAccountRequest,
+    current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """Update account details."""
+    global firestore_db
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
+    
+    try:
+        account_id = current_account["account_id"]
+        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        
+        # Build update data, only including fields that were provided
+        update_fields = {}
+        if update_data.account_name is not None:
+            update_fields["account_name"] = update_data.account_name
+        if update_data.address is not None:
+            update_fields["address"] = update_data.address
+        if update_data.phone is not None:
+            update_fields["phone"] = update_data.phone
+        if update_data.therapist_email is not None:
+            update_fields["therapist_email"] = update_data.therapist_email
+        if update_data.is_therapist is not None:
+            update_fields["is_therapist"] = update_data.is_therapist
+        if update_data.allow_admin_access is not None:
+            update_fields["allow_admin_access"] = update_data.allow_admin_access
+        
+        update_fields["last_updated"] = dt.now().isoformat()
+        
+        await asyncio.to_thread(account_doc_ref.update, update_fields)
+        
+        return {"message": "Account updated successfully"}
+    except Exception as e:
+        logging.error(f"Error updating account: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update account")
+
+# NEW: Get accounts accessible by admin/therapist
+@app.get("/api/admin/accessible-accounts")
+async def get_accessible_accounts(current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+    """Get accounts that admin/therapist can access."""
+    global firestore_db
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
+    
+    try:
+        account_id = current_account["account_id"]
+        
+        # Get current user's account to check if they're admin or therapist
+        current_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        current_account_doc = await asyncio.to_thread(current_account_doc_ref.get)
+        
+        if not current_account_doc.exists:
+            raise HTTPException(status_code=404, detail="Current account not found")
+        
+        current_account_data = current_account_doc.to_dict()
+        user_email = current_account_data.get("email", "")
+        is_admin = user_email == "admin@talkwithbravo.com"
+        is_therapist = current_account_data.get("is_therapist", False)
+        
+        if not is_admin and not is_therapist:
+            raise HTTPException(status_code=403, detail="Access denied: Not an admin or therapist")
+        
+        # Query all accounts
+        accounts_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+        all_accounts = await asyncio.to_thread(list, accounts_ref.stream())
+        
+        accessible_accounts = []
+        for account_doc in all_accounts:
+            account_data = account_doc.to_dict()
+            
+            # Admin can access all accounts that allow admin access
+            if is_admin:
+                if account_data.get("allow_admin_access", True):  # Default to True if not set
+                    accessible_accounts.append({
+                        "account_id": account_doc.id,
+                        "account_name": account_data.get("account_name", ""),
+                        "email": account_data.get("email", "")
+                    })
+            # Therapists can access accounts where they're listed as therapist_email
+            elif is_therapist:
+                if account_data.get("therapist_email") == user_email:
+                    accessible_accounts.append({
+                        "account_id": account_doc.id,
+                        "account_name": account_data.get("account_name", ""),
+                        "email": account_data.get("email", "")
+                    })
+        
+        return accessible_accounts
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting accessible accounts: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get accessible accounts")
+
+# NEW: Select account for admin/therapist access
+@app.post("/api/admin/select-account")
+async def select_account_for_access(
+    request_data: SelectAccountRequest,
+    current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """Select an account for admin/therapist to access."""
+    global firestore_db
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
+    
+    try:
+        current_account_id = current_account["account_id"]
+        target_account_id = request_data.account_id
+        
+        # Get current user's account to verify permissions
+        current_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(current_account_id)
+        current_account_doc = await asyncio.to_thread(current_account_doc_ref.get)
+        
+        if not current_account_doc.exists:
+            raise HTTPException(status_code=404, detail="Current account not found")
+        
+        current_account_data = current_account_doc.to_dict()
+        user_email = current_account_data.get("email", "")
+        is_admin = user_email == "admin@talkwithbravo.com"
+        is_therapist = current_account_data.get("is_therapist", False)
+        
+        if not is_admin and not is_therapist:
+            raise HTTPException(status_code=403, detail="Access denied: Not an admin or therapist")
+        
+        # Get target account to verify access permissions
+        target_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id)
+        target_account_doc = await asyncio.to_thread(target_account_doc_ref.get)
+        
+        if not target_account_doc.exists:
+            raise HTTPException(status_code=404, detail="Target account not found")
+        
+        target_account_data = target_account_doc.to_dict()
+        
+        # Verify access permissions
+        has_access = False
+        if is_admin and target_account_data.get("allow_admin_access", True):
+            has_access = True
+        elif is_therapist and target_account_data.get("therapist_email") == user_email:
+            has_access = True
+        
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Access denied to this account")
+        
+        # Return success - the frontend will handle switching context
+        return {
+            "message": "Account access granted", 
+            "account_id": target_account_id,
+            "account_name": target_account_data.get("account_name", "")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error selecting account for access: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to select account")
+
+# NEW: Get user profiles for admin-selected account
+@app.get("/api/admin/account-users/{account_id}")
+async def get_admin_account_users(
+    account_id: str,
+    firebase_user: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
+):
+    """Get user profiles for a specific account (admin/therapist access)."""
+    global firestore_db
+    if not firestore_db:
+        raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
+    
+    try:
+        # Get the Firebase user UID (this is the admin/therapist's UID)
+        admin_firebase_uid = firebase_user["account_id"]
+        
+        # Get admin/therapist account to verify permissions
+        admin_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(admin_firebase_uid)
+        admin_account_doc = await asyncio.to_thread(admin_account_doc_ref.get)
+        
+        if not admin_account_doc.exists:
+            raise HTTPException(status_code=404, detail="Admin account not found")
+        
+        admin_account_data = admin_account_doc.to_dict()
+        user_email = admin_account_data.get("email", "")
+        is_admin = user_email == "admin@talkwithbravo.com"
+        is_therapist = admin_account_data.get("is_therapist", False)
+        
+        if not is_admin and not is_therapist:
+            raise HTTPException(status_code=403, detail="Access denied: Not an admin or therapist")
+        
+        # Get target account to verify access permissions
+        target_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        target_account_doc = await asyncio.to_thread(target_account_doc_ref.get)
+        
+        if not target_account_doc.exists:
+            raise HTTPException(status_code=404, detail="Target account not found")
+        
+        target_account_data = target_account_doc.to_dict()
+        
+        # Verify access permissions
+        has_access = False
+        if is_admin and target_account_data.get("allow_admin_access", True):
+            has_access = True
+        elif is_therapist and target_account_data.get("therapist_email") == user_email:
+            has_access = True
+        
+        if not has_access:
+            raise HTTPException(status_code=403, detail="Access denied to this account")
+        
+        # Get user profiles for the target account
+        users_collection_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+        
+        docs = await asyncio.to_thread(users_collection_ref.stream)
+        
+        user_profiles = []
+        for doc in docs:
+            profile_data = doc.to_dict()
+            if profile_data:
+                user_profiles.append({
+                    "aac_user_id": doc.id,
+                    "display_name": profile_data.get("display_name", doc.id),
+                })
+        
+        logging.info(f"Admin/therapist fetched {len(user_profiles)} user profiles for account {account_id}")
+        return JSONResponse(content=user_profiles)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting admin account users: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get account users")
 
 @app.get("/api/available-llm-models")
 async def get_available_llm_models():
@@ -4536,11 +5548,13 @@ async def get_activity_report_endpoint(start_date: str, end_date: str, current_i
 # --- Request Body Model for User Registration ---
 class CreateAccountRequest(BaseModel):
     account_name: str
-    num_users_allowed: conint(ge=1) = 1 # Default to 1, minimum 1
+    num_users_allowed: int = Field(default=1, ge=1)  # Default to 1, minimum 1
     promo_code: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
     therapist_email: Optional[str] = None
+    is_therapist: Optional[bool] = False  # NEW: Flag to indicate if this account is a therapist
+    allow_admin_access: Optional[bool] = True  # NEW: Flag to allow Bravo admin access (default True)
 
     # --- NEW: Email is derived from token, not provided here
     # email: str = Field(..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$") # Email will be derived from token
@@ -4653,6 +5667,8 @@ async def register_account(
                 "address": request_data.address,
                 "phone": request_data.phone,
                 "therapist_email": request_data.therapist_email,
+                "is_therapist": request_data.is_therapist,  # NEW: Therapist flag
+                "allow_admin_access": request_data.allow_admin_access,  # NEW: Admin access permission
                 "authorized_users": [email], # Creator's email is always authorized
                 "created_at": dt.now().isoformat(),
                 "last_updated": dt.now().isoformat()

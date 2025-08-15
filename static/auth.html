@@ -382,6 +382,18 @@
                     <label for="register-therapist-email">Therapist/Admin Email (Optional)</label>
                     <input type="email" id="register-therapist-email" name="therapist_email">
                 </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="register-is-therapist" name="is_therapist">
+                        <label for="register-is-therapist">I am a therapist or healthcare professional</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="register-allow-admin-access" name="allow_admin_access" checked>
+                        <label for="register-allow-admin-access">Allow Bravo Admin access to this account (for support purposes)</label>
+                    </div>
+                </div>
                 <div class="button-group">
                     <button type="submit">Register</button>
                 </div>
@@ -408,8 +420,87 @@
             </div>
 
             <div class="mt-6 text-center">
+                <button id="edit-account-button" class="mr-4 text-sm text-blue-600 hover:text-blue-800 hover:underline">Edit Account</button>
                 <button id="logout-button" class="text-sm text-gray-500 hover:text-red-600 hover:underline">Logout</button>
             </div>
+        </div>
+
+        <div id="admin-account-selection-section" class="auth-section">
+            <h3 class="text-xl font-semibold text-center text-gray-700 mb-4">Select Account to Access</h3>
+            <div id="account-selection-list" class="space-y-3">
+                <!-- Account selection will be injected here -->
+                <p id="loading-accounts" class="text-center text-gray-500">Loading accounts...</p>
+            </div>
+            <div class="mt-6 text-center">
+                <button id="admin-logout-button" class="text-sm text-gray-500 hover:text-red-600 hover:underline">Logout</button>
+            </div>
+        </div>
+
+        <div id="edit-account-section" class="auth-section">
+            <h3 class="text-xl font-semibold text-center text-gray-700 mb-4">Edit Account Settings</h3>
+            <form id="edit-account-form" class="space-y-4">
+                <div class="form-group">
+                    <label for="edit-email">Email (Cannot be changed)</label>
+                    <input type="email" id="edit-email" name="email" disabled class="bg-gray-100">
+                </div>
+                <div class="form-group">
+                    <label for="edit-account-name">Account Name</label>
+                    <input type="text" id="edit-account-name" name="account_name" required>
+                </div>
+                
+                <!-- Password Change Section -->
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="change-password-checkbox">
+                        <label for="change-password-checkbox">Change Password</label>
+                    </div>
+                </div>
+                <div id="password-change-fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="edit-current-password">Current Password</label>
+                        <input type="password" id="edit-current-password" name="current_password">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-new-password">New Password</label>
+                        <input type="password" id="edit-new-password" name="new_password" minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-confirm-password">Confirm New Password</label>
+                        <input type="password" id="edit-confirm-password" name="confirm_password" minlength="6">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-address">Address (Optional)</label>
+                    <input type="text" id="edit-address" name="address">
+                </div>
+                <div class="form-group">
+                    <label for="edit-phone">Phone (Optional)</label>
+                    <input type="tel" id="edit-phone" name="phone">
+                </div>
+                <div class="form-group">
+                    <label for="edit-therapist-email">Therapist/Admin Email (Optional)</label>
+                    <input type="email" id="edit-therapist-email" name="therapist_email">
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="edit-is-therapist" name="is_therapist">
+                        <label for="edit-is-therapist">I am a therapist or healthcare professional</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="edit-allow-admin-access" name="allow_admin_access">
+                        <label for="edit-allow-admin-access">Allow Bravo Admin access to this account (for support purposes)</label>
+                    </div>
+                </div>
+                <div class="button-group">
+                    <button type="submit">Save Changes</button>
+                </div>
+                <div class="text-center mt-4">
+                    <button type="button" id="cancel-edit-account" class="text-sm text-gray-500 hover:text-gray-700 hover:underline">Cancel</button>
+                </div>
+            </form>
         </div>
 
         <p class="error-message" id="auth-error-message"></p>
@@ -467,15 +558,29 @@
         const showLoginLink = document.getElementById('show-login');
         const loginForm = document.getElementById('login-form');
         const registerForm = document.getElementById('register-form');
+        
+        // Track previous section for navigation
+        let previousSection = null;
 
         // Function to show/hide sections
         function showSection(sectionToShow, title) {
+            // Track the current active section as previous before switching
+            const currentActive = document.querySelector('.auth-section.active');
+            if (currentActive && currentActive !== sectionToShow) {
+                previousSection = currentActive;
+            }
+            
+            // Hide all sections
             loginSection.classList.remove('active');
             registerSection.classList.remove('active');
+            profileSection.classList.remove('active');
+            document.getElementById('edit-account-section').classList.remove('active');
+            document.getElementById('admin-account-selection-section').classList.remove('active');
+            
+            // Show the target section
             sectionToShow.classList.add('active');
             authTitle.textContent = title;
             authErrorMessage.textContent = ''; // Clear error message
-            profileSection.classList.remove('active');
         }
 
         // Function to load saved login credentials
@@ -591,6 +696,7 @@
             displayUserProfiles(userProfiles);
             setupAddUserButton(idToken);
             setupLogoutButton();
+            setupEditAccountButton(idToken);  // NEW
         }
 
         function displayUserProfiles(profiles) {
@@ -938,11 +1044,21 @@
             sessionStorage.setItem('currentAacUserId', selectedUserId);
             sessionStorage.setItem('selectedDisplayName', displayName);
             
+            // NEW: Handle admin context - if admin selected an account, store that context
+            const adminSelectedAccountId = sessionStorage.getItem('adminSelectedAccountId');
+            if (adminSelectedAccountId) {
+                console.log('Admin context: storing admin access context for account:', adminSelectedAccountId);
+                sessionStorage.setItem('adminAccessContext', 'true');
+                sessionStorage.setItem('adminTargetAccountId', adminSelectedAccountId);
+            }
+            
             // Verify the items were actually set
             console.log('Session storage verification:', {
                 firebaseIdToken: sessionStorage.getItem('firebaseIdToken') ? 'set' : 'not set',
                 currentAacUserId: sessionStorage.getItem('currentAacUserId'),
-                selectedDisplayName: sessionStorage.getItem('selectedDisplayName')
+                selectedDisplayName: sessionStorage.getItem('selectedDisplayName'),
+                adminAccessContext: sessionStorage.getItem('adminAccessContext'),
+                adminTargetAccountId: sessionStorage.getItem('adminTargetAccountId')
             });
             
             // Small delay to ensure session storage is written
@@ -1047,6 +1163,398 @@
                 }, 100);
             });
         }
+
+        // Function to navigate back from Edit Account
+        function navigateBackFromEditAccount() {
+            // Clear any error messages
+            authErrorMessage.textContent = '';
+            
+            // Determine where to go back to
+            if (previousSection) {
+                if (previousSection.id === 'admin-account-selection-section') {
+                    showSection(previousSection, 'Select Account');
+                } else if (previousSection.id === 'profile-section') {
+                    showSection(previousSection, 'User Profiles');
+                } else {
+                    // Default fallback
+                    showSection(profileSection, 'User Profiles');
+                }
+            } else {
+                // Default fallback if no previous section tracked
+                showSection(profileSection, 'User Profiles');
+            }
+        }
+
+        // NEW: Setup Edit Account button functionality
+        function setupEditAccountButton(idToken) {
+            const editAccountButton = document.getElementById('edit-account-button');
+            const editAccountForm = document.getElementById('edit-account-form');
+            const cancelEditButton = document.getElementById('cancel-edit-account');
+            const changePasswordCheckbox = document.getElementById('change-password-checkbox');
+            const passwordChangeFields = document.getElementById('password-change-fields');
+
+            // Toggle password change fields
+            changePasswordCheckbox.addEventListener('change', () => {
+                if (changePasswordCheckbox.checked) {
+                    passwordChangeFields.style.display = 'block';
+                    // Make password fields required when shown
+                    document.getElementById('edit-current-password').required = true;
+                    document.getElementById('edit-new-password').required = true;
+                    document.getElementById('edit-confirm-password').required = true;
+                } else {
+                    passwordChangeFields.style.display = 'none';
+                    // Remove required attribute when hidden
+                    document.getElementById('edit-current-password').required = false;
+                    document.getElementById('edit-new-password').required = false;
+                    document.getElementById('edit-confirm-password').required = false;
+                    // Clear password fields
+                    document.getElementById('edit-current-password').value = '';
+                    document.getElementById('edit-new-password').value = '';
+                    document.getElementById('edit-confirm-password').value = '';
+                }
+            });
+
+            editAccountButton.addEventListener('click', async () => {
+                try {
+                    // Fetch current account data
+                    const response = await fetch('/api/account/details', {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${idToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+
+                    if (response.ok) {
+                        const accountData = await response.json();
+                        populateEditAccountForm(accountData);
+                        showSection(document.getElementById('edit-account-section'), 'Edit Account');
+                    } else {
+                        authErrorMessage.textContent = 'Failed to load account data';
+                    }
+                } catch (error) {
+                    console.error('Error loading account data:', error);
+                    authErrorMessage.textContent = 'Error loading account data';
+                }
+            });
+
+            editAccountForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                // Check password confirmation if password change is requested
+                if (changePasswordCheckbox.checked) {
+                    const newPassword = editAccountForm['edit-new-password'].value;
+                    const confirmPassword = editAccountForm['edit-confirm-password'].value;
+                    
+                    if (newPassword !== confirmPassword) {
+                        authErrorMessage.textContent = 'New passwords do not match';
+                        return;
+                    }
+                    
+                    if (newPassword.length < 6) {
+                        authErrorMessage.textContent = 'New password must be at least 6 characters long';
+                        return;
+                    }
+                }
+                
+                const formData = {
+                    account_name: editAccountForm['edit-account-name'].value,
+                    address: editAccountForm['edit-address'].value || null,
+                    phone: editAccountForm['edit-phone'].value || null,
+                    therapist_email: editAccountForm['edit-therapist-email'].value || null,
+                    is_therapist: editAccountForm['edit-is-therapist'].checked,
+                    allow_admin_access: editAccountForm['edit-allow-admin-access'].checked
+                };
+
+                loadingIndicator.style.display = 'flex';
+                authErrorMessage.textContent = '';
+
+                try {
+                    // Update account details first
+                    const response = await fetch('/api/account/update', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${idToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(formData)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
+                        throw new Error(errorData.detail || 'Failed to update account');
+                    }
+
+                    // Handle password change if requested
+                    if (changePasswordCheckbox.checked) {
+                        const currentPassword = editAccountForm['edit-current-password'].value;
+                        const newPassword = editAccountForm['edit-new-password'].value;
+
+                        try {
+                            // Re-authenticate user with current password using Firebase
+                            const user = firebase.auth().currentUser;
+                            if (!user) {
+                                throw new Error('User not authenticated');
+                            }
+
+                            const credential = firebase.auth.EmailAuthProvider.credential(user.email, currentPassword);
+                            await user.reauthenticateWithCredential(credential);
+
+                            // Update password
+                            await user.updatePassword(newPassword);
+                            
+                            alert('Account and password updated successfully!');
+                        } catch (passwordError) {
+                            console.error('Password update error:', passwordError);
+                            if (passwordError.code === 'auth/wrong-password') {
+                                authErrorMessage.textContent = 'Current password is incorrect';
+                            } else if (passwordError.code === 'auth/weak-password') {
+                                authErrorMessage.textContent = 'New password is too weak';
+                            } else {
+                                authErrorMessage.textContent = 'Failed to update password: ' + passwordError.message;
+                            }
+                            loadingIndicator.style.display = 'none';
+                            return;
+                        }
+                    } else {
+                        alert('Account updated successfully!');
+                    }
+
+                    // Reset form and navigate back
+                    editAccountForm.reset();
+                    changePasswordCheckbox.checked = false;
+                    passwordChangeFields.style.display = 'none';
+                    
+                    // Clear password field requirements
+                    document.getElementById('edit-current-password').required = false;
+                    document.getElementById('edit-new-password').required = false;
+                    document.getElementById('edit-confirm-password').required = false;
+                    
+                    navigateBackFromEditAccount();
+
+                } catch (error) {
+                    console.error('Error updating account:', error);
+                    authErrorMessage.textContent = error.message || 'Error updating account';
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            });
+
+            cancelEditButton.addEventListener('click', () => {
+                // Reset form and password change fields
+                editAccountForm.reset();
+                changePasswordCheckbox.checked = false;
+                passwordChangeFields.style.display = 'none';
+                document.getElementById('edit-current-password').required = false;
+                document.getElementById('edit-new-password').required = false;
+                document.getElementById('edit-confirm-password').required = false;
+                
+                // Navigate back to previous section
+                navigateBackFromEditAccount();
+            });
+        }
+
+        // NEW: Function to populate the edit account form
+        function populateEditAccountForm(accountData) {
+            const form = document.getElementById('edit-account-form');
+            const changePasswordCheckbox = document.getElementById('change-password-checkbox');
+            const passwordChangeFields = document.getElementById('password-change-fields');
+            
+            form['edit-email'].value = accountData.email || '';
+            form['edit-account-name'].value = accountData.account_name || '';
+            form['edit-address'].value = accountData.address || '';
+            form['edit-phone'].value = accountData.phone || '';
+            form['edit-therapist-email'].value = accountData.therapist_email || '';
+            form['edit-is-therapist'].checked = accountData.is_therapist || false;
+            form['edit-allow-admin-access'].checked = accountData.allow_admin_access !== false; // Default to true
+            
+            // Reset password change fields
+            changePasswordCheckbox.checked = false;
+            passwordChangeFields.style.display = 'none';
+            document.getElementById('edit-current-password').value = '';
+            document.getElementById('edit-new-password').value = '';
+            document.getElementById('edit-confirm-password').value = '';
+            document.getElementById('edit-current-password').required = false;
+            document.getElementById('edit-new-password').required = false;
+            document.getElementById('edit-confirm-password').required = false;
+            
+            // Clear any error messages
+            const authErrorMessage = document.getElementById('auth-error-message');
+            if (authErrorMessage) {
+                authErrorMessage.textContent = '';
+            }
+        }
+
+        // NEW: Check if user is admin/therapist and should see account selection
+        async function checkForAdminAccountSelection(user) {
+            const email = user.email;
+            const isAdmin = email === 'admin@talkwithbravo.com';
+            
+            if (!isAdmin) {
+                // Check if user is a therapist
+                const idToken = await user.getIdToken();
+                try {
+                    const response = await fetch('/api/account/details', {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${idToken}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const accountData = await response.json();
+                        if (!accountData.is_therapist) {
+                            return false; // Not admin or therapist, proceed normally
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking therapist status:', error);
+                    return false; // If error, proceed normally
+                }
+            }
+            
+            // User is admin or therapist, show account selection
+            await showAdminAccountSelection(user);
+            return true;
+        }
+
+        // NEW: Show admin/therapist account selection screen
+        async function showAdminAccountSelection(user) {
+            const idToken = await user.getIdToken();
+            
+            try {
+                const response = await fetch('/api/admin/accessible-accounts', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const accounts = await response.json();
+                    displayAccountSelection(accounts, idToken);
+                    showSection(document.getElementById('admin-account-selection-section'), 'Select Account');
+                    setupAdminLogoutButton();
+                } else {
+                    authErrorMessage.textContent = 'Failed to load accessible accounts';
+                    showSection(document.getElementById('profile-section'), 'User Profiles');
+                }
+            } catch (error) {
+                console.error('Error loading accessible accounts:', error);
+                authErrorMessage.textContent = 'Error loading accounts';
+                showSection(document.getElementById('profile-section'), 'User Profiles');
+            }
+        }
+
+        // NEW: Display account selection for admin/therapist
+        function displayAccountSelection(accounts, idToken) {
+            const accountListDiv = document.getElementById('account-selection-list');
+            
+            if (!accounts || accounts.length === 0) {
+                accountListDiv.innerHTML = '<p class="text-center text-gray-500">No accessible accounts found.</p>';
+                return;
+            }
+
+            let html = '<div class="space-y-2">';
+            accounts.forEach(account => {
+                html += `
+                    <button onclick="selectAccount('${account.account_id}', '${idToken}')" 
+                            class="w-full p-4 text-left border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <div class="font-semibold text-gray-900">${account.account_name}</div>
+                        <div class="text-sm text-gray-600">${account.email}</div>
+                    </button>
+                `;
+            });
+            html += '</div>';
+            
+            accountListDiv.innerHTML = html;
+        }
+
+        // NEW: Select an account for admin/therapist access
+        window.selectAccount = async function(accountId, idToken) {
+            loadingIndicator.style.display = 'flex';
+            
+            try {
+                const response = await fetch('/api/admin/select-account', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ account_id: accountId })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    // Store the selected account context
+                    sessionStorage.setItem('adminSelectedAccountId', accountId);
+                    // Load user profiles for the selected account
+                    await loadAdminAccountProfiles(accountId, idToken);
+                } else {
+                    const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
+                    authErrorMessage.textContent = errorData.detail || 'Failed to select account';
+                }
+            } catch (error) {
+                console.error('Error selecting account:', error);
+                authErrorMessage.textContent = 'Error selecting account';
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+
+        // NEW: Setup admin logout button
+        function setupAdminLogoutButton() {
+            const adminLogoutButton = document.getElementById('admin-logout-button');
+            adminLogoutButton.addEventListener('click', () => {
+                console.log('Admin account selection logout button clicked');
+                localStorage.setItem('bravoIntentionalLogout', 'true');
+                localStorage.setItem('bravoSkipDefaultUser', 'true');
+                sessionStorage.clear();
+                
+                setTimeout(async () => {
+                    try {
+                        await auth.signOut();
+                        console.log('Firebase sign out completed from admin account selection');
+                    } catch (error) {
+                        console.error('Error during Firebase sign out:', error);
+                        window.location.reload();
+                    }
+                }, 100);
+            });
+        }
+
+        // NEW: Load user profiles for admin-selected account
+        async function loadAdminAccountProfiles(accountId, idToken) {
+            try {
+                const response = await fetch(`/api/admin/account-users/${accountId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const userProfiles = await response.json();
+                    
+                    // Store the account context for later use
+                    sessionStorage.setItem('adminSelectedAccountId', accountId);
+                    
+                    // Show profile selection for the admin-selected account
+                    showProfileSelection(userProfiles, idToken);
+                } else {
+                    const errorData = await response.json().catch(() => ({ detail: "Unknown error" }));
+                    authErrorMessage.textContent = errorData.detail || 'Failed to load user profiles';
+                    showSection(document.getElementById('admin-account-selection-section'), 'Select Account');
+                }
+            } catch (error) {
+                console.error('Error loading admin account profiles:', error);
+                authErrorMessage.textContent = 'Error loading user profiles';
+                showSection(document.getElementById('admin-account-selection-section'), 'Select Account');
+            }
+        }
  
 registerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1058,6 +1566,8 @@ registerForm.addEventListener('submit', async (e) => {
     const address = registerForm['register-address'].value || null;
     const phone = registerForm['register-phone'].value || null;
     const therapist_email = registerForm['register-therapist-email'].value || null;
+    const is_therapist = registerForm['register-is-therapist'].checked;  // NEW
+    const allow_admin_access = registerForm['register-allow-admin-access'].checked;  // NEW
     let user = null; // Declare user here to make it available in the catch block
 
     authErrorMessage.textContent = ''; // Clear previous errors
@@ -1115,7 +1625,9 @@ registerForm.addEventListener('submit', async (e) => {
                 promo_code,
                 address,
                 phone,
-                therapist_email
+                therapist_email,
+                is_therapist,           // NEW
+                allow_admin_access      // NEW
             })
         });
 
@@ -1167,7 +1679,9 @@ registerForm.addEventListener('submit', async (e) => {
                     await auth.signOut(); // This will trigger onAuthStateChanged again with user=null
                     return; // Exit early to let the next call handle the null user case
                 }
-                // If user is already null, just show the login form
+                // If user is already null, show the login form
+                console.log('Showing login form after intentional logout');
+                showSection(loginSection, 'Login');
                 loadingIndicator.style.display = 'none';
                 return;
             }
@@ -1192,6 +1706,12 @@ registerForm.addEventListener('submit', async (e) => {
                     }
 
                     const userProfiles = await response.json();
+                    
+                    // NEW: Check if user is admin/therapist and should see account selection
+                    const shouldShowAccountSelection = await checkForAdminAccountSelection(user);
+                    if (shouldShowAccountSelection) {
+                        return; // Admin/therapist account selection is being shown
+                    }
                     
                     // Check if we should skip default user auto-proceed (set when logging out from profile page)
                     const skipDefaultUser = localStorage.getItem('bravoSkipDefaultUser') === 'true';
@@ -1235,15 +1755,6 @@ registerForm.addEventListener('submit', async (e) => {
             } else {
                 console.log("No Firebase user logged in.");
                 
-                // Check if user intentionally logged out - if so, don't attempt auto-login
-                const intentionalLogout = localStorage.getItem('bravoIntentionalLogout') === 'true';
-                if (intentionalLogout) {
-                    console.log('User intentionally logged out, not attempting auto-login');
-                    localStorage.removeItem('bravoIntentionalLogout'); // Clear the flag
-                    loadingIndicator.style.display = 'none';
-                    return;
-                }
-                
                 // Check if we should attempt automatic login with saved credentials
                 const savedEmail = localStorage.getItem('bravoSavedEmail');
                 const savedPassword = localStorage.getItem('bravoSavedPassword');
@@ -1272,6 +1783,7 @@ registerForm.addEventListener('submit', async (e) => {
                 }
                 
                 console.log("Displaying auth forms.");
+                showSection(loginSection, 'Login');
                 loadingIndicator.style.display = 'none'; // Ensure loading is hidden initially
             }
         });

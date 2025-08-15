@@ -62,6 +62,13 @@ async function authenticatedFetch(url, options = {}) {
     const headers = options.headers || {};
     headers['Authorization'] = `Bearer ${firebaseIdToken}`;
     headers['X-User-ID'] = currentAacUserId;
+    
+    // Check for admin context and add target account header if needed
+    const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+    if (adminTargetAccountId) {
+        headers['X-Admin-Target-Account'] = adminTargetAccountId;
+    }
+    
     options.headers = headers;
 
     const response = await fetch(url, options);
@@ -91,7 +98,90 @@ async function initializeUserContext() {
     // Load settings
     await loadScanSettings();
     
+    // Load and update page title with profile name
+    await updatePageTitleWithProfile();
+    
     return true;
+}
+
+// Function to update page title with profile name
+async function updatePageTitleWithProfile() {
+    console.log('updatePageTitleWithProfile: Starting - currentAacUserId:', currentAacUserId);
+    try {
+        if (!currentAacUserId) {
+            console.warn('updatePageTitleWithProfile: No currentAacUserId available');
+            return;
+        }
+        
+        const response = await authenticatedFetch('/api/account/users');
+        console.log('updatePageTitleWithProfile: API response status:', response.status);
+        
+        if (!response.ok) {
+            console.warn('updatePageTitleWithProfile: API response not ok:', response.status);
+            return;
+        }
+        
+        const profiles = await response.json();
+        console.log('updatePageTitleWithProfile: Profiles received:', profiles.length, 'profiles');
+        
+        const currentProfile = profiles.find(profile => profile.aac_user_id === currentAacUserId);
+        console.log('updatePageTitleWithProfile: Current profile found:', currentProfile ? currentProfile.display_name : 'none');
+        
+        if (currentProfile && currentProfile.display_name) {
+            const titleElement = document.getElementById('dynamic-page-title');
+            console.log('updatePageTitleWithProfile: Title element found:', !!titleElement);
+            
+            if (titleElement) {
+                const baseTitle = 'Thread Communication';
+                const newTitle = `${baseTitle} - ${currentProfile.display_name}`;
+                titleElement.textContent = newTitle;
+                console.log(`updatePageTitleWithProfile: Updated title to: "${newTitle}"`);
+            }
+        } else {
+            console.warn('updatePageTitleWithProfile: No profile found or no display name for user:', currentAacUserId);
+        }
+    } catch (error) {
+        console.error('Error updating page title with profile:', error);
+    }
+}
+
+// Function to update thread page title with both thread name and profile name
+async function updateThreadPageTitle() {
+    console.log('updateThreadPageTitle: Starting');
+    try {
+        if (!currentAacUserId) {
+            console.warn('updateThreadPageTitle: No currentAacUserId available');
+            return;
+        }
+        
+        const response = await authenticatedFetch('/api/account/users');
+        if (!response.ok) {
+            console.warn('updateThreadPageTitle: API response not ok:', response.status);
+            return;
+        }
+        
+        const profiles = await response.json();
+        const currentProfile = profiles.find(profile => profile.aac_user_id === currentAacUserId);
+        
+        const titleElement = document.getElementById('dynamic-page-title');
+        if (titleElement) {
+            let newTitle = '';
+            if (currentThread && currentThread.favorite_name) {
+                newTitle = `Thread: ${currentThread.favorite_name}`;
+            } else {
+                newTitle = 'Thread Communication';
+            }
+            
+            if (currentProfile && currentProfile.display_name) {
+                newTitle += ` - ${currentProfile.display_name}`;
+            }
+            
+            titleElement.textContent = newTitle;
+            console.log(`updateThreadPageTitle: Updated title to: "${newTitle}"`);
+        }
+    } catch (error) {
+        console.error('Error updating thread page title:', error);
+    }
 }
 
 async function loadScanSettings() {
@@ -157,11 +247,13 @@ async function openThread(favoriteName) {
         
         // Store thread data
         currentThread = result.thread;
-        threadMessages = result.recent_messages || [];
+        threadMessages = result.all_messages || result.recent_messages || [];  // Use all_messages if available, fallback to recent_messages for backwards compatibility
         
-        // Update page title with favorite name
-        document.getElementById('dynamic-page-title').textContent = 
-            `Thread: ${currentThread.favorite_name}`;
+        // Store recent messages separately for LLM context
+        const recentMessagesForLLM = result.recent_messages || threadMessages.slice(-5);
+        
+        // Update page title with favorite name and maintain profile name
+        await updateThreadPageTitle();
         
         // Display thread history
         displayThreadHistory();
@@ -172,10 +264,10 @@ async function openThread(favoriteName) {
             await generateInitialThreadOptions();
         } else {
             // Existing thread - announce summary and generate response options
-            if (threadMessages.length > 0) {
-                await announceThreadSummary();
+            if (recentMessagesForLLM.length > 0) {
+                await announceThreadSummary(recentMessagesForLLM);
             }
-            await generateInitialThreadOptions();
+            await generateInitialThreadOptions(recentMessagesForLLM);
         }
         
     } catch (error) {
@@ -236,13 +328,15 @@ function displayThreadHistory() {
     }, 50);
 }
 
-async function announceThreadSummary() {
-    if (threadMessages.length === 0) return;
+async function announceThreadSummary(recentMessages = null) {
+    // Use provided recent messages or fallback to last 5 from threadMessages
+    const messagesToSummarize = recentMessages || threadMessages.slice(-5);
+    
+    if (messagesToSummarize.length === 0) return;
     
     try {
         // Create prompt for LLM to summarize last few messages
-        const recentMessages = threadMessages.slice(-5);
-        const messagesText = recentMessages.map(msg => 
+        const messagesText = messagesToSummarize.map(msg => 
             `${msg.sender_type === 'user' ? 'User' : 'Others'}: ${msg.content}`
         ).join('\n');
         
@@ -268,7 +362,7 @@ Provide only the summary, no extra text.`;
     }
 }
 
-async function generateInitialThreadOptions() {
+async function generateInitialThreadOptions(recentMessages = null) {
     console.log('Generating initial thread options');
     document.getElementById('loading-indicator').style.display = 'flex';
     
@@ -278,7 +372,9 @@ async function generateInitialThreadOptions() {
         if (threadMessages.length === 0) {
             contextPrompt = `The user is starting a new communication thread at ${currentThread.location} with ${currentThread.people} during ${currentThread.activity}. Generate ${LLMOptions} conversation starter options that would be appropriate for this setting.`;
         } else {
-            const recentHistory = threadMessages.slice(-10).map(msg => 
+            // Use provided recent messages or fallback to last 10 from threadMessages
+            const messagesToUse = recentMessages || threadMessages.slice(-10);
+            const recentHistory = messagesToUse.map(msg => 
                 `${msg.sender_type === 'user' ? 'User' : 'Others'}: ${msg.content}`
             ).join('\n');
             
@@ -389,11 +485,20 @@ function setupSpeechRecognition() {
 
             const announcement = 'Listening for your question or comment...';
             console.log("Calling announce for thread question prompt...");
+            
+            // Set up a fallback timer in case announcement hangs
+            const fallbackTimer = setTimeout(() => {
+                console.warn("Thread wake word: Announcement took too long, proceeding with question recognition");
+                setupQuestionRecognition();
+            }, 5000); // 5 second fallback
+            
             try {
                 await announce(announcement, "system", false);
+                clearTimeout(fallbackTimer);
                 setTimeout(() => setupQuestionRecognition(), 500);
             } catch (announceError) {
                 console.error("Thread announcement error:", announceError);
+                clearTimeout(fallbackTimer);
                 setTimeout(() => setupQuestionRecognition(), 500);
             }
         }
@@ -673,13 +778,15 @@ async function addMessageToThread(content, senderType) {
     if (!currentThread) return;
     
     try {
+        const requestBody = {
+            content: content,
+            sender_type: senderType
+        };
+        
         const response = await authenticatedFetch(`/api/threads/${currentThread.thread_id}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: content,
-                sender_type: senderType
-            })
+            body: JSON.stringify(requestBody)
         });
         
         if (response.ok) {
@@ -688,6 +795,8 @@ async function addMessageToThread(content, senderType) {
                 threadMessages.push(result.message);
                 displayThreadHistory();
             }
+        } else {
+            console.error(`[THREAD_MESSAGE] Server responded with error:`, response.status, await response.text());
         }
     } catch (error) {
         console.error('Error adding message to thread:', error);
@@ -847,7 +956,13 @@ function generateThreadButtons(options) {
                 
                 // Pause scanning - user needs to manually resume with switch
                 console.log('User selected an option. Scanning paused until manual resume.');
-                await announce('Scanning paused. Use your switch to resume scanning.', "personal", false);
+                try {
+                    const utterance = new SpeechSynthesisUtterance("Scanning paused. Use your switch to resume scanning.");
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(utterance);
+                } catch (e) { 
+                    console.error("Speech synthesis error:", e); 
+                }
                 
             } catch (error) {
                 console.error("Error during thread response:", error);
@@ -894,62 +1009,6 @@ function clearLLMOptionsAndShowStandardButtons() {
 
 // --- Add essential buttons for post-communication pause ---
 function addEssentialThreadButtons(gridContainer) {
-    // Something Else button
-    const somethingElseButton = document.createElement('button');
-    somethingElseButton.textContent = 'Something Else';
-    somethingElseButton.addEventListener('click', async () => {
-        stopAuditoryScanning();
-        resumeScanningAfterUserAction(); // Resume scanning since button was clicked
-        console.log("Thread Something Else button clicked");
-        
-        try {
-            document.getElementById('loading-indicator').style.display = 'flex';
-            
-            // Get the last incoming message to regenerate options
-            const lastIncomingMessage = threadMessages
-                .slice()
-                .reverse()
-                .find(msg => msg.sender_type === 'incoming');
-            
-            if (lastIncomingMessage) {
-                await generateResponseOptions(lastIncomingMessage.content);
-            } else {
-                await generateInitialThreadOptions();
-            }
-        } catch (error) {
-            console.error('Error getting new thread options:', error);
-            await announce("Sorry, an error occurred while getting more options.", "system", false);
-        } finally {
-            document.getElementById('loading-indicator').style.display = 'none';
-        }
-    });
-    gridContainer.appendChild(somethingElseButton);
-
-    // Please Repeat button
-    const pleaseRepeatButton = document.createElement('button');
-    pleaseRepeatButton.textContent = 'Please Repeat';
-    pleaseRepeatButton.addEventListener('click', async () => {
-        stopAuditoryScanning();
-        resumeScanningAfterUserAction(); // Resume scanning since button was clicked
-        console.log("Thread Please Repeat button clicked");
-        
-        await announce('Could you please repeat that?', "system", false);
-        
-        // Clear question display and restart listening
-        const questionDisplay = document.getElementById('question-display');
-        if (questionDisplay) {
-            questionDisplay.value = '';
-        }
-        
-        setTimeout(() => {
-            setupSpeechRecognition();
-            if (document.querySelectorAll('#gridContainer button:not([style*="display: none"])').length > 0) {
-                startAuditoryScanning();
-            }
-        }, 1000);
-    });
-    gridContainer.appendChild(pleaseRepeatButton);
-
     // Free Style button
     const freeStyleButton = document.createElement('button');
     freeStyleButton.textContent = 'Free Style';
@@ -1109,7 +1168,16 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
                 console.log('Thread AudioContext resumed successfully');
             } catch (resumeError) {
                 console.warn("Thread playAudioToDevice: AudioContext resume failed:", resumeError);
-                // Continue anyway - sometimes audio still works
+                // If AudioContext can't resume, fall back to silent completion
+                console.log('Thread playAudioToDevice: Falling back to silent mode due to AudioContext restrictions');
+                if (audioContext && audioContext.state !== 'closed') {
+                    try {
+                        audioContext.close();
+                    } catch (closeError) {
+                        console.warn('Thread playAudioToDevice: Error closing failed AudioContext:', closeError);
+                    }
+                }
+                return; // Complete silently instead of throwing an error
             }
         }
 
@@ -1130,6 +1198,19 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
                 }
                 resolve();
             };
+            
+            // Add a timeout fallback in case onended doesn't fire
+            setTimeout(() => {
+                console.log('Thread playAudioToDevice: Timeout reached, forcing completion');
+                if (audioContext && audioContext.state !== 'closed') {
+                    try {
+                        audioContext.close();
+                    } catch (closeError) {
+                        console.warn('Thread playAudioToDevice: Error closing AudioContext on timeout:', closeError);
+                    }
+                }
+                resolve();
+            }, 10000); // 10 second timeout
         });
 
     } catch (error) {
@@ -1141,7 +1222,9 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
                 console.warn('Thread playAudioToDevice: Error closing AudioContext:', closeError);
             }
         }
-        throw error;
+        // Don't throw error, just complete silently to prevent lockup
+        console.log('Thread playAudioToDevice: Completing silently due to audio error');
+        return;
     }
 }
 
@@ -1155,10 +1238,18 @@ async function processAnnouncementQueue() {
 
     console.log(`Thread ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
-    // Show splash screen if enabled
-    if (typeof showSplashScreen === 'function') {
+    // Show splash screen only for personal announcements, not system announcements
+    if (typeof showSplashScreen === 'function' && announcementType === 'personal') {
         showSplashScreen(textToAnnounce);
     }
+
+    // Add a timeout to prevent hanging
+    const timeoutPromise = new Promise((timeoutResolve) => {
+        setTimeout(() => {
+            console.warn('Thread ANNOUNCE QUEUE: Timeout reached, forcing completion');
+            timeoutResolve();
+        }, 15000); // 15 second timeout
+    });
 
     try {
         const response = await authenticatedFetch(`/play-audio`, {
@@ -1181,13 +1272,20 @@ async function processAnnouncementQueue() {
         }
 
         const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-        await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+        
+        // Race between audio playback and timeout
+        await Promise.race([
+            playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType),
+            timeoutPromise
+        ]);
 
         resolve();
 
     } catch (error) {
         console.error('Thread ANNOUNCE QUEUE: Error:', error);
-        reject(error);
+        // Always resolve instead of reject to prevent hanging
+        console.log('Thread ANNOUNCE QUEUE: Resolving despite error to prevent lockup');
+        resolve();
     } finally {
         isAnnouncingNow = false;
         if (announcementQueue.length > 0) {
@@ -1249,10 +1347,11 @@ function startAuditoryScanning() {
                 stopAuditoryScanning();
                 
                 try {
-                    // Use fire-and-forget async call for the announcement
-                    announce("Scanning paused. Use your switch to resume scanning.", "personal", false);
+                    const utterance = new SpeechSynthesisUtterance("Scanning paused. Use your switch to resume scanning.");
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(utterance);
                 } catch (e) {
-                    console.error("Thread announce error:", e);
+                    console.error("Speech synthesis error:", e);
                 }
                 
                 if (buttons.length > 0) {
