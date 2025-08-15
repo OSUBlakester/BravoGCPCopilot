@@ -47,6 +47,7 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from firebase_admin._auth_utils import EmailAlreadyExistsError
 from google.oauth2 import service_account # Import service_account
+import openai # Add OpenAI import
 # SERVICE_ACCOUNT_KEY_PATH is now imported from config.py
 
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
@@ -91,6 +92,7 @@ async def health_check():
             "sentence_transformer": sentence_transformer_model is not None,
             "primary_llm": primary_llm_model_instance is not None,
             "fallback_llm": fallback_llm_model_instance is not None,
+            "openai": openai_client is not None,
             "tts": tts_client is not None
         }
     })
@@ -114,7 +116,7 @@ template_user_data_paths = {
         "wakeWordInterjection": "hey",
         "wakeWordName": "bravo",
         "CountryCode": "US",
-        "primary_llm_model": "models/gemini-1.5-flash-latest",
+        "llm_provider": "gemini",  # New field: "gemini" or "chatgpt"
         "speech_rate": 180,
         "LLMOptions": 10,
         "ScanningOff": False,
@@ -905,7 +907,7 @@ Examples of good prompts:
 Generate ONLY the prompt text, nothing else:"""
 
         # Use the LLM to generate the optimized prompt
-        response_text = await _generate_content_with_fallback(meta_prompt)
+        response_text = await _generate_gemini_content_with_fallback(meta_prompt)
         
         if response_text:
             # Clean up the response - remove any extra quotes or formatting
@@ -925,10 +927,21 @@ Generate ONLY the prompt text, nothing else:"""
 
 # --- Configuration ---
 SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embeddings
-# Ensure GOOGLE_API_KEY is set as an environment variable
-GEMINI_MODEL_NAME = 'models/gemini-2.5-flash-preview-05-20' # LLM model to use (e.g., 'gemini-pro', 'gemini-1.5-flash')
-DEFAULT_PRIMARY_LLM_MODEL_NAME = 'models/gemini-1.5-flash-latest' # More general and likely available
-DEFAULT_FALLBACK_LLM_MODEL_NAME = 'models/gemini-pro' # A solid, widely available fallback
+
+# LLM Model Configuration - Environment Variables
+# Gemini Models
+GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "models/gemini-1.5-flash-latest")
+GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "models/gemini-pro")
+
+# ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
+# GPT-4o/4o-mini use: max_tokens, adjustable temperature
+CHATGPT_PRIMARY_MODEL = os.environ.get("CHATGPT_PRIMARY_MODEL", "gpt-4o-mini")
+CHATGPT_FALLBACK_MODEL = os.environ.get("CHATGPT_FALLBACK_MODEL", "gpt-4o")
+
+# Keep legacy defaults for backward compatibility
+DEFAULT_PRIMARY_LLM_MODEL_NAME = GEMINI_PRIMARY_MODEL
+DEFAULT_FALLBACK_LLM_MODEL_NAME = GEMINI_FALLBACK_MODEL
+
 CONTEXT_N_RESULTS = 5 # Number of context documents to retrieve from ChromaDB
 
 
@@ -957,7 +970,7 @@ DEFAULT_SETTINGS = {
     "wakeWordInterjection": DEFAULT_WAKE_WORD_INTERJECTION, # Default interjection
     "wakeWordName": DEFAULT_WAKE_WORD_NAME,      # Default name
     "CountryCode": DEFAULT_COUNTRY_CODE,          # Default Country US
-    "primary_llm_model": DEFAULT_PRIMARY_LLM_MODEL_NAME, # New setting for primary LLM
+    "llm_provider": "gemini", # New setting: "gemini" or "chatgpt"
     "speech_rate": DEFAULT_SPEECH_RATE,            # Default speech rate in WPM
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
     "ScanningOff": False, # Default scanning off
@@ -1053,6 +1066,7 @@ chroma_client_global = None # NEW: Keep a global chroma client for static db if 
 sentence_transformer_model: Optional[SentenceTransformer] = None # Global instance
 primary_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 fallback_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
+openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
 tts_client: Optional[google_tts.TextToSpeechClient] = None # Global instance
 firestore_db: Optional[FirestoreClient] = None
 firebase_app: Optional[firebase_admin.App] = None # NEW
@@ -1107,6 +1121,29 @@ else:
         # Ensure models are None if configuration fails
         primary_llm_model_instance = None
         fallback_llm_model_instance = None
+
+# --- Initialize OpenAI Client ---
+logging.info("Initializing OpenAI client...")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+
+if not openai_api_key:
+    logging.warning("OPENAI_API_KEY environment variable not set. OpenAI functionality will be disabled.")
+    openai_client = None
+else:
+    try:
+        openai_client = openai.OpenAI(api_key=openai_api_key)
+        logging.info(f"OpenAI client initialized successfully (API key first 5 chars): {openai_api_key[:5]}*****")
+        
+        # Test the connection with a simple API call
+        try:
+            models = openai_client.models.list()
+            logging.info("OpenAI API connection verified successfully.")
+        except Exception as e_test:
+            logging.warning(f"OpenAI API test call failed: {e_test}")
+            
+    except Exception as e_openai:
+        logging.error(f"Error initializing OpenAI client: {e_openai}", exc_info=True)
+        openai_client = None
 
 # --- Initialize Google Cloud Text-to-Speech Client ---
 tts_client = None
@@ -1516,8 +1553,105 @@ async def _delete_collection(coll_ref, batch_size=50):
         await _delete_collection(coll_ref, batch_size)
 
 
-# --- Helper function for LLM content generation with fallback ---
-async def _generate_content_with_fallback(prompt_text: str, generation_config: Optional[Dict] = None) -> str: # <--- THIS LINE IS CRITICAL
+# --- OpenAI Helper Functions ---
+async def _generate_openai_content(prompt_text: str, model: str = None) -> str:
+    """Generate content using OpenAI API"""
+    global openai_client
+    
+    if not openai_client:
+        raise HTTPException(status_code=503, detail="OpenAI client not available.")
+    
+    if not model:
+        model = CHATGPT_PRIMARY_MODEL
+    
+    try:
+        logging.info(f"Sending request to OpenAI model: {model}")
+        
+        # Determine if this is a GPT-5 model (which has different parameter requirements)
+        # GPT-5 models: use max_completion_tokens, temperature fixed at 1.0 (omit parameter)
+        # GPT-4o/older: use max_tokens, temperature adjustable (0-2)
+        model_lower = model.lower()
+        is_gpt5_model = 'gpt-5' in model_lower
+        uses_completion_tokens = is_gpt5_model  # GPT-5 models use max_completion_tokens
+        
+        # Build the base request parameters
+        request_params = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": "You are a helpful assistant that generates responses in valid JSON format as requested by the user. Always respond with properly formatted JSON."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt_text
+                }
+            ],
+            "response_format": {"type": "json_object"}
+        }
+        
+        # Handle temperature parameter based on model type
+        if is_gpt5_model:
+            # GPT-5 models only support temperature=1.0 (default), so we omit it
+            logging.info(f"GPT-5 model detected: {model} - omitting temperature parameter (defaults to 1.0)")
+        else:
+            # Older models support adjustable temperature
+            request_params["temperature"] = 0.7
+            logging.info(f"Using temperature=0.7 for model: {model}")
+        
+        # Add the appropriate token limit parameter
+        if uses_completion_tokens:
+            request_params["max_completion_tokens"] = 2000
+            logging.info(f"Using max_completion_tokens for GPT-5 model: {model}")
+        else:
+            request_params["max_tokens"] = 2000
+            logging.info(f"Using max_tokens for model: {model}")
+        
+        response = await asyncio.to_thread(
+            openai_client.chat.completions.create,
+            **request_params
+        )
+        
+        # Log full response for debugging
+        logging.info(f"OpenAI API response: {response}")
+        
+        # Check if we have choices and content
+        if not response.choices:
+            logging.error("OpenAI response has no choices")
+            raise Exception("OpenAI response has no choices")
+        
+        choice = response.choices[0]
+        content = choice.message.content
+        
+        # Check for empty or None content
+        if not content:
+            logging.error(f"OpenAI returned empty content. Choice: {choice}")
+            logging.error(f"Finish reason: {choice.finish_reason}")
+            raise Exception("OpenAI returned empty content")
+        
+        logging.info(f"OpenAI response received (length: {len(content)})")
+        return content
+        
+    except Exception as e:
+        logging.error(f"OpenAI API error with model {model}: {e}")
+        raise
+
+async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
+    """Generate content using OpenAI with fallback to secondary model"""
+    try:
+        # Try primary ChatGPT model first
+        return await _generate_openai_content(prompt_text, CHATGPT_PRIMARY_MODEL)
+    except Exception as e:
+        logging.warning(f"Primary OpenAI model failed: {e}. Trying fallback...")
+        try:
+            # Try fallback ChatGPT model
+            return await _generate_openai_content(prompt_text, CHATGPT_FALLBACK_MODEL)
+        except Exception as e2:
+            logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
+            raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
+
+# --- Helper function for Gemini LLM content generation with fallback ---
+async def _generate_gemini_content_with_fallback(prompt_text: str, generation_config: Optional[Dict] = None) -> str: # <--- THIS LINE IS CRITICAL
     global primary_llm_model_instance, fallback_llm_model_instance
 
     if not primary_llm_model_instance:
@@ -1761,7 +1895,28 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     print(f'Final LLM Prompt for account {account_id} and user {aac_user_id}:\n{final_llm_prompt[:500]}...') # Print first 500 chars
     logging.info(f"--- Sending Prompt to LLM for account {account_id} and user {aac_user_id} (Length: {len(final_llm_prompt)}) ---")
 
-    llm_response_json_str = await _generate_content_with_fallback(final_llm_prompt, generation_config=generation_config)
+    # Get user's LLM provider preference
+    llm_provider = user_settings.get("llm_provider", "gemini").lower()
+    logging.info(f"Using LLM provider: {llm_provider} for account {account_id} and user {aac_user_id}")
+
+    # Add JSON format instructions if using OpenAI (Gemini handles this differently)
+    if llm_provider == "chatgpt":
+        # Add complete JSON format instructions for OpenAI
+        json_format_instructions = """
+
+Format your response as a JSON list where each item has "option" and "summary" keys.
+If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
+The "option" key should contain the FULL option text.
+Example: [{"option": "Hello there, how are you doing today?", "summary": "Hello how are you"}, {"option": "Goodbye!", "summary": "Goodbye!"}]"""
+        
+        final_llm_prompt += json_format_instructions
+        logging.info(f"Added JSON format instructions for OpenAI (length: {len(json_format_instructions)})")
+
+    # Route to appropriate LLM based on user preference
+    if llm_provider == "chatgpt":
+        llm_response_json_str = await _generate_openai_content_with_fallback(final_llm_prompt)
+    else:  # Default to Gemini for "gemini" or any unrecognized value
+        llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config=generation_config)
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
     try:
@@ -3011,7 +3166,7 @@ JSON response:
     try:
         # --- LLM Call ---
         # Use the helper function for LLM call with fallback
-        summary_text = await _generate_content_with_fallback(prompt_text)
+        summary_text = await _generate_gemini_content_with_fallback(prompt_text)
         #print(f"LLM raw output for '{item['title']}': {summary_text}") # Keep logging raw output
 
         # --- Attempt to Extract JSON OBJECT using Regex ---
@@ -3801,7 +3956,7 @@ JSON response:
             logging.info("--- End of Prompt ---")
 
             # Use the new helper function for LLM call with fallback
-            llm_response  = await _generate_content_with_fallback(llm_prompt)
+            llm_response  = await _generate_gemini_content_with_fallback(llm_prompt)
 
             # Access the text part of the response safely
             llm_output_text = ""
@@ -3945,7 +4100,7 @@ class SettingsModel(BaseModel):
     CountryCode: Optional[str] = Field(None, description="Country code for holiday lookups (e.g., US, CA).", min_length=2, max_length=2)
     speech_rate: Optional[int] = Field(None, description="Speech rate in WPM (e.g., 100-300).", gt=49, lt=401) # Added speech_rate
     LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 1-50)", gt=1, lt=50) 
-    primary_llm_model: Optional[str] = Field(None, description="Primary LLM model name (e.g., models/gemini-1.5-flash-latest).", min_length=3)
+    llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
     SummaryOff: Optional[bool] = Field(None, description="Enable/disable summary generation.") # Added SummaryOff    
     selected_tts_voice_name: Optional[str] = None
@@ -5905,7 +6060,7 @@ async def get_freestyle_word_prediction(
             prompt = f"Given the user context: '{user_context}', provide 5 complete words that start with '{partial_word}'. The words should be commonly used. Return only the complete words, one per line."
         
         # Use LLM to generate predictions
-        response_text = await _generate_content_with_fallback(prompt)
+        response_text = await _generate_gemini_content_with_fallback(prompt)
         
         # Parse predictions - ensure they are complete words starting with the partial word
         raw_predictions = [line.strip() for line in response_text.split('\n') if line.strip()]
@@ -5993,7 +6148,7 @@ async def get_freestyle_word_options(
         logging.info(f"Generated prompt for LLM: {prompt}")
 
         # Use LLM to generate options
-        response_text = await _generate_content_with_fallback(prompt)
+        response_text = await _generate_gemini_content_with_fallback(prompt)
         
         # Parse options
         options = [line.strip() for line in response_text.split('\n') if line.strip()][:20]
@@ -6147,7 +6302,7 @@ For example:
 Return only the improved text, nothing else."""
         
         # Use LLM to cleanup text with personalized context
-        cleaned_text = await _generate_content_with_fallback(prompt)
+        cleaned_text = await _generate_gemini_content_with_fallback(prompt)
         
         # Clean up the response (remove quotes if present)
         cleaned_text = cleaned_text.strip().strip('"').strip("'")

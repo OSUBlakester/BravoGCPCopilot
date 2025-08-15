@@ -28,7 +28,7 @@ const toolbarPINInput = document.getElementById('toolbarPIN');
 let gridColumnsSlider = null;
 let gridColumnsValue = null;
 
-const primaryLlmModelSelect = document.getElementById('primaryLlmModel'); // From admin_settings.html
+const llmProviderSelect = document.getElementById('llmProvider'); // Updated for provider selection
 
 const saveSettingsButton = document.getElementById('saveSettingsButton');
 
@@ -79,47 +79,7 @@ async function loadVoices() {
     }
 }
 
-
-
-
-// --- NEW: Function to populate LLM models dropdown ---
-async function populateLlmModelsDropdown() {
-    if (!primaryLlmModelSelect) {
-        // This element might not be on all pages if this script is shared.
-        console.info('Primary LLM Model select element not found on this page.');
-        return;
-    }
-    primaryLlmModelSelect.innerHTML = '<option value="">Loading models...</option>'; // Placeholder
-
-    try {
-        // Assuming /api/available-llm-models is public or handled by a different auth mechanism
-        const response = await window.authenticatedFetch('/api/available-llm-models'); // Using authenticatedFetch
-        if (!response.ok) throw new Error(`Failed to fetch LLM models: ${response.statusText}`);
-        const data = await response.json();
-        primaryLlmModelSelect.innerHTML = ''; // Clear placeholder
-        if (data.models && data.models.length > 0) {
-            primaryLlmModelSelect.add(new Option("-- Select Primary LLM Model --", "")); // Add a default blank option
-            data.models.forEach(model => {
-                // Handle both old format (strings) and new format (objects)
-                if (typeof model === 'string') {
-                    primaryLlmModelSelect.add(new Option(model, model));
-                } else {
-                    // New format with display_name and description
-                    const displayText = model.display_name || model.name;
-                    const optionText = model.description ? 
-                        `${displayText} - ${model.description}` : displayText;
-                    primaryLlmModelSelect.add(new Option(optionText, model.name));
-                }
-            });
-        } else {
-            primaryLlmModelSelect.innerHTML = '<option value="">No models available</option>';
-        }
-    } catch (error) {
-        console.error('Error populating LLM models dropdown:', error);
-        primaryLlmModelSelect.innerHTML = '<option value="">Error loading models</option>';
-        showTemporaryStatus(settingsStatus, `Error loading LLM models: ${error.message}`, true, 5000);
-    }
-}
+// --- Provider selection is now static, no need to load models dynamically ---
 
 // --- Functions ---
 
@@ -177,11 +137,11 @@ async function loadSettings() {
             if (gridColumnsValue) gridColumnsValue.textContent = 6;
             console.log("Using default gridColumns value: 6");
         }
-         // Load primary LLM model
-        if (primaryLlmModelSelect && currentSettings.primary_llm_model) {
-            primaryLlmModelSelect.value = currentSettings.primary_llm_model;
-        } else if (primaryLlmModelSelect) {
-            primaryLlmModelSelect.value = ''; // Default to no selection if not set
+         // Load LLM provider setting
+        if (llmProviderSelect) {
+            // Set to saved value or default to 'gemini'
+            const providerValue = currentSettings.llm_provider || 'gemini';
+            llmProviderSelect.value = providerValue;
         }
 
         // Load toolbar PIN (account level)
@@ -225,7 +185,7 @@ async function saveSettings() {
         - newGridColumns (parsed): ${newGridColumns}`);
 
 
-    const newPrimaryLlmModel = primaryLlmModelSelect ? primaryLlmModelSelect.value : null;
+    const newLlmProvider = llmProviderSelect ? llmProviderSelect.value : 'gemini';
 
 
     // Validation
@@ -270,11 +230,8 @@ async function saveSettings() {
     if (ttsVoiceSelect && !newSelectedTtsVoice && availableVoices.length > 0) { // Check if voices loaded but none selected
         showTemporaryStatus(settingsStatus, 'Please select a TTS voice.', true, 4000); return;
     }
-    // Validate Primary LLM Model if the select element exists and a value is expected
-    if (primaryLlmModelSelect && !newPrimaryLlmModel) {
-        showTemporaryStatus(settingsStatus, 'Please select a Primary LLM Model.', true, 4000); return;
-    
-    }
+    // Provider selection is always valid since it has default values
+    // Remove the old LLM model validation
 
     const settingsToSave = {
         scanDelay: parseInt(newDelay),
@@ -293,7 +250,7 @@ async function saveSettings() {
         enablePictograms: newEnablePictograms,
         currentMood: newCurrentMood,
         selected_tts_voice_name: newSelectedTtsVoice,
-        primary_llm_model: newPrimaryLlmModel, // Add to payload
+        llm_provider: newLlmProvider, // Updated to use provider instead of specific model
         gridColumns: newGridColumns // Add gridColumns to save payload
     };
 
@@ -310,6 +267,7 @@ async function saveSettings() {
         if (!response.ok) { const errorText = await response.text(); throw new Error(`Save failed: ${response.status} ${errorText}`); }
 
         currentSettings = await response.json(); // Update local state with response
+        
         if (scanDelayInput) scanDelayInput.value = currentSettings.scanDelay || '';
         if (wakeWordInterjectionInput) wakeWordInterjectionInput.value = currentSettings.wakeWordInterjection || '';
         if (wakeWordNameInput) wakeWordNameInput.value = currentSettings.wakeWordName || '';
@@ -328,8 +286,8 @@ async function saveSettings() {
             gridColumnsSlider.value = currentSettings.gridColumns;
             if (gridColumnsValue) gridColumnsValue.textContent = currentSettings.gridColumns;
         }
-        // Update primary LLM model select
-        if (primaryLlmModelSelect) primaryLlmModelSelect.value = currentSettings.primary_llm_model || '';
+        // Update LLM provider select
+        if (llmProviderSelect) llmProviderSelect.value = currentSettings.llm_provider || 'gemini';
         
         // Save toolbar PIN separately (account level)
         if (newToolbarPIN) {
@@ -573,7 +531,7 @@ async function initializePage() {
         // The following are already assigned globally as const, no need to re-assign:
         // wakeWordInterjectionInput, wakeWordNameInput, CountryCodeInput, speechRateInput,
         // LLMOptionsInput, ScanningOffInput, SummaryOffInput, ttsVoiceSelect,
-        // testTtsVoiceButton, ttsVoiceStatus, primaryLlmModelSelect, saveSettingsButton.
+        // testTtsVoiceButton, ttsVoiceStatus, llmProviderSelect, saveSettingsButton.
 
         settingsStatus = document.getElementById('settings-status'); // This was 'let', so assign it.
 
@@ -664,7 +622,7 @@ async function initializePage() {
 
         // Initial data loading
         if (ttsVoiceSelect) await loadVoices();
-        if (primaryLlmModelSelect) await populateLlmModelsDropdown();
+        // Static provider selection - no need to populate dropdown
         await loadSettings();
         await loadToolbarPIN(); // Load the toolbar PIN on page initialization
     }
