@@ -277,6 +277,13 @@ async function authenticatedFetch(url, options = {}) {
     const headers = options.headers || {};
     headers['Authorization'] = `Bearer ${firebaseIdToken}`;
     headers['X-User-ID'] = currentAacUserId;
+    
+    // Check for admin context and add target account header if needed
+    const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+    if (adminTargetAccountId) {
+        headers['X-Admin-Target-Account'] = adminTargetAccountId;
+    }
+    
     options.headers = headers;
 
     // Add a check for 401/403 responses to trigger re-authentication
@@ -403,26 +410,34 @@ function setBannerAndPageTitle() {
     const bannerTitleElement = document.getElementById('dynamic-page-title');
     let displayTitle = "Home"; // Default title, will be overridden
 
-    // Revert this block to prioritize page name
-    // const selectedDisplayName = sessionStorage.getItem(SELECTED_DISPLAY_NAME_SESSION_KEY); // Remove this line
-    // if (selectedDisplayName) { // Remove this if block
-    //     displayTitle = selectedDisplayName;
-    // } else { // Remove this else branch
-        const storedBannerTitle = sessionStorage.getItem('dynamicBannerTitle');
-        if (pageQueryParam) // Prioritize page name from URL for banner
-            displayTitle = capitalizeFirstLetter(pageQueryParam);
-         else if (storedBannerTitle) // Fallback to session storage if no URL param
-            displayTitle = storedBannerTitle;
-            sessionStorage.removeItem('dynamicBannerTitle'); // Clear it after use
-    // }
+    // Get the base page title first
+    const storedBannerTitle = sessionStorage.getItem('dynamicBannerTitle');
+    if (pageQueryParam) {
+        displayTitle = capitalizeFirstLetter(pageQueryParam);
+    } else if (storedBannerTitle) {
+        displayTitle = storedBannerTitle;
+        sessionStorage.removeItem('dynamicBannerTitle'); // Clear it after use
+    }
 
     // If a specific page is loaded and has a displayName, use that.
-    // This will be updated again in fetchAndDisplayPage after data is loaded.
-    const loadedPageDisplayName = sessionStorage.getItem('currentPageDisplayNameForBanner'); // Temp store
+    const loadedPageDisplayName = sessionStorage.getItem('currentPageDisplayNameForBanner');
     if (loadedPageDisplayName) {
         displayTitle = loadedPageDisplayName;
-    } 
-    if (bannerTitleElement) { bannerTitleElement.textContent = displayTitle; }
+    }
+    
+    // Always add profile name if available (remove any existing profile suffix first)
+    const profileDisplayName = sessionStorage.getItem('currentProfileDisplayName');
+    if (profileDisplayName) {
+        // Remove any existing " - [profile]" suffix to avoid duplication
+        displayTitle = displayTitle.replace(/ - .*$/, '');
+        displayTitle = `${displayTitle} - ${profileDisplayName}`;
+    }
+    
+    console.log('Setting page title to:', displayTitle); // Debug log
+    if (bannerTitleElement) { 
+        bannerTitleElement.textContent = displayTitle; 
+        console.log('Banner element updated:', bannerTitleElement.textContent); // Debug log
+    }
     document.title = displayTitle; // Update browser tab title
 }
 
@@ -482,7 +497,44 @@ async function initializeUserContext() {
     if (activeUserIdElement) {
         activeUserIdElement.textContent = sessionStorage.getItem(SELECTED_DISPLAY_NAME_SESSION_KEY) || currentAacUserId;
     }*/
+    
+    // Load and update page title with profile name
+    await updatePageTitleWithProfile();
+    
     return true; // Indicate ready
+}
+
+// Function to update page title with profile name
+async function updatePageTitleWithProfile() {
+    console.log('updatePageTitleWithProfile: Starting profile name fetch...'); // Debug log
+    try {
+        const response = await authenticatedFetch('/api/account/users');
+        console.log('Profile API response status:', response.status); // Debug log
+        
+        if (!response.ok) {
+            console.warn('Failed to fetch profiles:', response.status);
+            return;
+        }
+        
+        const profiles = await response.json();
+        console.log('Profiles received:', profiles.length, 'profiles'); // Debug log
+        
+        const currentProfile = profiles.find(profile => profile.aac_user_id === currentAacUserId);
+        console.log('Current profile found:', currentProfile ? currentProfile.display_name : 'none'); // Debug log
+        
+        if (currentProfile && currentProfile.display_name) {
+            // Store the profile name for use in title updates
+            sessionStorage.setItem('currentProfileDisplayName', currentProfile.display_name);
+            console.log('Stored profile name in session:', currentProfile.display_name); // Debug log
+            
+            // Update the banner title immediately
+            setBannerAndPageTitle();
+        } else {
+            console.warn('No profile found for current user ID:', currentAacUserId);
+        }
+    } catch (error) {
+        console.error('Error updating page title with profile:', error);
+    }
 }
 
 // --- Mood Selection Integration ---
@@ -935,7 +987,7 @@ async function handleButtonClick(buttonData) {
 
     // Check if scanning was paused from scan limit and resume it
     if (isPausedFromScanLimit) {
-        resumeAuditoryScanning();
+        await resumeAuditoryScanning();
         debugTimes.resumeScan = performance.now();
         console.log('[DEBUG] handleButtonClick: resumeAuditoryScanning only, total:', (debugTimes.resumeScan - debugTimes.start).toFixed(2), 'ms');
         return; // Don't process the button click, just resume scanning
@@ -1001,14 +1053,16 @@ async function handleButtonClick(buttonData) {
         debugTimes.preMain = performance.now();
         if (llmQuery) {
             const t0 = performance.now();
-            document.getElementById('loading-indicator').style.display = 'flex';
             // Case 1: Button triggers an LLM query.
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system"); // Announce while spinner is showing.
+                await announce(speechPhrase, "system"); // Announce while speech bubble is clear.
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
             }
+            
+            // Show loading indicator AFTER the speech announcement is complete
+            document.getElementById('loading-indicator').style.display = 'flex';
 
             if (buttonLabel) {
                 sessionStorage.setItem('dynamicBannerTitle', buttonLabel);
@@ -1115,7 +1169,14 @@ async function handleButtonClick(buttonData) {
             if (typeof targetPage === 'string' && targetPage.startsWith('!')) {
                 // Special page: navigate directly to the corresponding HTML
                 const specialPage = targetPage.substring(1).toLowerCase();
-                window.location.href = `${specialPage}.html`;
+                
+                // For favorites page, pass current location as 'from' parameter
+                if (specialPage === 'favorites') {
+                    const currentUrl = window.location.href;
+                    window.location.href = `${specialPage}.html?from=${encodeURIComponent(currentUrl)}`;
+                } else {
+                    window.location.href = `${specialPage}.html`;
+                }
             } else {
                 // Normal page: use gridpage.html?page=targetPage
                 window.location.href = `gridpage.html?page=${targetPage}`;
@@ -1899,7 +1960,7 @@ function startAuditoryScanning() {
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
 
-    const scanStep = () => {
+    const scanStep = async () => {
         if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); }
         currentButtonIndex++;
         
@@ -1914,11 +1975,9 @@ function startAuditoryScanning() {
                 isPausedFromScanLimit = true;
                 stopAuditoryScanning();
                 
-                // Announce that scanning is paused
+                // Announce that scanning is paused using the proper audio system
                 try {
-                    const utterance = new SpeechSynthesisUtterance("Scanning paused");
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(utterance);
+                    await announce("Scanning paused", "system", false);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -1966,7 +2025,7 @@ function stopAuditoryScanning() {
 }
 
 // Function to resume scanning from first option with cycle reset
-function resumeAuditoryScanning() {
+async function resumeAuditoryScanning() {
     if (!isPausedFromScanLimit) {
         console.log("Scanning was not paused from scan limit, starting normally");
         startAuditoryScanning();
@@ -1978,11 +2037,9 @@ function resumeAuditoryScanning() {
     scanCycleCount = 0; // Reset cycle count
     currentButtonIndex = -1; // Reset to start from first option
     
-    // Announce that scanning is resumed
+    // Announce that scanning is resumed using the proper audio system
     try {
-        const utterance = new SpeechSynthesisUtterance("Scanning resumed");
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        await announce("Scanning resumed", "system", false);
     } catch (e) { 
         console.error("Speech synthesis error:", e); 
     }

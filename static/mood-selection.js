@@ -41,6 +41,12 @@ class MoodSelection {
         this.defaultDelay = 3500; // Default scanning delay
         this.isScanning = false;
         this.ScanningOff = false; // Will be loaded from settings
+        
+        // Gamepad variables
+        this.gamepadIndex = null;
+        this.gamepadPollInterval = null;
+        this.lastGamepadInputTime = 0;
+        this.gamepadEnabled = false; // Track if we should handle gamepad input
     }
 
     /**
@@ -178,6 +184,9 @@ class MoodSelection {
         container.addEventListener('keydown', (event) => this.handleKeyPress(event));
         
         container.focus();
+
+        // Setup gamepad support
+        this.setupGamepadSupport();
 
         // Start scanning if enabled
         if (!this.ScanningOff) {
@@ -404,6 +413,128 @@ class MoodSelection {
     }
 
     /**
+     * Setup gamepad listeners for mood selection
+     */
+    setupGamepadSupport() {
+        console.log('Setting up gamepad support for mood selection');
+        this.gamepadEnabled = true;
+        
+        // Check for already connected gamepads
+        const gamepads = navigator.getGamepads();
+        for (let i = 0; i < gamepads.length; i++) {
+            if (gamepads[i]) {
+                console.log("Found connected gamepad for mood selection:", i, gamepads[i].id);
+                if (this.gamepadIndex === null) {
+                    this.gamepadIndex = i;
+                    this.startGamepadPolling();
+                }
+                break;
+            }
+        }
+        
+        // If no gamepad is found, that's okay - user can still use keyboard/touch
+        if (this.gamepadIndex === null) {
+            console.log('No gamepad detected for mood selection, keyboard/touch input will work');
+        }
+    }
+
+    /**
+     * Start gamepad polling for mood selection
+     */
+    startGamepadPolling() {
+        if (this.gamepadPollInterval !== null || !this.gamepadEnabled) return;
+        console.log("Starting mood selection gamepad polling for index:", this.gamepadIndex);
+        let lastButtonState = false;
+
+        const pollGamepads = () => {
+            // Stop polling if mood selection is no longer active
+            if (!this.moodOverlay || !this.gamepadEnabled) {
+                this.stopGamepadPolling();
+                return;
+            }
+            
+            if (this.gamepadIndex === null) {
+                this.stopGamepadPolling();
+                return;
+            }
+            
+            const gp = navigator.getGamepads()[this.gamepadIndex];
+            if (!gp) {
+                this.gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                return;
+            }
+
+            const currentButtonState = gp.buttons[0] && gp.buttons[0].pressed;
+            if (currentButtonState && !lastButtonState) {
+                const now = Date.now();
+                if (now - this.lastGamepadInputTime > 300) { // Rate limit
+                    this.handleGamepadInput();
+                    this.lastGamepadInputTime = now;
+                } else {
+                    console.log("Mood selection gamepad press ignored (rate limit).");
+                }
+            }
+            
+            lastButtonState = currentButtonState;
+            this.gamepadPollInterval = requestAnimationFrame(pollGamepads);
+        };
+        
+        this.gamepadPollInterval = requestAnimationFrame(pollGamepads);
+    }
+
+    /**
+     * Stop gamepad polling for mood selection
+     */
+    stopGamepadPolling() {
+        if (this.gamepadPollInterval !== null) {
+            cancelAnimationFrame(this.gamepadPollInterval);
+            this.gamepadPollInterval = null;
+            console.log("Stopped mood selection gamepad polling.");
+        }
+    }
+
+    /**
+     * Handle gamepad input for mood selection
+     */
+    handleGamepadInput() {
+        console.log('Gamepad input detected in mood selection, ScanningOff:', this.ScanningOff, 'currentlyScannedButton:', this.currentlyScannedButton);
+        
+        if (this.ScanningOff) {
+            // Manual selection mode - activate focused button
+            const focusedButton = document.activeElement;
+            console.log('Manual mode - focused button:', focusedButton);
+            
+            if (focusedButton && focusedButton.classList.contains('mood-button')) {
+                const moodName = focusedButton.getAttribute('data-mood');
+                this.selectMood(moodName, focusedButton);
+            } else if (focusedButton && focusedButton.classList.contains('mood-skip-button')) {
+                this.skipMoodSelection();
+            } else {
+                // If no specific button is focused, focus the first mood button
+                const firstButton = this.moodOverlay.querySelector('.mood-button');
+                if (firstButton) {
+                    firstButton.focus();
+                }
+            }
+        } else {
+            // Scanning mode - select current highlighted button
+            if (this.currentlyScannedButton) {
+                const buttonToActivate = this.currentlyScannedButton;
+                console.log("Mood selection: Gamepad pressed, activating button:", buttonToActivate.textContent || buttonToActivate.getAttribute('data-mood'));
+                
+                // Add visual feedback
+                buttonToActivate.classList.add('active');
+                setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+                
+                // Activate the button
+                buttonToActivate.click();
+            } else {
+                console.log('No currently scanned button available in mood selection');
+            }
+        }
+    }
+
+    /**
      * Handle keyboard navigation and scanning controls
      */
     handleKeyPress(event) {
@@ -510,6 +641,11 @@ class MoodSelection {
     removeMoodInterface() {
         // Stop scanning
         this.stopScanning();
+        
+        // Stop gamepad polling and disable gamepad support
+        this.gamepadEnabled = false;
+        this.stopGamepadPolling();
+        this.gamepadIndex = null;
         
         // Remove interface (this will automatically remove the container event listener)
         if (this.moodOverlay) {
