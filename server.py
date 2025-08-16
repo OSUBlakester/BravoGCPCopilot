@@ -20,7 +20,15 @@ except ImportError:
     if ENVIRONMENT == 'testing':
         CONFIG = {
             'gcp_project_id': os.getenv('GCP_PROJECT_ID', 'bravo-test-465400'),
-            'environment_name': 'Testing'
+            'environment_name': 'Testing',
+            'client_firebase_config': {
+                'apiKey': os.getenv('FIREBASE_API_KEY_TEST', ''),
+                'authDomain': os.getenv('FIREBASE_AUTH_DOMAIN_TEST', 'bravo-test-465400.firebaseapp.com'),
+                'projectId': os.getenv('FIREBASE_PROJECT_ID_TEST', 'bravo-test-465400'),
+                'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET_TEST', 'bravo-test-465400.firebasestorage.app'),
+                'messagingSenderId': os.getenv('FIREBASE_MESSAGING_SENDER_ID_TEST', ''),
+                'appId': os.getenv('FIREBASE_APP_ID_TEST', '')
+            }
         }
         SERVICE_ACCOUNT_KEY_PATH = os.getenv('SERVICE_ACCOUNT_KEY_PATH', '/keys/bravo-test-service-account.json')
         ALLOWED_ORIGINS = [
@@ -31,7 +39,15 @@ except ImportError:
     elif ENVIRONMENT == 'production':
         CONFIG = {
             'gcp_project_id': os.getenv('GCP_PROJECT_ID', 'bravo-prod-project'),
-            'environment_name': 'Production'
+            'environment_name': 'Production',
+            'client_firebase_config': {
+                'apiKey': os.getenv('FIREBASE_API_KEY_PROD', ''),
+                'authDomain': os.getenv('FIREBASE_AUTH_DOMAIN_PROD', 'bravo-prod-project.firebaseapp.com'),
+                'projectId': os.getenv('FIREBASE_PROJECT_ID_PROD', 'bravo-prod-project'),
+                'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET_PROD', 'bravo-prod-project.firebasestorage.app'),
+                'messagingSenderId': os.getenv('FIREBASE_MESSAGING_SENDER_ID_PROD', ''),
+                'appId': os.getenv('FIREBASE_APP_ID_PROD', '')
+            }
         }
         SERVICE_ACCOUNT_KEY_PATH = os.getenv('SERVICE_ACCOUNT_KEY_PATH', '/keys/bravo-prod-service-account.json')
         ALLOWED_ORIGINS = ['https://talkwithbravo.com']
@@ -39,7 +55,15 @@ except ImportError:
     else:  # development
         CONFIG = {
             'gcp_project_id': os.getenv('GCP_PROJECT_ID', 'bravo-test-465400'),
-            'environment_name': 'Development'
+            'environment_name': 'Development',
+            'client_firebase_config': {
+                'apiKey': os.getenv('FIREBASE_API_KEY_DEV', ''),
+                'authDomain': os.getenv('FIREBASE_AUTH_DOMAIN_DEV', 'bravo-test-465400.firebaseapp.com'),
+                'projectId': os.getenv('FIREBASE_PROJECT_ID_DEV', 'bravo-test-465400'),
+                'storageBucket': os.getenv('FIREBASE_STORAGE_BUCKET_DEV', 'bravo-test-465400.firebasestorage.app'),
+                'messagingSenderId': os.getenv('FIREBASE_MESSAGING_SENDER_ID_DEV', ''),
+                'appId': os.getenv('FIREBASE_APP_ID_DEV', '')
+            }
         }
         SERVICE_ACCOUNT_KEY_PATH = os.getenv('SERVICE_ACCOUNT_KEY_PATH', '/keys/service-account.json')
         ALLOWED_ORIGINS = [
@@ -175,8 +199,37 @@ async def get_cache_stats():
 @app.get("/api/frontend-config")
 async def get_frontend_config():
     """Provides the necessary client-side Firebase configuration."""
-    # CONFIG is already environment-aware thanks to config.py
-    return JSONResponse(content=CONFIG.get('client_firebase_config', {}))
+    try:
+        client_config = CONFIG.get('client_firebase_config', {})
+        
+        # Validate that we have some configuration
+        if not client_config:
+            logging.warning("No client_firebase_config found in CONFIG")
+            # Return a minimal valid config to prevent frontend errors
+            client_config = {
+                'apiKey': '',
+                'authDomain': '',
+                'projectId': CONFIG.get('gcp_project_id', ''),
+                'storageBucket': '',
+                'messagingSenderId': '',
+                'appId': ''
+            }
+        
+        logging.info(f"Serving frontend config with projectId: {client_config.get('projectId', 'unknown')}")
+        return JSONResponse(content=client_config)
+        
+    except Exception as e:
+        logging.error(f"Error serving frontend config: {e}", exc_info=True)
+        # Return minimal valid config as fallback
+        return JSONResponse(content={
+            'apiKey': '',
+            'authDomain': '',
+            'projectId': CONFIG.get('gcp_project_id', ''),
+            'storageBucket': '',
+            'messagingSenderId': '',
+            'appId': '',
+            'error': 'Configuration temporarily unavailable'
+        })
 
 
 # NEW: Files that should be copied for a new user, relative to the user's data directory.
