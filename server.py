@@ -1935,6 +1935,42 @@ async def options_llm(request: Request):
     return Response(status_code=200)
 
 
+@app.get("/api/cache/stats")
+async def get_cache_stats(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get cache statistics for the current user"""
+    cache_manager = GeminiCacheManager()
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    stats = cache_manager.get_cache_stats(account_id, aac_user_id)
+    return JSONResponse(content=stats)
+
+
+@app.post("/api/cache/refresh")
+async def refresh_user_cache(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Manually refresh all cache entries for the current user"""
+    cache_manager = GeminiCacheManager()
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    # Clear all cache entries for this user
+    cache_types = ["USER_PROFILE", "LOCATION_DATA", "FRIENDS_FAMILY", "USER_SETTINGS", 
+                  "HOLIDAYS_BIRTHDAYS", "RAG_CONTEXT", "CONVERSATION_SESSION"]
+    
+    cleared_count = 0
+    for cache_type in cache_types:
+        if cache_manager.invalidate_cache(account_id, aac_user_id, cache_type):
+            cleared_count += 1
+    
+    logging.info(f"Manual cache refresh: Cleared {cleared_count} cache entries for account {account_id} and user {aac_user_id}")
+    
+    return JSONResponse(content={
+        "message": f"Cache refreshed for user {aac_user_id}",
+        "cleared_entries": cleared_count,
+        "cache_types": cache_types
+    })
+
+
 # --- LLM Endpoint (MODIFIED RAG Context Processing for user-specificity) ---
 @app.post("/llm")
 
@@ -1977,13 +2013,44 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
 
     current_date = date.today(); current_date_str = current_date.isoformat()
 
-    # --- AWAIT all Firestore data loading calls ---
-    upcoming_holidays_list = await get_upcoming_holidays_and_observances(account_id, aac_user_id, days_ahead=14)
-    upcoming_birthdays_list = await get_upcoming_birthdays(account_id, aac_user_id, days_ahead=14)
-    diary_entries = await load_diary_entries(account_id, aac_user_id)
-    friends_family_data = await load_friends_family_from_file(account_id, aac_user_id)
+    # --- Initialize Cache Manager ---
+    cache_manager = GeminiCacheManager()
+    
+    # --- OPTIMIZED: Try to get context from cache first ---
+    cached_user_profile = cache_manager.get_cached_context(account_id, aac_user_id, "USER_PROFILE")
+    cached_location_data = cache_manager.get_cached_context(account_id, aac_user_id, "LOCATION_DATA")
+    cached_friends_family = cache_manager.get_cached_context(account_id, aac_user_id, "FRIENDS_FAMILY")
+    cached_user_settings = cache_manager.get_cached_context(account_id, aac_user_id, "USER_SETTINGS")
+    cached_holidays_birthdays = cache_manager.get_cached_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS")
+    cached_rag_context = cache_manager.get_cached_context(account_id, aac_user_id, "RAG_CONTEXT")
 
-    chroma_context_str = ""
+    # --- AWAIT all Firestore data loading calls (only if not cached) ---
+    if cached_holidays_birthdays:
+        logging.info(f"Using cached holidays/birthdays for account {account_id} and user {aac_user_id}")
+        upcoming_holidays_list = cached_holidays_birthdays.get("holidays", [])
+        upcoming_birthdays_list = cached_holidays_birthdays.get("birthdays", [])
+    else:
+        logging.info(f"Loading fresh holidays/birthdays for account {account_id} and user {aac_user_id}")
+        upcoming_holidays_list = await get_upcoming_holidays_and_observances(account_id, aac_user_id, days_ahead=14)
+        upcoming_birthdays_list = await get_upcoming_birthdays(account_id, aac_user_id, days_ahead=14)
+        # Cache the results
+        cache_manager.cache_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS", {
+            "holidays": upcoming_holidays_list,
+            "birthdays": upcoming_birthdays_list
+        })
+
+    # Load diary entries (always fresh due to frequent updates)
+    diary_entries = await load_diary_entries(account_id, aac_user_id)
+    
+    if cached_friends_family:
+        logging.info(f"Using cached friends/family for account {account_id} and user {aac_user_id}")
+        friends_family_data = cached_friends_family
+    else:
+        logging.info(f"Loading fresh friends/family for account {account_id} and user {aac_user_id}")
+        friends_family_data = await load_friends_family_from_file(account_id, aac_user_id)
+        cache_manager.cache_context(account_id, aac_user_id, "FRIENDS_FAMILY", friends_family_data)
+
+    chroma_context_str = cached_rag_context or ""
     generation_config = {
         "response_mime_type": "application/json", # CRITICAL: Force JSON output
         "temperature": 0.7, # Adjust as needed
@@ -2013,40 +2080,65 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     future_diary_context.sort(key=lambda x: x['date_obj']); 
     future_diary_context = [item['text'] for item in future_diary_context[:MAX_DIARY_CONTEXT]]
 
-    chat_history = await load_chat_history(account_id, aac_user_id)
+    # --- OPTIMIZED: Use cached conversation session if available ---
+    cached_conversation = cache_manager.get_cached_context(account_id, aac_user_id, "CONVERSATION_SESSION")
+    if cached_conversation and len(cached_conversation.get("chat_history", [])) >= len(chat_history):
+        logging.info(f"Using cached conversation session for account {account_id} and user {aac_user_id}")
+        recent_chat_context = cached_conversation.get("recent_context", [])
+    else:
+        logging.info(f"Building fresh conversation context for account {account_id} and user {aac_user_id}")
+        chat_history = await load_chat_history(account_id, aac_user_id)
 
-    recent_chat_context = []
-    for chat in reversed(chat_history[-MAX_CHAT_CONTEXT:]):
-        # Ensure 'chat' is a dictionary before using .get()
-        if not isinstance(chat, dict):
-            logging.warning(f"Skipping non-dictionary chat item for account {account_id} and user {aac_user_id}: {chat!r}")
-            continue
-        q = chat.get('question', '').strip().replace('Q: ', '').strip("' "); 
-        r = chat.get('response', '').strip().replace('A: ', '').strip("' ")
-        if q and r: recent_chat_context.append(f"Previous Turn: Q: {q} / A: {r}")
+        recent_chat_context = []
+        for chat in reversed(chat_history[-MAX_CHAT_CONTEXT:]):
+            # Ensure 'chat' is a dictionary before using .get()
+            if not isinstance(chat, dict):
+                logging.warning(f"Skipping non-dictionary chat item for account {account_id} and user {aac_user_id}: {chat!r}")
+                continue
+            q = chat.get('question', '').strip().replace('Q: ', '').strip("' "); 
+            r = chat.get('response', '').strip().replace('A: ', '').strip("' ")
+            if q and r: recent_chat_context.append(f"Previous Turn: Q: {q} / A: {r}")
+        
+        # Cache the conversation session
+        cache_manager.cache_context(account_id, aac_user_id, "CONVERSATION_SESSION", {
+            "chat_history": chat_history,
+            "recent_context": recent_chat_context
+        })
 
-    # User Info Content
-    user_info_content_dict = await load_firestore_document(
-        account_id=account_id,
-        aac_user_id=aac_user_id,
-        doc_subpath="info/user_narrative",
-        default_data=DEFAULT_USER_INFO.copy()
-    )
-    user_info_content = user_info_content_dict.get("narrative", "").strip()
+    # --- OPTIMIZED: Use cached user info if available ---
+    if cached_user_profile:
+        logging.info(f"Using cached user profile for account {account_id} and user {aac_user_id}")
+        user_info_content = cached_user_profile.get("user_info", "")
+        user_current_content = cached_user_profile.get("user_current", "")
+    else:
+        logging.info(f"Loading fresh user profile for account {account_id} and user {aac_user_id}")
+        # User Info Content
+        user_info_content_dict = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        user_info_content = user_info_content_dict.get("narrative", "").strip()
 
-
-    # User Current Content
-    user_current_content_dict = await load_firestore_document(
-        account_id=account_id,
-        aac_user_id=aac_user_id,
-        doc_subpath="info/current_state",
-        default_data=DEFAULT_USER_CURRENT.copy()
-    )
-    user_current_content = (
-        f"Location: {user_current_content_dict.get('location', '')}\n"
-        f"People Present: {user_current_content_dict.get('people', '')}\n"
-        f"Activity: {user_current_content_dict.get('activity', '')}"
-    ).strip()
+        # User Current Content
+        user_current_content_dict = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/current_state",
+            default_data=DEFAULT_USER_CURRENT.copy()
+        )
+        user_current_content = (
+            f"Location: {user_current_content_dict.get('location', '')}\n"
+            f"People Present: {user_current_content_dict.get('people', '')}\n"
+            f"Activity: {user_current_content_dict.get('activity', '')}"
+        ).strip()
+        
+        # Cache the user profile data
+        cache_manager.cache_context(account_id, aac_user_id, "USER_PROFILE", {
+            "user_info": user_info_content,
+            "user_current": user_current_content
+        })
 
     # --- Context Assembly (RAG disabled) ---
     logging.info(f"DEBUG LLM Context: RAG functionality disabled (sentence transformer not available)")
@@ -2135,6 +2227,21 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     logging.info(f"DEBUG Final LLM Prompt preview (first 1000 chars): {prompt_preview}...")
     print(f'Final LLM Prompt for account {account_id} and user {aac_user_id}:\n{final_llm_prompt[:500]}...') # Print first 500 chars
     logging.info(f"--- Sending Prompt to LLM for account {account_id} and user {aac_user_id} (Length: {len(final_llm_prompt)}) ---")
+
+    # --- PERFORMANCE: Log cache effectiveness ---
+    cache_hits = sum([
+        1 for cache in [cached_user_profile, cached_location_data, cached_friends_family, 
+                       cached_user_settings, cached_holidays_birthdays, cached_rag_context, cached_conversation]
+        if cache is not None
+    ])
+    total_cache_types = 7
+    cache_hit_rate = (cache_hits / total_cache_types) * 100
+    logging.info(f"PERFORMANCE: Cache hit rate: {cache_hit_rate:.1f}% ({cache_hits}/{total_cache_types}) for account {account_id} and user {aac_user_id}")
+    
+    # Estimate performance improvement
+    if cache_hit_rate > 0:
+        estimated_speedup = 1 + (cache_hit_rate / 100) * 0.9  # Up to 90% improvement
+        logging.info(f"PERFORMANCE: Estimated speedup: {estimated_speedup:.2f}x with {cache_hit_rate:.1f}% cache hit rate")
 
     # Get user's LLM provider preference
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
@@ -4202,7 +4309,7 @@ JSON response:
     else:
         # Proceed with LLM call only if a prompt was successfully generated and genai is available
         try:
-            logging.info(f"--- Sending Prompt to LLM ({model}) for {url} ---")
+            logging.info(f"--- Sending Prompt to LLM ({GEMINI_PRIMARY_MODEL}) for {url} ---")
             # logging.debug(llm_prompt) # Use debug level for potentially large prompts
             logging.info("--- End of Prompt ---")
 
