@@ -7,7 +7,63 @@ import sys
 print("DEBUG: HOME =", os.environ.get("HOME")) # Also check HOME
 
 # Import environment configuration
-from config import CONFIG, SERVICE_ACCOUNT_KEY_PATH, ALLOWED_ORIGINS, DEBUG, LOG_LEVEL, HEALTH_INFO, DOMAIN
+try:
+    from config import CONFIG, SERVICE_ACCOUNT_KEY_PATH, ALLOWED_ORIGINS, DEBUG, LOG_LEVEL, HEALTH_INFO, DOMAIN
+    print("✅ Loaded configuration from config.py")
+except ImportError:
+    # Fallback to environment variables when config.py is not available (e.g., in deployment)
+    import os
+    print("⚠️  config.py not found, using environment variables")
+    
+    ENVIRONMENT = os.getenv('ENVIRONMENT', 'testing').lower()
+    
+    if ENVIRONMENT == 'testing':
+        CONFIG = {
+            'gcp_project_id': os.getenv('GCP_PROJECT_ID', 'bravo-test-465400'),
+            'environment_name': 'Testing'
+        }
+        SERVICE_ACCOUNT_KEY_PATH = os.getenv('SERVICE_ACCOUNT_KEY_PATH', '/keys/bravo-test-service-account.json')
+        ALLOWED_ORIGINS = [
+            'https://test.talkwithbravo.com',
+            'https://bravo-aac-api-946502488848.us-central1.run.app'
+        ]
+        DOMAIN = os.getenv('DOMAIN', 'test.talkwithbravo.com')
+    elif ENVIRONMENT == 'production':
+        CONFIG = {
+            'gcp_project_id': os.getenv('GCP_PROJECT_ID', 'bravo-prod-project'),
+            'environment_name': 'Production'
+        }
+        SERVICE_ACCOUNT_KEY_PATH = os.getenv('SERVICE_ACCOUNT_KEY_PATH', '/keys/bravo-prod-service-account.json')
+        ALLOWED_ORIGINS = ['https://talkwithbravo.com']
+        DOMAIN = os.getenv('DOMAIN', 'talkwithbravo.com')
+    else:  # development
+        CONFIG = {
+            'gcp_project_id': os.getenv('GCP_PROJECT_ID', 'bravo-test-465400'),
+            'environment_name': 'Development'
+        }
+        SERVICE_ACCOUNT_KEY_PATH = os.getenv('SERVICE_ACCOUNT_KEY_PATH', '/keys/service-account.json')
+        ALLOWED_ORIGINS = [
+            'http://localhost:3000',
+            'http://localhost:8080',
+            'http://localhost:8000'
+        ]
+        DOMAIN = os.getenv('DOMAIN', 'localhost:8000')
+    
+    DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    
+    HEALTH_INFO = {
+        'environment': ENVIRONMENT,
+        'environment_name': CONFIG['environment_name'],
+        'domain': DOMAIN,
+        'gcp_project': CONFIG['gcp_project_id'],
+        'debug_mode': DEBUG
+    }
+    
+    print(f"🚀 Bravo AAC Application - {CONFIG['environment_name']} Environment")
+    print(f"   Environment: {ENVIRONMENT}")
+    print(f"   Domain: {DOMAIN}")
+    print(f"   Debug Mode: {DEBUG}")
 
 
 from fastapi import FastAPI, Request, HTTPException, Body, Path, Response, Header, Depends
