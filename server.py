@@ -1402,18 +1402,46 @@ class GeminiCacheManager:
                 self.cache_refresh_times[user_key] = {}
             
             # Store cache info locally as fallback
-            self.gemini_caches[user_key][cache_type] = context
-            self.cache_refresh_times[user_key][cache_type] = datetime.now()
-            logging.info(f"Cached context locally for {user_key}/{cache_type} (length: {len(str(context))})")
+            self.gemini_caches[user_key][cache_type] = {
+                "context": context,
+                "created_at": datetime.now().timestamp(),
+                "ttl": self.cache_ttl.get(cache_type, 3600)
+            }
+            self.cache_refresh_times[user_key][cache_type] = datetime.now().timestamp()
+            context_length = len(str(context)) if isinstance(context, (dict, list)) else len(context)
+            logging.info(f"Cached context locally for {user_key}/{cache_type} (length: {context_length})")
             
             # Get all cached contexts for this user
             all_contexts = {}
             # Check all possible context types, not just a few
             for ctx_type in [CacheType.USER_PROFILE, CacheType.FRIENDS_FAMILY, CacheType.LOCATION_DATA, 
                            CacheType.USER_SETTINGS, CacheType.HOLIDAYS_BIRTHDAYS, CacheType.CONVERSATION_SESSION]:
-                ctx_content = await self.get_cached_context(account_id, aac_user_id, ctx_type)
-                if ctx_content and not ctx_content.startswith("cachedContents/"):  # Exclude Gemini cache references
-                    all_contexts[ctx_type] = str(ctx_content)
+                # Get context directly from local cache to avoid recursion
+                if user_key in self.gemini_caches and ctx_type in self.gemini_caches[user_key]:
+                    cache_entry = self.gemini_caches[user_key][ctx_type]
+                    
+                    # Extract context from cache entry structure
+                    if isinstance(cache_entry, dict) and "context" in cache_entry:
+                        ctx_content = cache_entry["context"]
+                    else:
+                        ctx_content = cache_entry
+                    
+                    # Handle both dictionary and string contexts
+                    if isinstance(ctx_content, dict):
+                        # For USER_PROFILE cache, properly format the dictionary
+                        if ctx_type == CacheType.USER_PROFILE:
+                            formatted_content = ""
+                            if "user_info" in ctx_content:
+                                formatted_content += f"User Info: {ctx_content['user_info']}\n"
+                            if "user_current" in ctx_content:
+                                formatted_content += f"Current State: {ctx_content['user_current']}\n"
+                            all_contexts[ctx_type] = formatted_content.strip()
+                        else:
+                            # For other dictionary contexts, convert to readable format
+                            import json
+                            all_contexts[ctx_type] = json.dumps(ctx_content, indent=2)
+                    elif isinstance(ctx_content, str) and not ctx_content.startswith("cachedContents/"):
+                        all_contexts[ctx_type] = ctx_content
             
             # Combine contexts into a single larger content block
             if all_contexts:
