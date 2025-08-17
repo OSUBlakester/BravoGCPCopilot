@@ -241,7 +241,7 @@ class MoodSelection {
             // Save mood to session storage
             sessionStorage.setItem('currentSessionMood', this.selectedMood);
 
-            // Save mood to settings (optional - persists across sessions)
+            // Save mood to user info (optional - persists across sessions)
             await this.saveMoodToSettings(this.selectedMood);
 
             console.log('Mood selection completed:', this.selectedMood);
@@ -282,28 +282,42 @@ class MoodSelection {
     }
 
     /**
-     * Saves the selected mood to settings
+     * Saves the selected mood to user info
      * @param {string} mood - The selected mood
      */
     async saveMoodToSettings(mood) {
         try {
             const fetchFunction = window.authenticatedFetch || fetch;
             
-            const response = await fetchFunction('/api/settings', {
+            // First get current user info to preserve it
+            const getCurrentResponse = await fetchFunction('/api/user-info', {
+                method: 'GET',
+                credentials: 'include'
+            });
+            
+            let currentUserInfo = "";
+            if (getCurrentResponse.ok) {
+                const current = await getCurrentResponse.json();
+                currentUserInfo = current.userInfo || "";
+            }
+            
+            // Save mood along with existing user info
+            const response = await fetchFunction('/api/user-info', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
+                    userInfo: currentUserInfo,
                     currentMood: mood
                 })
             });
 
             if (!response.ok) {
-                console.warn('Failed to save mood to settings:', response.statusText);
+                console.warn('Failed to save mood to user info:', response.statusText);
             }
         } catch (error) {
-            console.warn('Error saving mood to settings:', error);
+            console.warn('Error saving mood to user info:', error);
         }
     }
 
