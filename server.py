@@ -2749,9 +2749,11 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
         ).strip()
         
         # Cache the user profile data
+        from datetime import datetime, timezone
         await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
             "user_info": user_info_content,
-            "user_current": user_current_content
+            "user_current": user_current_content,
+            "updated_at": datetime.now(timezone.utc).isoformat()
         })
 
     # --- Context Assembly (RAG disabled) ---
