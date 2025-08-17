@@ -2610,19 +2610,6 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     if not user_prompt_content: raise HTTPException(status_code=400, detail="Missing 'prompt'.")
     logging.info(f"LLM request received for account {account_id} and user {aac_user_id}. Prompt length: {len(user_prompt_content)}")
 
-    # Load user settings to get LLMOptions value for placeholder replacement
-    user_settings = await load_settings_from_file(account_id, aac_user_id)
-    llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
-    current_mood = user_settings.get("currentMood")  # Get current mood from settings
-    
-    # Replace #LLMOptions placeholder in the prompt
-    if "#LLMOptions" in user_prompt_content:
-        original_prompt = user_prompt_content
-        user_prompt_content = user_prompt_content.replace("#LLMOptions", str(llm_options_value))
-        logging.info(f"Replaced #LLMOptions in prompt: '{original_prompt}' -> '{user_prompt_content}'")
-    else:
-        logging.info(f"No #LLMOptions placeholder found in prompt: '{user_prompt_content[:100]}...'")
-
     current_date = date.today(); current_date_str = current_date.isoformat()
 
     # --- Use the GLOBAL cache manager instance, not a new one ---
@@ -2636,6 +2623,27 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     cached_holidays_birthdays = await cache_manager.get_cached_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS")
     cached_rag_context = await cache_manager.get_cached_context(account_id, aac_user_id, "RAG_CONTEXT")
     cached_button_activity = await cache_manager.get_cached_context(account_id, aac_user_id, "BUTTON_ACTIVITY")
+
+    # --- OPTIMIZED: Use cached user settings if available ---
+    if cached_user_settings:
+        logging.info(f"Using cached user settings for account {account_id} and user {aac_user_id}")
+        user_settings = cached_user_settings
+    else:
+        logging.info(f"Loading fresh user settings for account {account_id} and user {aac_user_id}")
+        user_settings = await load_settings_from_file(account_id, aac_user_id)
+        # Cache the user settings
+        await cache_manager.store_cached_context(account_id, aac_user_id, "USER_SETTINGS", user_settings)
+
+    llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
+    current_mood = user_settings.get("currentMood")  # Get current mood from settings
+    
+    # Replace #LLMOptions placeholder in the prompt
+    if "#LLMOptions" in user_prompt_content:
+        original_prompt = user_prompt_content
+        user_prompt_content = user_prompt_content.replace("#LLMOptions", str(llm_options_value))
+        logging.info(f"Replaced #LLMOptions in prompt: '{original_prompt}' -> '{user_prompt_content}'")
+    else:
+        logging.info(f"No #LLMOptions placeholder found in prompt: '{user_prompt_content[:100]}...'")
 
     # --- AWAIT all Firestore data loading calls (only if not cached) ---
     if cached_holidays_birthdays:
@@ -5366,10 +5374,10 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
             await cache_manager.store_cached_context(
                 account_id, 
                 aac_user_id, 
-                saved_settings_dict, 
-                CacheType.USER_SETTINGS
+                "USER_SETTINGS",
+                saved_settings_dict
             )
-            logging.info(f"Updated USER_SETTINGS cache for user {aac_user_id}")
+            logging.info(f"Updated USER_SETTINGS cache for account {account_id} and user {aac_user_id}")
         except Exception as e:
             logging.error(f"Failed to update USER_SETTINGS cache: {e}")
         
