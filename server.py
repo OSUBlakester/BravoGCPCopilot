@@ -2693,12 +2693,13 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
 
     # --- OPTIMIZED: Use cached conversation session if available ---
     cached_conversation = await cache_manager.get_cached_context(account_id, aac_user_id, "CONVERSATION_SESSION")
+    chat_history = await load_chat_history(account_id, aac_user_id)  # Load chat history first
+    
     if cached_conversation and len(cached_conversation.get("chat_history", [])) >= len(chat_history):
         logging.info(f"Using cached conversation session for account {account_id} and user {aac_user_id}")
         recent_chat_context = cached_conversation.get("recent_context", [])
     else:
         logging.info(f"Building fresh conversation context for account {account_id} and user {aac_user_id}")
-        chat_history = await load_chat_history(account_id, aac_user_id)
 
         recent_chat_context = []
         for chat in reversed(chat_history[-MAX_CHAT_CONTEXT:]):
