@@ -6399,7 +6399,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         
         # Get current user state to maintain complete cache structure
         user_current_content_dict = await load_firestore_document(
-            account_id, aac_user_id, "current"
+            account_id, aac_user_id, "info/current_state"
         )
         user_current_content = ""
         if user_current_content_dict:
