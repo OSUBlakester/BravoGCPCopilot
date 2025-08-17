@@ -240,7 +240,7 @@
                 "text": "Jokes",
                 "speechPhrase": "I have a joke for you",
                 "targetPage": "home",
-                "LLMQuery": "Generate 100 random, unique jokes or one-liners in the style of a random, popular comedian.  Select #LLMOptions of them at random and return just those #LLMOptions",
+                "LLMQuery": "Generate #LLMOptions random, unique jokes or one-liners in the style of a random, popular comedian. Each joke should include both the question and punchline together in the format 'Question? Punchline!' with just a question mark between them. Do NOT split questions and punchlines into separate options.",
                 "queryType": "options",
                 "hidden": false
             },

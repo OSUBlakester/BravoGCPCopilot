@@ -580,7 +580,9 @@ function updateWizardPreview() {
         ${wizardData.targetPage ? `<div><strong>Navigation:</strong> Go to "${wizardData.targetPage}"</div>` : ''}
         ${wizardData.llmQuery ? `<div><strong>AI Query:</strong> ${wizardData.llmQuery}</div>` : ''}
         <div style="margin-top:1em;">
-            <button id="wizardPreviewResultsBtn" class="btn btn-primary" type="button">Preview Results</button>
+            <button id="wizardPreviewResultsBtn" class="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-200 ease-in-out" type="button">
+                <i class="fas fa-eye mr-2"></i>Preview Results
+            </button>
         </div>
         <div id="wizardLLMPreviewTable" style="margin-top:1em;"></div>
     `;
@@ -597,10 +599,10 @@ function updateWizardPreview() {
 // --- LLM Preview Integration ---
 async function previewLLMResults() {
     const previewDiv = document.getElementById('wizardLLMPreviewTable');
-    previewDiv.innerHTML = '<div class="text-center text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>Generating preview...</div>';
+    previewDiv.innerHTML = '<div class="text-center text-gray-500 py-4"><i class="fas fa-spinner fa-spin mr-2"></i>Generating preview...</div>';
     let prompt = wizardData.llmQuery || '';
     if (!prompt) {
-        previewDiv.innerHTML = '<div class="text-red-500">No AI Query to preview.</div>';
+        previewDiv.innerHTML = '<div class="text-red-500 p-4 bg-red-50 border border-red-200 rounded">No AI Query to preview.</div>';
         return;
     }
 
@@ -634,17 +636,34 @@ async function previewLLMResults() {
 
         // Render as a table
         if (options.length > 0) {
-            let html = '<table class="table-auto w-full"><thead><tr><th>#</th><th>Option</th></tr></thead><tbody>';
+            let html = '<div class="border rounded-lg overflow-hidden"><table class="w-full border-collapse"><thead class="bg-gray-100"><tr><th class="border p-2 text-left">#</th><th class="border p-2 text-left">Option</th><th class="border p-2 text-left">Summary</th></tr></thead><tbody>';
             options.forEach((opt, idx) => {
-                html += `<tr><td>${idx + 1}</td><td>${opt}</td></tr>`;
+                let optionText = '';
+                let summaryText = '';
+                
+                if (typeof opt === 'object' && opt !== null) {
+                    // Handle object format {option: "...", summary: "..."}
+                    optionText = opt.option || opt.text || JSON.stringify(opt);
+                    summaryText = opt.summary || opt.option || '';
+                } else if (typeof opt === 'string') {
+                    // Handle string format
+                    optionText = opt;
+                    summaryText = opt.length > 20 ? opt.substring(0, 20) + '...' : opt;
+                } else {
+                    // Fallback for any other format
+                    optionText = String(opt);
+                    summaryText = String(opt);
+                }
+                
+                html += `<tr class="hover:bg-gray-50"><td class="border p-2">${idx + 1}</td><td class="border p-2">${optionText}</td><td class="border p-2">${summaryText}</td></tr>`;
             });
-            html += '</tbody></table>';
+            html += '</tbody></table></div>';
             previewDiv.innerHTML = html;
         } else {
-            previewDiv.innerHTML = '<div class="text-red-500">No options returned by LLM.</div>';
+            previewDiv.innerHTML = '<div class="text-red-500 p-4 bg-red-50 border border-red-200 rounded">No options returned by LLM.</div>';
         }
     } catch (err) {
-        previewDiv.innerHTML = `<div class="text-red-500">Error: ${err.message}</div>`;
+        previewDiv.innerHTML = `<div class="text-red-500 p-4 bg-red-50 border border-red-200 rounded">Error: ${err.message}</div>`;
     }
 }
 
@@ -756,6 +775,20 @@ function populatePageSelect() {
     });
 }
 
+// Function to collect any unsaved changes from the modal editor
+function collectCurrentFormData() {
+    console.log('Collecting current form data...');
+    
+    // If there's a modal open with unsaved changes, save them first
+    if (currentEditingButton && buttonEditorModal && buttonEditorModal.style.display !== 'none') {
+        console.log('Found open modal editor, saving current changes...');
+        saveButtonEdit(); // Save any unsaved changes in the modal
+    }
+    
+    // Debug: Log current button data
+    console.log('Current page data buttons:', currentPageData ? currentPageData.buttons : 'No currentPageData');
+}
+
 async function createUpdatePage() {
     const displayName = newPageDisplayNameInput.value.trim();
     if (!displayName) {
@@ -770,32 +803,61 @@ async function createUpdatePage() {
         return;
     }
 
+    // Collect current button data from the grid form inputs
+    collectCurrentFormData();
+
     const pageData = {
         name: pageName,
         displayName: displayName,
         buttons: currentPageData ? currentPageData.buttons : []
     };
 
+    console.log('Saving page data:', pageData); // Debug logging
+
     try {
         const isUpdate = allUserPages.some(page => page.name === pageData.name);
 
         if (isUpdate) {
             pageData.originalName = pageData.name;
-            const response = await window.authenticatedFetch('/pages', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(pageData)
-            });
+            console.log('Updating page with PUT request'); // Debug logging
+            try {
+                const response = await window.authenticatedFetch('/pages', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(pageData)
+                });
 
-            if (!response.ok) throw new Error(`Failed to update page: ${response.statusText}`);
+                console.log('PUT request completed, response status:', response.status);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('PUT request failed:', response.status, errorText);
+                    throw new Error(`Failed to update page: ${response.statusText}`);
+                }
+                console.log('PUT request successful');
+            } catch (error) {
+                console.error('Error during PUT request:', error);
+                throw error;
+            }
         } else {
-            const response = await window.authenticatedFetch('/pages', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(pageData)
-            });
+            console.log('Creating page with POST request'); // Debug logging
+            try {
+                const response = await window.authenticatedFetch('/pages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(pageData)
+                });
 
-            if (!response.ok) throw new Error(`Failed to create page: ${response.statusText}`);
+                console.log('POST request completed, response status:', response.status);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('POST request failed:', response.status, errorText);
+                    throw new Error(`Failed to create page: ${response.statusText}`);
+                }
+                console.log('POST request successful');
+            } catch (error) {
+                console.error('Error during POST request:', error);
+                throw error;
+            }
         }
 
         await loadPages();
