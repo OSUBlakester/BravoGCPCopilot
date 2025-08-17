@@ -895,6 +895,20 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
     # Cache invalidation for user current state changes (location, people, activity)
     if success:
         await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/user_current")
+        
+        # Update USER_PROFILE cache with new current state
+        # Get user info to maintain complete cache structure
+        user_info_content_dict = await load_firestore_document(
+            account_id, aac_user_id, "info/user_narrative"
+        )
+        user_info_content = user_info_content_dict.get("narrative", "") if user_info_content_dict else ""
+        
+        await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
+            "user_info": user_info_content,
+            "user_current": current_state_content,
+            "updated_at": saved_at
+        })
+        logging.info(f"Updated USER_PROFILE cache with new current state for account {account_id} and user {aac_user_id}")
     
     return {"success": success}
 
@@ -1226,7 +1240,7 @@ class GeminiCacheManager:
         
         return (dt.now().timestamp() - last_refresh) < ttl
     
-    async def store_cached_context(self, account_id: str, aac_user_id: str, cache_type: str, context: str) -> bool:
+    async def store_cached_context(self, account_id: str, aac_user_id: str, cache_type: str, context) -> bool:
         """Store context using Gemini caching API with fallback to local cache"""
         # Try Gemini caching first for better performance
         if await self.store_cached_context_with_gemini(account_id, aac_user_id, cache_type, context):
@@ -1252,7 +1266,8 @@ class GeminiCacheManager:
             # Update refresh time
             self.cache_refresh_times[user_key][cache_type] = dt.now().timestamp()
             
-            logging.info(f"Cached context locally for {user_key}/{cache_type} (length: {len(context)})")
+            context_length = len(str(context)) if isinstance(context, (dict, list)) else len(context)
+            logging.info(f"Cached context locally for {user_key}/{cache_type} (length: {context_length})")
             return True
             
         except Exception as e:
@@ -1374,7 +1389,7 @@ class GeminiCacheManager:
             logging.error(f"Error deleting Gemini cached content {cache_name}: {e}")
             return False
     
-    async def store_cached_context_with_gemini(self, account_id: str, aac_user_id: str, cache_type: str, context: str) -> bool:
+    async def store_cached_context_with_gemini(self, account_id: str, aac_user_id: str, cache_type: str, context) -> bool:
         """Store context using actual Gemini caching API with batching for efficiency"""
         try:
             from datetime import datetime
@@ -6353,8 +6368,22 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     if success:
         # Update USER_PROFILE cache with new user info
         from datetime import datetime, timezone
+        
+        # Get current user state to maintain complete cache structure
+        user_current_content_dict = await load_firestore_document(
+            account_id, aac_user_id, "current"
+        )
+        user_current_content = ""
+        if user_current_content_dict:
+            user_current_content = (
+                f"Location: {user_current_content_dict.get('location', '')}\n"
+                f"People Present: {user_current_content_dict.get('people', '')}\n"
+                f"Activity: {user_current_content_dict.get('activity', '')}"
+            ).strip()
+        
         await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
             "user_info": user_info,
+            "user_current": user_current_content,
             "updated_at": datetime.now(timezone.utc).isoformat()
         })
         logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
