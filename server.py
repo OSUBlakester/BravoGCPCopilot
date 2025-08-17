@@ -897,18 +897,22 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
         await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/user_current")
         
         # Update USER_PROFILE cache with new current state
-        # Get user info to maintain complete cache structure
-        user_info_content_dict = await load_firestore_document(
-            account_id, aac_user_id, "info/user_narrative"
-        )
-        user_info_content = user_info_content_dict.get("narrative", "") if user_info_content_dict else ""
-        
-        await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
-            "user_info": user_info_content,
-            "user_current": current_state_content,
-            "updated_at": saved_at
-        })
-        logging.info(f"Updated USER_PROFILE cache with new current state for account {account_id} and user {aac_user_id}")
+        try:
+            # Get user info to maintain complete cache structure
+            user_info_content_dict = await load_firestore_document(
+                account_id, aac_user_id, "info/user_narrative"
+            )
+            user_info_content = user_info_content_dict.get("narrative", "") if user_info_content_dict else ""
+            
+            await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
+                "user_info": user_info_content,
+                "user_current": current_state_content,
+                "updated_at": saved_at
+            })
+            logging.info(f"Updated USER_PROFILE cache with new current state for account {account_id} and user {aac_user_id}")
+        except Exception as cache_error:
+            logging.error(f"Failed to update USER_PROFILE cache with current state for account {account_id} and user {aac_user_id}: {cache_error}")
+            # Don't fail the entire operation due to cache update failure
     
     return {"success": success}
 
@@ -6395,26 +6399,30 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     
     if success:
         # Update USER_PROFILE cache with new user info
-        from datetime import datetime, timezone
-        
-        # Get current user state to maintain complete cache structure
-        user_current_content_dict = await load_firestore_document(
-            account_id, aac_user_id, "info/current_state"
-        )
-        user_current_content = ""
-        if user_current_content_dict:
-            user_current_content = (
-                f"Location: {user_current_content_dict.get('location', '')}\n"
-                f"People Present: {user_current_content_dict.get('people', '')}\n"
-                f"Activity: {user_current_content_dict.get('activity', '')}"
-            ).strip()
-        
-        await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
-            "user_info": user_info,
-            "user_current": user_current_content,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        })
-        logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
+        try:
+            from datetime import datetime, timezone
+            
+            # Get current user state to maintain complete cache structure
+            user_current_content_dict = await load_firestore_document(
+                account_id, aac_user_id, "info/current_state"
+            )
+            user_current_content = ""
+            if user_current_content_dict:
+                user_current_content = (
+                    f"Location: {user_current_content_dict.get('location', '')}\n"
+                    f"People Present: {user_current_content_dict.get('people', '')}\n"
+                    f"Activity: {user_current_content_dict.get('activity', '')}"
+                ).strip()
+            
+            await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
+                "user_info": user_info,
+                "user_current": user_current_content,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+            logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
+        except Exception as cache_error:
+            logging.error(f"Failed to update USER_PROFILE cache for account {account_id} and user {aac_user_id}: {cache_error}")
+            # Don't fail the entire save operation due to cache update failure
         
         return JSONResponse(content={"userInfo": user_info})
     else:
