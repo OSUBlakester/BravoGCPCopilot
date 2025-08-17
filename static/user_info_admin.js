@@ -7,6 +7,12 @@ let saveInfoButton = null;
 let infoSaveStatus = null;
 
 let userBirthdateInput = null;
+
+// Mood related elements
+let currentMoodSelect = null;
+let saveMoodBtn = null;
+let clearMoodBtn = null;
+let moodSaveStatus = null;
 let friendsFamilyTableBody = null;
 let addFriendsFamilyRowButton = null;
 let saveFriendsFamilyButton = null;
@@ -22,6 +28,8 @@ let addRelationshipBtn = null;
 // --- State Variables ---
 let currentUserInfo = '';
 let currentUserBirthdate = null;
+let currentMood = '';
+
 // Global state
 let currentFriendsFamily = { friends_family: [] };
 let editingPersonIndex = null;
@@ -41,6 +49,12 @@ async function initializePage() {
         // User Birthday Element
         userBirthdateInput = document.getElementById('userBirthdate');
 
+        // Mood Elements
+        currentMoodSelect = document.getElementById('currentMood');
+        saveMoodBtn = document.getElementById('saveMoodBtn');
+        clearMoodBtn = document.getElementById('clearMoodBtn');
+        moodSaveStatus = document.getElementById('mood-save-status');
+
         // Friends & Family Elements
         friendsFamilyTableBody = document.getElementById('friendsFamilyTbody');
         addFriendsFamilyRowButton = document.getElementById('addFriendsFamilyRow');
@@ -59,6 +73,7 @@ async function initializePage() {
 
         // Basic check for essential elements
         if (!userInfoTextarea || !saveInfoButton || !infoSaveStatus || !userBirthdateInput || 
+            !currentMoodSelect || !saveMoodBtn || !clearMoodBtn || !moodSaveStatus ||
             !friendsFamilyTableBody || !addFriendsFamilyRowButton || !saveFriendsFamilyButton || 
             !friendsFamilySaveStatus || !relationshipModal || !manageRelationshipsBtn || 
             !closeModalBtn || !relationshipsList || !newRelationshipInput || !addRelationshipBtn) {
@@ -68,6 +83,8 @@ async function initializePage() {
 
         // Add Event Listeners
         saveInfoButton.addEventListener('click', saveUserInfoAndBirthday);
+        saveMoodBtn.addEventListener('click', saveMood);
+        clearMoodBtn.addEventListener('click', clearMood);
         addFriendsFamilyRowButton.addEventListener('click', addFriendsFamilyRow);
         saveFriendsFamilyButton.addEventListener('click', saveFriendsFamily);
         manageRelationshipsBtn.addEventListener('click', openRelationshipModal);
@@ -84,6 +101,8 @@ async function initializePage() {
         // Load initial data
         await loadUserInfo();
         await loadFriendsFamily();
+        await loadMoodOptions();
+        await loadCurrentMood();
     }
 }
 
@@ -97,6 +116,126 @@ function showStatus(statusElement, message, isError = false, timeout = 3000) {
             statusElement.textContent = '';
         }, timeout);
     }
+}
+
+// --- Mood Functions ---
+async function loadMoodOptions() {
+    console.log("Loading mood options...");
+    
+    // Predefined mood options (same as mood-selection.js)
+    const MOOD_OPTIONS = [
+        { name: 'Happy', emoji: '😊' },
+        { name: 'Sad', emoji: '😢' },
+        { name: 'Excited', emoji: '🤩' },
+        { name: 'Calm', emoji: '😌' },
+        { name: 'Angry', emoji: '😠' },
+        { name: 'Silly', emoji: '🤪' },
+        { name: 'Tired', emoji: '😴' },
+        { name: 'Anxious', emoji: '😰' },
+        { name: 'Confused', emoji: '😕' },
+        { name: 'Surprised', emoji: '😲' },
+        { name: 'Proud', emoji: '😎' },
+        { name: 'Worried', emoji: '😟' },
+        { name: 'Cranky', emoji: '😤' },
+        { name: 'Peaceful', emoji: '🕊️' },
+        { name: 'Playful', emoji: '😄' },
+        { name: 'Frustrated', emoji: '😫' },
+        { name: 'Curious', emoji: '🤔' },
+        { name: 'Grateful', emoji: '🙏' },
+        { name: 'Lonely', emoji: '😔' },
+        { name: 'Content', emoji: '😊' }
+    ];
+    
+    // Clear existing options except the first one
+    currentMoodSelect.innerHTML = '<option value="">No mood selected</option>';
+    
+    // Add mood options
+    MOOD_OPTIONS.forEach(mood => {
+        const option = document.createElement('option');
+        option.value = mood.name;
+        option.textContent = `${mood.emoji} ${mood.name}`;
+        currentMoodSelect.appendChild(option);
+    });
+}
+
+async function loadCurrentMood() {
+    console.log("Loading current mood...");
+    showStatus(moodSaveStatus, "Loading...", false, 0);
+    
+    try {
+        const response = await window.authenticatedFetch('/api/user-info', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            currentMood = data.currentMood || '';
+            currentMoodSelect.value = currentMood;
+            showStatus(moodSaveStatus, "Loaded", false, 2000);
+            console.log("Current mood loaded:", currentMood);
+        } else {
+            throw new Error(`Failed to load current mood: ${response.status}`);
+        }
+    } catch (error) {
+        console.error("Error loading current mood:", error);
+        showStatus(moodSaveStatus, "Failed to load mood", true, 5000);
+    }
+}
+
+async function saveMood() {
+    const selectedMood = currentMoodSelect.value;
+    console.log("Saving mood:", selectedMood);
+    showStatus(moodSaveStatus, "Saving...", false, 0);
+    
+    try {
+        // First get current user info to preserve it
+        const getCurrentResponse = await window.authenticatedFetch('/api/user-info', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        let currentUserInfo = "";
+        if (getCurrentResponse.ok) {
+            const current = await getCurrentResponse.json();
+            currentUserInfo = current.userInfo || "";
+        }
+        
+        // Save mood along with existing user info
+        const response = await window.authenticatedFetch('/api/user-info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userInfo: currentUserInfo,
+                currentMood: selectedMood
+            })
+        });
+        
+        if (response.ok) {
+            currentMood = selectedMood;
+            showStatus(moodSaveStatus, "Mood saved successfully", false, 3000);
+            console.log("Mood saved successfully:", selectedMood);
+            
+            // Update session storage as well
+            if (selectedMood) {
+                sessionStorage.setItem('currentSessionMood', selectedMood);
+            } else {
+                sessionStorage.removeItem('currentSessionMood');
+            }
+        } else {
+            throw new Error(`Failed to save mood: ${response.status}`);
+        }
+    } catch (error) {
+        console.error("Error saving mood:", error);
+        showStatus(moodSaveStatus, "Failed to save mood", true, 5000);
+    }
+}
+
+async function clearMood() {
+    console.log("Clearing mood...");
+    currentMoodSelect.value = "";
+    await saveMood(); // This will save an empty mood
+    sessionStorage.removeItem('currentSessionMood');
 }
 
 // --- User Info Functions ---

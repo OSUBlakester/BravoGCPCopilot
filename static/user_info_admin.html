@@ -6,6 +6,8 @@
     <title>User Information & Friends & Family Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Ensure mood-selection.js is loaded for mood options -->
+    <script src="/static/mood-selection.js" defer></script>
     <script src="/static/user_info_admin.js" defer></script>
     <style>
         /* Custom base styles */
@@ -239,6 +241,32 @@
     </div>
 
     <div class="container mx-auto mt-6 p-4 space-y-6">
+
+        <!-- Current Mood Section -->
+        <div class="bg-blue-50 p-6 rounded-lg shadow-lg border-l-4 border-blue-500">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2 flex items-center">
+                <i class="fas fa-smile mr-3 text-blue-600"></i>Current Mood
+            </h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="currentMood" class="block text-lg font-medium text-gray-700 mb-2">Current Session Mood</label>
+                    <select id="currentMood" name="currentMood" class="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="">No mood selected</option>
+                        <!-- Mood options will be populated dynamically -->
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Set the current mood to personalize AI responses. This affects how the assistant interacts with you.</p>
+                </div>
+                <div class="flex space-x-3">
+                    <button type="button" id="saveMoodBtn" class="button-primary">
+                        <i class="fas fa-save mr-2"></i>Save Mood
+                    </button>
+                    <button type="button" id="clearMoodBtn" class="button-secondary">
+                        <i class="fas fa-times mr-2"></i>Clear Mood
+                    </button>
+                    <span id="mood-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
+                </div>
+            </div>
+        </div>
 
         <div class="bg-white p-6 rounded-lg shadow-lg">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-2">User Information</h2>
