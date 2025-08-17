@@ -18,8 +18,6 @@ const displaySplashInput = document.getElementById('displaySplash');
 const displaySplashTimeInput = document.getElementById('displaySplashTime');
 const enableMoodSelectionInput = document.getElementById('enableMoodSelection');
 const enablePictogramsInput = document.getElementById('enablePictograms');
-const currentMoodSelect = document.getElementById('currentMood');
-const clearMoodBtn = document.getElementById('clearMoodBtn');
 const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
 const testTtsVoiceButton = document.getElementById('testTtsVoiceButton');
 const ttsVoiceStatus = document.getElementById('tts-voice-status');
@@ -116,14 +114,6 @@ async function loadSettings() {
         if (displaySplashTimeInput) { displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000; }
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
         if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms || false; }
-        if (currentMoodSelect) { 
-            currentMoodSelect.value = currentSettings.currentMood || ''; 
-            // Also update from session storage to show current session mood
-            const sessionMood = getCurrentMood ? getCurrentMood() : null;
-            if (sessionMood && sessionMood !== 'none') {
-                currentMoodSelect.value = sessionMood;
-            }
-        }
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
             ttsVoiceSelect.value = currentSettings.selected_tts_voice_name;
         }
@@ -174,7 +164,6 @@ async function saveSettings() {
     const newDisplaySplashTime = displaySplashTimeInput.value ? parseInt(displaySplashTimeInput.value) : 3000;
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
     const newEnablePictograms = enablePictogramsInput.checked;
-    const newCurrentMood = currentMoodSelect.value || null;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
     const newGridColumns = gridColumnsSlider ? parseInt(gridColumnsSlider.value) : 6;
     const newToolbarPIN = toolbarPINInput ? toolbarPINInput.value.trim() : null;
@@ -248,7 +237,6 @@ async function saveSettings() {
         displaySplashTime: newDisplaySplashTime,
         enableMoodSelection: newEnableMoodSelection,
         enablePictograms: newEnablePictograms,
-        currentMood: newCurrentMood,
         selected_tts_voice_name: newSelectedTtsVoice,
         llm_provider: newLlmProvider, // Updated to use provider instead of specific model
         gridColumns: newGridColumns // Add gridColumns to save payload
@@ -569,35 +557,6 @@ async function initializePage() {
         if (testTtsVoiceButton) testTtsVoiceButton.addEventListener('click', testSelectedVoice);
         
         // Mood-related event listeners
-        if (clearMoodBtn) {
-            clearMoodBtn.addEventListener('click', function() {
-                // Clear session storage mood
-                if (typeof clearCurrentMood === 'function') {
-                    clearCurrentMood();
-                }
-                // Reset dropdown to no selection
-                if (currentMoodSelect) {
-                    currentMoodSelect.value = '';
-                }
-                showTemporaryStatus(settingsStatus, 'Session mood cleared', false, 2000);
-            });
-        }
-        
-        // Update session storage when mood is manually changed
-        if (currentMoodSelect) {
-            currentMoodSelect.addEventListener('change', function() {
-                const selectedMood = this.value;
-                if (selectedMood) {
-                    // Update session storage
-                    sessionStorage.setItem('currentSessionMood', selectedMood);
-                    console.log('Mood manually updated to:', selectedMood);
-                } else {
-                    sessionStorage.removeItem('currentSessionMood');
-                    console.log('Mood manually cleared');
-                }
-            });
-        }
-        
         // Grid columns slider event listener
         if (gridColumnsSlider && gridColumnsValue) {
             // Update value display when slider moves
