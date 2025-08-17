@@ -1131,7 +1131,7 @@ DEFAULT_LLM_OPTIONS = 10 # Default LLM Options
 DEFAULT_WAKE_WORD_INTERJECTION = "Hey" # Default interjection
 DEFAULT_WAKE_WORD_NAME = "Friend" # Default name
 
-DEFAULT_USER_INFO = {"narrative": "Default user info."}
+DEFAULT_USER_INFO = {"narrative": "Default user info.", "currentMood": None}
 DEFAULT_USER_CURRENT = {"location": "Unknown", "people": "None", "activity": "Idle", "loaded_at": None, "favorite_name": None, "saved_at": None}
 DEFAULT_COLUMNS = 10 # Default number of columns in the grid
 DEFAULT_LIGHT_COLOR = 4294659860 # Default light color
@@ -1158,7 +1158,6 @@ DEFAULT_SETTINGS = {
     "displaySplash": False,  # Default splash screen display setting
     "displaySplashTime": 3000,  # Default splash screen duration (3 seconds)
     "enableMoodSelection": False,  # Default mood selection disabled
-    "currentMood": None,  # Default no mood selected
     "enablePictograms": False  # Default AAC pictograms disabled
 }
 
@@ -2635,7 +2634,6 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
         await cache_manager.store_cached_context(account_id, aac_user_id, "USER_SETTINGS", user_settings)
 
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
-    current_mood = user_settings.get("currentMood")  # Get current mood from settings
     
     # Replace #LLMOptions placeholder in the prompt
     if "#LLMOptions" in user_prompt_content:
@@ -2732,6 +2730,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
         logging.info(f"Using cached user profile for account {account_id} and user {aac_user_id}")
         user_info_content = cached_user_profile.get("user_info", "")
         user_current_content = cached_user_profile.get("user_current", "")
+        current_mood = cached_user_profile.get("current_mood")  # Get current mood from cached profile
     else:
         logging.info(f"Loading fresh user profile for account {account_id} and user {aac_user_id}")
         # User Info Content
@@ -2742,6 +2741,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
             default_data=DEFAULT_USER_INFO.copy()
         )
         user_info_content = user_info_content_dict.get("narrative", "").strip()
+        current_mood = user_info_content_dict.get("currentMood")  # Get current mood from user info
 
         # User Current Content
         user_current_content_dict = await load_firestore_document(
@@ -2761,6 +2761,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
         await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
             "user_info": user_info_content,
             "user_current": user_current_content,
+            "current_mood": current_mood,
             "updated_at": datetime.now(timezone.utc).isoformat()
         })
 
@@ -5276,7 +5277,6 @@ class SettingsModel(BaseModel):
     displaySplash: Optional[bool] = Field(None, description="Enable/disable splash screen display when announcing text.")
     displaySplashTime: Optional[int] = Field(None, description="Duration in milliseconds to display splash screen.", ge=500, le=10000)
     enableMoodSelection: Optional[bool] = Field(None, description="Enable/disable mood selection at session start.")
-    currentMood: Optional[str] = Field(None, description="Currently selected mood for the session.", max_length=50)
     enablePictograms: Optional[bool] = Field(None, description="Enable/disable AAC pictogram display on buttons.")
 
 
@@ -6494,7 +6494,10 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         doc_subpath="info/user_narrative",
         default_data=DEFAULT_USER_INFO.copy()
     )
-    return JSONResponse(content={"userInfo": user_info_content_dict.get("narrative", "")})
+    return JSONResponse(content={
+        "userInfo": user_info_content_dict.get("narrative", ""),
+        "currentMood": user_info_content_dict.get("currentMood")
+    })
 
 @app.post("/api/user-info")
 async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
@@ -6503,11 +6506,12 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     logging.info(f"POST /api/user-info request received for account {account_id} and user {aac_user_id}.")
     
     user_info = request.get("userInfo", "")
+    current_mood = request.get("currentMood")
     success = await save_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="info/user_narrative",
-        data_to_save={"narrative": user_info}
+        data_to_save={"narrative": user_info, "currentMood": current_mood}
     )
     
     if success:
@@ -6530,6 +6534,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
             await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
                 "user_info": user_info,
                 "user_current": user_current_content,
+                "current_mood": current_mood,
                 "updated_at": datetime.now(timezone.utc).isoformat()
             })
             logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
@@ -6537,7 +6542,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
             logging.error(f"Failed to update USER_PROFILE cache for account {account_id} and user {aac_user_id}: {cache_error}")
             # Don't fail the entire save operation due to cache update failure
         
-        return JSONResponse(content={"userInfo": user_info})
+        return JSONResponse(content={"userInfo": user_info, "currentMood": current_mood})
     else:
         raise HTTPException(status_code=500, detail="Failed to save user info.")
 
