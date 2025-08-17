@@ -902,8 +902,6 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
     
     # Cache invalidation for user current state changes (location, people, activity)
     if success:
-        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/user_current")
-        
         # Update USER_PROFILE cache with new current state
         try:
             # Get user info to maintain complete cache structure
@@ -918,6 +916,10 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
                 "updated_at": saved_at
             })
             logging.info(f"Updated USER_PROFILE cache with new current state for account {account_id} and user {aac_user_id}")
+            
+            # Invalidate conversation sessions since user context changed
+            await cache_manager.invalidate_cache_type(account_id, aac_user_id, "CONVERSATION_SESSION")
+            logging.info(f"Invalidated conversation session cache due to current state change for account {account_id} and user {aac_user_id}")
         except Exception as cache_error:
             logging.error(f"Failed to update USER_PROFILE cache with current state for account {account_id} and user {aac_user_id}: {cache_error}")
             # Don't fail the entire operation due to cache update failure
