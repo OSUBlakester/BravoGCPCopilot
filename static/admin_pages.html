@@ -216,28 +216,48 @@
 
                     // 6. Define and expose a global authenticatedFetch function
                     window.authenticatedFetch = async (url, options = {}) => {
+                        console.log(`authenticatedFetch called: ${options.method || 'GET'} ${url}`);
+                        console.log('Request options:', options);
+                        
                         const headers = options.headers || {};
                         headers['Authorization'] = `Bearer ${tokenFromUser}`;
                         headers['X-User-ID'] = currentAacUserId;
                         
-                        // For admin access, include the target account ID
+                        // Handle both admin and account owner scenarios
                         const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+                        const adminAccessContext = sessionStorage.getItem('adminAccessContext');
+                        
                         console.log(`DEBUG: Session storage items:`, {
                             currentAacUserId: sessionStorage.getItem('currentAacUserId'),
                             adminTargetAccountId: sessionStorage.getItem('adminTargetAccountId'),
                             adminSelectedAccountId: sessionStorage.getItem('adminSelectedAccountId'),
+                            adminAccessContext: sessionStorage.getItem('adminAccessContext'),
                             firebaseIdToken: sessionStorage.getItem('firebaseIdToken') ? 'present' : 'missing'
                         });
                         
                         if (adminTargetAccountId) {
+                            // Admin managing another account
                             headers['X-Admin-Target-Account'] = adminTargetAccountId;
-                            console.log(`Setting admin target account header: ${adminTargetAccountId}`);
+                            console.log(`Admin mode: Setting admin target account header: ${adminTargetAccountId}`);
+                        } else if (adminAccessContext === 'true') {
+                            // Admin context but no target account (shouldn't happen, but log it)
+                            console.warn('Admin access context set but no adminTargetAccountId found');
                         } else {
-                            console.warn('No adminTargetAccountId found in session storage - admin access may fail');
+                            // Account owner managing their own account
+                            console.log(`Account owner mode: User ${currentAacUserId} managing their own account`);
                         }
                         
                         options.headers = headers;
-                        const response = await fetch(url, options);
+                        console.log('About to call fetch with:', url, options);
+                        
+                        try {
+                            const response = await fetch(url, options);
+                            console.log(`Fetch completed: ${response.status} ${response.statusText}`);
+                            return response;
+                        } catch (error) {
+                            console.error('Fetch error:', error);
+                            throw error;
+                        }
                         if (response.status === 401 || response.status === 403) {
                             console.warn(`Auth failed (${response.status}). Redirecting to login.`);
                             sessionStorage.clear();

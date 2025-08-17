@@ -95,6 +95,7 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import google.generativeai as genai
+from google.generativeai import caching
 import json
 import logging
 import datetime
@@ -286,9 +287,9 @@ template_user_data_paths = {
         "displayName": "Greetings",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "Goodbye for now!", "hidden": False},
+            {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
             {"row": 0,"col": 2,"text": "Current Location", "LLMQuery": "Using the 'People Present' values from context, generate #LLMOptions expressive greetings.  Each item should be a single sentence and be very energetic and engaging.  The greetings should be in first person from the user, as if the user was speaking to someone in the room or a general greeting.  If there is information about one of the People Present in the user data, use that information to craft a more personal greeting.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 3,"text": "Jokes", "LLMQuery": "Generate 100 random, unique jokes or one-liners for the user.  Randomly select #LLMOptions of them from the 100 and return just those #LLMOptions", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Jokes", "LLMQuery": "Generate #LLMOptions random, unique jokes or one-liners. Each joke should include both the question and punchline together in the format 'Question? Punchline!' with just a question mark between them. Do NOT split questions and punchlines into separate options.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
             {"row": 0,"col": 4,"text": "Would you rather", "LLMQuery": "Generate #LLMOptions creative and fun would-you-rather type questions that could be used to start a conversation.  The more obscure comparison, the better.  Begin each option with Would you rather...", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
             {"row": 0,"col": 5,"text": "Did you know", "LLMQuery": "Generate #LLMOptions random, creative and possibly obscure trivia facts that can be used start a conversation.  You can user some of the user context select most of the trivia topics, but do not limit the topics on just the user's context.  The funnier that trivia fact, the better.'", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
             {"row": 0,"col": 6,"text": "Affirmations", "LLMQuery": "Generate #LLMOptions positive affirmations for the user to share with everyone around", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
@@ -690,6 +691,10 @@ async def create_page(page: dict, current_ids: Annotated[Dict[str, str], Depends
 
         pages.append(page)
         await save_pages_to_file(account_id, aac_user_id, pages) # ADD 'await' here
+        
+        # Invalidate caches that might be affected by page changes
+        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/pages")
+        
         return {"message": "Page created successfully"}
     except Exception as e:
         logging.error(f"Error creating page for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
@@ -750,6 +755,10 @@ async def update_page(request: Request, current_ids: Annotated[Dict[str, str], D
         # Save the ENTIRE updated list of pages back to Firestore
         # The save_pages_to_file wraps this list in a dictionary, which is what Firestore expects.
         await save_pages_to_file(account_id, aac_user_id, all_pages_for_user)
+        
+        # Invalidate caches that might be affected by page changes
+        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/pages")
+        
         return {"message": "Page updated successfully"}
     except Exception as e:
         logging.error(f"Error updating page for user {aac_user_id}: {e}", exc_info=True)
@@ -770,6 +779,10 @@ async def delete_page(page_name: str, current_ids: Annotated[Dict[str, str], Dep
     pages_data = [p for p in pages_data if p["name"].lower() != page_name_lower] # Compare with lowercase
     if len(pages_data) < initial_len:
         await save_pages_to_file(account_id, aac_user_id, pages_data) # Save for this user
+        
+        # Invalidate caches that might be affected by page deletion
+        await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/pages")
+        
         return {"message": f"Page '{page_name}' deleted successfully"}
     else:
         raise HTTPException(status_code=404, detail=f"Page with name '{page_name}' not found")
@@ -1161,13 +1174,14 @@ class CacheType:
     HOLIDAYS_BIRTHDAYS = "holidays_birthdays"
     RAG_CONTEXT = "rag_context"
     CONVERSATION_SESSION = "conversation_session"
+    BUTTON_ACTIVITY = "button_activity"
 
 class GeminiCacheManager:
     """Manages Gemini context caching and conversation sessions for performance optimization"""
     
     def __init__(self):
-        self.gemini_caches = {}  # {user_key: {cache_type: cache_info}}
-        self.conversation_sessions = {}  # {user_key: conversation_object}
+        self.gemini_caches = {}  # {user_key: {cache_type: gemini_cache_object}}
+        self.conversation_sessions = {}  # {user_key: conversation_chat_session}
         self.cache_refresh_times = {}  # {user_key: {cache_type: last_refresh_timestamp}}
         
         # Cache invalidation rules - which admin changes invalidate which caches
@@ -1178,6 +1192,7 @@ class GeminiCacheManager:
             "/api/favorites": [CacheType.RAG_CONTEXT],
             "/api/user-current-favorites": [CacheType.RAG_CONTEXT],
             "/pages": [CacheType.RAG_CONTEXT],  # Page layout changes might affect context
+            "/api/audit/log-button-click": [CacheType.BUTTON_ACTIVITY],  # Button clicks invalidate activity cache
         }
         
         # Cache TTL settings (in seconds)
@@ -1188,7 +1203,8 @@ class GeminiCacheManager:
             CacheType.USER_SETTINGS: 1 * 3600,      # 1 hour - changes more often
             CacheType.HOLIDAYS_BIRTHDAYS: 24 * 3600, # 24 hours - daily refresh
             CacheType.RAG_CONTEXT: 1 * 3600,        # 1 hour - depends on other data
-            CacheType.CONVERSATION_SESSION: 4 * 3600 # 4 hours - conversation session
+            CacheType.CONVERSATION_SESSION: 4 * 3600, # 4 hours - conversation session
+            CacheType.BUTTON_ACTIVITY: 6 * 3600     # 6 hours - recent button activity
         }
     
     def _get_user_key(self, account_id: str, aac_user_id: str) -> str:
@@ -1210,27 +1226,13 @@ class GeminiCacheManager:
         
         return (dt.now().timestamp() - last_refresh) < ttl
     
-    async def get_cached_context(self, account_id: str, aac_user_id: str, cache_type: str) -> Optional[str]:
-        """Retrieve cached context if valid, None if expired or missing"""
-        if not await self.is_cache_valid(account_id, aac_user_id, cache_type):
-            return None
-            
-        user_key = self._get_user_key(account_id, aac_user_id)
-        cache_info = self.gemini_caches.get(user_key, {}).get(cache_type)
-        
-        if not cache_info:
-            return None
-            
-        try:
-            # In a full implementation, this would retrieve from Gemini cache
-            # For now, we'll store context directly in memory
-            return cache_info.get("context")
-        except Exception as e:
-            logging.error(f"Error retrieving cached context for {user_key}/{cache_type}: {e}")
-            return None
-    
     async def store_cached_context(self, account_id: str, aac_user_id: str, cache_type: str, context: str) -> bool:
-        """Store context in cache with TTL"""
+        """Store context using Gemini caching API with fallback to local cache"""
+        # Try Gemini caching first for better performance
+        if await self.store_cached_context_with_gemini(account_id, aac_user_id, cache_type, context):
+            return True
+        
+        # Fallback to local caching if Gemini caching fails
         try:
             user_key = self._get_user_key(account_id, aac_user_id)
             
@@ -1240,7 +1242,7 @@ class GeminiCacheManager:
             if user_key not in self.cache_refresh_times:
                 self.cache_refresh_times[user_key] = {}
             
-            # Store cache info (in full implementation, this would use Gemini context caching API)
+            # Store cache info locally as fallback
             self.gemini_caches[user_key][cache_type] = {
                 "context": context,
                 "created_at": dt.now().timestamp(),
@@ -1250,7 +1252,7 @@ class GeminiCacheManager:
             # Update refresh time
             self.cache_refresh_times[user_key][cache_type] = dt.now().timestamp()
             
-            logging.info(f"Cached context for {user_key}/{cache_type} (length: {len(context)})")
+            logging.info(f"Cached context locally for {user_key}/{cache_type} (length: {len(context)})")
             return True
             
         except Exception as e:
@@ -1294,6 +1296,200 @@ class GeminiCacheManager:
         except Exception as e:
             logging.error(f"Error refreshing RAG context for {account_id}/{aac_user_id}: {e}")
             return False
+
+    async def create_gemini_cached_content(self, cache_name: str, content: str, ttl_hours: int = 24) -> Optional[str]:
+        """Create a Gemini cached content object and return cache name"""
+        try:
+            # Ensure content is a string
+            content_str = str(content) if not isinstance(content, str) else content
+            
+            # Estimate token count (roughly 4 characters per token)
+            estimated_tokens = len(content_str) // 4
+            min_required_tokens = 2048
+            
+            if estimated_tokens < min_required_tokens:
+                logging.info(f"Skipping cache creation for {cache_name}: estimated {estimated_tokens} tokens < {min_required_tokens} minimum")
+                return None
+            
+            logging.info(f"Creating Gemini cached content: {cache_name} (content length: {len(content_str)}, estimated tokens: {estimated_tokens}, TTL: {ttl_hours}h)")
+            
+            # Format content for Gemini caching API - use genai.Content instead of dict
+            import google.generativeai as genai
+            
+            # Create content using Gemini's Content class
+            try:
+                content_part = genai.Part.from_text(content_str)
+                content_obj = genai.Content(parts=[content_part], role='user')
+                formatted_content = [content_obj]
+                
+                logging.info(f"Attempting to create cached content with model: {GEMINI_PRIMARY_MODEL}")
+                logging.info(f"Content formatted with genai.Content class")
+                
+            except Exception as content_error:
+                logging.error(f"Error formatting content with genai.Content: {content_error}")
+                # Fallback to simple dict format
+                formatted_content = [{
+                    'role': 'user',
+                    'parts': [{'text': content_str}]
+                }]
+                logging.info(f"Using fallback dict format for content")
+            
+            # Create cached content using Gemini's caching API
+            cached_content = caching.CachedContent.create(
+                model=GEMINI_PRIMARY_MODEL,  # Use the configured primary model
+                display_name=cache_name,
+                contents=formatted_content,
+                ttl=timedelta(hours=ttl_hours)  # Use timedelta directly, not dt.timedelta
+            )
+            
+            logging.info(f"Successfully created Gemini cached content: {cache_name} -> {cached_content.name}")
+            return cached_content.name
+            
+        except Exception as e:
+            logging.error(f"Error creating Gemini cached content {cache_name}: {e}")
+            return None
+    
+    async def get_gemini_cached_content(self, cache_name: str) -> Optional[str]:
+        """Retrieve Gemini cached content by name"""
+        try:
+            cached_content = caching.CachedContent.get(cache_name)
+            if cached_content:
+                logging.info(f"Retrieved Gemini cached content: {cache_name}")
+                return cached_content.name
+            return None
+        except Exception as e:
+            logging.error(f"Error retrieving Gemini cached content {cache_name}: {e}")
+            return None
+    
+    async def delete_gemini_cached_content(self, cache_name: str) -> bool:
+        """Delete Gemini cached content"""
+        try:
+            cached_content = caching.CachedContent.get(cache_name)
+            if cached_content:
+                cached_content.delete()
+                logging.info(f"Deleted Gemini cached content: {cache_name}")
+                return True
+            return False
+        except Exception as e:
+            logging.error(f"Error deleting Gemini cached content {cache_name}: {e}")
+            return False
+    
+    async def store_cached_context_with_gemini(self, account_id: str, aac_user_id: str, cache_type: str, context: str) -> bool:
+        """Store context using actual Gemini caching API with batching for efficiency"""
+        try:
+            user_key = self._get_user_key(account_id, aac_user_id)
+            
+            # Store locally first for batching (direct local storage to avoid recursion)
+            if user_key not in self.gemini_caches:
+                self.gemini_caches[user_key] = {}
+            if user_key not in self.cache_refresh_times:
+                self.cache_refresh_times[user_key] = {}
+            
+            # Store cache info locally as fallback
+            self.gemini_caches[user_key][cache_type] = context
+            self.cache_refresh_times[user_key][cache_type] = datetime.now()
+            logging.info(f"Cached context locally for {user_key}/{cache_type} (length: {len(str(context))})")
+            
+            # Get all cached contexts for this user
+            all_contexts = {}
+            for ctx_type in ["USER_PROFILE", "FRIENDS_FAMILY", "HOLIDAYS_BIRTHDAYS", "CONVERSATION_SESSION"]:
+                ctx_content = await self.get_cached_context(account_id, aac_user_id, ctx_type)
+                if ctx_content:
+                    all_contexts[ctx_type] = ctx_content
+            
+            # Combine contexts into a single larger content block
+            if all_contexts:
+                # Start with system instruction for Bravo
+                combined_content = """You are Bravo, an AI communication assistant designed for AAC (Augmentative and Alternative Communication) users. You help users communicate by providing relevant response options based on their context, relationships, location, activities, and conversation history.
+
+Your role is to:
+- Generate 3-7 contextually appropriate response options
+- Consider the user's current mood, location, people present, and recent activities
+- Take into account relationships with friends and family
+- Be aware of upcoming events, birthdays, and holidays
+- Reference recent conversations and diary entries when relevant
+- Format responses as a JSON array with "option" and "summary" keys
+
+Context Information:
+"""
+                
+                for ctx_type, ctx_content in all_contexts.items():
+                    combined_content += f"\n## {ctx_type.replace('_', ' ').title()}\n{ctx_content}\n"
+                
+                # Only create cache if combined content is large enough
+                estimated_tokens = len(combined_content) // 4
+                if estimated_tokens >= 2048:
+                    cache_name = f"{user_key}_COMBINED_{int(dt.now().timestamp())}"
+                    
+                    # Create cached content with Gemini
+                    gemini_cache_name = await self.create_gemini_cached_content(
+                        cache_name=cache_name,
+                        content=combined_content,
+                        ttl_hours=1  # 1 hour TTL for combined cache
+                    )
+                    
+                    if gemini_cache_name:
+                        # Initialize user cache if needed
+                        if user_key not in self.gemini_caches:
+                            self.gemini_caches[user_key] = {}
+                        if user_key not in self.cache_refresh_times:
+                            self.cache_refresh_times[user_key] = {}
+                        
+                        # Store Gemini cache reference for COMBINED cache
+                        self.gemini_caches[user_key]["COMBINED"] = {
+                            "gemini_cache_name": gemini_cache_name,
+                            "created_at": dt.now().timestamp(),
+                            "ttl": 3600,  # 1 hour
+                            "content_preview": f"Combined contexts ({len(all_contexts)} types, {estimated_tokens} est. tokens)"
+                        }
+                        
+                        # Update refresh time
+                        self.cache_refresh_times[user_key]["COMBINED"] = dt.now().timestamp()
+                        
+                        logging.info(f"Created combined Gemini cache for {account_id}/{aac_user_id}: {gemini_cache_name}")
+                        return True
+                else:
+                    logging.info(f"Combined content too small for caching: {estimated_tokens} tokens < 2048 minimum")
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error storing Gemini cached context {cache_type} for {account_id}/{aac_user_id}: {e}")
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error storing context in Gemini cache for {account_id}/{aac_user_id}/{cache_type}: {e}")
+            return False
+
+    async def get_cached_context(self, account_id: str, aac_user_id: str, cache_type: str) -> Optional[str]:
+        """Retrieve cached context - updated to work with Gemini caching"""
+        if not await self.is_cache_valid(account_id, aac_user_id, cache_type):
+            return None
+            
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cache_info = self.gemini_caches.get(user_key, {}).get(cache_type)
+        
+        if not cache_info:
+            return None
+            
+        try:
+            # If we have a Gemini cache name, return it for use in generation
+            if "gemini_cache_name" in cache_info:
+                gemini_cache_name = cache_info["gemini_cache_name"]
+                # Verify cache still exists in Gemini
+                if await self.get_gemini_cached_content(gemini_cache_name):
+                    return gemini_cache_name  # Return cache reference for use in generation
+                else:
+                    # Cache expired in Gemini, remove local reference
+                    del self.gemini_caches[user_key][cache_type]
+                    return None
+            
+            # Fallback to local cache
+            return cache_info.get("context")
+            
+        except Exception as e:
+            logging.error(f"Error retrieving cached context for {user_key}/{cache_type}: {e}")
+            return None
     
     async def get_or_create_conversation_session(self, account_id: str, aac_user_id: str):
         """Get existing conversation session or create new one with cached context"""
@@ -1309,25 +1505,78 @@ class GeminiCacheManager:
         
         # Create new session with cached static context
         try:
-            static_context = await self.build_static_context(account_id, aac_user_id)
+            # Build static context using cached content references
+            cached_content_refs = await self.build_cached_context_references(account_id, aac_user_id)
             
-            # In full implementation, this would create a Gemini conversation session
-            # For now, we'll store context information
-            session_info = {
-                "session": f"conversation_session_{user_key}",
-                "static_context": static_context,
-                "created_at": dt.now().timestamp(),
-                "message_count": 0
-            }
-            
-            self.conversation_sessions[user_key] = session_info
-            logging.info(f"Created new conversation session for {user_key}")
-            
-            return session_info["session"]
+            # Create actual Gemini chat session with cached content
+            if cached_content_refs:
+                # Use cached content for session creation
+                model = genai.GenerativeModel(
+                    model_name=GEMINI_PRIMARY_MODEL.replace("models/", ""),
+                    cached_content=cached_content_refs[0] if cached_content_refs else None
+                )
+                chat_session = model.start_chat()
+                
+                session_info = {
+                    "chat_session": chat_session,
+                    "model": model,
+                    "cached_content_refs": cached_content_refs,
+                    "created_at": dt.now().timestamp(),
+                    "message_count": 0
+                }
+                
+                self.conversation_sessions[user_key] = session_info
+                logging.info(f"Created Gemini chat session for {user_key} with {len(cached_content_refs)} cached content refs")
+                
+                return chat_session
+            else:
+                # Fallback: create session without cached content
+                model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL.replace("models/", ""))
+                chat_session = model.start_chat()
+                
+                session_info = {
+                    "chat_session": chat_session,
+                    "model": model,
+                    "cached_content_refs": [],
+                    "created_at": dt.now().timestamp(),
+                    "message_count": 0
+                }
+                
+                self.conversation_sessions[user_key] = session_info
+                logging.info(f"Created Gemini chat session for {user_key} without cached content")
+                
+                return chat_session
             
         except Exception as e:
-            logging.error(f"Error creating conversation session for {account_id}/{aac_user_id}: {e}")
+            logging.error(f"Error creating Gemini chat session for {account_id}/{aac_user_id}: {e}")
             return None
+    
+    async def build_cached_context_references(self, account_id: str, aac_user_id: str) -> List[str]:
+        """Build list of Gemini cached content references for session creation"""
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cached_refs = []
+        
+        # First check for combined cache (new batched approach)
+        if user_key in self.gemini_caches and "COMBINED" in self.gemini_caches[user_key]:
+            combined_cache = self.gemini_caches[user_key]["COMBINED"]
+            
+            # Check if cache is still valid
+            cache_age = dt.now().timestamp() - combined_cache.get("created_at", 0)
+            if cache_age < combined_cache.get("ttl", 3600):
+                cached_refs.append(combined_cache["gemini_cache_name"])
+                logging.info(f"Using combined Gemini cache for {account_id}/{aac_user_id}")
+                return cached_refs
+        
+        # Fallback: Try to get individual cached content references (legacy)
+        for cache_type in [CacheType.USER_PROFILE, CacheType.FRIENDS_FAMILY, 
+                          CacheType.LOCATION_DATA, CacheType.USER_SETTINGS, 
+                          CacheType.HOLIDAYS_BIRTHDAYS]:
+            
+            cached_ref = await self.get_cached_context(account_id, aac_user_id, cache_type)
+            if cached_ref and cached_ref.startswith("cachedContents/"):  # Gemini cache reference
+                cached_refs.append(cached_ref)
+        
+        return cached_refs
     
     async def build_static_context(self, account_id: str, aac_user_id: str) -> str:
         """Build static context from cached components"""
@@ -2000,6 +2249,81 @@ async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
             logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
             raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
+# --- Helper function for Gemini LLM with Context Caching ---
+async def _generate_gemini_content_with_caching(
+    account_id: str, 
+    aac_user_id: str, 
+    prompt_text: str, 
+    generation_config: Optional[Dict] = None,
+    cache_manager: GeminiCacheManager = None,
+    user_query_only: Optional[str] = None
+) -> str:
+    """Generate content using Gemini with context caching and conversation sessions for token savings"""
+    
+    if not cache_manager:
+        # Fallback to non-cached generation
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+    
+    try:
+        # Try to get or create conversation session with cached context
+        chat_session = await cache_manager.get_or_create_conversation_session(account_id, aac_user_id)
+        
+        if chat_session and hasattr(chat_session, 'send_message'):
+            # Use conversation session for generation (maintains chat history)
+            logging.info(f"Using Gemini chat session for {account_id}/{aac_user_id}")
+            response = await asyncio.to_thread(chat_session.send_message, prompt_text)
+            
+            # Update message count
+            user_key = cache_manager._get_user_key(account_id, aac_user_id)
+            if user_key in cache_manager.conversation_sessions:
+                cache_manager.conversation_sessions[user_key]["message_count"] += 1
+            
+            return response.text.strip()
+            
+        else:
+            # Fallback: Check for cached content references to use with direct model call
+            cached_refs = await cache_manager.build_cached_context_references(account_id, aac_user_id)
+            
+            if cached_refs and user_query_only:
+                # Use model with cached content - ONLY send user query for token savings
+                try:
+                    # Get the first cached content reference
+                    cached_content = caching.CachedContent.get(cached_refs[0])
+                    model = genai.GenerativeModel(
+                        model_name=GEMINI_PRIMARY_MODEL.replace("models/", ""),
+                        cached_content=cached_content
+                    )
+                    
+                    # Calculate token savings
+                    full_prompt_tokens = len(prompt_text.split())  # Rough estimate
+                    user_query_tokens = len(user_query_only.split())  # Rough estimate
+                    token_savings = full_prompt_tokens - user_query_tokens
+                    token_savings_percent = (token_savings / full_prompt_tokens) * 100 if full_prompt_tokens > 0 else 0
+                    
+                    logging.info(f"TOKEN SAVINGS: Using cached content for {account_id}/{aac_user_id}")
+                    logging.info(f"TOKEN SAVINGS: Full context would be ~{full_prompt_tokens} tokens, sending only ~{user_query_tokens} tokens")
+                    logging.info(f"TOKEN SAVINGS: Estimated savings: ~{token_savings} tokens ({token_savings_percent:.1f}% reduction)")
+                    
+                    # Only send the user query - the context is already cached on Gemini's servers
+                    response = await asyncio.to_thread(model.generate_content, user_query_only, generation_config=generation_config)
+                    return response.text.strip()
+                    
+                except Exception as cache_error:
+                    logging.warning(f"Failed to use cached content, falling back to regular generation: {cache_error}")
+                    return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+            else:
+                # No cached content available or no user query provided, use regular generation
+                if not user_query_only:
+                    logging.info(f"No user_query_only provided, using full prompt for {account_id}/{aac_user_id}")
+                else:
+                    logging.info(f"No cached content available, using full prompt for {account_id}/{aac_user_id}")
+                return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+                
+    except Exception as e:
+        logging.error(f"Error in cached Gemini generation for {account_id}/{aac_user_id}: {e}")
+        # Fallback to non-cached generation
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
+
 # --- Helper function for Gemini LLM content generation with fallback ---
 async def _generate_gemini_content_with_fallback(prompt_text: str, generation_config: Optional[Dict] = None) -> str: # <--- THIS LINE IS CRITICAL
     global primary_llm_model_instance, fallback_llm_model_instance
@@ -2126,12 +2450,13 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     cache_manager = GeminiCacheManager()
     
     # --- OPTIMIZED: Try to get context from cache first ---
-    cached_user_profile = cache_manager.get_cached_context(account_id, aac_user_id, "USER_PROFILE")
-    cached_location_data = cache_manager.get_cached_context(account_id, aac_user_id, "LOCATION_DATA")
-    cached_friends_family = cache_manager.get_cached_context(account_id, aac_user_id, "FRIENDS_FAMILY")
-    cached_user_settings = cache_manager.get_cached_context(account_id, aac_user_id, "USER_SETTINGS")
-    cached_holidays_birthdays = cache_manager.get_cached_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS")
-    cached_rag_context = cache_manager.get_cached_context(account_id, aac_user_id, "RAG_CONTEXT")
+    cached_user_profile = await cache_manager.get_cached_context(account_id, aac_user_id, "USER_PROFILE")
+    cached_location_data = await cache_manager.get_cached_context(account_id, aac_user_id, "LOCATION_DATA")
+    cached_friends_family = await cache_manager.get_cached_context(account_id, aac_user_id, "FRIENDS_FAMILY")
+    cached_user_settings = await cache_manager.get_cached_context(account_id, aac_user_id, "USER_SETTINGS")
+    cached_holidays_birthdays = await cache_manager.get_cached_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS")
+    cached_rag_context = await cache_manager.get_cached_context(account_id, aac_user_id, "RAG_CONTEXT")
+    cached_button_activity = await cache_manager.get_cached_context(account_id, aac_user_id, "BUTTON_ACTIVITY")
 
     # --- AWAIT all Firestore data loading calls (only if not cached) ---
     if cached_holidays_birthdays:
@@ -2143,7 +2468,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
         upcoming_holidays_list = await get_upcoming_holidays_and_observances(account_id, aac_user_id, days_ahead=14)
         upcoming_birthdays_list = await get_upcoming_birthdays(account_id, aac_user_id, days_ahead=14)
         # Cache the results
-        cache_manager.cache_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS", {
+        await cache_manager.store_cached_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS", {
             "holidays": upcoming_holidays_list,
             "birthdays": upcoming_birthdays_list
         })
@@ -2157,7 +2482,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     else:
         logging.info(f"Loading fresh friends/family for account {account_id} and user {aac_user_id}")
         friends_family_data = await load_friends_family_from_file(account_id, aac_user_id)
-        cache_manager.cache_context(account_id, aac_user_id, "FRIENDS_FAMILY", friends_family_data)
+        await cache_manager.store_cached_context(account_id, aac_user_id, "FRIENDS_FAMILY", friends_family_data)
 
     chroma_context_str = cached_rag_context or ""
     generation_config = {
@@ -2190,7 +2515,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     future_diary_context = [item['text'] for item in future_diary_context[:MAX_DIARY_CONTEXT]]
 
     # --- OPTIMIZED: Use cached conversation session if available ---
-    cached_conversation = cache_manager.get_cached_context(account_id, aac_user_id, "CONVERSATION_SESSION")
+    cached_conversation = await cache_manager.get_cached_context(account_id, aac_user_id, "CONVERSATION_SESSION")
     if cached_conversation and len(cached_conversation.get("chat_history", [])) >= len(chat_history):
         logging.info(f"Using cached conversation session for account {account_id} and user {aac_user_id}")
         recent_chat_context = cached_conversation.get("recent_context", [])
@@ -2209,7 +2534,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
             if q and r: recent_chat_context.append(f"Previous Turn: Q: {q} / A: {r}")
         
         # Cache the conversation session
-        cache_manager.cache_context(account_id, aac_user_id, "CONVERSATION_SESSION", {
+        await cache_manager.store_cached_context(account_id, aac_user_id, "CONVERSATION_SESSION", {
             "chat_history": chat_history,
             "recent_context": recent_chat_context
         })
@@ -2244,7 +2569,7 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
         ).strip()
         
         # Cache the user profile data
-        cache_manager.cache_context(account_id, aac_user_id, "USER_PROFILE", {
+        await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
             "user_info": user_info_content,
             "user_current": user_current_content
         })
@@ -2296,6 +2621,92 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     else:
         logging.info(f"DEBUG friends_family: No friends_family list found or list is empty")
 
+    # --- OPTIMIZED: Load recent button activity for context ---
+    if cached_button_activity:
+        logging.info(f"Using cached button activity for account {account_id} and user {aac_user_id}")
+        recent_button_activity = cached_button_activity.get("recent_activity", [])
+    else:
+        logging.info(f"Loading fresh button activity for account {account_id} and user {aac_user_id}")
+        try:
+            # Load button activity log from last 7 days
+            from datetime import datetime, timedelta, timezone
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            
+            button_activity_log = await load_button_activity_log(account_id, aac_user_id)
+            recent_button_activity = []
+            
+            logging.info(f"Found {len(button_activity_log)} total button activity entries for account {account_id} and user {aac_user_id}")
+            
+            # Filter for recent activity and organize by page/category
+            activity_by_page = {}
+            filtered_count = 0
+            for entry in button_activity_log:
+                if isinstance(entry, dict):
+                    timestamp_str = entry.get('timestamp', '')
+                    try:
+                        # Parse timestamp (assuming ISO format)
+                        if timestamp_str:
+                            entry_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                            if entry_time >= seven_days_ago:
+                                filtered_count += 1
+                                page_name = entry.get('page_name', 'Unknown')
+                                button_text = entry.get('button_text', 'Unknown')
+                                
+                                if page_name not in activity_by_page:
+                                    activity_by_page[page_name] = []
+                                activity_by_page[page_name].append(button_text)
+                    except (ValueError, TypeError) as e:
+                        logging.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+                        continue
+            
+            logging.info(f"After filtering for last 7 days: {filtered_count} entries from {len(button_activity_log)} total")
+            
+            # Convert to structured format for context
+            for page_name, buttons in activity_by_page.items():
+                # Get unique buttons (remove duplicates but keep order)
+                unique_buttons = []
+                seen = set()
+                for button in reversed(buttons):  # Most recent first
+                    if button not in seen:
+                        unique_buttons.append(button)
+                        seen.add(button)
+                
+                if unique_buttons:
+                    recent_button_activity.append({
+                        'page': page_name,
+                        'buttons': unique_buttons[:10]  # Limit to 10 most recent per page
+                    })
+            
+            logging.info(f"After deduplication: {len(recent_button_activity)} pages with activity")
+            for page_activity in recent_button_activity:
+                logging.info(f"  Page '{page_activity['page']}': {len(page_activity['buttons'])} unique buttons")
+            
+            # Cache the results
+            await cache_manager.store_cached_context(account_id, aac_user_id, "BUTTON_ACTIVITY", {
+                "recent_activity": recent_button_activity
+            })
+            
+        except Exception as e:
+            logging.error(f"Error loading button activity for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+            recent_button_activity = []
+
+    # Add recent button activity context
+    if recent_button_activity:
+        activity_lines = []
+        for page_activity in recent_button_activity:
+            page_name = page_activity.get('page', 'Unknown')
+            buttons = page_activity.get('buttons', [])
+            if buttons:
+                # Format: "Page: button1, button2, button3"
+                button_list = ", ".join(buttons[:5])  # Show up to 5 per page in context
+                activity_lines.append(f"{page_name}: {button_list}")
+        
+        if activity_lines:
+            button_activity_context = f"Recently Used Options (last 7 days - avoid repeating these):\n" + "\n".join(activity_lines)
+            context_parts.append(button_activity_context)
+            logging.info(f"Added button activity context: {len(activity_lines)} pages with recent activity")
+    else:
+        logging.info(f"No recent button activity found for account {account_id} and user {aac_user_id}")
 
     # Add holidays, birthdays, diary, chat history contexts
     if upcoming_holidays_list and upcoming_holidays_list[0] != f"No major holidays or observances found in the next {14} days for {DEFAULT_COUNTRY_CODE}.":
@@ -2356,28 +2767,78 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
     logging.info(f"Using LLM provider: {llm_provider} for account {account_id} and user {aac_user_id}")
 
-    # Add JSON format instructions if using OpenAI (Gemini handles this differently)
-    if llm_provider == "chatgpt":
-        # Add complete JSON format instructions for OpenAI
-        json_format_instructions = """
+    # Add JSON format instructions for both OpenAI and Gemini
+    json_format_instructions = """
 
-Format your response as a JSON list where each item has "option" and "summary" keys.
+CRITICAL: Format your response as a JSON list where each item has "option" and "summary" keys.
 If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
 The "option" key should contain the FULL option text.
-Example: [{"option": "Hello there, how are you doing today?", "summary": "Hello how are you"}, {"option": "Goodbye!", "summary": "Goodbye!"}]"""
-        
-        final_llm_prompt += json_format_instructions
-        logging.info(f"Added JSON format instructions for OpenAI (length: {len(json_format_instructions)})")
+
+IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND punchline in the SAME "option". Format them as: "Question? Punchline!" with just a question mark between the question and punchline. DO NOT split jokes into separate options.
+
+Example: [{"option": "Hello there, how are you doing today?", "summary": "Hello how are you"}, {"option": "Goodbye!", "summary": "Goodbye!"}]
+Joke Example: [{"option": "Why don't scientists trust atoms? Because they make up everything!", "summary": "scientists trust atoms"}]
+
+Return ONLY valid JSON - no other text before or after the JSON array."""
+    
+    final_llm_prompt += json_format_instructions
+    logging.info(f"Added JSON format instructions for {llm_provider} (length: {len(json_format_instructions)})")
 
     # Route to appropriate LLM based on user preference
     if llm_provider == "chatgpt":
         llm_response_json_str = await _generate_openai_content_with_fallback(final_llm_prompt)
     else:  # Default to Gemini for "gemini" or any unrecognized value
-        llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config=generation_config)
+        # Prepare user query with JSON format instructions for cached content
+        user_query_with_instructions = f"User Request (follow instructions carefully):\n{user_prompt_content}{json_format_instructions}"
+        
+        # Use cached generation for significant performance and cost improvements
+        llm_response_json_str = await _generate_gemini_content_with_caching(
+            account_id, aac_user_id, final_llm_prompt, 
+            generation_config=generation_config, 
+            cache_manager=cache_manager,
+            user_query_only=user_query_with_instructions
+        )
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
+    def extract_json_from_response(response_text: str) -> str:
+        """Extract JSON from LLM response, handling markdown code blocks"""
+        # Remove any leading/trailing whitespace
+        response_text = response_text.strip()
+        
+        # Check if response is wrapped in markdown code blocks
+        if response_text.startswith('```json') and response_text.endswith('```'):
+            # Extract content between ```json and ```
+            lines = response_text.split('\n')
+            json_lines = []
+            in_json_block = False
+            
+            for line in lines:
+                if line.strip().startswith('```json'):
+                    in_json_block = True
+                    continue
+                elif line.strip() == '```' and in_json_block:
+                    break
+                elif in_json_block:
+                    json_lines.append(line)
+            
+            return '\n'.join(json_lines).strip()
+        
+        # Check for other markdown variations
+        elif response_text.startswith('```') and response_text.endswith('```'):
+            # Extract content between ``` blocks (without json specifier)
+            lines = response_text.split('\n')
+            if len(lines) >= 3:
+                return '\n'.join(lines[1:-1]).strip()
+        
+        # If no markdown blocks, return as-is
+        return response_text
+
+    # Extract clean JSON from the response
+    clean_json_str = extract_json_from_response(llm_response_json_str)
+    logging.info(f"--- Extracted clean JSON for account {account_id} and user {aac_user_id} (Original length: {len(llm_response_json_str)}, Clean length: {len(clean_json_str)}) ---")
+
     try:
-        parsed_llm_output = json.loads(llm_response_json_str)
+        parsed_llm_output = json.loads(clean_json_str)
         logging.info(f"--- Parsed LLM JSON Output for account {account_id} and user {aac_user_id} ---")
 
         # --- CRITICAL FIX: Robust extraction of the options list ---
@@ -2415,7 +2876,7 @@ Example: [{"option": "Hello there, how are you doing today?", "summary": "Hello 
         return JSONResponse(content=extracted_options_list)
 
     except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse LLM response as JSON: {e}. Raw: {llm_response_json_str}", exc_info=True)
+        logging.error(f"Failed to parse LLM response as JSON: {e}. Original Raw: {llm_response_json_str[:500]}... Clean Raw: {clean_json_str[:500]}...", exc_info=True)
         raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(e)}")
     except Exception as e:
         logging.error(f"Error processing LLM response for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
@@ -2559,6 +3020,18 @@ async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath
         if doc.exists:
             data_from_db = doc.to_dict()
             logging.info(f"Loaded Firestore document from {full_path} for AAC user {aac_user_id}.")
+            
+            # Handle JSON string format for pages data
+            if doc_subpath == "config/pages_list" and "pages_json" in data_from_db:
+                import json
+                try:
+                    pages_data = json.loads(data_from_db["pages_json"])
+                    logging.info(f"Successfully parsed pages JSON data for AAC user {aac_user_id}.")
+                    return pages_data
+                except json.JSONDecodeError as e:
+                    logging.error(f"Failed to parse pages JSON data for AAC user {aac_user_id}: {e}")
+                    return default_data.copy() if isinstance(default_data, (dict, list)) else default_data
+            
             if isinstance(default_data, dict) and isinstance(data_from_db, dict):
                 merged_data = default_data.copy()
                 merged_data.update(data_from_db) # Merge with defaults
@@ -2576,6 +3049,25 @@ async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath
         logging.error(f"Error loading Firestore document from {full_path} for AAC user {aac_user_id}: {e}", exc_info=True)
         return default_data.copy() if isinstance(default_data, (dict, list)) else default_data
 
+def sanitize_for_firestore(data):
+    """
+    Recursively sanitize data to ensure it's compatible with Firestore.
+    Firestore has restrictions on nested objects and certain data types.
+    """
+    if isinstance(data, dict):
+        sanitized = {}
+        for key, value in data.items():
+            # Convert keys to strings and sanitize values
+            sanitized[str(key)] = sanitize_for_firestore(value)
+        return sanitized
+    elif isinstance(data, list):
+        return [sanitize_for_firestore(item) for item in data]
+    elif isinstance(data, (str, int, float, bool, type(None))):
+        return data
+    else:
+        # Convert any other type to string representation
+        return str(data)
+
 async def save_firestore_document(account_id: str, aac_user_id: str, doc_subpath: str, data_to_save: Any) -> bool:
     """
     Saves data to a Firestore document for a specific AAC user under an account.
@@ -2586,9 +3078,23 @@ async def save_firestore_document(account_id: str, aac_user_id: str, doc_subpath
         logging.error(f"Firestore DB client not initialized. Cannot save document for AAC user {aac_user_id}.")
         return False
     try:
+        # For complex nested data like pages, store as JSON string to avoid Firestore nested entity limits
+        if doc_subpath == "config/pages_list":
+            # Convert to JSON string for pages data
+            import json
+            json_data = {
+                "pages_json": json.dumps(data_to_save, ensure_ascii=False, default=str),
+                "last_updated": firestore.SERVER_TIMESTAMP
+            }
+            logging.info(f"Saving pages data as JSON string. Original data type: {type(data_to_save)}")
+            data_to_store = json_data
+        else:
+            # Sanitize the data before saving to Firestore for other documents
+            data_to_store = sanitize_for_firestore(data_to_save)
+        
         full_path = f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/{doc_subpath}"
         doc_ref = firestore_db.document(full_path)
-        await asyncio.to_thread(doc_ref.set, data_to_save) # Use .set() to overwrite or create
+        await asyncio.to_thread(doc_ref.set, data_to_store) # Use .set() to overwrite or create
         logging.info(f"Saved Firestore document to {full_path} for AAC user {aac_user_id}.")
         return True
     except Exception as e:
@@ -6130,6 +6636,11 @@ async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: An
         success = await save_button_activity_log(account_id, aac_user_id, activity_log)
         if success:
             logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
+            
+            # Invalidate button activity cache when new clicks are logged
+            cache_manager = GeminiCacheManager()
+            await cache_manager.invalidate_by_endpoint(account_id, aac_user_id, "/api/audit/log-button-click")
+            
             return JSONResponse(content={"message": "Button click logged successfully."})
         else: raise HTTPException(status_code=500, detail="Failed to save button click log.")
     except Exception as e:

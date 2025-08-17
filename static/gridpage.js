@@ -1912,7 +1912,45 @@ async function processAnnouncementQueue() {
 async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
     console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
     
-    // Create and return a new Promise, whose resolve/reject functions are stored in the queue.
+    // Special handling for jokes - detect if text contains a question followed by an answer
+    const jokePattern = /^(.+\?)\s*(.+[!.])$/;
+    const jokeMatch = textToAnnounce.match(jokePattern);
+    
+    if (jokeMatch) {
+        const question = jokeMatch[1].trim();
+        const punchline = jokeMatch[2].trim();
+        
+        console.log(`JOKE DETECTED: Question="${question}" Punchline="${punchline}"`);
+        
+        // Announce the question first
+        await new Promise((resolve, reject) => {
+            announcementQueue.push({
+                textToAnnounce: question,
+                announcementType,
+                recordHistory: false, // Don't record the split parts
+                resolve,
+                reject
+            });
+            processAnnouncementQueue();
+        });
+        
+        // Add a 1-second pause
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        
+        // Then announce the punchline
+        return new Promise((resolve, reject) => {
+            announcementQueue.push({
+                textToAnnounce: punchline,
+                announcementType,
+                recordHistory, // Record the full joke in history if requested
+                resolve,
+                reject
+            });
+            processAnnouncementQueue();
+        });
+    }
+    
+    // Regular announcement for non-jokes
     return new Promise((resolve, reject) => {
         announcementQueue.push({
             textToAnnounce,
