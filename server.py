@@ -1392,10 +1392,12 @@ class GeminiCacheManager:
             
             # Get all cached contexts for this user
             all_contexts = {}
-            for ctx_type in ["USER_PROFILE", "FRIENDS_FAMILY", "HOLIDAYS_BIRTHDAYS", "CONVERSATION_SESSION"]:
+            # Check all possible context types, not just a few
+            for ctx_type in [CacheType.USER_PROFILE, CacheType.FRIENDS_FAMILY, CacheType.LOCATION_DATA, 
+                           CacheType.USER_SETTINGS, CacheType.HOLIDAYS_BIRTHDAYS, CacheType.CONVERSATION_SESSION]:
                 ctx_content = await self.get_cached_context(account_id, aac_user_id, ctx_type)
-                if ctx_content:
-                    all_contexts[ctx_type] = ctx_content
+                if ctx_content and not ctx_content.startswith("cachedContents/"):  # Exclude Gemini cache references
+                    all_contexts[ctx_type] = str(ctx_content)
             
             # Combine contexts into a single larger content block
             if all_contexts:
@@ -1416,9 +1418,11 @@ Context Information:
                 for ctx_type, ctx_content in all_contexts.items():
                     combined_content += f"\n## {ctx_type.replace('_', ' ').title()}\n{ctx_content}\n"
                 
-                # Only create cache if combined content is large enough
+                logging.info(f"DEBUG: Combined content length: {len(combined_content)} chars, {len(all_contexts)} context types")
+                
+                # Only create cache if combined content is large enough (lowered threshold)
                 estimated_tokens = len(combined_content) // 4
-                if estimated_tokens >= 2048:
+                if estimated_tokens >= 512:  # Lowered from 2048 to 512 tokens
                     cache_name = f"{user_key}_COMBINED_{int(dt.now().timestamp())}"
                     
                     # Create cached content with Gemini
@@ -1448,8 +1452,15 @@ Context Information:
                         
                         logging.info(f"Created combined Gemini cache for {account_id}/{aac_user_id}: {gemini_cache_name}")
                         return True
+                    else:
+                        logging.warning(f"Failed to create Gemini cached content for {account_id}/{aac_user_id}")
+                        return False
                 else:
-                    logging.info(f"Combined content too small for caching: {estimated_tokens} tokens < 2048 minimum")
+                    logging.info(f"Combined content too small for caching: {estimated_tokens} tokens < 512 minimum for {account_id}/{aac_user_id}")
+                    return False
+            else:
+                logging.info(f"No contexts available for combined cache creation for {account_id}/{aac_user_id}")
+                return False
             
             return False
             
@@ -2271,7 +2282,25 @@ async def _generate_gemini_content_with_caching(
         if chat_session and hasattr(chat_session, 'send_message'):
             # Use conversation session for generation (maintains chat history)
             logging.info(f"Using Gemini chat session for {account_id}/{aac_user_id}")
-            response = await asyncio.to_thread(chat_session.send_message, prompt_text)
+            
+            # CRITICAL: Use user_query_only for token savings when chat session has cached content
+            if user_query_only:
+                # Calculate token savings
+                full_prompt_tokens = len(prompt_text.split())  # Rough estimate
+                user_query_tokens = len(user_query_only.split())  # Rough estimate
+                token_savings = full_prompt_tokens - user_query_tokens
+                token_savings_percent = (token_savings / full_prompt_tokens) * 100 if full_prompt_tokens > 0 else 0
+                
+                logging.info(f"TOKEN SAVINGS: Using chat session with cached content for {account_id}/{aac_user_id}")
+                logging.info(f"TOKEN SAVINGS: Full context would be ~{full_prompt_tokens} tokens, sending only ~{user_query_tokens} tokens")
+                logging.info(f"TOKEN SAVINGS: Estimated savings: ~{token_savings} tokens ({token_savings_percent:.1f}% reduction)")
+                
+                # Send only the user query - context is cached in the session
+                response = await asyncio.to_thread(chat_session.send_message, user_query_only)
+            else:
+                # Fallback: send full prompt if no user_query_only provided
+                logging.info(f"No user_query_only provided, sending full prompt to chat session for {account_id}/{aac_user_id}")
+                response = await asyncio.to_thread(chat_session.send_message, prompt_text)
             
             # Update message count
             user_key = cache_manager._get_user_key(account_id, aac_user_id)
