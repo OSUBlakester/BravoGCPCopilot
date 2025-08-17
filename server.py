@@ -5208,6 +5208,19 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
     if success:
         # Await load_settings_from_file to get the actual dictionary
         saved_settings_dict = await load_settings_from_file(account_id, aac_user_id)
+        
+        # Update the RAG cache with new user settings
+        try:
+            await cache_manager.store_cached_context(
+                account_id, 
+                aac_user_id, 
+                saved_settings_dict, 
+                CacheType.USER_SETTINGS
+            )
+            logging.info(f"Updated USER_SETTINGS cache for user {aac_user_id}")
+        except Exception as e:
+            logging.error(f"Failed to update USER_SETTINGS cache: {e}")
+        
         # JSONResponse expects a dictionary, not a Pydantic model here.
         # Using model_dump on the SettingsModel with saved_settings_dict will structure it correctly for JSON.
         return JSONResponse(content=SettingsModel(**saved_settings_dict).model_dump())
@@ -6234,8 +6247,13 @@ async def save_birthdays(birthday_data: BirthdayData, current_ids: Annotated[Dic
     success = await save_birthdays_to_file(account_id, aac_user_id, data_to_save) # Renamed to 'success' for clarity
 
     if success:
+        # Update HOLIDAYS_BIRTHDAYS cache with new data
+        await cache_manager.store_cached_context(account_id, aac_user_id, "HOLIDAYS_BIRTHDAYS", data_to_save)
+        logging.info(f"Updated HOLIDAYS_BIRTHDAYS cache for account {account_id} and user {aac_user_id}")
+        
         return JSONResponse(content=data_to_save)
-    else: raise HTTPException(status_code=500, detail="Failed to save birthday data to file.")
+    else: 
+        raise HTTPException(status_code=500, detail="Failed to save birthday data to file.")
 
 
 # /api/friends-family
@@ -6257,6 +6275,10 @@ async def save_friends_family(friends_family_data: FriendsFamilyData, current_id
     success = await save_friends_family_to_file(account_id, aac_user_id, data_to_save)
 
     if success:
+        # Update FRIENDS_FAMILY cache with new data
+        await cache_manager.store_cached_context(account_id, aac_user_id, "FRIENDS_FAMILY", data_to_save)
+        logging.info(f"Updated FRIENDS_FAMILY cache for account {account_id} and user {aac_user_id}")
+        
         return JSONResponse(content=data_to_save)
     else: 
         raise HTTPException(status_code=500, detail="Failed to save friends & family data to file.")
@@ -6329,6 +6351,14 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     )
     
     if success:
+        # Update USER_PROFILE cache with new user info
+        from datetime import datetime, timezone
+        await cache_manager.store_cached_context(account_id, aac_user_id, "USER_PROFILE", {
+            "user_info": user_info,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        })
+        logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
+        
         return JSONResponse(content={"userInfo": user_info})
     else:
         raise HTTPException(status_code=500, detail="Failed to save user info.")
@@ -6446,6 +6476,19 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         if len(history) > MAX_CHAT_HISTORY: history = history[-MAX_CHAT_HISTORY:]
         if save_chat_history(account_id, aac_user_id, history): # Pass user_id
             logging.info(f"Chat history updated successfully for account {account_id} and user {aac_user_id}.")
+            
+            # Update the RAG cache with new conversation data
+            try:
+                await cache_manager.store_cached_context(
+                    account_id, 
+                    aac_user_id, 
+                    history, 
+                    CacheType.CONVERSATION_SESSION
+                )
+                logging.info(f"Updated CONVERSATION_SESSION cache for user {aac_user_id}")
+            except Exception as e:
+                logging.error(f"Failed to update CONVERSATION_SESSION cache: {e}")
+            
             return JSONResponse(content={"message": "Chat history saved successfully"})
         else: raise HTTPException(status_code=500, detail="Failed to save chat history.")
     except HTTPException as http_exc: raise http_exc
