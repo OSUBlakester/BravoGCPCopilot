@@ -1377,6 +1377,7 @@ class GeminiCacheManager:
     async def store_cached_context_with_gemini(self, account_id: str, aac_user_id: str, cache_type: str, context: str) -> bool:
         """Store context using actual Gemini caching API with batching for efficiency"""
         try:
+            from datetime import datetime
             user_key = self._get_user_key(account_id, aac_user_id)
             
             # Store locally first for batching (direct local storage to avoid recursion)
