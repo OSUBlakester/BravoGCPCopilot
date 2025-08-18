@@ -3023,16 +3023,18 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         # Prepare user query with JSON format instructions for cached content
         user_query_with_instructions = f"User Request (follow instructions carefully):\n{user_prompt_content}{json_format_instructions}"
         
-        # Check if we have a cached session - if so, send only the user query
-        chat_session = await cache_manager.get_or_create_conversation_session(account_id, aac_user_id)
+        # For option generation, use cached content references with fresh model instances
+        # This avoids polluting persistent conversation sessions with "fake" conversation history
+        cached_refs = await cache_manager.build_cached_context_references(account_id, aac_user_id)
         
-        if chat_session and hasattr(chat_session, 'send_message'):
-            # We have a cached session - send only the user query for maximum token savings
-            logging.info(f"TOKEN OPTIMIZATION: Using cached session, sending only user query ({len(user_query_with_instructions)} chars vs {len(final_llm_prompt)} chars)")
-            
+        if cached_refs:
+            # Use cached content with a fresh model instance (no persistent session state)
             try:
-                response = await asyncio.to_thread(chat_session.send_message, user_query_with_instructions)
-                llm_response_json_str = response.text.strip()
+                cached_content = caching.CachedContent.get(cached_refs[0])
+                model = genai.GenerativeModel(
+                    model_name=GEMINI_PRIMARY_MODEL.replace("models/", ""),
+                    cached_content=cached_content
+                )
                 
                 # Calculate and log token savings
                 estimated_full_tokens = len(final_llm_prompt.split())
@@ -3040,22 +3042,22 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 token_savings = estimated_full_tokens - estimated_query_tokens
                 savings_percent = (token_savings / estimated_full_tokens) * 100 if estimated_full_tokens > 0 else 0
                 
-                logging.info(f"TOKEN SAVINGS ACHIEVED: ~{token_savings} tokens saved ({savings_percent:.1f}% reduction)")
+                logging.info(f"TOKEN OPTIMIZATION: Using cached content with fresh model instance for option generation")
                 logging.info(f"TOKEN SAVINGS: Full context: ~{estimated_full_tokens} tokens, Sent: ~{estimated_query_tokens} tokens")
+                logging.info(f"TOKEN SAVINGS ACHIEVED: ~{token_savings} tokens saved ({savings_percent:.1f}% reduction)")
                 
-            except Exception as e:
-                logging.error(f"Error using cached session for {account_id}/{aac_user_id}: {e}")
+                # Send only the user query - context is cached on Gemini's servers
+                response = await asyncio.to_thread(model.generate_content, user_query_with_instructions, generation_config=generation_config)
+                llm_response_json_str = response.text.strip()
+                
+            except Exception as cache_error:
+                logging.warning(f"Failed to use cached content for {account_id}/{aac_user_id}: {cache_error}")
                 # Fallback to regular generation
                 llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config)
         else:
-            # No cached session - need to use full context initially, but this will create the cache for next time
-            logging.info(f"TOKEN OPTIMIZATION: No cached session found, sending full context to establish cache ({len(final_llm_prompt)} chars)")
-            llm_response_json_str = await _generate_gemini_content_with_caching(
-                account_id, aac_user_id, final_llm_prompt, 
-                generation_config=generation_config, 
-                cache_manager=cache_manager,
-                user_query_only=user_query_with_instructions
-            )
+            # No cached content available - use regular generation 
+            logging.info(f"TOKEN OPTIMIZATION: No cached content available, using full prompt ({len(final_llm_prompt)} chars)")
+            llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config)
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
     def extract_json_from_response(response_text: str) -> str:
