@@ -1786,6 +1786,86 @@ Context Information:
             "cache_types": cache_types_count,
             "active_sessions": len(self.conversation_sessions)
         }
+    
+    def get_cache_debug_info(self, account_id: str, aac_user_id: str) -> Dict:
+        """Get detailed cache debug information for a specific user"""
+        user_key = self._get_user_key(account_id, aac_user_id)
+        
+        debug_info = {
+            "user_key": user_key,
+            "cached_types": [],
+            "cache_details": {},
+            "conversation_session": None,
+            "cache_refresh_times": {},
+            "cache_validity": {}
+        }
+        
+        # Check local caches
+        if user_key in self.gemini_caches:
+            user_caches = self.gemini_caches[user_key]
+            debug_info["cached_types"] = list(user_caches.keys())
+            
+            for cache_type, cache_data in user_caches.items():
+                if isinstance(cache_data, dict):
+                    debug_info["cache_details"][cache_type] = {
+                        "type": "local",
+                        "created_at": cache_data.get("created_at"),
+                        "ttl": cache_data.get("ttl"),
+                        "is_gemini_cache": cache_data.get("gemini_cache_name") is not None,
+                        "gemini_cache_name": cache_data.get("gemini_cache_name"),
+                        "context_length": len(str(cache_data.get("context", "")))
+                    }
+                else:
+                    debug_info["cache_details"][cache_type] = {
+                        "type": "gemini_cached_content",
+                        "cache_name": str(cache_data)
+                    }
+        
+        # Check conversation session
+        if user_key in self.conversation_sessions:
+            session_info = self.conversation_sessions[user_key]
+            debug_info["conversation_session"] = {
+                "exists": True,
+                "created_at": session_info.get("created_at"),
+                "message_count": session_info.get("message_count", 0),
+                "cached_content_refs": session_info.get("cached_content_refs", []),
+                "age_seconds": dt.now().timestamp() - session_info.get("created_at", 0)
+            }
+        else:
+            debug_info["conversation_session"] = {"exists": False}
+        
+        # Check cache refresh times
+        if user_key in self.cache_refresh_times:
+            debug_info["cache_refresh_times"] = self.cache_refresh_times[user_key].copy()
+        
+        # Check cache validity
+        for cache_type in [CacheType.USER_PROFILE, CacheType.LOCATION_DATA, CacheType.FRIENDS_FAMILY, 
+                          CacheType.USER_SETTINGS, CacheType.HOLIDAYS_BIRTHDAYS, CacheType.RAG_CONTEXT,
+                          CacheType.CONVERSATION_SESSION, CacheType.BUTTON_ACTIVITY]:
+            try:
+                # Use sync method for debug
+                if user_key in self.cache_refresh_times and cache_type in self.cache_refresh_times[user_key]:
+                    last_refresh = self.cache_refresh_times[user_key][cache_type]
+                    ttl = self.cache_ttl.get(cache_type, 3600)
+                    age = dt.now().timestamp() - last_refresh
+                    debug_info["cache_validity"][cache_type] = {
+                        "is_valid": age < ttl,
+                        "age_seconds": age,
+                        "ttl_seconds": ttl,
+                        "last_refresh": last_refresh
+                    }
+                else:
+                    debug_info["cache_validity"][cache_type] = {
+                        "is_valid": False,
+                        "reason": "No refresh time recorded"
+                    }
+            except Exception as e:
+                debug_info["cache_validity"][cache_type] = {
+                    "is_valid": False,
+                    "error": str(e)
+                }
+        
+        return debug_info
 
 # Initialize global cache manager
 cache_manager = GeminiCacheManager()
@@ -5468,6 +5548,18 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
         except Exception as e:
             logging.error(f"Failed to update USER_SETTINGS cache: {e}")
         
+        # CRITICAL FIX: Invalidate relevant caches after settings update
+        try:
+            await cache_manager.invalidate_cache(
+                account_id, 
+                aac_user_id, 
+                [CacheType.USER_SETTINGS, CacheType.RAG_CONTEXT], 
+                "/api/settings"
+            )
+            logging.info(f"Invalidated USER_SETTINGS and RAG_CONTEXT caches for account {account_id}, user {aac_user_id} after settings update")
+        except Exception as e:
+            logging.error(f"Failed to invalidate caches after settings update: {e}")
+        
         # JSONResponse expects a dictionary, not a Pydantic model here.
         # Using model_dump on the SettingsModel with saved_settings_dict will structure it correctly for JSON.
         return JSONResponse(content=SettingsModel(**saved_settings_dict).model_dump())
@@ -6585,6 +6677,52 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         "userInfo": user_info_content_dict.get("narrative", ""),
         "currentMood": user_info_content_dict.get("currentMood")
     })
+
+# Debug endpoint for cache inspection
+@app.get("/api/debug/cache")
+async def get_cache_debug_info(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Debug endpoint to inspect cache state for troubleshooting"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    logging.info(f"GET /api/debug/cache request received for account {account_id} and user {aac_user_id}.")
+    
+    try:
+        # Get detailed cache debug information
+        debug_info = cache_manager.get_cache_debug_info(account_id, aac_user_id)
+        
+        # Add overall cache statistics
+        cache_stats = cache_manager.get_cache_stats()
+        
+        # Try to get current user data for comparison
+        try:
+            user_info = await load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data=DEFAULT_USER_INFO.copy()
+            )
+            debug_info["current_user_data"] = {
+                "has_mood": "currentMood" in user_info,
+                "current_mood": user_info.get("currentMood"),
+                "narrative_length": len(user_info.get("narrative", ""))
+            }
+        except Exception as e:
+            debug_info["current_user_data"] = {"error": str(e)}
+        
+        return JSONResponse(content={
+            "success": True,
+            "debug_info": debug_info,
+            "cache_stats": cache_stats,
+            "timestamp": dt.now().isoformat()
+        })
+    
+    except Exception as e:
+        logging.error(f"Error getting cache debug info: {e}")
+        return JSONResponse(content={
+            "success": False,
+            "error": str(e),
+            "timestamp": dt.now().isoformat()
+        }, status_code=500)
 
 @app.post("/api/user-info")
 async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
