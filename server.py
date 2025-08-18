@@ -917,9 +917,9 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
             })
             logging.info(f"Updated USER_PROFILE cache with new current state for account {account_id} and user {aac_user_id}")
             
-            # Invalidate conversation sessions since user context changed
-            await cache_manager.invalidate_cache_type(account_id, aac_user_id, "CONVERSATION_SESSION")
-            logging.info(f"Invalidated conversation session cache due to current state change for account {account_id} and user {aac_user_id}")
+            # Invalidate conversation sessions and user profile cache since user context changed
+            await cache_manager.invalidate_cache(account_id, aac_user_id, ["CONVERSATION_SESSION", "USER_PROFILE"], "/user_current")
+            logging.info(f"Invalidated conversation session and user profile cache due to current state change for account {account_id} and user {aac_user_id}")
         except Exception as cache_error:
             logging.error(f"Failed to update USER_PROFILE cache with current state for account {account_id} and user {aac_user_id}: {cache_error}")
             # Don't fail the entire operation due to cache update failure
@@ -1292,13 +1292,29 @@ class GeminiCacheManager:
         user_key = self._get_user_key(account_id, aac_user_id)
         
         invalidated = []
+        gemini_caches_to_delete = []
+        
         for cache_type in cache_types:
             if user_key in self.gemini_caches and cache_type in self.gemini_caches[user_key]:
+                cache_entry = self.gemini_caches[user_key][cache_type]
+                
+                # If this cache has a Gemini cached content reference, mark it for deletion
+                if isinstance(cache_entry, dict) and "gemini_cache_name" in cache_entry:
+                    gemini_caches_to_delete.append(cache_entry["gemini_cache_name"])
+                
                 del self.gemini_caches[user_key][cache_type]
                 invalidated.append(cache_type)
             
             if user_key in self.cache_refresh_times and cache_type in self.cache_refresh_times[user_key]:
                 del self.cache_refresh_times[user_key][cache_type]
+        
+        # Delete Gemini cached content references
+        for gemini_cache_name in gemini_caches_to_delete:
+            try:
+                await asyncio.to_thread(genai.delete_cached_content, gemini_cache_name)
+                logging.info(f"Deleted Gemini cached content: {gemini_cache_name}")
+            except Exception as e:
+                logging.warning(f"Failed to delete Gemini cached content {gemini_cache_name}: {e}")
         
         if invalidated:
             logging.info(f"Cache invalidated for {user_key} by {endpoint}: {invalidated}")
@@ -6590,9 +6606,9 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
             })
             logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
             
-            # Invalidate conversation sessions since user mood/info changed
-            await cache_manager.invalidate_cache_type(account_id, aac_user_id, "CONVERSATION_SESSION")
-            logging.info(f"Invalidated conversation session cache due to mood/user info change for account {account_id} and user {aac_user_id}")
+            # Invalidate conversation sessions and user profile cache since user mood/info changed
+            await cache_manager.invalidate_cache(account_id, aac_user_id, ["CONVERSATION_SESSION", "USER_PROFILE"], "/api/user-info")
+            logging.info(f"Invalidated conversation session and user profile cache due to mood/user info change for account {account_id} and user {aac_user_id}")
         except Exception as cache_error:
             logging.error(f"Failed to update USER_PROFILE cache for account {account_id} and user {aac_user_id}: {cache_error}")
             # Don't fail the entire save operation due to cache update failure
