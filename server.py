@@ -1326,6 +1326,24 @@ class GeminiCacheManager:
                 del self.conversation_sessions[user_key]
                 logging.info(f"Invalidated conversation session for {user_key} due to user data changes")
         
+        # CRITICAL: Also invalidate COMBINED cache when core user data changes
+        # This ensures Gemini cached content is rebuilt with updated user profile/mood
+        core_data_types = [CacheType.USER_PROFILE, CacheType.FRIENDS_FAMILY, CacheType.USER_SETTINGS]
+        if any(cache_type in invalidated for cache_type in core_data_types):
+            if user_key in self.gemini_caches and "COMBINED" in self.gemini_caches[user_key]:
+                combined_cache = self.gemini_caches[user_key]["COMBINED"]
+                if isinstance(combined_cache, dict) and "gemini_cache_name" in combined_cache:
+                    try:
+                        await asyncio.to_thread(genai.delete_cached_content, combined_cache["gemini_cache_name"])
+                        logging.info(f"Deleted COMBINED Gemini cached content due to {invalidated} changes: {combined_cache['gemini_cache_name']}")
+                    except Exception as e:
+                        logging.warning(f"Failed to delete COMBINED Gemini cached content: {e}")
+                
+                del self.gemini_caches[user_key]["COMBINED"]
+                if user_key in self.cache_refresh_times and "COMBINED" in self.cache_refresh_times[user_key]:
+                    del self.cache_refresh_times[user_key]["COMBINED"]
+                logging.info(f"Invalidated COMBINED cache for {user_key} due to core data changes: {invalidated}")
+        
         # Special handling for RAG context refresh
         if CacheType.RAG_CONTEXT in cache_types:
             await self.refresh_rag_context(account_id, aac_user_id)
@@ -6608,9 +6626,35 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
             })
             logging.info(f"Updated USER_PROFILE cache for account {account_id} and user {aac_user_id}")
             
-            # Only invalidate conversation sessions so they get rebuilt with new user profile data
+            # CRITICAL: Force rebuild of COMBINED cache to include new mood/user info
+            # First invalidate the old COMBINED cache
+            import google.generativeai as genai
+            user_key = cache_manager._get_user_key(account_id, aac_user_id)
+            if user_key in cache_manager.gemini_caches and "COMBINED" in cache_manager.gemini_caches[user_key]:
+                combined_cache = cache_manager.gemini_caches[user_key]["COMBINED"]
+                if isinstance(combined_cache, dict) and "gemini_cache_name" in combined_cache:
+                    try:
+                        await asyncio.to_thread(genai.delete_cached_content, combined_cache["gemini_cache_name"])
+                        logging.info(f"Deleted old COMBINED cache to rebuild with new mood: {combined_cache['gemini_cache_name']}")
+                    except Exception as e:
+                        logging.warning(f"Failed to delete old COMBINED cache: {e}")
+                
+                del cache_manager.gemini_caches[user_key]["COMBINED"]
+                if user_key in cache_manager.cache_refresh_times and "COMBINED" in cache_manager.cache_refresh_times[user_key]:
+                    del cache_manager.cache_refresh_times[user_key]["COMBINED"]
+            
+            # Force rebuild by calling store_cached_context_with_gemini with USER_PROFILE
+            # This will trigger the COMBINED cache creation with updated data
+            await cache_manager.store_cached_context_with_gemini(account_id, aac_user_id, "USER_PROFILE", {
+                "user_info": user_info,
+                "user_current": user_current_content,
+                "current_mood": current_mood,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            # Only invalidate conversation sessions so they get rebuilt with new cached content
             await cache_manager.invalidate_cache(account_id, aac_user_id, ["CONVERSATION_SESSION"], "/api/user-info")
-            logging.info(f"Invalidated conversation session cache due to mood/user info change for account {account_id} and user {aac_user_id}")
+            logging.info(f"Rebuilt COMBINED cache and invalidated conversation session due to mood/user info change for account {account_id} and user {aac_user_id}")
         except Exception as cache_error:
             logging.error(f"Failed to update USER_PROFILE cache for account {account_id} and user {aac_user_id}: {cache_error}")
             # Don't fail the entire save operation due to cache update failure
