@@ -91,6 +91,11 @@ async function initializePage() {
         closeModalBtn.addEventListener('click', closeRelationshipModal);
         addRelationshipBtn.addEventListener('click', addRelationship);
 
+        console.log("Event listeners added successfully");
+        console.log("Save Mood Button:", saveMoodBtn);
+        console.log("Clear Mood Button:", clearMoodBtn);
+        console.log("Current Mood Select:", currentMoodSelect);
+
         // Close modal when clicking outside
         relationshipModal.addEventListener('click', (e) => {
             if (e.target === relationshipModal) {
@@ -122,8 +127,15 @@ function showStatus(statusElement, message, isError = false, timeout = 3000) {
 async function loadMoodOptions() {
     console.log("Loading mood options...");
     
-    // Predefined mood options (same as mood-selection.js)
-    const MOOD_OPTIONS = [
+    // Wait for mood-selection.js to load if needed
+    let attempts = 0;
+    while (!window.MOOD_OPTIONS && attempts < 10) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+    }
+    
+    // Use global MOOD_OPTIONS from mood-selection.js, or fallback to local array
+    const MOOD_OPTIONS = window.MOOD_OPTIONS || [
         { name: 'Happy', emoji: '😊' },
         { name: 'Sad', emoji: '😢' },
         { name: 'Excited', emoji: '🤩' },
@@ -146,6 +158,8 @@ async function loadMoodOptions() {
         { name: 'Content', emoji: '😊' }
     ];
     
+    console.log("Using mood options:", MOOD_OPTIONS.length, "options");
+    
     // Clear existing options except the first one
     currentMoodSelect.innerHTML = '<option value="">No mood selected</option>';
     
@@ -156,6 +170,8 @@ async function loadMoodOptions() {
         option.textContent = `${mood.emoji} ${mood.name}`;
         currentMoodSelect.appendChild(option);
     });
+    
+    console.log("Mood options loaded successfully:", currentMoodSelect.options.length, "total options");
 }
 
 async function loadCurrentMood() {
@@ -185,7 +201,9 @@ async function loadCurrentMood() {
 
 async function saveMood() {
     const selectedMood = currentMoodSelect.value;
-    console.log("Saving mood:", selectedMood);
+    console.log("saveMood() called - Selected mood:", selectedMood);
+    console.log("currentMoodSelect element:", currentMoodSelect);
+    
     showStatus(moodSaveStatus, "Saving...", false, 0);
     
     try {
@@ -199,7 +217,10 @@ async function saveMood() {
         if (getCurrentResponse.ok) {
             const current = await getCurrentResponse.json();
             currentUserInfo = current.userInfo || "";
+            console.log("Retrieved current user info for preservation");
         }
+        
+        console.log("Sending mood save request:", { userInfo: currentUserInfo, currentMood: selectedMood });
         
         // Save mood along with existing user info
         const response = await window.authenticatedFetch('/api/user-info', {
@@ -232,10 +253,12 @@ async function saveMood() {
 }
 
 async function clearMood() {
-    console.log("Clearing mood...");
+    console.log("clearMood() called");
+    console.log("Setting currentMoodSelect.value to empty string");
     currentMoodSelect.value = "";
     await saveMood(); // This will save an empty mood
     sessionStorage.removeItem('currentSessionMood');
+    console.log("Mood cleared and session storage updated");
 }
 
 // --- User Info Functions ---
