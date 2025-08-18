@@ -1374,7 +1374,7 @@ class GeminiCacheManager:
             
             # Estimate token count (roughly 4 characters per token)
             estimated_tokens = len(content_str) // 4
-            min_required_tokens = 2048
+            min_required_tokens = 512  # Changed from 2048 to match COMBINED cache threshold
             
             if estimated_tokens < min_required_tokens:
                 logging.info(f"Skipping cache creation for {cache_name}: estimated {estimated_tokens} tokens < {min_required_tokens} minimum")
@@ -1498,6 +1498,7 @@ class GeminiCacheManager:
                         all_contexts[ctx_type] = ctx_content
             
             # Combine contexts into a single larger content block
+            logging.info(f"DEBUG: Checking if all_contexts has data: {len(all_contexts)} contexts available")
             if all_contexts:
                 # Start with system instruction for Bravo
                 combined_content = """You are Bravo, an AI communication assistant designed for AAC (Augmentative and Alternative Communication) users. You help users communicate by providing relevant response options based on their context, relationships, location, activities, and conversation history.
@@ -1517,9 +1518,11 @@ Context Information:
                     combined_content += f"\n## {ctx_type.replace('_', ' ').title()}\n{ctx_content}\n"
                 
                 logging.info(f"DEBUG: Combined content length: {len(combined_content)} chars, {len(all_contexts)} context types")
+                logging.info(f"DEBUG: Available context types: {list(all_contexts.keys())}")
                 
                 # Only create cache if combined content is large enough (lowered threshold)
                 estimated_tokens = len(combined_content) // 4
+                logging.info(f"DEBUG: Estimated tokens: {estimated_tokens}, threshold: 512")
                 if estimated_tokens >= 512:  # Lowered from 2048 to 512 tokens
                     cache_name = f"{user_key}_COMBINED_{int(dt.now().timestamp())}"
                     
@@ -1557,7 +1560,7 @@ Context Information:
                     logging.info(f"Combined content too small for caching: {estimated_tokens} tokens < 512 minimum for {account_id}/{aac_user_id}")
                     return False
             else:
-                logging.info(f"No contexts available for combined cache creation for {account_id}/{aac_user_id}")
+                logging.info(f"DEBUG: No contexts available for combined cache creation for {account_id}/{aac_user_id} - all_contexts is empty")
                 return False
             
             return False
@@ -2604,6 +2607,53 @@ async def _generate_gemini_content_with_caching(
         return await _generate_gemini_content_with_fallback(prompt_text, generation_config)
 
 # --- Helper function for Gemini LLM content generation with fallback ---
+async def _generate_gemini_content_with_caching(
+    account_id: str, 
+    aac_user_id: str, 
+    user_query_only: str,
+    cache_manager,
+    generation_config: Optional[Dict] = None
+) -> str:
+    """
+    Generate Gemini content using cached context references instead of sending full prompts.
+    This is the token-optimized version that leverages Gemini Context Caching.
+    """
+    try:
+        # Get cached content references
+        cached_refs = await cache_manager.build_cached_context_references(account_id, aac_user_id)
+        
+        if cached_refs:
+            # Use cached content with a fresh model instance
+            try:
+                cached_content = caching.CachedContent.get(cached_refs[0])
+                model = genai.GenerativeModel(
+                    model_name=GEMINI_PRIMARY_MODEL.replace("models/", ""),
+                    cached_content=cached_content
+                )
+                
+                # Calculate and log token savings
+                estimated_query_tokens = len(user_query_only.split())
+                
+                logging.info(f"TOKEN OPTIMIZATION: Using cached content for content generation")
+                logging.info(f"TOKEN SAVINGS: Sent only user query: ~{estimated_query_tokens} tokens (instead of 2000+ tokens)")
+                
+                # Send only the user query - context is cached on Gemini's servers
+                response = await asyncio.to_thread(model.generate_content, user_query_only, generation_config=generation_config)
+                return response.text.strip()
+                
+            except Exception as cache_error:
+                logging.warning(f"Failed to use cached content for {account_id}/{aac_user_id}: {cache_error}")
+                # Fallback to regular generation without cache
+                return await _generate_gemini_content_with_fallback(user_query_only, generation_config)
+        else:
+            # No cached content available - use regular generation
+            logging.info(f"TOKEN OPTIMIZATION: No cached content available, using lightweight query only")
+            return await _generate_gemini_content_with_fallback(user_query_only, generation_config)
+            
+    except Exception as e:
+        logging.error(f"Error in _generate_gemini_content_with_caching: {e}")
+        return await _generate_gemini_content_with_fallback(user_query_only, generation_config)
+
 async def _generate_gemini_content_with_fallback(prompt_text: str, generation_config: Optional[Dict] = None) -> str: # <--- THIS LINE IS CRITICAL
     global primary_llm_model_instance, fallback_llm_model_instance
 
@@ -3150,12 +3200,24 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
             except Exception as cache_error:
                 logging.warning(f"Failed to use cached content for {account_id}/{aac_user_id}: {cache_error}")
-                # Fallback to regular generation
-                llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config)
+                # Fallback to caching function (which will handle no cache gracefully)
+                llm_response_json_str = await _generate_gemini_content_with_caching(
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                    user_query_only=user_query_with_instructions,
+                    cache_manager=cache_manager,
+                    generation_config=generation_config
+                )
         else:
-            # No cached content available - use regular generation 
+            # No cached content available - use caching function (which will handle no cache gracefully)
             logging.info(f"TOKEN OPTIMIZATION: No cached content available, using full prompt ({len(final_llm_prompt)} chars)")
-            llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config)
+            llm_response_json_str = await _generate_gemini_content_with_caching(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                user_query_only=user_query_with_instructions,
+                cache_manager=cache_manager,
+                generation_config=generation_config
+            )
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
     def extract_json_from_response(response_text: str) -> str:
@@ -6740,13 +6802,20 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     )
     
     if success:
-        # Update USER_PROFILE cache with new user info
+        # Update USER_PROFILE cache with new user info AND invalidate USER_SETTINGS for mood
         try:
             from datetime import datetime, timezone
             
+            # CRITICAL FIX: Invalidate USER_SETTINGS cache since mood is stored there
+            await cache_manager.invalidate_cache(account_id, aac_user_id, [CacheType.USER_SETTINGS], "/api/user-info")
+            logging.info(f"Invalidated USER_SETTINGS cache due to mood change for account {account_id} and user {aac_user_id}")
+            
             # Get current user state to maintain complete cache structure
             user_current_content_dict = await load_firestore_document(
-                account_id, aac_user_id, "info/current_state"
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/current_state",
+                default_data=DEFAULT_USER_CURRENT.copy()
             )
             user_current_content = ""
             if user_current_content_dict:
@@ -7666,111 +7735,9 @@ async def cleanup_freestyle_text(
     account_id = current_ids["account_id"]
     
     try:
-        # Load comprehensive user context (same as LLM endpoint)
-        current_date = date.today()
-        current_date_str = current_date.strftime("%A, %B %d, %Y")
-        
-        # Load user settings
-        user_settings = await load_settings_from_file(account_id, aac_user_id)
-        
-        # Load holidays and birthdays
-        upcoming_holidays_list = await get_upcoming_holidays_and_observances(account_id, aac_user_id, days_ahead=14)
-        upcoming_birthdays_list = await get_upcoming_birthdays(account_id, aac_user_id, days_ahead=14)
-        
-        # Load diary entries
-        diary_entries = await load_diary_entries(account_id, aac_user_id)
-        
-        # Process diary entries into past and future context
-        past_diary_context = []
-        future_diary_context = []
-        for entry in diary_entries:
-            try:
-                if not isinstance(entry, dict): 
-                    continue
-                entry_date = date.fromisoformat(entry.get('date',''))
-                entry_text = entry.get('entry', '')
-                if not entry_text: continue
-                
-                if entry_date <= current_date and len(past_diary_context) < MAX_DIARY_CONTEXT:
-                    days_ago = (current_date - entry_date).days
-                    relative_day = f" ({days_ago} days ago)" if days_ago > 1 else (" (Yesterday)" if days_ago == 1 else " (Today)")
-                    past_diary_context.append(f"Date: {entry['date']}{relative_day}\nEntry: {entry_text}")
-                elif entry_date > current_date:
-                    days_ahead_entry = (entry_date - current_date).days
-                    relative_day = f" (in {days_ahead_entry} days)" if days_ahead_entry > 1 else (" (Tomorrow!)" if days_ahead_entry == 1 else " (Today - planned)")
-                    future_diary_context.append({'date_obj': entry_date, 'text': f"Date: {entry['date']}{relative_day}\nEntry: {entry_text}"})
-            except Exception:
-                continue
-        
-        future_diary_context.sort(key=lambda x: x['date_obj'])
-        future_diary_context = [item['text'] for item in future_diary_context[:MAX_DIARY_CONTEXT]]
-        
-        # Load chat history
-        chat_history = await load_chat_history(account_id, aac_user_id)
-        recent_chat_context = []
-        for chat in reversed(chat_history[-MAX_CHAT_CONTEXT:]):
-            if not isinstance(chat, dict):
-                continue
-            q = chat.get('question', '').strip().replace('Q: ', '').strip("' ")
-            r = chat.get('response', '').strip().replace('A: ', '').strip("' ")
-            if q and r: recent_chat_context.append(f"Previous Turn: Q: {q} / A: {r}")
-        
-        # Load user info and current state
-        user_info_content_dict = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data=DEFAULT_USER_INFO.copy()
-        )
-        user_info_content = user_info_content_dict.get("narrative", "").strip()
-        
-        user_current_content_dict = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/current_state",
-            default_data=DEFAULT_USER_CURRENT.copy()
-        )
-        user_current_content = (
-            f"Location: {user_current_content_dict.get('location', '')}\n"
-            f"People Present: {user_current_content_dict.get('people', '')}\n"
-            f"Activity: {user_current_content_dict.get('activity', '')}"
-        ).strip()
-        
-        # Build context for personalized cleanup
-        context_parts = []
-        context_parts.append(f"Current Date: {current_date_str}")
-        
-        if user_info_content.strip():
-            context_parts.append(f"General User Information:\n{user_info_content}")
-        if user_current_content.strip():
-            context_parts.append(f"User's Current State:\n{user_current_content}")
-        
-        # Add holidays and birthdays if available
-        if upcoming_holidays_list and upcoming_holidays_list[0] != f"No major holidays or observances found in the next {14} days for {DEFAULT_COUNTRY_CODE}.":
-            context_parts.append(f"Upcoming Holidays/Observances (approx. next 2 weeks):\n" + "\n".join(upcoming_holidays_list))
-        
-        if upcoming_birthdays_list and upcoming_birthdays_list[0] != f"No birthdays found in the next {14} days.":
-            is_just_user_age = (len(upcoming_birthdays_list) == 1 and upcoming_birthdays_list[0].startswith("User's current age:"))
-            if is_just_user_age:
-                context_parts.append(upcoming_birthdays_list[0])
-            else:
-                context_parts.append(f"Birthday Info & Upcoming Birthdays (approx. next 2 weeks):\n" + "\n".join(upcoming_birthdays_list))
-        
-        # Add diary and chat context if available
-        if past_diary_context:
-            context_parts.append(f"Recent Diary Entries (most recent first):\n---\n" + "\n---\n".join(past_diary_context))
-        if future_diary_context:
-            context_parts.append(f"Upcoming Diary Plans (soonest first):\n---\n" + "\n---\n".join(future_diary_context))
-        if recent_chat_context:
-            context_parts.append(f"Recent Conversation History (most recent first):\n" + "\n".join(recent_chat_context))
-        
-        # Build personalized context
-        personalized_context = "\n\n".join(c.strip() for c in context_parts if c.strip())
-        
-        # Create enhanced cleanup prompt with RAG context
-        prompt = f"""{personalized_context}
-
-Clean up and improve this text while preserving the original meaning and intent. Use the context above to make the cleanup more personalized and appropriate for this specific user.
+        # We no longer need to manually build context - the caching function handles it
+        # Create enhanced cleanup prompt - now just the user query part
+        user_query_only = f"""Clean up and improve this text while preserving the original meaning and intent. Use my personal context to make the cleanup more personalized and appropriate.
 
 Original text: "{request.text_to_cleanup}"
 
@@ -7778,10 +7745,10 @@ Please:
 1. Fix grammar and punctuation
 2. Make it more natural and conversational and complete if needed
 3. Keep the same meaning and tone
-4. Make it sound like natural speech appropriate for this user's context
+4. Make it sound like natural speech appropriate for my context
 5. Keep it concise and clear
-6. The phrase should be structured like it is coming from the user
-7. Consider the user's current situation, recent activities, and personal context when cleaning up
+6. The phrase should be structured like it is coming from me
+7. Consider my current situation, recent activities, and personal context when cleaning up
 
 For example:
 - "dad beekeeping" → "My dad is a beekeeper"
@@ -7790,8 +7757,14 @@ For example:
 
 Return only the improved text, nothing else."""
         
-        # Use LLM to cleanup text with personalized context
-        cleaned_text = await _generate_gemini_content_with_fallback(prompt)
+        # Use NEW caching function instead of building massive prompts
+        cleaned_text = await _generate_gemini_content_with_caching(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            user_query_only=user_query_only,
+            cache_manager=cache_manager,
+            generation_config=None
+        )
         
         # Clean up the response (remove quotes if present)
         cleaned_text = cleaned_text.strip().strip('"').strip("'")
