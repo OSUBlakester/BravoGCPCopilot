@@ -2775,9 +2775,17 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     
     # Add mood context if available
     if current_mood:
-        mood_context = f"User's Current Mood: {current_mood} - Please tailor responses to be appropriate for someone feeling {current_mood.lower()}."
+        mood_context = f"""IMPORTANT: User's Current Mood is {current_mood.upper()}
+The user is feeling {current_mood.lower()} right now. This is critical context that MUST influence your response.
+Please tailor ALL responses to be sensitive and appropriate for someone feeling {current_mood.lower()}.
+- Use language that acknowledges their {current_mood.lower()} mood
+- Choose tone and content that's suitable for someone who is {current_mood.lower()}
+- Be empathetic and supportive if the mood is negative
+- Match their energy level if the mood is positive"""
         context_parts.append(mood_context)
-        logging.info(f"Added mood context to LLM prompt: {mood_context}")
+        logging.info(f"Added enhanced mood context to LLM prompt: User is feeling {current_mood}")
+    else:
+        logging.info("No mood set - using neutral tone")
     
     if user_info_content.strip(): # Only add if not empty after strip
         context_parts.append(f"General User Information:\n{user_info_content}")
@@ -2959,7 +2967,18 @@ async def get_llm_response_endpoint(request: Request, current_ids: Annotated[Dic
     logging.info(f"Using LLM provider: {llm_provider} for account {account_id} and user {aac_user_id}")
 
     # Add JSON format instructions for both OpenAI and Gemini
-    json_format_instructions = """
+    # Add mood-aware JSON format instructions based on current mood
+    mood_instruction = ""
+    if current_mood:
+        mood_instruction = f"""
+
+MOOD REQUIREMENT: The user is currently feeling {current_mood.upper()}. Every response option MUST reflect this mood appropriately:
+- Language should be suitable for someone feeling {current_mood.lower()}
+- Tone should match or be sensitive to their {current_mood.lower()} state
+- Content should acknowledge their emotional state
+- Be empathetic and supportive for negative moods, energetic for positive moods"""
+
+    json_format_instructions = f"""{mood_instruction}
 
 CRITICAL: Format your response as a JSON list where each item has "option" and "summary" keys.
 If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
@@ -2967,8 +2986,8 @@ The "option" key should contain the FULL option text.
 
 IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND punchline in the SAME "option". Format them as: "Question? Punchline!" with just a question mark between the question and punchline. DO NOT split jokes into separate options.
 
-Example: [{"option": "Hello there, how are you doing today?", "summary": "Hello how are you"}, {"option": "Goodbye!", "summary": "Goodbye!"}]
-Joke Example: [{"option": "Why don't scientists trust atoms? Because they make up everything!", "summary": "scientists trust atoms"}]
+Example: [{{"option": "Hello there, how are you doing today?", "summary": "Hello how are you"}}, {{"option": "Goodbye!", "summary": "Goodbye!"}}]
+Joke Example: [{{"option": "Why don't scientists trust atoms? Because they make up everything!", "summary": "scientists trust atoms"}}]
 
 Return ONLY valid JSON - no other text before or after the JSON array."""
     
