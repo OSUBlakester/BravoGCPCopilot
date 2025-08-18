@@ -27,6 +27,9 @@ const MOOD_OPTIONS = [
     { name: 'Content', emoji: '😊' }
 ];
 
+// Export to global scope for use by other scripts
+window.MOOD_OPTIONS = MOOD_OPTIONS;
+
 class MoodSelection {
     constructor() {
         this.selectedMood = null;
