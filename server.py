@@ -2944,8 +2944,12 @@ Please tailor ALL responses to be sensitive and appropriate for someone feeling 
     # Log a more detailed preview of the final prompt
     prompt_preview = final_llm_prompt[:1000].replace('\n', '\\n')
     logging.info(f"DEBUG Final LLM Prompt preview (first 1000 chars): {prompt_preview}...")
-    print(f'Final LLM Prompt for account {account_id} and user {aac_user_id}:\n{final_llm_prompt[:500]}...') # Print first 500 chars
-    logging.info(f"--- Sending Prompt to LLM for account {account_id} and user {aac_user_id} (Length: {len(final_llm_prompt)}) ---")
+    logging.info(f"--- Constructed Full Context for account {account_id} and user {aac_user_id} (Length: {len(final_llm_prompt)} chars, ~{len(final_llm_prompt.split())} tokens) ---")
+    
+    # Log what the user query alone looks like
+    user_query_preview = user_prompt_content[:200].replace('\n', '\\n')
+    logging.info(f"DEBUG User Query Only (first 200 chars): {user_query_preview}...")
+    logging.info(f"User Query Length: {len(user_prompt_content)} chars, ~{len(user_prompt_content.split())} tokens")
 
     # --- PERFORMANCE: Log cache effectiveness ---
     cache_hits = sum([
@@ -2996,18 +3000,46 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
 
     # Route to appropriate LLM based on user preference
     if llm_provider == "chatgpt":
+        # For OpenAI, we still need to send the full prompt
         llm_response_json_str = await _generate_openai_content_with_fallback(final_llm_prompt)
     else:  # Default to Gemini for "gemini" or any unrecognized value
+        # For Gemini with caching, we want to send minimal tokens
         # Prepare user query with JSON format instructions for cached content
         user_query_with_instructions = f"User Request (follow instructions carefully):\n{user_prompt_content}{json_format_instructions}"
         
-        # Use cached generation for significant performance and cost improvements
-        llm_response_json_str = await _generate_gemini_content_with_caching(
-            account_id, aac_user_id, final_llm_prompt, 
-            generation_config=generation_config, 
-            cache_manager=cache_manager,
-            user_query_only=user_query_with_instructions
-        )
+        # Check if we have a cached session - if so, send only the user query
+        chat_session = await cache_manager.get_or_create_conversation_session(account_id, aac_user_id)
+        
+        if chat_session and hasattr(chat_session, 'send_message'):
+            # We have a cached session - send only the user query for maximum token savings
+            logging.info(f"TOKEN OPTIMIZATION: Using cached session, sending only user query ({len(user_query_with_instructions)} chars vs {len(final_llm_prompt)} chars)")
+            
+            try:
+                response = await asyncio.to_thread(chat_session.send_message, user_query_with_instructions)
+                llm_response_json_str = response.text.strip()
+                
+                # Calculate and log token savings
+                estimated_full_tokens = len(final_llm_prompt.split())
+                estimated_query_tokens = len(user_query_with_instructions.split())
+                token_savings = estimated_full_tokens - estimated_query_tokens
+                savings_percent = (token_savings / estimated_full_tokens) * 100 if estimated_full_tokens > 0 else 0
+                
+                logging.info(f"TOKEN SAVINGS ACHIEVED: ~{token_savings} tokens saved ({savings_percent:.1f}% reduction)")
+                logging.info(f"TOKEN SAVINGS: Full context: ~{estimated_full_tokens} tokens, Sent: ~{estimated_query_tokens} tokens")
+                
+            except Exception as e:
+                logging.error(f"Error using cached session for {account_id}/{aac_user_id}: {e}")
+                # Fallback to regular generation
+                llm_response_json_str = await _generate_gemini_content_with_fallback(final_llm_prompt, generation_config)
+        else:
+            # No cached session - need to use full context initially, but this will create the cache for next time
+            logging.info(f"TOKEN OPTIMIZATION: No cached session found, sending full context to establish cache ({len(final_llm_prompt)} chars)")
+            llm_response_json_str = await _generate_gemini_content_with_caching(
+                account_id, aac_user_id, final_llm_prompt, 
+                generation_config=generation_config, 
+                cache_manager=cache_manager,
+                user_query_only=user_query_with_instructions
+            )
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
     def extract_json_from_response(response_text: str) -> str:
