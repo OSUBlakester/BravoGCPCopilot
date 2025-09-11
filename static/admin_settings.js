@@ -10,6 +10,7 @@ const wakeWordNameInput = document.getElementById('wakeWordName');
 const CountryCodeInput = document.getElementById('CountryCode');
 const speechRateInput = document.getElementById('speechRate');
 const LLMOptionsInput = document.getElementById('LLMOptions');
+const FreestyleOptionsInput = document.getElementById('FreestyleOptions');
 const scanLoopLimitInput = document.getElementById('scanLoopLimit');
 const ScanningOffInput = document.getElementById('ScanningOff');
 const SummaryOffInput = document.getElementById('SummaryOff');
@@ -106,6 +107,11 @@ async function loadSettings() {
         if (CountryCodeInput) { CountryCodeInput.value = currentSettings.CountryCode || ''; }
         if (speechRateInput) { speechRateInput.value = currentSettings.speech_rate || 180; } // Populate speech rate
         if (LLMOptionsInput) { LLMOptionsInput.value = currentSettings.LLMOptions || ''; }
+        if (FreestyleOptionsInput) { 
+            console.log('DEBUG FreestyleOptions - Element found:', !!FreestyleOptionsInput);
+            console.log('DEBUG FreestyleOptions - currentSettings.FreestyleOptions:', currentSettings.FreestyleOptions);
+            FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : ''; 
+        }
         if (scanLoopLimitInput) { scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0; }
         if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; }
         if (SummaryOffInput) { SummaryOffInput.checked = currentSettings.SummaryOff || false; }
@@ -156,6 +162,8 @@ async function saveSettings() {
     const newCountryCode = CountryCodeInput.value.trim();
     const newSpeechRate = speechRateInput.value; // Get speech rate value
     const newLLMOptions = LLMOptionsInput.value; 
+    const newFreestyleOptions = FreestyleOptionsInput.value;
+    console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
     const newScanLoopLimit = scanLoopLimitInput.value;
     const newScanningOff = ScanningOffInput.checked;
     const newSummaryOff = SummaryOffInput.checked;
@@ -198,8 +206,12 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Speech Rate. Must be a number (e.g., 50-400).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-     if (!newLLMOptions || isNaN(parseInt(newLLMOptions)) || parseInt(newLLMOptions) < 1 || parseInt(newLLMOptions) > 20) {
-        settingsStatus.textContent = 'Invalid LLM Options. Must be a number (e.g., 1-20).';
+     if (!newLLMOptions || isNaN(parseInt(newLLMOptions)) || parseInt(newLLMOptions) < 1 || parseInt(newLLMOptions) > 50) {
+        settingsStatus.textContent = 'Invalid LLM Options. Must be a number (e.g., 1-50).';
+        settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
+    }
+     if (newFreestyleOptions !== '' && (isNaN(parseInt(newFreestyleOptions)) || parseInt(newFreestyleOptions) < 1 || parseInt(newFreestyleOptions) > 50)) {
+        settingsStatus.textContent = 'Invalid Freestyle Options. Must be a number (e.g., 1-50).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
     if (newScanLoopLimit !== '' && (isNaN(parseInt(newScanLoopLimit)) || parseInt(newScanLoopLimit) < 0 || parseInt(newScanLoopLimit) > 10)) {
@@ -229,6 +241,7 @@ async function saveSettings() {
         CountryCode: newCountryCode,
         speech_rate: parseInt(newSpeechRate),
         LLMOptions: parseInt(newLLMOptions),
+        FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
         ScanningOff: newScanningOff,    
         SummaryOff: newSummaryOff,
@@ -241,6 +254,7 @@ async function saveSettings() {
         llm_provider: newLlmProvider, // Updated to use provider instead of specific model
         gridColumns: newGridColumns // Add gridColumns to save payload
     };
+    console.log('DEBUG FreestyleOptions - Payload value:', settingsToSave.FreestyleOptions);
 
     console.log("Saving settings:", settingsToSave);
     showTemporaryStatus(settingsStatus, 'Saving...', false, 0)
@@ -262,6 +276,10 @@ async function saveSettings() {
         if (CountryCodeInput) CountryCodeInput.value = currentSettings.CountryCode || '';
         if (speechRateInput) speechRateInput.value = currentSettings.speech_rate || 180;
         if (LLMOptionsInput) LLMOptionsInput.value = currentSettings.LLMOptions || '';
+        if (FreestyleOptionsInput) {
+            console.log('DEBUG FreestyleOptions - Reload value:', currentSettings.FreestyleOptions);
+            FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : '';
+        }
         if (scanLoopLimitInput) scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0;
         if (ScanningOffInput) ScanningOffInput.checked = currentSettings.ScanningOff || false;
         if (SummaryOffInput) SummaryOffInput.checked = currentSettings.SummaryOff || false;
@@ -597,6 +615,48 @@ function authContextIsReady() {
 
 
 // --- Event Listeners ---
+// --- Admin Toolbar Button Handlers ---
+function setupAdminToolbarButtons() {
+    const switchUserButton = document.getElementById('switch-user-button');
+    const logoutButton = document.getElementById('logout-button');
+
+    function handleSwitchUser() {
+        console.log("Switching user profile. Clearing session and redirecting to auth page for profile selection.");
+        // Only set flag to prevent auto-proceed with default user - keep user authenticated
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        console.log('Set bravoSkipDefaultUser flag for profile selection');
+        sessionStorage.clear();
+        
+        // Small delay to ensure localStorage is written before navigation
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    function handleLogout() {
+        console.log("Logging out. Clearing session and redirecting to auth page for login.");
+        // Set both flags to prevent automatic re-login and auto-profile selection
+        localStorage.setItem('bravoIntentionalLogout', 'true');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        console.log('Set bravoIntentionalLogout and bravoSkipDefaultUser flags');
+        sessionStorage.clear();
+        
+        // Small delay to ensure localStorage is written before navigation
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    if (switchUserButton) {
+        switchUserButton.addEventListener('click', handleSwitchUser);
+        console.log("admin_settings.js: Switch User button event listener added");
+    }
+    if (logoutButton) {
+        logoutButton.addEventListener('click', handleLogout);
+        console.log("admin_settings.js: Logout button event listener added");
+    }
+}
+
 // Listener for when the authentication context is ready
 document.addEventListener('adminUserContextReady', () => {
     console.log("admin_settings.js: 'adminUserContextReady' event received.");
@@ -612,4 +672,5 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("admin_settings.js: DOMContentLoaded event.");
     isDomContentLoaded = true;
     initializePage();
+    setupAdminToolbarButtons(); // Add toolbar button functionality
 });

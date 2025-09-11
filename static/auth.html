@@ -636,6 +636,7 @@
 
                 // --- IMPORTANT: Now handle selecting the AAC user ---
                 // Fetch the list of AAC users associated with this account
+                console.log('Attempting to fetch user profiles from:', window.location.origin + '/api/account/users');
                 const response = await fetch(`/api/account/users`, { // Use relative URL
                     method: 'GET',
                     headers: {
@@ -644,9 +645,13 @@
                     }
                 });
 
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.detail || `Failed to fetch user profiles: ${response.status}`);
+                    const errorData = await response.json().catch(() => ({ detail: `Network error: ${response.status} ${response.statusText}` }));
+                    console.error('API Error:', errorData);
+                    throw new Error(errorData.detail || `Failed to fetch user profiles: ${response.status} ${response.statusText}`);
                 }
 
                 const userProfiles = await response.json();
@@ -676,7 +681,37 @@
 
             } catch (error) {
                 console.error('Login error:', error);
-                authErrorMessage.textContent = error.message || 'Login failed. Please check your credentials.';
+                
+                // Special handling for cruise ship network issues
+                if (error.message && (error.message.includes('Failed to fetch') || 
+                    error.message.includes('ERR_CONNECTION_RESET') || 
+                    error.message.includes('Network request failed'))) {
+                    
+                    authErrorMessage.innerHTML = `
+                        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                            <strong>🚢 Cruise Ship Network Detected</strong><br>
+                            Your cruise internet is blocking our app's backend connection.<br><br>
+                            <strong>Try these solutions:</strong><br>
+                            1. Connect to premium/unlimited internet package<br>
+                            2. Use ship's WiFi in public areas (often less restricted)<br>
+                            3. Try during off-peak hours (early morning/late evening)<br>
+                            4. Ask guest services about ports/websites being blocked<br><br>
+                            <em>Firebase authentication works, but the app data cannot be accessed due to network restrictions.</em>
+                        </div>
+                    `;
+                    
+                    // Offer an offline mode option
+                    const retryButton = document.createElement('button');
+                    retryButton.textContent = 'Retry Connection';
+                    retryButton.className = 'w-full mt-2 p-3 font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors';
+                    retryButton.onclick = () => {
+                        loginForm.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                    };
+                    authErrorMessage.appendChild(retryButton);
+                    
+                } else {
+                    authErrorMessage.textContent = error.message || 'Login failed. Please check your credentials.';
+                }
             } finally {
                 loadingIndicator.style.display = 'none';
             }
@@ -1747,7 +1782,22 @@ registerForm.addEventListener('submit', async (e) => {
 
                 } catch (error) {
                     console.error('Auto-login/profile fetch error:', error);
-                    authErrorMessage.textContent = error.message || 'Failed to auto-login. Please log in manually.';
+                    
+                    // Special handling for cruise ship network issues
+                    if (error.message && (error.message.includes('Failed to fetch') || 
+                        error.message.includes('ERR_CONNECTION_RESET') || 
+                        error.message.includes('Network request failed'))) {
+                        
+                        authErrorMessage.innerHTML = `
+                            <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                                <strong>🚢 Cruise Ship Network Issue</strong><br>
+                                You're logged in but can't access your profiles due to network restrictions.<br><br>
+                                <em>Try connecting to premium WiFi or retry in a few minutes.</em>
+                            </div>
+                        `;
+                    } else {
+                        authErrorMessage.textContent = error.message || 'Failed to auto-login. Please log in manually.';
+                    }
                     auth.signOut(); // Ensure user is signed out if there's an error
                 } finally {
                     loadingIndicator.style.display = 'none';
@@ -1755,34 +1805,63 @@ registerForm.addEventListener('submit', async (e) => {
             } else {
                 console.log("No Firebase user logged in.");
                 
-                // Check if we should attempt automatic login with saved credentials
-                const savedEmail = localStorage.getItem('bravoSavedEmail');
-                const savedPassword = localStorage.getItem('bravoSavedPassword');
-                const defaultUserId = localStorage.getItem('bravoDefaultUserId');
-                const autoLoginEnabled = localStorage.getItem('bravoAutoLogin') === 'true';
+        // Check for URL parameters first (e.g., for demo account auto-login)
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlEmail = urlParams.get('email');
+        
+        if (urlEmail === 'demoreadonly@talkwithbravo.com') {
+            console.log('Demo account auto-login requested via URL parameter');
+            loadingIndicator.style.display = 'flex';
+            
+            // Fill in the login form with demo credentials
+            const emailInput = document.getElementById('login-email');
+            const passwordInput = document.getElementById('login-password');
+            emailInput.value = 'demoreadonly@talkwithbravo.com';
+            passwordInput.value = 'Brav0Dem0!';
+            
+            try {
+                const userCredential = await auth.signInWithEmailAndPassword('demoreadonly@talkwithbravo.com', 'Brav0Dem0!');
+                const user = userCredential.user;
+                const idToken = await user.getIdToken();
+                console.log('Demo account auto-login successful');
                 
-                if (savedEmail && savedPassword && defaultUserId && autoLoginEnabled) {
-                    console.log('Attempting automatic login with saved credentials...');
-                    loadingIndicator.style.display = 'flex';
-                    
-                    try {
-                        const userCredential = await auth.signInWithEmailAndPassword(savedEmail, savedPassword);
-                        const user = userCredential.user;
-                        const idToken = await user.getIdToken();
-                        console.log('Automatic login successful with saved credentials');
-                        
-                        // The onAuthStateChanged will trigger again and handle the auto-login flow
-                        return;
-                        
-                    } catch (error) {
-                        console.error('Automatic login failed:', error);
-                        // Don't show error message here, just fall through to show login form
-                    } finally {
-                        loadingIndicator.style.display = 'none';
-                    }
-                }
+                // The onAuthStateChanged will trigger again and handle the auto-login flow
+                return;
                 
-                console.log("Displaying auth forms.");
+            } catch (error) {
+                console.error('Demo account auto-login failed:', error);
+                authErrorMessage.textContent = 'Demo account login failed. Please try again manually.';
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+        
+        // Check if we should attempt automatic login with saved credentials
+        const savedEmail = localStorage.getItem('bravoSavedEmail');
+        const savedPassword = localStorage.getItem('bravoSavedPassword');
+        const defaultUserId = localStorage.getItem('bravoDefaultUserId');
+        const autoLoginEnabled = localStorage.getItem('bravoAutoLogin') === 'true';
+        
+        if (savedEmail && savedPassword && defaultUserId && autoLoginEnabled) {
+            console.log('Attempting automatic login with saved credentials...');
+            loadingIndicator.style.display = 'flex';
+            
+            try {
+                const userCredential = await auth.signInWithEmailAndPassword(savedEmail, savedPassword);
+                const user = userCredential.user;
+                const idToken = await user.getIdToken();
+                console.log('Automatic login successful with saved credentials');
+                
+                // The onAuthStateChanged will trigger again and handle the auto-login flow
+                return;
+                
+            } catch (error) {
+                console.error('Automatic login failed:', error);
+                // Don't show error message here, just fall through to show login form
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        }                console.log("Displaying auth forms.");
                 showSection(loginSection, 'Login');
                 loadingIndicator.style.display = 'none'; // Ensure loading is hidden initially
             }

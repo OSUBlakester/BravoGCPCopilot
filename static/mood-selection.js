@@ -695,10 +695,21 @@ class MoodSelection {
 // Global instance
 let globalMoodSelection = null;
 
-// Initialize when script loads
-document.addEventListener('DOMContentLoaded', () => {
-    globalMoodSelection = new MoodSelection();
-});
+// Initialize when script loads or when DOM is ready
+function initializeMoodSelection() {
+    if (!globalMoodSelection) {
+        globalMoodSelection = new MoodSelection();
+        console.log('Global mood selection initialized');
+    }
+}
+
+// Initialize immediately if DOM is already loaded, otherwise wait for DOMContentLoaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeMoodSelection);
+} else {
+    // DOM is already ready
+    initializeMoodSelection();
+}
 
 /**
  * Global function to show mood selection (used by other scripts)
@@ -708,8 +719,22 @@ function showMoodSelection(onComplete) {
     if (globalMoodSelection) {
         globalMoodSelection.show(onComplete);
     } else {
-        console.warn('Mood selection not initialized');
-        if (onComplete) onComplete(null);
+        console.log('Mood selection not yet initialized, waiting...');
+        // Wait for initialization with a timeout
+        let attempts = 0;
+        const maxAttempts = 50; // 5 seconds max wait
+        const checkInterval = setInterval(() => {
+            attempts++;
+            if (globalMoodSelection) {
+                clearInterval(checkInterval);
+                console.log('Mood selection now available, showing...');
+                globalMoodSelection.show(onComplete);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(checkInterval);
+                console.warn('Mood selection initialization timed out');
+                if (onComplete) onComplete(null);
+            }
+        }, 100);
     }
 }
 

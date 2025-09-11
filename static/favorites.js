@@ -127,6 +127,9 @@ async function initializeUserContext() {
     // Load and update page title with profile name
     await updatePageTitleWithProfile();
     
+    // Setup admin toolbar
+    setupAdminToolbar();
+    
     return true; // Indicate ready
 }
 
@@ -161,12 +164,6 @@ async function updatePageTitleWithProfile() {
             titleElement.textContent = 'Favorites';
         }
     }
-}
-    
-    // Setup admin toolbar
-    setupAdminToolbar();
-    
-    return true; // Indicate ready
 }
 
 // Load user settings
@@ -282,7 +279,7 @@ function generateGrid() {
     backButton.addEventListener('click', async () => {
         console.log('Go Back button clicked');
         // Navigate back to gridpage (home) without announcement
-        window.location.href = '/gridpage.html?page=home';
+        window.location.href = '/static/gridpage.html?page=home';
     });
     gridContainer.appendChild(backButton);
     

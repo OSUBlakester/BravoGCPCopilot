@@ -9,7 +9,8 @@ let selectPage = null;
 let buttonGrid = null;
 // let newPageNameInput = null; // Removed: Page Name input no longer used
 let newPageDisplayNameInput = null;
-let createUpdatePageBtn = null;
+let createNewPageBtn = null;
+let updatePageBtn = null;
 let revertPageBtn = null;
 let saveButtonsBtn = null; // New button for saving changes
 let helpWizardBtn = null;
@@ -80,7 +81,8 @@ function assignDOMElements() {
     buttonGrid = document.getElementById('buttonGrid');
     // newPageNameInput = document.getElementById('newPageName'); // Removed
     newPageDisplayNameInput = document.getElementById('newPageDisplayName');
-    createUpdatePageBtn = document.getElementById('createUpdatePageBtn');
+    createNewPageBtn = document.getElementById('createNewPageBtn');
+    updatePageBtn = document.getElementById('updatePageBtn');
     revertPageBtn = document.getElementById('revertPageBtn');
     saveButtonsBtn = document.getElementById('saveButtonsBtn');
     helpWizardBtn = document.getElementById('helpWizardBtn');
@@ -94,7 +96,7 @@ function assignDOMElements() {
 function validateDOMElements() {
     const required = [
         pageForm, selectPage, buttonGrid, 
-        newPageDisplayNameInput, createUpdatePageBtn, deletePageButton, 
+        newPageDisplayNameInput, createNewPageBtn, updatePageBtn, deletePageButton, 
         revertPageBtn, saveButtonsBtn, helpWizardBtn,
         buttonEditorModal, helpWizardModal
     ];
@@ -104,13 +106,14 @@ function validateDOMElements() {
 function setupEventListeners() {
     // Page management
     selectPage.addEventListener('change', handlePageSelected);
-    createUpdatePageBtn.addEventListener('click', createUpdatePage);
+    createNewPageBtn.addEventListener('click', createNewPage);
+    updatePageBtn.addEventListener('click', updatePage);
     deletePageButton.addEventListener('click', deletePage);
     revertPageBtn.addEventListener('click', revertPage);
     
     // Button grid controls
-    saveButtonsBtn.addEventListener('click', createUpdatePage);
-    helpWizardBtn.addEventListener('click', openHelpWizard);
+    saveButtonsBtn.addEventListener('click', updatePage);
+    helpWizardBtn.addEventListener('click', startComprehensiveGuide);
     
     // Button Editor Modal
     document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
@@ -428,6 +431,60 @@ function clearAllButtons() {
             currentPageData.buttons = [];
             renderButtonGrid();
         }
+    }
+}
+
+// --- Comprehensive Guide Integration ---
+function startComprehensiveGuide() {
+    console.log('startComprehensiveGuide called');
+    console.log('window.guideInstance:', window.guideInstance);
+    
+    // Check if the comprehensive guide is available
+    if (window.guideInstance && typeof window.guideInstance.startComprehensiveGuide === 'function') {
+        console.log('guideInstance found, checking properties...');
+        console.log('guideInstance.smartHelp:', window.guideInstance.smartHelp);
+        console.log('guideInstance.multimedia:', window.guideInstance.multimedia);
+        
+        // Check if the guide is fully initialized
+        if (window.guideInstance.smartHelp && window.guideInstance.multimedia) {
+            console.log('Comprehensive guide fully initialized, starting...');
+            try {
+                window.guideInstance.startComprehensiveGuide();
+            } catch (error) {
+                console.error('Error starting comprehensive guide:', error);
+                openHelpWizard();
+            }
+        } else {
+            // Wait a bit for initialization to complete
+            console.log('Waiting for comprehensive guide to initialize...');
+            setTimeout(() => {
+                if (window.guideInstance && window.guideInstance.smartHelp && window.guideInstance.multimedia) {
+                    console.log('Comprehensive guide now ready, starting...');
+                    try {
+                        window.guideInstance.startComprehensiveGuide();
+                    } catch (error) {
+                        console.error('Error starting comprehensive guide after wait:', error);
+                        openHelpWizard();
+                    }
+                } else {
+                    console.warn('Comprehensive guide still not ready after wait, falling back to old help wizard');
+                    console.log('Final state - guideInstance:', window.guideInstance);
+                    if (window.guideInstance) {
+                        console.log('Final state - smartHelp:', window.guideInstance.smartHelp);
+                        console.log('Final state - multimedia:', window.guideInstance.multimedia);
+                    }
+                    openHelpWizard();
+                }
+            }, 1000); // Wait longer (1 second)
+        }
+    } else {
+        // Fallback to old help wizard if comprehensive guide is not available
+        console.warn('Comprehensive guide not available, falling back to old help wizard');
+        console.log('window.guideInstance exists:', !!window.guideInstance);
+        if (window.guideInstance) {
+            console.log('startComprehensiveGuide method exists:', typeof window.guideInstance.startComprehensiveGuide);
+        }
+        openHelpWizard();
     }
 }
 
@@ -789,83 +846,116 @@ function collectCurrentFormData() {
     console.log('Current page data buttons:', currentPageData ? currentPageData.buttons : 'No currentPageData');
 }
 
-async function createUpdatePage() {
+async function createNewPage() {
+    // Prompt for new page display name
+    const displayName = prompt('Enter the display name for the new page (e.g., "Daily Greetings", "What to Eat"):');
+    
+    if (!displayName || !displayName.trim()) {
+        return; // User cancelled or entered empty name
+    }
+
+    const trimmedDisplayName = displayName.trim();
+    
+    // Generate page name: all lowercase, only letters
+    const pageName = trimmedDisplayName.toLowerCase().replace(/[^a-z]/g, '');
+    if (!pageName) {
+        alert('Display name must contain at least one letter.');
+        return;
+    }
+
+    // Check if page already exists
+    const pageExists = allUserPages.some(page => page.name === pageName);
+    if (pageExists) {
+        alert(`A page with the name "${pageName}" already exists. Please choose a different display name.`);
+        return;
+    }
+
+    const pageData = {
+        name: pageName,
+        displayName: trimmedDisplayName,
+        buttons: [] // New pages start with empty button array
+    };
+
+    console.log('Creating new page:', pageData);
+
+    try {
+        const response = await window.authenticatedFetch('/pages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pageData)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Failed to create page:', response.status, errorText);
+            throw new Error(`Failed to create page: ${response.statusText}`);
+        }
+
+        // Reload pages and select the new page
+        await loadPages();
+        
+        // Select the newly created page
+        selectPage.value = pageName;
+        await handlePageSelected();
+        
+        alert(`Page "${trimmedDisplayName}" created successfully!`);
+
+    } catch (error) {
+        console.error('Error creating page:', error);
+        alert('Failed to create page. Please try again.');
+    }
+}
+
+async function updatePage() {
+    // Get the currently selected page
+    const selectedPageName = selectPage.value;
+    if (!selectedPageName) {
+        alert('No page selected to update.');
+        return;
+    }
+
     const displayName = newPageDisplayNameInput.value.trim();
     if (!displayName) {
         alert('Please enter a display name.');
         return;
     }
 
-    // Generate page name: all lowercase, only letters
-    const pageName = displayName.toLowerCase().replace(/[^a-z]/g, '');
-    if (!pageName) {
-        alert('Display name must contain at least one letter.');
-        return;
-    }
-
-    // Collect current button data from the grid form inputs
+    // Collect current form data to include any button changes
     collectCurrentFormData();
 
     const pageData = {
-        name: pageName,
+        name: selectedPageName,
         displayName: displayName,
-        buttons: currentPageData ? currentPageData.buttons : []
+        buttons: currentPageData ? currentPageData.buttons : [],
+        originalName: selectedPageName
     };
 
-    console.log('Saving page data:', pageData); // Debug logging
+    console.log('Updating page data:', pageData);
 
     try {
-        const isUpdate = allUserPages.some(page => page.name === pageData.name);
+        const response = await window.authenticatedFetch('/pages', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pageData)
+        });
 
-        if (isUpdate) {
-            pageData.originalName = pageData.name;
-            console.log('Updating page with PUT request'); // Debug logging
-            try {
-                const response = await window.authenticatedFetch('/pages', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(pageData)
-                });
-
-                console.log('PUT request completed, response status:', response.status);
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('PUT request failed:', response.status, errorText);
-                    throw new Error(`Failed to update page: ${response.statusText}`);
-                }
-                console.log('PUT request successful');
-            } catch (error) {
-                console.error('Error during PUT request:', error);
-                throw error;
-            }
-        } else {
-            console.log('Creating page with POST request'); // Debug logging
-            try {
-                const response = await window.authenticatedFetch('/pages', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(pageData)
-                });
-
-                console.log('POST request completed, response status:', response.status);
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('POST request failed:', response.status, errorText);
-                    throw new Error(`Failed to create page: ${response.statusText}`);
-                }
-                console.log('POST request successful');
-            } catch (error) {
-                console.error('Error during POST request:', error);
-                throw error;
-            }
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Failed to update page:', response.status, errorText);
+            throw new Error(`Failed to update page: ${response.statusText}`);
         }
 
         await loadPages();
-        alert(isUpdate ? 'Page updated successfully!' : 'Page created successfully!');
+        
+        // Maintain selection of the updated page
+        selectPage.value = selectedPageName;
+        await handlePageSelected();
+        
+        alert('Page updated successfully!');
 
     } catch (error) {
-        console.error('Error saving page:', error);
-        alert('Failed to save page. Please try again.');
+        console.error('Error updating page:', error);
+        alert('Failed to update page. Please try again.');
     }
 }
 

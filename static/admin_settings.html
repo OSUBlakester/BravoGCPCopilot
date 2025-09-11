@@ -6,6 +6,8 @@
     <title>Admin Panel - Configuration</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="/static/interactive-guide.js"></script>
+    <script src="/static/admin-settings-guide.js"></script>
      <!-- Ensure mood-selection.js is loaded before admin_settings.js -->
     <script src="/static/mood-selection.js" defer></script>
     <!-- Ensure admin_settings.js is loaded with defer -->
@@ -360,6 +362,11 @@
                     <label for="LLMOptions" class="block text-lg font-medium text-gray-700 mb-2">Number of AI Options:</label>
                     <input type="number" id="LLMOptions" name="LLMOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 10">
                     <p class="text-xs text-gray-500 mt-1">Number of options AI will return for user to select</p>
+                </div>
+                <div>
+                    <label for="FreestyleOptions" class="block text-lg font-medium text-gray-700 mb-2">Freestyle Word Options:</label>
+                    <input type="number" id="FreestyleOptions" name="FreestyleOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 20">
+                    <p class="text-xs text-gray-500 mt-1">Number of word options AI will return in freestyle communication</p>
                 </div>
                 <div>
                     <label for="SummaryOff" class="block text-lg font-medium text-gray-700 mb-2">Turn off Button Summary</label>
