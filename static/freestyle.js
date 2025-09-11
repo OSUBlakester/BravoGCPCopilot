@@ -70,11 +70,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Setup PIN modal functionality
     setupPinModal();
     
-    // Auto-start scanning regardless of previous state
-    setTimeout(() => {
-        scanningPaused = false;
-        startScanning();
-    }, 1000); // Small delay to ensure page is fully loaded
+    // Start scanning after everything is initialized
+    startInitialScanning();
 });
 
 // --- User Context Initialization (Same as gridpage.js) ---
@@ -256,7 +253,20 @@ async function initializeFreestylePage() {
     // Setup choose word modal
     setupChooseWordModal();
     
+    // Load initial word options and wait for completion before starting scanning
+    await loadWordOptions();
+    
     console.log('Freestyle page initialized');
+}
+
+// Function to start scanning after page is fully ready
+function startInitialScanning() {
+    // Auto-start scanning after everything is loaded
+    setTimeout(() => {
+        scanningPaused = false;
+        startScanning();
+        console.log('Initial scanning started');
+    }, 500); // Small delay to ensure page is fully loaded
 }
 
 // --- Build Space Management ---
@@ -471,21 +481,21 @@ function renderWordOptionsGrid() {
         grid.appendChild(button);
     });
     
-    // Add Spell button
-    const spellButton = document.createElement('button');
-    spellButton.className = 'word-option-btn spell-button';
-    spellButton.innerHTML = '<i class="fas fa-keyboard"></i> Spell';
-    spellButton.id = 'spell-btn-lower';
-    spellButton.addEventListener('click', () => openSpellingModal());
-    grid.appendChild(spellButton);
-    
-    // Add Choose Word button
+    // Add Choose Word button (comes first)
     const chooseWordButton = document.createElement('button');
     chooseWordButton.className = 'word-option-btn choose-word-button';
     chooseWordButton.innerHTML = '<i class="fas fa-list"></i> Choose Word';
     chooseWordButton.id = 'choose-word-btn-lower';
     chooseWordButton.addEventListener('click', () => openChooseWordModal());
     grid.appendChild(chooseWordButton);
+    
+    // Add Spell button (comes second)
+    const spellButton = document.createElement('button');
+    spellButton.className = 'word-option-btn spell-button';
+    spellButton.innerHTML = '<i class="fas fa-keyboard"></i> Spell';
+    spellButton.id = 'spell-btn-lower';
+    spellButton.addEventListener('click', () => openSpellingModal());
+    grid.appendChild(spellButton);
     
     // Add "More Options" button
     const moreButton = document.createElement('button');
