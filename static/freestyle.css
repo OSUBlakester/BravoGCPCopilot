@@ -190,9 +190,9 @@
     font-size: var(--word-option-font-size); /* Use the CSS custom property */
     font-weight: 500;
     cursor: pointer;
-    background-color: white;   /* White inside */
+    background-color: #e0e0e0; /* Match gridpage LLM button color */
     color: #002244;           /* Dark blue text */
-    border: 2px solid #002244; /* Dark blue border, 2px thick */
+    border: 1px solid #ccc;   /* Match gridpage LLM button border */
     border-radius: 12px;       /* Somewhat rounded corners */
     text-align: center;
     min-height: 50px;          /* Ensure buttons have some height */
@@ -208,7 +208,7 @@
 }
 
 .word-option-btn:hover {
-    filter: brightness(97%);
+    background-color: #d0d0d0; /* Match gridpage LLM button hover color */
 }
 
 .word-option-btn:active {
