@@ -238,12 +238,10 @@ async function initializeFreestylePage() {
     // Load settings first before setting up PIN modal
     await loadScanSettings();
     
-    // Setup event listeners for control buttons
+    // Setup event listeners for control buttons (only the remaining ones)
     document.getElementById('speak-display-btn').addEventListener('click', speakDisplayText);
     document.getElementById('clear-display-btn').addEventListener('click', clearDisplayText);
     document.getElementById('go-back-btn').addEventListener('click', goBackToGrid);
-    document.getElementById('spell-btn').addEventListener('click', openSpellingModal);
-    document.getElementById('choose-word-btn').addEventListener('click', openChooseWordModal);
     
     // Setup build space text area
     const buildSpaceTextarea = document.getElementById('build-space');
@@ -308,26 +306,26 @@ async function speakDisplayText() {
         stopScanning();
         
         setTimeout(() => {
-            // Reset to Clear Display button and resume scanning
+            // Reset to Go Back button and resume scanning
             if (!scanningPaused && currentScanningContext === "main") {
                 // Build the same button list as in startMainScanning()
-                let controlButtonSelectors = '#choose-word-btn, #spell-btn, #go-back-btn';
+                let controlButtonSelectors = '';
                 if (currentBuildSpaceText.trim()) {
-                    controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #choose-word-btn, #spell-btn, #go-back-btn';
+                    controlButtonSelectors = '#speak-display-btn, #go-back-btn, #clear-display-btn';
                 }
                 
                 const controlButtons = document.querySelectorAll(controlButtonSelectors);
                 const wordButtons = document.querySelectorAll('.word-option-btn');
                 const allButtons = [...controlButtons, ...wordButtons];
                 
-                // Find the index of the Clear Display button
-                const clearDisplayIndex = Array.from(allButtons).findIndex(btn => btn.id === 'clear-display-btn');
-                if (clearDisplayIndex !== -1) {
-                    // Set to Clear Display button index
-                    currentButtonIndex = clearDisplayIndex;
-                    console.log(`Reset scanning to Clear Display button at index ${clearDisplayIndex}`);
+                // Find the index of the Go Back button (should be second after Speak Display)
+                const goBackIndex = Array.from(allButtons).findIndex(btn => btn.id === 'go-back-btn');
+                if (goBackIndex !== -1) {
+                    // Set to Go Back button index
+                    currentButtonIndex = goBackIndex;
+                    console.log(`Reset scanning to Go Back button at index ${goBackIndex}`);
                 } else {
-                    // Fallback to first button if Clear Display not found
+                    // Fallback to first button if Go Back not found
                     currentButtonIndex = 0;
                 }
                 
@@ -473,6 +471,22 @@ function renderWordOptionsGrid() {
         grid.appendChild(button);
     });
     
+    // Add Spell button
+    const spellButton = document.createElement('button');
+    spellButton.className = 'word-option-btn spell-button';
+    spellButton.innerHTML = '<i class="fas fa-keyboard"></i> Spell';
+    spellButton.id = 'spell-btn-lower';
+    spellButton.addEventListener('click', () => openSpellingModal());
+    grid.appendChild(spellButton);
+    
+    // Add Choose Word button
+    const chooseWordButton = document.createElement('button');
+    chooseWordButton.className = 'word-option-btn choose-word-button';
+    chooseWordButton.innerHTML = '<i class="fas fa-list"></i> Choose Word';
+    chooseWordButton.id = 'choose-word-btn-lower';
+    chooseWordButton.addEventListener('click', () => openChooseWordModal());
+    grid.appendChild(chooseWordButton);
+    
     // Add "More Options" button
     const moreButton = document.createElement('button');
     moreButton.className = 'word-option-btn more-options-btn';
@@ -480,7 +494,7 @@ function renderWordOptionsGrid() {
     moreButton.addEventListener('click', () => loadMoreWordOptions());
     grid.appendChild(moreButton);
     
-    console.log(`Rendered ${currentWordOptions.length} word options + More Options button`);
+    console.log(`Rendered ${currentWordOptions.length} word options + Spell + Choose Word + More Options buttons`);
 }
 
 async function loadMoreWordOptions() {
@@ -1135,10 +1149,10 @@ function startMainScanning() {
     console.log('Starting main scanning');
     
     // Context-aware scanning: control buttons first, then word options
-    // Skip Speak Display and Clear Display buttons if Build Space is empty
-    let controlButtonSelectors = '#choose-word-btn, #spell-btn, #go-back-btn';
+    // Skip Speak Display, Go Back, and Clear Display buttons if Build Space is empty
+    let controlButtonSelectors = '';
     if (currentBuildSpaceText.trim()) {
-        controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #choose-word-btn, #spell-btn, #go-back-btn';
+        controlButtonSelectors = '#speak-display-btn, #go-back-btn, #clear-display-btn';
     }
     
     const controlButtons = document.querySelectorAll(controlButtonSelectors);
