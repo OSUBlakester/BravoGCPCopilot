@@ -1264,8 +1264,10 @@ function startSpellingPredictionsScanning() {
 }
 
 function startChooseWordCategoriesScanning() {
-    const categoryButtons = document.querySelectorAll('.category-btn');
-    const controlButtons = document.querySelectorAll('#cancel-choose-word-btn');
+    // Only scan buttons within the choose word modal
+    const modal = document.getElementById('choose-word-modal');
+    const categoryButtons = modal.querySelectorAll('.category-btn');
+    const controlButtons = modal.querySelectorAll('#cancel-choose-word-btn');
     const allButtons = [...categoryButtons, ...controlButtons];
     if (allButtons.length === 0) return;
     const buttons = allButtons;
@@ -1305,8 +1307,10 @@ function startChooseWordCategoriesScanning() {
 }
 
 function startChooseWordOptionsScanning() {
-    const wordButtons = document.querySelectorAll('.word-option-btn');
-    const controlButtons = document.querySelectorAll('#back-to-categories-btn, #something-else-words-btn, #go-back-from-words-btn');
+    // Only scan buttons within the choose word modal
+    const modal = document.getElementById('choose-word-modal');
+    const wordButtons = modal.querySelectorAll('.word-option-btn');
+    const controlButtons = modal.querySelectorAll('#back-to-categories-btn, #something-else-words-btn, #go-back-from-words-btn');
     const allButtons = [...wordButtons, ...controlButtons];
     if (allButtons.length === 0) return;
     const buttons = allButtons;
