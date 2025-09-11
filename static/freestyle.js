@@ -812,6 +812,7 @@ function setupChooseWordModal() {
     document.getElementById('cancel-choose-word-btn').addEventListener('click', closeChooseWordModal);
     document.getElementById('back-to-categories-btn').addEventListener('click', showCategorySelection);
     document.getElementById('something-else-words-btn').addEventListener('click', generateDifferentWords);
+    document.getElementById('go-back-from-words-btn').addEventListener('click', closeChooseWordModal);
     
     // Handle modal background click
     document.getElementById('choose-word-modal').addEventListener('click', (e) => {
@@ -931,7 +932,7 @@ function generateCategoryButtons() {
     // Create category buttons
     categories.forEach((category, index) => {
         const button = document.createElement('button');
-        button.className = 'category-btn';
+        button.className = 'freestyle-modal-btn category-btn';
         button.innerHTML = `<i class="${category.icon}"></i> ${category.name}`;
         button.addEventListener('click', () => selectCategory(category.name));
         categoryGrid.appendChild(button);
@@ -1010,7 +1011,7 @@ async function generateCategoryWords(categoryName, excludeWords = []) {
 }
 
 function displayCategoryWords() {
-    const wordOptionsGrid = document.getElementById('word-options-grid');
+    const wordOptionsGrid = document.getElementById('category-word-options-grid');
     
     // Clear existing words
     wordOptionsGrid.innerHTML = '';
@@ -1018,18 +1019,11 @@ function displayCategoryWords() {
     // Add word buttons
     currentCategoryWords.forEach((word) => {
         const button = document.createElement('button');
-        button.className = 'word-option-btn';
+        button.className = 'freestyle-modal-btn word-option-btn';
         button.textContent = word;
         button.addEventListener('click', () => selectCategoryWord(word));
         wordOptionsGrid.appendChild(button);
     });
-    
-    // Add "Something Else" button
-    const somethingElseButton = document.createElement('button');
-    somethingElseButton.className = 'word-option-btn something-else-btn';
-    somethingElseButton.innerHTML = '<i class="fas fa-sync"></i> Something Else';
-    somethingElseButton.addEventListener('click', generateDifferentWords);
-    wordOptionsGrid.appendChild(somethingElseButton);
     
     // Update scanning
     if (scanningInterval) {
@@ -1123,9 +1117,9 @@ function startMainScanning() {
     
     // Context-aware scanning: control buttons first, then word options
     // Skip Speak Display and Clear Display buttons if Build Space is empty
-    let controlButtonSelectors = '#spell-btn, #go-back-btn';
+    let controlButtonSelectors = '#choose-word-btn, #spell-btn, #go-back-btn';
     if (currentBuildSpaceText.trim()) {
-        controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #spell-btn, #choose-word-btn, #go-back-btn';
+        controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #choose-word-btn, #spell-btn, #go-back-btn';
     }
     
     const controlButtons = document.querySelectorAll(controlButtonSelectors);
@@ -1270,8 +1264,11 @@ function startSpellingPredictionsScanning() {
 }
 
 function startChooseWordCategoriesScanning() {
-    const buttons = document.querySelectorAll('.category-btn');
-    if (buttons.length === 0) return;
+    const categoryButtons = document.querySelectorAll('.category-btn');
+    const controlButtons = document.querySelectorAll('#cancel-choose-word-btn');
+    const allButtons = [...categoryButtons, ...controlButtons];
+    if (allButtons.length === 0) return;
+    const buttons = allButtons;
     
     currentButtonIndex = 0;
     
@@ -1308,8 +1305,11 @@ function startChooseWordCategoriesScanning() {
 }
 
 function startChooseWordOptionsScanning() {
-    const buttons = document.querySelectorAll('.word-option-btn');
-    if (buttons.length === 0) return;
+    const wordButtons = document.querySelectorAll('.word-option-btn');
+    const controlButtons = document.querySelectorAll('#back-to-categories-btn, #something-else-words-btn, #go-back-from-words-btn');
+    const allButtons = [...wordButtons, ...controlButtons];
+    if (allButtons.length === 0) return;
+    const buttons = allButtons;
     
     currentButtonIndex = 0;
     
