@@ -309,19 +309,26 @@ async function speakDisplayText() {
         
         setTimeout(() => {
             // Reset to Clear Display button and resume scanning
-            const clearDisplayBtn = document.getElementById('clear-display-btn');
-            if (clearDisplayBtn && !scanningPaused) {
-                // Find the index of the Clear Display button in the current scanning context
-                if (currentScanningContext === "main") {
-                    const controlButtons = document.querySelectorAll('#speak-display-btn, #clear-display-btn, #spell-btn, #choose-word-btn, #go-back-btn');
-                    const wordButtons = document.querySelectorAll('.word-option-btn');
-                    const allButtons = [...controlButtons, ...wordButtons];
-                    
-                    // Find the index of the Clear Display button (should be index 1)
-                    const clearDisplayIndex = Array.from(allButtons).findIndex(btn => btn.id === 'clear-display-btn');
-                    if (clearDisplayIndex !== -1) {
-                        currentButtonIndex = clearDisplayIndex;
-                    }
+            if (!scanningPaused && currentScanningContext === "main") {
+                // Build the same button list as in startMainScanning()
+                let controlButtonSelectors = '#choose-word-btn, #spell-btn, #go-back-btn';
+                if (currentBuildSpaceText.trim()) {
+                    controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #choose-word-btn, #spell-btn, #go-back-btn';
+                }
+                
+                const controlButtons = document.querySelectorAll(controlButtonSelectors);
+                const wordButtons = document.querySelectorAll('.word-option-btn');
+                const allButtons = [...controlButtons, ...wordButtons];
+                
+                // Find the index of the Clear Display button
+                const clearDisplayIndex = Array.from(allButtons).findIndex(btn => btn.id === 'clear-display-btn');
+                if (clearDisplayIndex !== -1) {
+                    // Set to Clear Display button index
+                    currentButtonIndex = clearDisplayIndex;
+                    console.log(`Reset scanning to Clear Display button at index ${clearDisplayIndex}`);
+                } else {
+                    // Fallback to first button if Clear Display not found
+                    currentButtonIndex = 0;
                 }
                 
                 startScanning();
@@ -1151,7 +1158,7 @@ function startMainScanning() {
         const button = allButtons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            speakAndHighlight(button);
+            await speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1209,7 +1216,7 @@ function startSpellingLettersScanning() {
         const button = allButtons[currentButtonIndex];
         if (button && !button.disabled && !button.classList.contains('disabled-letter')) {
             currentlyScannedButton = button;
-            speakAndHighlight(button);
+            await speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1248,7 +1255,7 @@ function startSpellingPredictionsScanning() {
         const button = buttons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            speakAndHighlight(button);
+            await speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1291,7 +1298,7 @@ function startChooseWordCategoriesScanning() {
         const button = buttons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            speakAndHighlight(button);
+            await speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1334,7 +1341,7 @@ function startChooseWordOptionsScanning() {
         const button = buttons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            speakAndHighlight(button);
+            await speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1366,7 +1373,7 @@ function stopScanning() {
     window.speechSynthesis.cancel(); // Cancel any ongoing speech
 }
 
-function speakAndHighlight(button) {
+async function speakAndHighlight(button) {
     // Remove scanning class from all buttons
     document.querySelectorAll('.scanning-highlight').forEach(btn => {
         btn.classList.remove('scanning-highlight');
@@ -1388,9 +1395,8 @@ function speakAndHighlight(button) {
             textToSpeak = currentSpellingWord.trim();
         }
         
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        // Use the app's announcement system instead of direct speech synthesis
+        await announce(textToSpeak, "system", false);
     } catch (e) {
         console.error("Speech synthesis error:", e);
     }
