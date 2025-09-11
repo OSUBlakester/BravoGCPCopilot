@@ -42,7 +42,10 @@ let currentWordOptions = [];
 let currentSpellingWord = "";
 let currentPredictions = [];
 let isSpellingModalOpen = false;
-let currentScanningContext = "main"; // "main", "spelling-letters", "spelling-predictions"
+let isChooseWordModalOpen = false;
+let currentChooseWordCategory = "";
+let currentCategoryWords = [];
+let currentScanningContext = "main"; // "main", "spelling-letters", "spelling-predictions", "choose-word-categories", "choose-word-options"
 
 // --- Initialize on Page Load ---
 document.addEventListener('DOMContentLoaded', async () => {
@@ -240,6 +243,7 @@ async function initializeFreestylePage() {
     document.getElementById('clear-display-btn').addEventListener('click', clearDisplayText);
     document.getElementById('go-back-btn').addEventListener('click', goBackToGrid);
     document.getElementById('spell-btn').addEventListener('click', openSpellingModal);
+    document.getElementById('choose-word-btn').addEventListener('click', openChooseWordModal);
     
     // Setup build space text area
     const buildSpaceTextarea = document.getElementById('build-space');
@@ -250,6 +254,9 @@ async function initializeFreestylePage() {
     
     // Setup spelling modal
     setupSpellingModal();
+    
+    // Setup choose word modal
+    setupChooseWordModal();
     
     console.log('Freestyle page initialized');
 }
@@ -306,7 +313,7 @@ async function speakDisplayText() {
             if (clearDisplayBtn && !scanningPaused) {
                 // Find the index of the Clear Display button in the current scanning context
                 if (currentScanningContext === "main") {
-                    const controlButtons = document.querySelectorAll('#speak-display-btn, #clear-display-btn, #spell-btn, #go-back-btn');
+                    const controlButtons = document.querySelectorAll('#speak-display-btn, #clear-display-btn, #spell-btn, #choose-word-btn, #go-back-btn');
                     const wordButtons = document.querySelectorAll('.word-option-btn');
                     const allButtons = [...controlButtons, ...wordButtons];
                     
@@ -799,6 +806,264 @@ function backspaceCurrentWord() {
     }
 }
 
+// --- Choose Word Modal Management ---
+function setupChooseWordModal() {
+    // Setup event listeners
+    document.getElementById('cancel-choose-word-btn').addEventListener('click', closeChooseWordModal);
+    document.getElementById('back-to-categories-btn').addEventListener('click', showCategorySelection);
+    document.getElementById('something-else-words-btn').addEventListener('click', generateDifferentWords);
+    
+    // Handle modal background click
+    document.getElementById('choose-word-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'choose-word-modal') {
+            closeChooseWordModal();
+        }
+    });
+}
+
+function openChooseWordModal() {
+    console.log('Opening Choose Word modal');
+    
+    // Set modal state
+    isChooseWordModalOpen = true;
+    currentScanningContext = "choose-word-categories";
+    
+    // Reset modal state
+    currentChooseWordCategory = "";
+    currentCategoryWords = [];
+    
+    // Show modal
+    document.getElementById('choose-word-modal').classList.remove('hidden');
+    
+    // Show category selection
+    showCategorySelection();
+    
+    // Update scanning
+    if (scanningInterval) {
+        stopScanning();
+        setTimeout(() => {
+            if (!scanningPaused) {
+                startScanning();
+            }
+        }, 300);
+    }
+}
+
+function closeChooseWordModal() {
+    console.log('Closing Choose Word modal');
+    
+    // Set modal state
+    isChooseWordModalOpen = false;
+    currentScanningContext = "main";
+    
+    // Reset state
+    currentChooseWordCategory = "";
+    currentCategoryWords = [];
+    
+    // Hide modal
+    document.getElementById('choose-word-modal').classList.add('hidden');
+    
+    // Update scanning
+    if (scanningInterval) {
+        stopScanning();
+        setTimeout(() => {
+            if (!scanningPaused) {
+                startScanning();
+            }
+        }, 300);
+    }
+}
+
+function showCategorySelection() {
+    console.log('Showing category selection');
+    
+    // Update scanning context
+    currentScanningContext = "choose-word-categories";
+    
+    // Show category section, hide word options section
+    document.getElementById('category-section').classList.remove('hidden');
+    document.getElementById('word-options-section').classList.add('hidden');
+    
+    // Generate category buttons
+    generateCategoryButtons();
+    
+    // Update scanning
+    if (scanningInterval) {
+        stopScanning();
+        setTimeout(() => {
+            if (!scanningPaused) {
+                startScanning();
+            }
+        }, 300);
+    }
+}
+
+function generateCategoryButtons() {
+    const categoryGrid = document.getElementById('category-grid');
+    
+    // Define categories with additional suggestions
+    const categories = [
+        { name: "People", icon: "fas fa-users" },
+        { name: "Places", icon: "fas fa-map-marker-alt" },
+        { name: "Animals", icon: "fas fa-paw" },
+        { name: "Around the House", icon: "fas fa-home" },
+        { name: "In the Room", icon: "fas fa-couch" },
+        { name: "General things", icon: "fas fa-cube" },
+        { name: "Actions", icon: "fas fa-running" },
+        { name: "Feelings & Emotions", icon: "fas fa-heart" },
+        { name: "Questions & Comments", icon: "fas fa-question-circle" },
+        { name: "Times and Dates", icon: "fas fa-calendar" },
+        { name: "Activities & Hobbies", icon: "fas fa-gamepad" },
+        { name: "Medical & Health", icon: "fas fa-heartbeat" },
+        { name: "Food & Drinks", icon: "fas fa-utensils" },
+        { name: "Colors & Descriptions", icon: "fas fa-palette" },
+        { name: "Numbers & Quantities", icon: "fas fa-calculator" },
+        { name: "School & Learning", icon: "fas fa-graduation-cap" },
+        { name: "Transportation", icon: "fas fa-car" },
+        { name: "Weather", icon: "fas fa-cloud-sun" },
+        { name: "Technology", icon: "fas fa-laptop" },
+        { name: "Sports & Games", icon: "fas fa-trophy" }
+    ];
+    
+    // Clear existing categories
+    categoryGrid.innerHTML = '';
+    
+    // Create category buttons
+    categories.forEach((category, index) => {
+        const button = document.createElement('button');
+        button.className = 'category-btn';
+        button.innerHTML = `<i class="${category.icon}"></i> ${category.name}`;
+        button.addEventListener('click', () => selectCategory(category.name));
+        categoryGrid.appendChild(button);
+    });
+}
+
+async function selectCategory(categoryName) {
+    console.log('Selected category:', categoryName);
+    
+    // Set current category
+    currentChooseWordCategory = categoryName;
+    
+    // Update title
+    document.getElementById('selected-category-title').textContent = `${categoryName}:`;
+    
+    // Show word options section, hide category section
+    document.getElementById('category-section').classList.add('hidden');
+    document.getElementById('word-options-section').classList.remove('hidden');
+    
+    // Update scanning context
+    currentScanningContext = "choose-word-options";
+    
+    // Generate words for the category
+    await generateCategoryWords(categoryName);
+}
+
+async function generateCategoryWords(categoryName, excludeWords = []) {
+    if (isLLMProcessing) return;
+    
+    try {
+        isLLMProcessing = true;
+        showLoadingIndicator();
+        
+        // Get current build space content for context
+        const buildSpaceContent = document.getElementById('build-space').value.trim();
+        
+        // Prepare the request
+        const requestData = {
+            category: categoryName,
+            build_space_content: buildSpaceContent,
+            exclude_words: excludeWords
+        };
+        
+        console.log('Generating category words:', requestData);
+        
+        const response = await authenticatedFetch('/api/freestyle/category-words', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestData)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Category words response:', data);
+        
+        if (data.words && Array.isArray(data.words)) {
+            currentCategoryWords = data.words;
+            displayCategoryWords();
+        } else {
+            console.error('Invalid category words response format');
+            announceText('Error generating word options. Please try again.');
+        }
+        
+    } catch (error) {
+        console.error('Error generating category words:', error);
+        announceText('Error generating word options. Please try again.');
+    } finally {
+        isLLMProcessing = false;
+        hideLoadingIndicator();
+    }
+}
+
+function displayCategoryWords() {
+    const wordOptionsGrid = document.getElementById('word-options-grid');
+    
+    // Clear existing words
+    wordOptionsGrid.innerHTML = '';
+    
+    // Add word buttons
+    currentCategoryWords.forEach((word) => {
+        const button = document.createElement('button');
+        button.className = 'word-option-btn';
+        button.textContent = word;
+        button.addEventListener('click', () => selectCategoryWord(word));
+        wordOptionsGrid.appendChild(button);
+    });
+    
+    // Add "Something Else" button
+    const somethingElseButton = document.createElement('button');
+    somethingElseButton.className = 'word-option-btn something-else-btn';
+    somethingElseButton.innerHTML = '<i class="fas fa-sync"></i> Something Else';
+    somethingElseButton.addEventListener('click', generateDifferentWords);
+    wordOptionsGrid.appendChild(somethingElseButton);
+    
+    // Update scanning
+    if (scanningInterval) {
+        stopScanning();
+        setTimeout(() => {
+            if (!scanningPaused) {
+                startScanning();
+            }
+        }, 300);
+    }
+}
+
+async function generateDifferentWords() {
+    console.log('Generating different words for category:', currentChooseWordCategory);
+    
+    // Generate new words excluding current ones
+    await generateCategoryWords(currentChooseWordCategory, currentCategoryWords);
+}
+
+function selectCategoryWord(word) {
+    console.log('Selected word:', word);
+    
+    // Add word to build space
+    addWordToBuildSpace(word);
+    
+    // Close modal
+    closeChooseWordModal();
+    
+    // Follow same flow as freestyle options - speak display
+    setTimeout(() => {
+        speakDisplayText();
+    }, 500);
+}
+
 // --- Speech History Management (Following gridpage.js pattern) ---
 function recordToSpeechHistory(textToRecord) {
     if (!currentAacUserId || !textToRecord.trim()) {
@@ -846,6 +1111,10 @@ function startScanning() {
         startSpellingLettersScanning();
     } else if (currentScanningContext === "spelling-predictions") {
         startSpellingPredictionsScanning();
+    } else if (currentScanningContext === "choose-word-categories") {
+        startChooseWordCategoriesScanning();
+    } else if (currentScanningContext === "choose-word-options") {
+        startChooseWordOptionsScanning();
     }
 }
 
@@ -856,7 +1125,7 @@ function startMainScanning() {
     // Skip Speak Display and Clear Display buttons if Build Space is empty
     let controlButtonSelectors = '#spell-btn, #go-back-btn';
     if (currentBuildSpaceText.trim()) {
-        controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #spell-btn, #go-back-btn';
+        controlButtonSelectors = '#speak-display-btn, #clear-display-btn, #spell-btn, #choose-word-btn, #go-back-btn';
     }
     
     const controlButtons = document.querySelectorAll(controlButtonSelectors);
@@ -972,6 +1241,82 @@ function startSpellingPredictionsScanning() {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
             currentlyScannedButton.classList.remove('scanning-highlight');
+        }
+        
+        // Check scan limit
+        if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
+            stopScanning();
+            isPausedFromScanLimit = true;
+            return;
+        }
+        
+        // Get current button
+        const button = buttons[currentButtonIndex];
+        if (button) {
+            currentlyScannedButton = button;
+            speakAndHighlight(button);
+        }
+        
+        // Move to next button
+        currentButtonIndex++;
+        if (currentButtonIndex >= buttons.length) {
+            currentButtonIndex = 0;
+            scanCycleCount++;
+        }
+    };
+    
+    scanNext(); // Start immediately
+    scanningInterval = setInterval(scanNext, defaultDelay);
+}
+
+function startChooseWordCategoriesScanning() {
+    const buttons = document.querySelectorAll('.category-btn');
+    if (buttons.length === 0) return;
+    
+    currentButtonIndex = 0;
+    
+    const scanNext = async () => {
+        // Remove highlight from previous button
+        if (currentlyScannedButton) {
+            currentlyScannedButton.classList.remove('scanned');
+        }
+        
+        // Check scan limit
+        if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
+            stopScanning();
+            isPausedFromScanLimit = true;
+            return;
+        }
+        
+        // Get current button
+        const button = buttons[currentButtonIndex];
+        if (button) {
+            currentlyScannedButton = button;
+            speakAndHighlight(button);
+        }
+        
+        // Move to next button
+        currentButtonIndex++;
+        if (currentButtonIndex >= buttons.length) {
+            currentButtonIndex = 0;
+            scanCycleCount++;
+        }
+    };
+    
+    scanNext(); // Start immediately
+    scanningInterval = setInterval(scanNext, defaultDelay);
+}
+
+function startChooseWordOptionsScanning() {
+    const buttons = document.querySelectorAll('.word-option-btn');
+    if (buttons.length === 0) return;
+    
+    currentButtonIndex = 0;
+    
+    const scanNext = async () => {
+        // Remove highlight from previous button
+        if (currentlyScannedButton) {
+            currentlyScannedButton.classList.remove('scanned');
         }
         
         // Check scan limit

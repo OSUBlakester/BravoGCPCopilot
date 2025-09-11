@@ -7406,6 +7406,120 @@ Return only the improved text, nothing else."""
         return JSONResponse(content={"cleaned_text": request.text_to_cleanup})
 
 
+class FreestyleCategoryWordsRequest(BaseModel):
+    category: str = Field(..., min_length=1, description="Category name for word generation")
+    build_space_content: Optional[str] = Field("", description="Current build space content for context")
+    exclude_words: Optional[List[str]] = Field(default_factory=list, description="Words to exclude from generation")
+
+@app.post("/api/freestyle/category-words")
+async def generate_category_words(
+    request: FreestyleCategoryWordsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Generates word options for a specific category using LLM with user context
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings to get FreestyleOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        freestyle_options = settings.get("FreestyleOptions", 6)  # Default to 6 if not set
+        
+        # Load user context for better word generation
+        user_info = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data={"narrative": ""}
+        )
+        
+        # Build exclude words clause
+        exclude_clause = ""
+        if request.exclude_words:
+            exclude_words_str = ", ".join(request.exclude_words)
+            exclude_clause = f" Do not include these words that were already shown: {exclude_words_str}."
+        
+        # Build context clause
+        context_clause = ""
+        if request.build_space_content:
+            context_clause = f" Current message being built: '{request.build_space_content}'."
+        
+        # Get user context
+        user_context = user_info.get("narrative", "")
+        
+        # Create the prompt for word generation
+        prompt = f"""Given the user context: '{user_context}' and category '{request.category}', generate {freestyle_options} single words for this category.{context_clause}{exclude_clause}
+
+Requirements:
+- Provide exactly {freestyle_options} single words (no phrases)
+- Words should be relevant to "{request.category}"
+- Words should be commonly used and appropriate for AAC communication
+- Each word should be useful for building messages
+- Return only the words, one per line, no numbering or formatting
+
+Category: {request.category}"""
+
+        # Generate words using LLM
+        words_response = await _generate_gemini_content_with_fallback(prompt, None, account_id, aac_user_id)
+        
+        # Parse the response into individual words
+        words = []
+        if words_response:
+            lines = words_response.strip().split('\n')
+            for line in lines:
+                word = line.strip().strip('-').strip('*').strip().strip('"').strip("'")
+                if word and len(word.split()) == 1:  # Ensure single words only
+                    words.append(word)
+        
+        # Ensure we have the right number of words
+        if len(words) < freestyle_options:
+            # If we don't have enough, pad with generic words for the category
+            generic_words = get_generic_category_words(request.category)
+            for generic_word in generic_words:
+                if generic_word not in words and generic_word not in request.exclude_words:
+                    words.append(generic_word)
+                    if len(words) >= freestyle_options:
+                        break
+        
+        # Trim to exact number requested
+        words = words[:freestyle_options]
+        
+        logging.info(f"Generated {len(words)} words for category '{request.category}' for account {account_id}, user {aac_user_id}")
+        return JSONResponse(content={"words": words})
+        
+    except Exception as e:
+        logging.error(f"Error generating category words for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
+        return JSONResponse(content={"words": []})
+
+def get_generic_category_words(category: str) -> List[str]:
+    """Get generic fallback words for a category"""
+    generic_words = {
+        "People": ["mom", "dad", "friend", "teacher", "doctor", "family"],
+        "Places": ["home", "school", "store", "park", "hospital", "library"],
+        "Animals": ["dog", "cat", "bird", "fish", "horse", "rabbit"],
+        "Around the House": ["kitchen", "bedroom", "bathroom", "living", "garage", "yard"],
+        "In the Room": ["chair", "table", "bed", "lamp", "window", "door"],
+        "General things": ["book", "phone", "keys", "bag", "water", "food"],
+        "Actions": ["go", "come", "eat", "drink", "sleep", "play"],
+        "Feelings & Emotions": ["happy", "sad", "angry", "excited", "tired", "scared"],
+        "Questions & Comments": ["what", "where", "when", "how", "why", "please"],
+        "Times and Dates": ["today", "tomorrow", "morning", "night", "week", "month"],
+        "Activities & Hobbies": ["read", "music", "games", "sports", "art", "cooking"],
+        "Medical & Health": ["medicine", "doctor", "hurt", "sick", "better", "hospital"],
+        "Food & Drinks": ["water", "milk", "bread", "apple", "sandwich", "juice"],
+        "Colors & Descriptions": ["red", "blue", "big", "small", "hot", "cold"],
+        "Numbers & Quantities": ["one", "two", "many", "few", "more", "less"],
+        "School & Learning": ["book", "pencil", "teacher", "class", "homework", "test"],
+        "Transportation": ["car", "bus", "train", "bike", "walk", "plane"],
+        "Weather": ["sunny", "rainy", "cold", "hot", "cloudy", "windy"],
+        "Technology": ["computer", "phone", "tablet", "internet", "email", "game"],
+        "Sports & Games": ["ball", "team", "play", "win", "run", "jump"]
+    }
+    return generic_words.get(category, ["thing", "stuff", "item", "object", "something", "anything"])
+
+
 # --- ADMIN ENDPOINTS ---
 
 class CopyProfilesBetweenAccountsRequest(BaseModel):
