@@ -244,9 +244,6 @@ async function initializeFreestylePage() {
     const buildSpaceTextarea = document.getElementById('build-space');
     buildSpaceTextarea.addEventListener('input', onBuildSpaceChange);
     
-    // Load initial word options
-    await loadWordOptions();
-    
     // Setup spelling modal
     setupSpellingModal();
     
@@ -261,12 +258,26 @@ async function initializeFreestylePage() {
 
 // Function to start scanning after page is fully ready
 function startInitialScanning() {
-    // Auto-start scanning after everything is loaded
+    console.log('startInitialScanning called');
+    console.log('scanningPaused:', scanningPaused);
+    console.log('currentScanningContext:', currentScanningContext);
+    
+    // Wait a bit longer and ensure buttons exist
     setTimeout(() => {
+        const wordButtons = document.querySelectorAll('.word-option-btn');
+        const controlButtons = document.querySelectorAll('#speak-display-btn, #go-back-btn, #clear-display-btn');
+        console.log(`Found ${wordButtons.length} word buttons and ${controlButtons.length} control buttons`);
+        
+        if (wordButtons.length === 0) {
+            console.warn('No word buttons found, retrying in 1 second...');
+            setTimeout(startInitialScanning, 1000);
+            return;
+        }
+        
         scanningPaused = false;
         startScanning();
-        console.log('Initial scanning started');
-    }, 500); // Small delay to ensure page is fully loaded
+        console.log('Initial scanning started with buttons available');
+    }, 1000); // Increased delay to ensure buttons are rendered
 }
 
 // --- Build Space Management ---
