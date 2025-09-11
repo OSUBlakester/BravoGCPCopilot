@@ -6,7 +6,10 @@
   <title>Admin - Manage Pages</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <script src="/static/admin_pages.js" defer></script>
+    <script src="/static/interactive-guide.js?v=20250901-fix3" defer></script>
+    <script src="/static/admin-pages-guide-fixed.js?v=20250901-fix5" defer></script>
+    <script src="/static/admin-pages-comprehensive-guide.js?v=20250901-fix5" defer></script>
+    <script src="/static/admin_pages.js?v=20250901-fix3" defer></script>
   <style>
     /* Custom base styles */
     body {
@@ -373,11 +376,54 @@
     const helpLoading = document.getElementById('help-loading');
 
     function openHelpModal() {
+        console.log('🔍 DEBUG: openHelpModal called');
+        console.log('🔍 DEBUG: window.guideInstance exists?', !!window.guideInstance);
+        console.log('🔍 DEBUG: window.guideInstance type:', typeof window.guideInstance);
+        if (window.guideInstance) {
+            console.log('🔍 DEBUG: guideInstance methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(window.guideInstance)));
+            console.log('🔍 DEBUG: startComprehensiveGuide exists?', typeof window.guideInstance.startComprehensiveGuide);
+            console.log('🔍 DEBUG: smartHelp exists?', !!window.guideInstance.smartHelp);
+            console.log('🔍 DEBUG: multimedia exists?', !!window.guideInstance.multimedia);
+        }
+        
+        // Try to use comprehensive guide first
+        if (window.guideInstance && typeof window.guideInstance.startComprehensiveGuide === 'function') {
+            console.log('🚀 Attempting to start comprehensive guide...');
+            // Check if the guide is fully initialized
+            if (window.guideInstance.smartHelp && window.guideInstance.multimedia) {
+                console.log('✅ Guide fully initialized, starting comprehensive guide');
+                window.guideInstance.startComprehensiveGuide();
+                return;
+            } else {
+                // Wait a bit for initialization to complete
+                console.log('⏳ Waiting for comprehensive guide to initialize...');
+                setTimeout(() => {
+                    if (window.guideInstance && window.guideInstance.smartHelp && window.guideInstance.multimedia) {
+                        console.log('✅ Guide initialized after wait, starting comprehensive guide');
+                        window.guideInstance.startComprehensiveGuide();
+                    } else {
+                        console.warn('❌ Comprehensive guide still not ready after wait, falling back to old help modal');
+                        showOldHelpModal();
+                    }
+                }, 500);
+                return;
+            }
+        } else {
+            // Fallback to old help modal if comprehensive guide is not available
+            console.warn('❌ Comprehensive guide not available, falling back to old help modal');
+            console.log('🔍 DEBUG: Reason - guideInstance exists?', !!window.guideInstance, 'startComprehensiveGuide function?', !!(window.guideInstance && typeof window.guideInstance.startComprehensiveGuide === 'function'));
+            showOldHelpModal();
+        }
+    }
+    
+    function showOldHelpModal() {
+        console.log('📋 Showing old help modal as fallback');
         helpModal.classList.remove('hidden');
         helpLoading.style.display = '';
         // Load static help for this page (customize as needed)
         helpModalContent.innerHTML = `<div class='p-4'><h3 class='text-lg font-bold mb-2'>Admin Pages Help</h3><p>This page allows you to manage the grid of pages and buttons. Select a page, edit its details, and configure the button grid. For more help, contact support.</p></div>`;
     }
+    
     function closeHelpModal() {
         helpModal.classList.add('hidden');
     }
@@ -395,9 +441,16 @@
     <main class="container mx-auto p-4 mt-8 bg-white rounded-lg shadow-md text-gray-800">
         <h2 class="text-2xl font-bold mb-4">Manage Pages & Buttons</h2>
 
-        <div class="mb-6">
-            <label for="selectPage" class="block text-sm font-medium text-gray-700">Select Page:</label>
-            <select id="selectPage" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></select>
+        <div class="mb-6 flex items-center space-x-4">
+            <div class="flex-1">
+                <label for="selectPage" class="block text-sm font-medium text-gray-700">Select Page:</label>
+                <select id="selectPage" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"></select>
+            </div>
+            <div class="flex-shrink-0 pt-6">
+                <button type="button" id="createNewPageBtn" class="px-4 py-2 bg-green-600 text-white rounded-md shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    <i class="fas fa-plus mr-2"></i>Create New Page
+                </button>
+            </div>
         </div>
 
         <form id="pageForm" class="mb-6 p-4 border rounded-md bg-gray-50">
@@ -405,9 +458,10 @@
             <div class="mb-4">
                 <label for="newPageDisplayName" class="block text-sm font-medium text-gray-700">Display Name (for Menu/Banner):</label>
                 <input type="text" id="newPageDisplayName" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="e.g., Daily Greetings, What to Eat">
+                <p class="mt-1 text-sm text-gray-500">Update the display name for the currently selected page</p>
             </div>
             <div class="flex space-x-3">
-                <button type="button" id="createUpdatePageBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Create/Update Page</button>
+                <button type="button" id="updatePageBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Update Page</button>
                 <button type="button" id="deletePage" class="px-4 py-2 bg-red-600 text-white rounded-md shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">Delete Page</button>
                 <button type="button" id="revertPageBtn" class="px-4 py-2 bg-gray-500 text-white rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">Revert Changes</button>
             </div>

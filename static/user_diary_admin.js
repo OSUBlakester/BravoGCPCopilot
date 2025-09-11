@@ -256,6 +256,48 @@ function authContextIsReady() {
     initializePage();
 }
 
+// --- Admin Toolbar Button Handlers ---
+function setupAdminToolbarButtons() {
+    const switchUserButton = document.getElementById('switch-user-button');
+    const logoutButton = document.getElementById('logout-button');
+
+    function handleSwitchUser() {
+        console.log("Switching user profile. Clearing session and redirecting to auth page for profile selection.");
+        // Only set flag to prevent auto-proceed with default user - keep user authenticated
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        console.log('Set bravoSkipDefaultUser flag for profile selection');
+        sessionStorage.clear();
+        
+        // Small delay to ensure localStorage is written before navigation
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    function handleLogout() {
+        console.log("Logging out. Clearing session and redirecting to auth page for login.");
+        // Set both flags to prevent automatic re-login and auto-profile selection
+        localStorage.setItem('bravoIntentionalLogout', 'true');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        console.log('Set bravoIntentionalLogout and bravoSkipDefaultUser flags');
+        sessionStorage.clear();
+        
+        // Small delay to ensure localStorage is written before navigation
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    if (switchUserButton) {
+        switchUserButton.addEventListener('click', handleSwitchUser);
+        console.log("user_diary_admin.js: Switch User button event listener added");
+    }
+    if (logoutButton) {
+        logoutButton.addEventListener('click', handleLogout);
+        console.log("user_diary_admin.js: Logout button event listener added");
+    }
+}
+
 // --- Event Listeners ---
 // Listener for when the authentication context is ready
 document.addEventListener('adminUserContextReady', () => {
@@ -272,4 +314,5 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("user_diary_admin.js: DOMContentLoaded event.");
     isDomContentLoaded = true;
     initializePage();
+    setupAdminToolbarButtons(); // Add toolbar button functionality
 });

@@ -1935,7 +1935,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
         });
         
         // Add a 1-second pause
-        await new Promise(resolve => setTimeout(resolve, 2500));
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // Then announce the punchline
         return new Promise((resolve, reject) => {

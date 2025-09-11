@@ -35,7 +35,7 @@ case $ENVIRONMENT in
         ;;
     "prod")
         PROJECT_ID="bravo-prod-465323"
-        CUSTOM_DOMAIN="talkwithbravo.com"   
+        CUSTOM_DOMAIN="app.talkwithbravo.com"   
         ENV_NAME="production"
         ;;
 esac

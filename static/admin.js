@@ -468,6 +468,47 @@ if (saveSettingsButton) {
     saveSettingsButton.addEventListener('click', saveSettings);
 } else { console.error("Save Settings button not found!"); }
 
+// --- Admin Toolbar Button Handlers ---
+function setupAdminToolbarButtons() {
+    const switchUserButton = document.getElementById('switch-user-button');
+    const logoutButton = document.getElementById('logout-button');
+
+    function handleSwitchUser() {
+        console.log("Switching user profile. Clearing session and redirecting to auth page for profile selection.");
+        // Only set flag to prevent auto-proceed with default user - keep user authenticated
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        console.log('Set bravoSkipDefaultUser flag for profile selection');
+        sessionStorage.clear();
+        
+        // Small delay to ensure localStorage is written before navigation
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    function handleLogout() {
+        console.log("Logging out. Clearing session and redirecting to auth page for login.");
+        // Set both flags to prevent automatic re-login and auto-profile selection
+        localStorage.setItem('bravoIntentionalLogout', 'true');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        console.log('Set bravoIntentionalLogout and bravoSkipDefaultUser flags');
+        sessionStorage.clear();
+        
+        // Small delay to ensure localStorage is written before navigation
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    if (switchUserButton) {
+        switchUserButton.addEventListener('click', handleSwitchUser);
+        console.log("admin.js: Switch User button event listener added");
+    }
+    if (logoutButton) {
+        logoutButton.addEventListener('click', handleLogout);
+        console.log("admin.js: Logout button event listener added");
+    }
+}
 
 // --- Initial Load ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -475,4 +516,5 @@ document.addEventListener('DOMContentLoaded', () => {
     generateGrid(); // Generate grid structure on initial load
     loadPages();    // Load page list into dropdown
     loadSettings(); // Load global settings
+    setupAdminToolbarButtons(); // Add toolbar button functionality
 });

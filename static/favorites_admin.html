@@ -6,6 +6,8 @@
   <title>Admin - Manage Favorites</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <script src="/static/interactive-guide.js"></script>
+  <script src="/static/favorites-admin-guide.js"></script>
   <script src="/static/favorites_admin.js" defer></script>
   <style>
     /* Custom base styles */
@@ -259,13 +261,13 @@
             <h1 id="dynamic-page-title" class="ml-2 text-xl font-semibold">Manage Favorites Topics</h1>
         </div>
         <div class="admin-toolbar flex items-center gap-2">
-            <a href="admin_pages.html" title="Pages & Buttons" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-th-large"></i></a>
+            <a href="admin_pages.html" title="Pages &amp; Buttons" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-th-large"></i></a>
             <a href="admin_settings.html" title="Global Settings" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-cog"></i></a>
             <a href="user_current_admin.html" title="User Current Location" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-map-marker-alt"></i></a>
-            <a href="user_info_admin.html" title="User Info & Birthdays" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-info-circle"></i></a>
+            <a href="user_info_admin.html" title="User Info &amp; Birthdays" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-info-circle"></i></a>
             <a href="user_diary_admin.html" title="User Diary" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-book-open"></i></a>
             <a href="audio_admin.html" title="Audio Devices" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-volume-up"></i></a>
-            <a href="favorites_admin.html" title="Event Sources" class="h-8 w-8 flex items-center justify-center text-blue-600 bg-blue-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-200"><i class="fas fa-star"></i></a>
+            <a href="favorites_admin.html" title="Event Sources" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-star"></i></a>
             <a href="admin_audit_report.html" title="Activity Reports" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-clipboard-list"></i></a>
             <span class="border-l border-gray-300 h-6 mx-1"></span>
             <button id="switch-user-button" title="Switch User Profile" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-users"></i></button>
