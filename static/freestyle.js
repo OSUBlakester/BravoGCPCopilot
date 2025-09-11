@@ -525,7 +525,10 @@ async function loadMoreWordOptions() {
     }
 }
 
-function handleWordOptionClick(word) {
+async function handleWordOptionClick(word) {
+    // Announce the selected word
+    await announce(word, "system", true);
+    
     addWordToBuildSpace(word);
     
     // Stop scanning completely and restart only after word options are reloaded
@@ -751,7 +754,10 @@ function renderWordPredictions() {
     });
 }
 
-function handlePredictionClick(word) {
+async function handlePredictionClick(word) {
+    // Announce the selected word
+    await announce(word, "system", true);
+    
     // Immediately add the selected prediction to Build Space and close modal
     currentSpellingWord = word;
     document.getElementById('current-word').value = currentSpellingWord;
@@ -762,8 +768,11 @@ function handlePredictionClick(word) {
     closeSpellingModal();
 }
 
-function addCurrentWordToBuildSpace() {
+async function addCurrentWordToBuildSpace() {
     if (currentSpellingWord.trim()) {
+        // Announce the selected word
+        await announce(currentSpellingWord, "system", true);
+        
         addWordToBuildSpace(currentSpellingWord);
         clearCurrentWord();
         closeSpellingModal();
@@ -1050,8 +1059,11 @@ async function generateDifferentWords() {
     await generateCategoryWords(currentChooseWordCategory, currentCategoryWords);
 }
 
-function selectCategoryWord(word) {
+async function selectCategoryWord(word) {
     console.log('Selected word:', word);
+    
+    // Announce the selected word
+    await announce(word, "system", true);
     
     // Add word to build space
     addWordToBuildSpace(word);
@@ -1158,7 +1170,7 @@ function startMainScanning() {
         const button = allButtons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            await speakAndHighlight(button);
+            speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1216,7 +1228,7 @@ function startSpellingLettersScanning() {
         const button = allButtons[currentButtonIndex];
         if (button && !button.disabled && !button.classList.contains('disabled-letter')) {
             currentlyScannedButton = button;
-            await speakAndHighlight(button);
+            speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1238,7 +1250,7 @@ function startSpellingPredictionsScanning() {
     
     currentButtonIndex = 0;
     
-    const scanNext = async () => {
+    const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
             currentlyScannedButton.classList.remove('scanning-highlight');
@@ -1255,7 +1267,7 @@ function startSpellingPredictionsScanning() {
         const button = buttons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            await speakAndHighlight(button);
+            speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1281,7 +1293,7 @@ function startChooseWordCategoriesScanning() {
     
     currentButtonIndex = 0;
     
-    const scanNext = async () => {
+    const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
             currentlyScannedButton.classList.remove('scanned');
@@ -1298,7 +1310,7 @@ function startChooseWordCategoriesScanning() {
         const button = buttons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            await speakAndHighlight(button);
+            speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1324,7 +1336,7 @@ function startChooseWordOptionsScanning() {
     
     currentButtonIndex = 0;
     
-    const scanNext = async () => {
+    const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
             currentlyScannedButton.classList.remove('scanned');
@@ -1341,7 +1353,7 @@ function startChooseWordOptionsScanning() {
         const button = buttons[currentButtonIndex];
         if (button) {
             currentlyScannedButton = button;
-            await speakAndHighlight(button);
+            speakAndHighlight(button);
         }
         
         // Move to next button
@@ -1373,7 +1385,7 @@ function stopScanning() {
     window.speechSynthesis.cancel(); // Cancel any ongoing speech
 }
 
-async function speakAndHighlight(button) {
+function speakAndHighlight(button) {
     // Remove scanning class from all buttons
     document.querySelectorAll('.scanning-highlight').forEach(btn => {
         btn.classList.remove('scanning-highlight');
@@ -1395,8 +1407,10 @@ async function speakAndHighlight(button) {
             textToSpeak = currentSpellingWord.trim();
         }
         
-        // Use the app's announcement system instead of direct speech synthesis
-        await announce(textToSpeak, "system", false);
+        // Use speech synthesis for scanning (personal speaker, not announced)
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
     } catch (e) {
         console.error("Speech synthesis error:", e);
     }
