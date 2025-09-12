@@ -185,26 +185,20 @@
 }
 
 .word-option-btn {
-    position: relative; /* Needed for the tail pseudo-elements */
-    padding: 10px 20px; /* Match gridpage LLM button padding */
-    font-size: 16px; /* Match gridpage LLM button font size */
-    font-weight: 500;
+    padding: 10px 20px; /* Match gridpage LLM button padding exactly */
+    font-size: 16px; /* Match gridpage LLM button font size exactly */
+    background-color: #e0e0e0; /* Match gridpage LLM button color exactly */
+    border: 1px solid #ccc;   /* Match gridpage LLM button border exactly */
+    border-radius: 5px;       /* Match gridpage LLM button border radius exactly */
     cursor: pointer;
-    background-color: #e0e0e0; /* Match gridpage LLM button color */
-    color: #002244;           /* Dark blue text */
-    border: 1px solid #ccc;   /* Match gridpage LLM button border */
-    border-radius: 5px;       /* Match gridpage LLM button border radius */
+    margin: 5px; /* Match gridpage LLM button margin exactly */
     text-align: center;
-    min-height: 50px;          /* Ensure buttons have some height */
-    display: flex;             /* For centering text */
-    align-items: center;
-    justify-content: center;
-    margin: 5px; /* Match gridpage LLM button margin */
-    box-shadow: 0 1px 3px rgba(0,0,0,0.12); /* Optional: subtle shadow for depth */
-    transition: transform 0.1s ease-out, box-shadow 0.2s ease-out, font-size 0.2s ease-out; /* Smooth transitions */
+    min-height: auto;          /* Remove min-height to match gridpage */
+    display: inline-block;     /* Match gridpage display */
+    box-sizing: border-box;    /* Ensure consistent sizing */
     word-wrap: break-word;     /* Allow text to wrap if needed */
-    hyphens: auto;             /* Enable automatic hyphenation */
-    line-height: 1.2;          /* Better line spacing for readability */
+    line-height: 1.4;          /* Better line spacing for readability */
+    font-weight: normal;       /* Match gridpage font weight */
 }
 
 .word-option-btn:hover {
@@ -213,32 +207,6 @@
 
 .word-option-btn:active {
     transform: scale(0.97);
-}
-
-/* Speech Bubble Tail for word option buttons */
-.word-option-btn::before,
-.word-option-btn::after {
-    content: "";
-    width: 0px;
-    height: 0px;
-    position: absolute;
-    border-right: 10px solid transparent;  /* Makes the shape triangular on the right */
-    border-bottom: 10px solid transparent; /* Makes the shape triangular on the bottom */
-}
-
-.word-option-btn::before { /* This creates the dark blue border of the tail */
-    border-left: 10px solid #002244;
-    border-top: 10px solid #002244;
-    left: 15px;  /* Position from the left edge of the button */
-    bottom: -18px; /* Positions the tail below the button */
-}
-
-.word-option-btn::after { /* This creates the white fill of the tail */
-    border-left: 10px solid white;
-    border-top: 10px solid white;
-    left: 17px;  /* Offset by 2px from ::before (button border thickness) */
-    bottom: -16px; /* Offset by 2px from ::before (button border thickness) */
-    z-index: 1;  /* Ensures the white fill is on top of the blue tail border */
 }
 
 /* Scanning highlight styles (matching gridpage.html) */
