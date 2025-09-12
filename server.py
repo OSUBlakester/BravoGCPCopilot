@@ -7320,22 +7320,59 @@ async def get_freestyle_word_options(
         
         if build_space_text.strip():
             # If there's text in build space, provide contextual next words
-            variation_text = "different and alternative" if request.request_different_options else ""
-            prompt = f"Given this context: {context_str} and the partial sentence '{build_space_text}', provide {freestyle_options} {variation_text} useful words or short phrases that would logically complete or continue this communication. Focus on words that would naturally follow what's already written. Return only the words/phrases, one per line."
+            variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
+            prompt = f"""Given this context: {context_str} and the partial sentence '{build_space_text}', provide exactly {freestyle_options} {variation_text} useful words or short phrases that would logically complete or continue this communication. 
+
+Requirements:
+- Each option should be DIFFERENT and UNIQUE
+- Focus on words that would naturally follow what's already written
+- Provide variety in the suggestions (different topics, actions, descriptions)
+- Return only the words/phrases, one per line
+- Do not repeat the same option multiple times
+- Make each option distinct and useful
+
+Examples of good variety: verbs, adjectives, locations, time expressions, etc."""
         else:
             # If no build space text, provide conversation starters
-            variation_text = "different and alternative" if request.request_different_options else ""
-            prompt = f"Given this context: {context_str}, provide {freestyle_options} {variation_text} useful words or short phrases to START AAC communication. Include common conversation starters like 'I', 'You', 'Where', 'Who', 'What', 'Can', 'Want', 'Need', etc. Return only the words/phrases, one per line."
+            variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
+            prompt = f"""Given this context: {context_str}, provide exactly {freestyle_options} {variation_text} useful words or short phrases to START AAC communication. 
+
+Requirements:
+- Each option should be DIFFERENT and UNIQUE
+- Include common conversation starters like 'I', 'You', 'Where', 'Who', 'What', 'Can', 'Want', 'Need', etc.
+- Provide variety in the suggestions (questions, statements, greetings, etc.)
+- Return only the words/phrases, one per line
+- Do not repeat the same option multiple times
+- Make each option distinct and useful"""
         
         logging.info(f"Generated prompt for LLM: {prompt}")
 
-        # Use LLM to generate options
-        response_text = await _generate_gemini_content_with_fallback(prompt)
+        # Use LLM to generate options with generation config for more randomness
+        generation_config = {
+            "temperature": 0.8,  # Add some randomness
+            "top_p": 0.9,
+            "candidate_count": 1
+        }
         
-        # Parse options
-        options = [line.strip() for line in response_text.split('\n') if line.strip()][:freestyle_options]
+        response_text = await _generate_gemini_content_with_fallback(prompt, generation_config, account_id, aac_user_id)
         
-        logging.info(f"Generated {len(options)} word options for build space: '{build_space_text}' with context: {context_str}")
+        # Parse options and ensure uniqueness
+        all_options = [line.strip() for line in response_text.split('\n') if line.strip()]
+        
+        # Remove duplicates while preserving order
+        unique_options = []
+        seen = set()
+        for option in all_options:
+            option_lower = option.lower()
+            if option_lower not in seen and option:
+                unique_options.append(option)
+                seen.add(option_lower)
+        
+        # Take only the requested number
+        options = unique_options[:freestyle_options]
+        
+        logging.info(f"Generated {len(options)} unique word options for build space: '{build_space_text}' with context: {context_str}")
+        logging.info(f"Options: {options}")
         return JSONResponse(content={"word_options": options})
         
     except Exception as e:
