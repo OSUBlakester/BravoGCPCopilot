@@ -1057,7 +1057,7 @@ async function generateCategoryWords(categoryName, excludeWords = []) {
         announceText('Error generating word options. Please try again.');
     } finally {
         isLLMProcessing = false;
-        hideLoadingIndicator();
+        showLoadingIndicator(false);
     }
 }
 
