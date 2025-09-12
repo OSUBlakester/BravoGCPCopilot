@@ -7472,6 +7472,13 @@ async def generate_category_words(
             default_data={"narrative": ""}
         )
         
+        user_current = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/current_state",
+            default_data=DEFAULT_USER_CURRENT.copy()
+        )
+        
         # Build exclude words clause
         exclude_clause = ""
         if request.exclude_words:
@@ -7483,15 +7490,31 @@ async def generate_category_words(
         if request.build_space_content:
             context_clause = f" Current message being built: '{request.build_space_content}'."
         
-        # Get user context
-        user_context = user_info.get("narrative", "")
+        # Get comprehensive user context
+        user_context_parts = []
+        if user_info.get("narrative"):
+            user_context_parts.append(f"User info: {user_info['narrative']}")
+        if user_current.get("location"):
+            user_context_parts.append(f"Current location: {user_current['location']}")
+        if user_current.get("people"):
+            user_context_parts.append(f"People present: {user_current['people']}")
+        if user_current.get("activity"):
+            user_context_parts.append(f"Current activity: {user_current['activity']}")
+            
+        user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
         
-        # Create the prompt for word generation
+        # Create the prompt for word generation with enhanced context
         prompt = f"""Given the user context: '{user_context}' and category '{request.category}', generate {freestyle_options} single words for this category.{context_clause}{exclude_clause}
+
+IMPORTANT: Use the user context to provide personalized, relevant words. For example:
+- If category is "People" and user context mentions specific people, prioritize those names
+- If category is "Places" and user has a current location, include relevant locations
+- If category is "Activities" and user has a current activity, include related activities
 
 Requirements:
 - Provide exactly {freestyle_options} single words (no phrases)
 - Words should be relevant to "{request.category}"
+- Prioritize words from user context when applicable
 - Words should be commonly used and appropriate for AAC communication
 - Each word should be useful for building messages
 - Return only the words, one per line, no numbering or formatting

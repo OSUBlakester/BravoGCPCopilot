@@ -212,6 +212,32 @@
     transform: scale(0.97);
 }
 
+/* Speech Bubble Tail for word option buttons - exactly matching gridpage */
+.word-option-btn::before,
+.word-option-btn::after {
+    content: "";
+    width: 0px;
+    height: 0px;
+    position: absolute;
+    border-right: 10px solid transparent;  /* Makes the shape triangular on the right */
+    border-bottom: 10px solid transparent; /* Makes the shape triangular on the bottom */
+}
+
+.word-option-btn::before { /* This creates the dark blue border of the tail */
+    border-left: 10px solid #002244;
+    border-top: 10px solid #002244;
+    left: 15px;  /* Position from the left edge of the button */
+    bottom: -18px; /* Positions the tail below the button */
+}
+
+.word-option-btn::after { /* This creates the white fill of the tail */
+    border-left: 10px solid white;
+    border-top: 10px solid white;
+    left: 17px;  /* Offset by 2px from ::before (button border thickness) */
+    bottom: -16px; /* Offset by 2px from ::before (button border thickness) */
+    z-index: 1;  /* Ensures the white fill is on top of the blue tail border */
+}
+
 /* Scanning highlight styles (matching gridpage.html) */
 .scanning-highlight {
     /* Orange glow for highlighted state */
