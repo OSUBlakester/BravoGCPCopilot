@@ -322,7 +322,7 @@ async function speakDisplayText() {
     // Record to speech history (following gridpage.js pattern)
     recordToSpeechHistory(currentBuildSpaceText);
     
-    // Pause scanning for the scanning interval duration, then reset to Clear Display button
+    // Pause scanning for the scanning interval duration, then reset to Go Back button
     if (scanningInterval) {
         stopScanning();
         
@@ -330,24 +330,24 @@ async function speakDisplayText() {
             // Reset to Go Back button and resume scanning
             if (!scanningPaused && currentScanningContext === "main") {
                 // Build the same button list as in startMainScanning()
-                let controlButtonSelectors = '';
+                let controlButtons = [];
                 if (currentBuildSpaceText.trim()) {
-                    controlButtonSelectors = '#speak-display-btn, #go-back-btn, #clear-display-btn';
+                    controlButtons = Array.from(document.querySelectorAll('#speak-display-btn, #go-back-btn, #clear-display-btn'));
                 }
                 
-                const controlButtons = document.querySelectorAll(controlButtonSelectors);
-                const wordButtons = document.querySelectorAll('.word-option-btn');
+                const wordButtons = Array.from(document.querySelectorAll('.word-option-btn'));
                 const allButtons = [...controlButtons, ...wordButtons];
                 
                 // Find the index of the Go Back button (should be second after Speak Display)
-                const goBackIndex = Array.from(allButtons).findIndex(btn => btn.id === 'go-back-btn');
+                const goBackIndex = allButtons.findIndex(btn => btn.id === 'go-back-btn');
                 if (goBackIndex !== -1) {
                     // Set to Go Back button index
                     currentButtonIndex = goBackIndex;
                     console.log(`Reset scanning to Go Back button at index ${goBackIndex}`);
                 } else {
-                    // Fallback to first button if Go Back not found
-                    currentButtonIndex = 0;
+                    // Fallback to first word button if Go Back not found
+                    currentButtonIndex = controlButtons.length;
+                    console.log(`Go Back button not found, starting with first word button at index ${currentButtonIndex}`);
                 }
                 
                 startScanning();

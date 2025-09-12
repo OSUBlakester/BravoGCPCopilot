@@ -185,20 +185,23 @@
 }
 
 .word-option-btn {
-    padding: 10px 20px; /* Match gridpage LLM button padding exactly */
-    font-size: 16px; /* Match gridpage LLM button font size exactly */
-    background-color: #e0e0e0; /* Match gridpage LLM button color exactly */
-    border: 1px solid #ccc;   /* Match gridpage LLM button border exactly */
-    border-radius: 5px;       /* Match gridpage LLM button border radius exactly */
+    position: relative; /* Needed for proper positioning */
+    padding: 15px 20px; /* Match gridpage exactly */
+    font-size: var(--word-option-font-size); /* Use the CSS custom property */
+    font-weight: 500; /* Match gridpage exactly */
     cursor: pointer;
-    margin: 5px; /* Match gridpage LLM button margin exactly */
+    background-color: white;   /* Match gridpage exactly - White inside */
+    color: #002244;           /* Match gridpage exactly - Dark blue text */
+    border: 2px solid #002244; /* Match gridpage exactly - Dark blue border, 2px thick */
+    border-radius: 12px;       /* Match gridpage exactly - Somewhat rounded corners */
     text-align: center;
-    min-height: auto;          /* Remove min-height to match gridpage */
-    display: inline-block;     /* Match gridpage display */
-    box-sizing: border-box;    /* Ensure consistent sizing */
+    min-height: 50px;          /* Match gridpage exactly */
+    display: flex;             /* Match gridpage exactly - For centering text */
+    align-items: center;       /* Match gridpage exactly */
+    justify-content: center;   /* Match gridpage exactly */
+    margin-bottom: 18px; /* Match gridpage spacing for the tail + grid gap consideration */
     word-wrap: break-word;     /* Allow text to wrap if needed */
-    line-height: 1.4;          /* Better line spacing for readability */
-    font-weight: normal;       /* Match gridpage font weight */
+    line-height: 1.2;          /* Better line spacing for readability */
 }
 
 .word-option-btn:hover {
