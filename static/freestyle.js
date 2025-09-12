@@ -1171,13 +1171,12 @@ function startMainScanning() {
     
     // Context-aware scanning: control buttons first, then word options
     // Skip Speak Display, Go Back, and Clear Display buttons if Build Space is empty
-    let controlButtonSelectors = '';
+    let controlButtons = [];
     if (currentBuildSpaceText.trim()) {
-        controlButtonSelectors = '#speak-display-btn, #go-back-btn, #clear-display-btn';
+        controlButtons = Array.from(document.querySelectorAll('#speak-display-btn, #go-back-btn, #clear-display-btn'));
     }
     
-    const controlButtons = document.querySelectorAll(controlButtonSelectors);
-    const wordButtons = document.querySelectorAll('.word-option-btn');
+    const wordButtons = Array.from(document.querySelectorAll('.word-option-btn'));
     const allButtons = [...controlButtons, ...wordButtons];
     
     if (allButtons.length === 0) {
