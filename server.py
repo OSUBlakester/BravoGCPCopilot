@@ -7999,7 +7999,7 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
     api_key = await get_gemini_api_key()
     genai.configure(api_key=api_key)
     
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.0-flash-exp')
     
     prompt = f"""
     Generate {count} specific subconcepts related to "{concept}" that would be useful for AAC (Augmentative and Alternative Communication) purposes.
@@ -8026,41 +8026,60 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
         logging.error(f"Error generating subconcepts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
 
-async def generate_image_with_vertex(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using Vertex AI Imagen"""
+async def generate_image_with_gemini(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using Gemini 2.5 Flash with Vertex AI (image generation)"""
     for attempt in range(max_retries + 1):
         try:
-            # Use Vertex AI Imagen 3.0 with the current API
-            from google.cloud import aiplatform
+            # Use Vertex AI for Gemini 2.5 Flash image generation
+            import vertexai
+            from vertexai.generative_models import GenerativeModel, GenerationConfig
             
-            # Initialize client if not already done
-            client = aiplatform.gapic.PredictionServiceClient()
+            # Initialize Vertex AI
+            vertexai.init(project=CONFIG['gcp_project_id'], location="us-central1")
             
-            # Format the request for Imagen 3.0
-            endpoint = f"projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagen-3.0-generate-001"
+            # Use Gemini 2.5 Flash model with image generation capability
+            model = GenerativeModel("gemini-2.5-flash-image-preview")
             
-            instances = [{
-                "prompt": prompt,
-                "sampleCount": 1,
-                "aspectRatio": "1:1",
-                "safetyFilterLevel": "block_some",
-                "personGeneration": "allow_adult"
-            }]
+            # Enhanced prompt for better AAC-appropriate images
+            enhanced_prompt = f"""
+            Generate a high-quality, clear image of: {prompt}
             
-            # Make prediction request
-            response = await asyncio.to_thread(
-                client.predict,
-                endpoint=endpoint,
-                instances=instances
+            Style requirements:
+            - Simple, clean design suitable for AAC (Augmentative and Alternative Communication)
+            - Clear, recognizable representation
+            - Good contrast and visibility
+            - Child-friendly and appropriate for all ages
+            - Square aspect ratio (1:1)
+            - Bright, clear colors
+            - No text or words in the image
+            """
+            
+            # Generate image using Vertex AI Gemini
+            generation_config = GenerationConfig(
+                temperature=0.7,
+                max_output_tokens=8192
             )
             
-            if response.predictions:
-                # Extract image data from response
-                prediction = response.predictions[0]
-                image_bytes = base64.b64decode(prediction["bytesBase64Encoded"])
-                return image_bytes
-            else:
-                raise Exception("No image generated")
+            response = await asyncio.to_thread(
+                model.generate_content,
+                enhanced_prompt,
+                generation_config=generation_config
+            )
+            
+            # Extract image data from response
+            if response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if hasattr(part, 'inline_data') and part.inline_data:
+                            # Get the base64 image data
+                            image_data = part.inline_data.data
+                            if isinstance(image_data, str):
+                                return base64.b64decode(image_data)
+                            else:
+                                return image_data
+            
+            raise Exception("No image data found in response")
                 
         except Exception as e:
             logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
@@ -8090,7 +8109,7 @@ async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> 
         api_key = await get_gemini_api_key()
         genai.configure(api_key=api_key)
         
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
         
         prompt = f"""
         Analyze this image that represents the concept "{subconcept}" from the category "{concept}".
@@ -8173,7 +8192,7 @@ async def api_generate_images(
             prompt = f"{style}, {subconcept}, {concept}, clean background, high quality, friendly appearance, suitable for AAC communication"
             
             # Generate image
-            image_bytes = await generate_image_with_vertex(prompt)
+            image_bytes = await generate_image_with_gemini(prompt)
             
             # Create filename
             filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
