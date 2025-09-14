@@ -39,6 +39,10 @@ google-auth-httplib2==0.2.0
 google-cloud-core==2.4.3
 google-cloud-firestore==2.20.2
 google-cloud-storage>=1.32.0,<3.0.0
+google-cloud-aiplatform>=1.38.0  # For Vertex AI image generation
+google-cloud-secret-manager>=2.18.0  # For secure API key management
+pillow>=11.2.0  # For image processing
+uvicorn>=0.34.3  # For ASGI server (already included but ensuring version)
 google-cloud-texttospeech==2.27.0
 google-crc32c==1.7.1
 google-resumable-media==2.7.2

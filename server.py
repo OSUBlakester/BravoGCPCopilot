@@ -7912,6 +7912,407 @@ async def quick_user_info_check(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to check user info: {str(e)}")
 
 
+# =============================================================================
+# AAC IMAGE GENERATION SERVICE
+# =============================================================================
+
+# Import additional dependencies for image generation
+try:
+    from google.cloud import aiplatform, storage, secretmanager
+    from google.cloud.aiplatform.gapic.schema import predict
+    import base64
+    import io
+    from PIL import Image
+    import uuid
+    from datetime import datetime, timezone
+    import asyncio
+    VERTEX_AI_AVAILABLE = True
+    
+    # Initialize Vertex AI
+    aiplatform.init(project=CONFIG['gcp_project_id'], location="us-central1")
+    
+    # Initialize storage client for AAC images
+    storage_client = storage.Client(project=CONFIG['gcp_project_id'])
+    AAC_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-aac-images"
+    
+    # Initialize Secret Manager client
+    secret_client = secretmanager.SecretManagerServiceClient()
+    
+except ImportError as e:
+    logging.warning(f"Image generation dependencies not available: {e}")
+    VERTEX_AI_AVAILABLE = False
+
+class ImageGenerationRequest(BaseModel):
+    concept: str
+    variations: int = 10
+    style: str = "Apple memoji style"
+
+class ImageTaggingRequest(BaseModel):
+    image_url: str
+    concept: str
+    subconcept: str
+
+class ImageStoreRequest(BaseModel):
+    images: List[Dict[str, str]]  # List of {image_url, concept, subconcept}
+
+# Admin verification dependency
+async def verify_admin_user(token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]) -> Dict[str, str]:
+    """Verify that the authenticated user is admin@talkwithbravo.com"""
+    if token_info.get("email") != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Access denied. Admin privileges required.")
+    return token_info
+
+async def get_gemini_api_key():
+    """Get Gemini API key from Secret Manager or environment"""
+    try:
+        secret_name = f"projects/{CONFIG['gcp_project_id']}/secrets/bravo-google-api-key/versions/latest"
+        response = await asyncio.to_thread(secret_client.access_secret_version, request={"name": secret_name})
+        return response.payload.data.decode("UTF-8")
+    except Exception as e:
+        logging.warning(f"Could not access Secret Manager for Gemini API key: {e}")
+        # Fallback to environment variable
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if api_key:
+            return api_key
+        else:
+            raise HTTPException(status_code=503, detail="Gemini API key not configured")
+
+async def ensure_aac_images_bucket():
+    """Ensure the AAC images bucket exists"""
+    try:
+        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        if not await asyncio.to_thread(bucket.exists):
+            await asyncio.to_thread(bucket.create, location="US-CENTRAL1")
+            logging.info(f"Created AAC images bucket: {AAC_IMAGES_BUCKET_NAME}")
+        return bucket
+    except Exception as e:
+        logging.error(f"Error ensuring AAC images bucket: {e}")
+        raise HTTPException(status_code=500, detail=f"Storage service error: {str(e)}")
+
+async def generate_subconcepts(concept: str, count: int) -> List[str]:
+    """Use Gemini to generate subconcepts from a main concept"""
+    api_key = await get_gemini_api_key()
+    genai.configure(api_key=api_key)
+    
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    prompt = f"""
+    Generate {count} specific subconcepts related to "{concept}" that would be useful for AAC (Augmentative and Alternative Communication) purposes.
+    
+    Requirements:
+    - Each subconcept should be 1-3 words maximum
+    - Focus on common, everyday items/concepts that AAC users would communicate about
+    - Make them diverse and representative of the broader concept
+    - Return only the subconcepts, one per line, no numbering or formatting
+    
+    Example: If concept is "animals", return things like:
+    dog
+    cat
+    bird
+    fish
+    rabbit
+    """
+    
+    try:
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        subconcepts = [line.strip() for line in response.text.strip().split('\n') if line.strip()]
+        return subconcepts[:count]  # Ensure we don't exceed requested count
+    except Exception as e:
+        logging.error(f"Error generating subconcepts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
+
+async def generate_image_with_vertex(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using Vertex AI Imagen"""
+    for attempt in range(max_retries + 1):
+        try:
+            # Use Vertex AI Imagen 2.0
+            model = aiplatform.ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+            
+            response = await asyncio.to_thread(
+                model.generate_images,
+                prompt=prompt,
+                number_of_images=1,
+                aspect_ratio="1:1",
+                safety_filter_level="allow_most",
+                person_generation="allow_adult"
+            )
+            
+            if response.images:
+                # Convert to bytes
+                image_bytes = response.images[0]._image_bytes
+                return image_bytes
+            else:
+                raise Exception("No image generated")
+                
+        except Exception as e:
+            logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries:
+                raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
+
+async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
+    """Upload image to Google Cloud Storage and return public URL"""
+    try:
+        bucket = await ensure_aac_images_bucket()
+        blob = bucket.blob(f"global/{filename}")
+        
+        # Upload image
+        await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type='image/png')
+        
+        # Make it publicly accessible
+        await asyncio.to_thread(blob.make_public)
+        
+        return blob.public_url
+    except Exception as e:
+        logging.error(f"Error uploading image to storage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
+async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> List[str]:
+    """Use Gemini to analyze image and generate relevant tags"""
+    try:
+        api_key = await get_gemini_api_key()
+        genai.configure(api_key=api_key)
+        
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        Analyze this image that represents the concept "{subconcept}" from the category "{concept}".
+        
+        Generate 8-12 relevant tags for AAC (Augmentative and Alternative Communication) purposes.
+        
+        Requirements:
+        - Include the main concept and subconcept
+        - Add descriptive words about appearance, function, context
+        - Use simple, common words that AAC users might search for
+        - Include both specific and general terms
+        - Focus on communication-relevant aspects
+        
+        Return only the tags, separated by commas, no other text.
+        
+        Example format: dog, animal, pet, furry, four legs, companion, brown, sitting
+        """
+        
+        # Download image for analysis
+        import requests
+        response = requests.get(image_url)
+        if response.status_code == 200:
+            # Convert to base64 for Gemini
+            image_data = base64.b64encode(response.content).decode()
+            
+            response = await asyncio.to_thread(
+                model.generate_content,
+                [prompt, {"mime_type": "image/png", "data": image_data}]
+            )
+            
+            tags_text = response.text.strip()
+            tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
+            return tags
+        else:
+            # Fallback to basic tags if image analysis fails
+            return [concept, subconcept, "aac", "communication"]
+            
+    except Exception as e:
+        logging.warning(f"Error generating image tags: {e}")
+        # Return basic tags as fallback
+        return [concept, subconcept, "aac", "communication"]
+
+@app.get("/imagecreator")
+async def serve_image_creator(token_info: Annotated[Dict[str, str], Depends(verify_admin_user)]):
+    """Serve the AAC Image Creator interface (admin only)"""
+    return FileResponse("static/imagecreator.html")
+
+@app.post("/api/imagecreator/generate-subconcepts")
+async def api_generate_subconcepts(
+    request: ImageGenerationRequest,
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)]
+):
+    """Generate subconcepts for a given concept"""
+    if not VERTEX_AI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Image generation service not available")
+    
+    try:
+        subconcepts = await generate_subconcepts(request.concept, request.variations)
+        return {"concept": request.concept, "subconcepts": subconcepts}
+    except Exception as e:
+        logging.error(f"Error in generate subconcepts API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/imagecreator/generate-images")
+async def api_generate_images(
+    concept: str = Body(...),
+    subconcepts: List[str] = Body(...),
+    style: str = Body(default="Apple memoji style"),
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """Generate images for a list of subconcepts"""
+    if not VERTEX_AI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Image generation service not available")
+    
+    try:
+        results = []
+        
+        for subconcept in subconcepts:
+            # Create detailed prompt
+            prompt = f"{style}, {subconcept}, {concept}, clean background, high quality, friendly appearance, suitable for AAC communication"
+            
+            # Generate image
+            image_bytes = await generate_image_with_vertex(prompt)
+            
+            # Create filename
+            filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
+            
+            # Upload to storage
+            image_url = await upload_image_to_storage(image_bytes, filename)
+            
+            results.append({
+                "subconcept": subconcept,
+                "image_url": image_url,
+                "filename": filename
+            })
+        
+        return {"concept": concept, "images": results}
+        
+    except Exception as e:
+        logging.error(f"Error in generate images API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/imagecreator/store-images")
+async def api_store_images(
+    request: ImageStoreRequest,
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)]
+):
+    """Store selected images to Firestore with tags"""
+    if not VERTEX_AI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Image generation service not available")
+    
+    try:
+        stored_images = []
+        
+        for image_data in request.images:
+            # Generate tags
+            tags = await generate_image_tags(
+                image_data["image_url"],
+                image_data["concept"],
+                image_data["subconcept"]
+            )
+            
+            # Create document data
+            doc_data = {
+                "concept": image_data["concept"],
+                "subconcept": image_data["subconcept"],
+                "tags": tags,
+                "image_url": image_data["image_url"],
+                "image_type": "global",
+                "user_id": None,
+                "created_at": datetime.now(timezone.utc),
+                "created_by": "admin",
+                "approved": True
+            }
+            
+            # Store in Firestore
+            doc_ref = firestore_db.collection("aac_images").add(doc_data)
+            doc_id = doc_ref[1].id
+            
+            stored_images.append({
+                "id": doc_id,
+                **doc_data,
+                "created_at": doc_data["created_at"].isoformat()
+            })
+        
+        return {"stored_images": stored_images}
+        
+    except Exception as e:
+        logging.error(f"Error in store images API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/imagecreator/images")
+async def api_get_images(
+    concept: str = None,
+    tag: str = None,
+    limit: int = 50,
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """Get stored AAC images with optional filtering"""
+    try:
+        query = firestore_db.collection("aac_images")
+        
+        # Add filters
+        if concept:
+            query = query.where("concept", "==", concept)
+        
+        if tag:
+            query = query.where("tags", "array_contains", tag)
+        
+        # Limit results
+        query = query.limit(limit)
+        
+        # Execute query
+        docs = await asyncio.to_thread(query.get)
+        
+        images = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+                data["created_at"] = data["created_at"].isoformat()
+            images.append(data)
+        
+        return {"images": images}
+        
+    except Exception as e:
+        logging.error(f"Error in get images API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/imagecreator/images/{image_id}")
+async def api_delete_image(
+    image_id: str,
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)]
+):
+    """Delete an AAC image"""
+    try:
+        # Get image document
+        doc_ref = firestore_db.collection("aac_images").document(image_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Delete from Firestore
+        await asyncio.to_thread(doc_ref.delete)
+        
+        return {"success": True, "message": "Image deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in delete image API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/imagecreator/images/{image_id}/tags")
+async def api_update_image_tags(
+    image_id: str,
+    tags: List[str] = Body(...),
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """Update tags for an AAC image"""
+    try:
+        doc_ref = firestore_db.collection("aac_images").document(image_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        # Update tags
+        await asyncio.to_thread(doc_ref.update, {"tags": tags})
+        
+        return {"success": True, "message": "Tags updated successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in update image tags API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=3000)
