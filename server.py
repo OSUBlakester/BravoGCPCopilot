@@ -7983,12 +7983,26 @@ async def get_gemini_api_key():
             raise HTTPException(status_code=503, detail="Gemini API key not configured")
 
 async def ensure_aac_images_bucket():
-    """Ensure the AAC images bucket exists"""
+    """Ensure the AAC images bucket exists and is configured for public access"""
     try:
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         if not await asyncio.to_thread(bucket.exists):
             await asyncio.to_thread(bucket.create, location="US-CENTRAL1")
             logging.info(f"Created AAC images bucket: {AAC_IMAGES_BUCKET_NAME}")
+            
+            # For uniform bucket-level access, set the IAM policy to allow public read
+            try:
+                from google.cloud import storage
+                policy = await asyncio.to_thread(bucket.get_iam_policy, requested_policy_version=3)
+                policy.bindings.append({
+                    "role": "roles/storage.objectViewer",
+                    "members": ["allUsers"]
+                })
+                await asyncio.to_thread(bucket.set_iam_policy, policy)
+                logging.info(f"Configured public read access for bucket: {AAC_IMAGES_BUCKET_NAME}")
+            except Exception as iam_error:
+                logging.warning(f"Could not set public IAM policy (bucket may already be configured): {iam_error}")
+        
         return bucket
     except Exception as e:
         logging.error(f"Error ensuring AAC images bucket: {e}")
@@ -8141,13 +8155,15 @@ async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
         bucket = await ensure_aac_images_bucket()
         blob = bucket.blob(f"global/{filename}")
         
-        # Upload image
+        # Upload image with public-read content
         await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type='image/png')
         
-        # Make it publicly accessible
-        await asyncio.to_thread(blob.make_public)
+        # For uniform bucket-level access, we construct the public URL directly
+        # The bucket should already be configured for public access via IAM policies
+        public_url = f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
         
-        return blob.public_url
+        logging.info(f"Successfully uploaded image: {filename} -> {public_url}")
+        return public_url
     except Exception as e:
         logging.error(f"Error uploading image to storage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
