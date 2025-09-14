@@ -8066,20 +8066,24 @@ async def generate_image_with_vertex_imagen(prompt: str, max_retries: int = 2) -
                 'Authorization': f'Bearer {access_token}'
             }
             
-            # Enhanced prompt for AAC-appropriate images
-            enhanced_prompt = f"""Create a high-quality, clear illustration of {prompt}. 
-            Style requirements:
-            - Simple, clean design suitable for AAC (Augmentative and Alternative Communication)
-            - Clear, recognizable representation
-            - Good contrast and visibility
-            - Child-friendly and appropriate for all ages
-            - Bright, clear colors
-            - No text or words in the image
-            - Square aspect ratio, centered composition
-            - High contrast between subject and background for AAC clarity
-            
-            Subject: {prompt}
-            Make it clear, simple, and easily recognizable for communication purposes."""
+            # Enhanced prompt for AAC-appropriate images with good detail level
+            enhanced_prompt = f"""Create a clear, detailed 2D illustration of {prompt}.
+
+Style requirements:
+- Modern flat design illustration with good detail and depth
+- Clean, polished vector art style (similar to quality app icons or educational materials)
+- Vibrant, appealing colors with excellent contrast for accessibility
+- Professional illustration quality, more detailed than basic symbols or stick figures
+- Clear, easily recognizable subject matter
+- Child and adult-friendly design appropriate for communication aids
+- No text, words, or labels in the image
+- Centered composition with simple, clean background
+- Optimized for button/interface use in AAC applications
+- High visual clarity for communication aids
+
+Subject: {prompt}
+
+Create this as a detailed, beautiful 3D illustration that would look professional in a communication app - think Disney/Pixar movie quality but optimized for clear recognition and communication purposes."""
             
             data = {
                 "instances": [{
@@ -8244,34 +8248,51 @@ async def api_generate_subconcepts(
 async def api_generate_images(
     concept: str = Body(...),
     subconcepts: List[str] = Body(...),
-    style: str = Body(default="Apple memoji style"),
+    style: str = Body(default="modern illustration style"),
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
 ):
-    """Generate images for a list of subconcepts"""
+    """Generate images for a list of subconcepts with rate limiting for batch processing"""
     if not VERTEX_AI_AVAILABLE:
         raise HTTPException(status_code=503, detail="Image generation service not available")
     
     try:
         results = []
         
-        for subconcept in subconcepts:
+        for i, subconcept in enumerate(subconcepts):
+            # Add delay between requests to avoid rate limiting (except for the first one)
+            if i > 0:
+                await asyncio.sleep(1)  # 1 second delay between image generations
+            
+            logging.info(f"Generating image {i+1}/{len(subconcepts)}: {subconcept}")
+            
             # Create detailed prompt
-            prompt = f"{style}, {subconcept}, {concept}, clean background, high quality, friendly appearance, suitable for AAC communication"
+            prompt = f"{subconcept}, {concept}, clean background, high quality, friendly appearance, suitable for AAC communication"
             
-            # Generate image
-            image_bytes = await generate_image_with_gemini(prompt)
-            
-            # Create filename
-            filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
-            
-            # Upload to storage
-            image_url = await upload_image_to_storage(image_bytes, filename)
-            
-            results.append({
-                "subconcept": subconcept,
-                "image_url": image_url,
-                "filename": filename
-            })
+            try:
+                # Generate image with retry logic built into the function
+                image_bytes = await generate_image_with_gemini(prompt)
+                
+                # Create filename
+                filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
+                
+                # Upload to storage
+                image_url = await upload_image_to_storage(image_bytes, filename)
+                
+                results.append({
+                    "subconcept": subconcept,
+                    "image_url": image_url,
+                    "filename": filename
+                })
+                
+            except Exception as img_error:
+                logging.error(f"Failed to generate image for {subconcept}: {img_error}")
+                # Continue with other images instead of failing the whole batch
+                results.append({
+                    "subconcept": subconcept,
+                    "error": f"Failed to generate image: {str(img_error)}",
+                    "image_url": None,
+                    "filename": None
+                })
         
         return {"concept": concept, "images": results}
         
