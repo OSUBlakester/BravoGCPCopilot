@@ -228,19 +228,29 @@ async def get_frontend_config():
                 'appId': ''
             }
         
+        # Log the config being served for debugging
         logging.info(f"Serving frontend config with projectId: {client_config.get('projectId', 'unknown')}")
-        return JSONResponse(content=client_config)
+        logging.info(f"Config keys: {list(client_config.keys())}")
+        logging.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
+        
+        return JSONResponse(content={
+            "firebase_config": client_config,
+            "environment": os.getenv('ENVIRONMENT', 'development'),
+            "project_id": CONFIG.get('gcp_project_id', '')
+        })
         
     except Exception as e:
         logging.error(f"Error serving frontend config: {e}", exc_info=True)
         # Return minimal valid config as fallback
         return JSONResponse(content={
-            'apiKey': '',
-            'authDomain': '',
-            'projectId': CONFIG.get('gcp_project_id', ''),
-            'storageBucket': '',
-            'messagingSenderId': '',
-            'appId': '',
+            "firebase_config": {
+                'apiKey': '',
+                'authDomain': '',
+                'projectId': CONFIG.get('gcp_project_id', ''),
+                'storageBucket': '',
+                'messagingSenderId': '',
+                'appId': ''
+            },
             'error': 'Configuration temporarily unavailable'
         })
 
