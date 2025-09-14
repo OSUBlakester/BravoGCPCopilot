@@ -8030,21 +8030,34 @@ async def generate_image_with_vertex(prompt: str, max_retries: int = 2) -> bytes
     """Generate image using Vertex AI Imagen"""
     for attempt in range(max_retries + 1):
         try:
-            # Use Vertex AI Imagen 2.0
-            model = aiplatform.ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
+            # Use Vertex AI Imagen 3.0 with the current API
+            from google.cloud import aiplatform
             
+            # Initialize client if not already done
+            client = aiplatform.gapic.PredictionServiceClient()
+            
+            # Format the request for Imagen 3.0
+            endpoint = f"projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagen-3.0-generate-001"
+            
+            instances = [{
+                "prompt": prompt,
+                "sampleCount": 1,
+                "aspectRatio": "1:1",
+                "safetyFilterLevel": "block_some",
+                "personGeneration": "allow_adult"
+            }]
+            
+            # Make prediction request
             response = await asyncio.to_thread(
-                model.generate_images,
-                prompt=prompt,
-                number_of_images=1,
-                aspect_ratio="1:1",
-                safety_filter_level="allow_most",
-                person_generation="allow_adult"
+                client.predict,
+                endpoint=endpoint,
+                instances=instances
             )
             
-            if response.images:
-                # Convert to bytes
-                image_bytes = response.images[0]._image_bytes
+            if response.predictions:
+                # Extract image data from response
+                prediction = response.predictions[0]
+                image_bytes = base64.b64decode(prediction["bytesBase64Encoded"])
                 return image_bytes
             else:
                 raise Exception("No image generated")
