@@ -37,8 +37,7 @@ RUN mkdir -p /keys
 ENV PORT 8080
 ENV PYTHONPATH=/app
 
-# Default environment (can be overridden)
-ENV ENVIRONMENT=production
+# Environment will be set by Cloud Run deployment
 
 # Expose the port (informative, Cloud Run uses health checks)
 EXPOSE ${PORT}
