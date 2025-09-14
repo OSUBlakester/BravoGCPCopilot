@@ -8026,65 +8026,62 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
         logging.error(f"Error generating subconcepts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
 
-async def generate_image_with_gemini(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using Gemini 2.5 Flash with Vertex AI (image generation)"""
+async def generate_image_with_openai(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using OpenAI DALL-E 3"""
     for attempt in range(max_retries + 1):
         try:
-            # Use Vertex AI for Gemini 2.5 Flash image generation
-            import vertexai
-            from vertexai.generative_models import GenerativeModel, GenerationConfig
+            from openai import AsyncOpenAI
             
-            # Initialize Vertex AI
-            vertexai.init(project=CONFIG['gcp_project_id'], location="us-central1")
+            # Get OpenAI API key from environment
+            api_key = os.environ.get('OPENAI_API_KEY')
+            if not api_key:
+                raise Exception("OpenAI API key not found in environment variables")
             
-            # Use Gemini 2.5 Flash model with image generation capability
-            model = GenerativeModel("gemini-2.5-flash-image-preview")
+            client = AsyncOpenAI(api_key=api_key)
             
             # Enhanced prompt for better AAC-appropriate images
             enhanced_prompt = f"""
-            Generate a high-quality, clear image of: {prompt}
+            Create a high-quality, clear image of: {prompt}
             
             Style requirements:
             - Simple, clean design suitable for AAC (Augmentative and Alternative Communication)
             - Clear, recognizable representation
             - Good contrast and visibility
             - Child-friendly and appropriate for all ages
-            - Square aspect ratio (1:1)
+            - Square aspect ratio (1024x1024)
             - Bright, clear colors
             - No text or words in the image
+            - Cartoon or illustration style preferred over photorealistic
             """
             
-            # Generate image using Vertex AI Gemini
-            generation_config = GenerationConfig(
-                temperature=0.7,
-                max_output_tokens=8192
+            # Generate image using OpenAI DALL-E 3
+            response = await client.images.generate(
+                model="dall-e-3",
+                prompt=enhanced_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
             )
             
-            response = await asyncio.to_thread(
-                model.generate_content,
-                enhanced_prompt,
-                generation_config=generation_config
-            )
-            
-            # Extract image data from response
-            if response.candidates and len(response.candidates) > 0:
-                candidate = response.candidates[0]
-                if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                    for part in candidate.content.parts:
-                        if hasattr(part, 'inline_data') and part.inline_data:
-                            # Get the base64 image data
-                            image_data = part.inline_data.data
-                            if isinstance(image_data, str):
-                                return base64.b64decode(image_data)
-                            else:
-                                return image_data
-            
-            raise Exception("No image data found in response")
+            # Download the image
+            image_url = response.data[0].url
+            async with aiohttp.ClientSession() as session:
+                async with session.get(image_url) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                    else:
+                        raise Exception(f"Failed to download image: {resp.status}")
                 
         except Exception as e:
             logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
             if attempt == max_retries:
                 raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
+
+# Use OpenAI for image generation
+generate_image_with_gemini = generate_image_with_openai
+
+# Use OpenAI DALL-E 3 for image generation
+generate_image_with_gemini = generate_image_with_openai
 
 async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
     """Upload image to Google Cloud Storage and return public URL"""
