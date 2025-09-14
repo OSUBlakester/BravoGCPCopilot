@@ -215,13 +215,6 @@ async def get_frontend_config():
     try:
         client_config = CONFIG.get('client_firebase_config', {})
         
-        # Debug logging for troubleshooting
-        environment = os.getenv('ENVIRONMENT', 'development')
-        logging.info(f"Environment: {environment}")
-        logging.info(f"CONFIG keys: {list(CONFIG.keys())}")
-        logging.info(f"Client config keys: {list(client_config.keys())}")
-        logging.info(f"Client config values: {dict((k, '[PRESENT]' if v else '[MISSING]') for k, v in client_config.items())}")
-        
         # Validate that we have some configuration
         if not client_config:
             logging.warning("No client_firebase_config found in CONFIG")
@@ -235,33 +228,25 @@ async def get_frontend_config():
                 'appId': ''
             }
         
-        # Check if API key exists and is not empty
-        has_api_key = bool(client_config.get('apiKey'))
+        # Log the config being served for debugging
+        logging.info(f"Serving frontend config with projectId: {client_config.get('projectId', 'unknown')}")
+        logging.info(f"Config keys: {list(client_config.keys())}")
+        logging.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
         
-        return JSONResponse(content={
-            "firebase_config": client_config,
-            "environment": environment,
-            "project_id": CONFIG.get('gcp_project_id', ''),
-            "config_status": {
-                "has_api_key": has_api_key,
-                "config_keys": list(client_config.keys())
-            }
-        })
+        # Return Firebase config directly at root level (as original auth system expects)
+        return JSONResponse(content=client_config)
         
     except Exception as e:
         logging.error(f"Error serving frontend config: {e}", exc_info=True)
         # Return minimal valid config as fallback
         return JSONResponse(content={
-            "firebase_config": {
                 'apiKey': '',
                 'authDomain': '',
                 'projectId': CONFIG.get('gcp_project_id', ''),
                 'storageBucket': '',
                 'messagingSenderId': '',
-                'appId': ''
-            },
-            'environment': os.getenv('ENVIRONMENT', 'development'),
-            'error': 'Configuration temporarily unavailable'
+                'appId': '',
+                'error': 'Configuration temporarily unavailable'
         })
 
 
