@@ -7938,7 +7938,8 @@ try:
     
     # Initialize storage client for AAC images
     storage_client = storage.Client(project=CONFIG['gcp_project_id'])
-    AAC_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-aac-images"
+    # Use the same bucket as the working ImageCreator POC for now
+    AAC_IMAGES_BUCKET_NAME = "brimages"
     
     # Initialize Secret Manager client
     secret_client = secretmanager.SecretManagerServiceClient()
@@ -8087,6 +8088,7 @@ async def generate_image_with_vertex_imagen(prompt: str, max_retries: int = 2) -
                 "parameters": {
                     "sampleCount": 1,
                     "aspectRatio": "1:1",
+                    "outputImageSize": "512x512",  # Optimized for AAC buttons (75% size reduction)
                     "safetyFilterLevel": "block_some",
                     "personGeneration": "allow_adult"
                 }
