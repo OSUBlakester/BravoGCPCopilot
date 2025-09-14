@@ -8116,9 +8116,9 @@ async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> 
         return [concept, subconcept, "aac", "communication"]
 
 @app.get("/imagecreator")
-async def serve_image_creator(token_info: Annotated[Dict[str, str], Depends(verify_admin_user)]):
-    """Serve the AAC Image Creator interface (admin only)"""
-    return FileResponse("static/imagecreator.html")
+async def serve_image_creator():
+    """Serve the AAC Image Creator interface with client-side auth check"""
+    return FileResponse(os.path.join(static_file_path, "imagecreator.html"))
 
 @app.post("/api/imagecreator/generate-subconcepts")
 async def api_generate_subconcepts(
