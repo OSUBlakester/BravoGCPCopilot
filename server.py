@@ -8026,62 +8026,114 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
         logging.error(f"Error generating subconcepts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
 
-async def generate_image_with_openai(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using OpenAI DALL-E 3"""
+async def generate_image_with_vertex_imagen(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using Vertex AI Imagen (proven working approach from ImageCreator)"""
     for attempt in range(max_retries + 1):
         try:
-            from openai import AsyncOpenAI
+            from google.auth.transport.requests import Request
+            from google.auth import default
             
-            # Get OpenAI API key from environment
-            api_key = os.environ.get('OPENAI_API_KEY')
-            if not api_key:
-                raise Exception("OpenAI API key not found in environment variables")
+            logging.info(f"Attempting to generate image for prompt: {prompt} (attempt {attempt + 1}/{max_retries + 1})")
             
-            client = AsyncOpenAI(api_key=api_key)
+            # Get default credentials
+            credentials, project = default()
             
-            # Enhanced prompt for better AAC-appropriate images
-            enhanced_prompt = f"""
-            Create a high-quality, clear image of: {prompt}
+            # Refresh credentials to get access token
+            credentials.refresh(Request())
+            access_token = credentials.token
+            logging.info(f"Successfully obtained access token (attempt {attempt + 1})")
             
+            # Use Vertex AI Imagen API (proven working endpoint)
+            endpoint = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagegeneration@006:predict"
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {access_token}'
+            }
+            
+            # Enhanced prompt for AAC-appropriate images
+            enhanced_prompt = f"""Create a high-quality, clear illustration of {prompt}. 
             Style requirements:
             - Simple, clean design suitable for AAC (Augmentative and Alternative Communication)
             - Clear, recognizable representation
             - Good contrast and visibility
             - Child-friendly and appropriate for all ages
-            - Square aspect ratio (1024x1024)
             - Bright, clear colors
             - No text or words in the image
-            - Cartoon or illustration style preferred over photorealistic
-            """
+            - Square aspect ratio, centered composition
+            - High contrast between subject and background for AAC clarity
             
-            # Generate image using OpenAI DALL-E 3
-            response = await client.images.generate(
-                model="dall-e-3",
-                prompt=enhanced_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
+            Subject: {prompt}
+            Make it clear, simple, and easily recognizable for communication purposes."""
             
-            # Download the image
-            image_url = response.data[0].url
+            data = {
+                "instances": [{
+                    "prompt": enhanced_prompt
+                }],
+                "parameters": {
+                    "sampleCount": 1,
+                    "aspectRatio": "1:1",
+                    "safetyFilterLevel": "block_some",
+                    "personGeneration": "allow_adult"
+                }
+            }
+            
+            # Make the API request
             async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
+                async with session.post(endpoint, headers=headers, json=data, timeout=120) as response:
+                    logging.info(f"Vertex AI response status: {response.status} (attempt {attempt + 1})")
+                    
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logging.warning(f"Error response (attempt {attempt + 1}): {error_text}")
+                        if attempt < max_retries:
+                            logging.info(f"Retrying in 2 seconds...")
+                            await asyncio.sleep(2)
+                            continue
+                        raise Exception(f"Vertex AI API error: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+                    logging.info(f"API Response structure: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
+                    
+                    # Extract image data from response
+                    if 'predictions' in result and len(result['predictions']) > 0:
+                        prediction = result['predictions'][0]
+                        logging.info(f"Prediction keys: {list(prediction.keys()) if isinstance(prediction, dict) else 'Not a dict'}")
+                        
+                        # Check different possible response formats
+                        if 'bytesBase64Encoded' in prediction:
+                            logging.info(f"Found image in bytesBase64Encoded (attempt {attempt + 1})")
+                            return base64.b64decode(prediction['bytesBase64Encoded'])
+                        elif 'generated_image' in prediction:
+                            logging.info(f"Found image in generated_image (attempt {attempt + 1})")
+                            image_data = prediction['generated_image'].get('bytesBase64Encoded')
+                            if image_data:
+                                return base64.b64decode(image_data)
+                        elif 'image' in prediction:
+                            logging.info(f"Found image in image field (attempt {attempt + 1})")
+                            return base64.b64decode(prediction['image'])
+                        else:
+                            logging.warning(f"Unexpected prediction format (attempt {attempt + 1}): {prediction}")
                     else:
-                        raise Exception(f"Failed to download image: {resp.status}")
-                
+                        logging.warning(f"Empty or no predictions in response (attempt {attempt + 1})")
+                    
+                    if attempt < max_retries:
+                        logging.info(f"No valid image data found, retrying in 2 seconds...")
+                        await asyncio.sleep(2)
+                        continue
+                    
+                    raise Exception("No valid image data found in Vertex AI response after all retries")
+        
         except Exception as e:
-            logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
-            if attempt == max_retries:
-                raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
+            logging.warning(f"Error generating image with Vertex AI Imagen (attempt {attempt + 1}): {e}")
+            if attempt < max_retries:
+                logging.info(f"Retrying in 3 seconds...")
+                await asyncio.sleep(3)
+                continue
+            raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
 
-# Use OpenAI for image generation
-generate_image_with_gemini = generate_image_with_openai
-
-# Use OpenAI DALL-E 3 for image generation
-generate_image_with_gemini = generate_image_with_openai
+# Use Vertex AI Imagen for image generation (proven working approach)
+generate_image_with_gemini = generate_image_with_vertex_imagen
 
 async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
     """Upload image to Google Cloud Storage and return public URL"""
