@@ -1,0 +1,76 @@
+{
+  "symbols": {
+    "collection_name": "aac_symbols",
+    "document_structure": {
+      "symbol_id": "string (unique identifier)",
+      "filename": "string (original filename)",
+      "image_url": "string (Cloud Storage URL)",
+      "thumbnail_url": "string (smaller version for lists)",
+      "name": "string (primary name/description)",
+      "description": "string (detailed description)",
+      "alt_text": "string (accessibility description)",
+      "primary_category": "string (main category)",
+      "categories": "array<string> (all applicable categories)",
+      "tags": "array<string> (all searchable tags)",
+      "ai_tags": "array<string> (AI-generated tags)",
+      "filename_tags": "array<string> (extracted from filename)",
+      "difficulty_level": "string (simple|intermediate|complex)",
+      "age_groups": "array<string> (child|teen|adult|elderly)",
+      "usage_contexts": "array<string> (when/how to use)",
+      "related_concepts": "array<string> (similar meanings)",
+      "search_weight": "number (relevance scoring)",
+      "usage_frequency": "number (how often selected)",
+      "last_used": "timestamp",
+      "created_at": "timestamp",
+      "updated_at": "timestamp",
+      "source": "string (picom_cartoon|picom_action|custom)",
+      "source_id": "string (original ID from source)",
+      "processing_status": "string (analyzed|needs_review|approved)"
+    },
+    "indexes_needed": [
+      {
+        "fields": [
+          "primary_category",
+          "difficulty_level"
+        ]
+      },
+      {
+        "fields": [
+          "tags",
+          "search_weight"
+        ],
+        "array_config": "contains"
+      },
+      {
+        "fields": [
+          "age_groups",
+          "categories"
+        ],
+        "array_config": "contains"
+      },
+      {
+        "fields": [
+          "usage_frequency",
+          "created_at"
+        ]
+      },
+      {
+        "fields": [
+          "processing_status",
+          "source"
+        ]
+      }
+    ]
+  },
+  "symbol_usage": {
+    "collection_name": "symbol_usage_analytics",
+    "document_structure": {
+      "user_id": "string",
+      "symbol_id": "string",
+      "used_at": "timestamp",
+      "context": "string (search_query that found it)",
+      "selected": "boolean (was it actually used?)",
+      "session_id": "string"
+    }
+  }
+}

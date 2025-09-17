@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiCom Symbol Management - Bravo AAC</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 16px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
+        .header p {
+            margin: 0;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            border: 1px solid rgba(0, 0, 0, 0.04);
+        }
+        .card h2 {
+            margin: 0 0 1rem 0;
+            color: #333;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        .button {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .button:hover {
+            background: #0056CC;
+            transform: translateY(-1px);
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .button.secondary {
+            background: #5856D6;
+        }
+        .button.secondary:hover {
+            background: #4B49C7;
+        }
+        .button.success {
+            background: #34C759;
+        }
+        .button.success:hover {
+            background: #2BA64A;
+        }
+        .progress {
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .progress-bar {
+            background: linear-gradient(90deg, #007AFF, #34C759);
+            height: 20px;
+            border-radius: 10px;
+            transition: width 0.3s ease;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .log {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        .log .success { color: #34C759; }
+        .log .error { color: #FF3B30; }
+        .log .info { color: #007AFF; }
+        .log .warning { color: #FF9500; }
+        .categories {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        .category-tag {
+            background: #F2F2F7;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            text-align: center;
+            font-size: 0.9rem;
+            border: 1px solid #D1D1D6;
+        }
+        .search-section {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .search-input {
+            padding: 12px 16px;
+            border: 1px solid #D1D1D6;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .symbol-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .symbol-card {
+            background: white;
+            border: 1px solid #E5E5EA;
+            border-radius: 12px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .symbol-image {
+            width: 64px;
+            height: 64px;
+            background: #F2F2F7;
+            border-radius: 8px;
+            margin: 0 auto 0.5rem auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        .status.ready { background: #D1F2EB; color: #27AE60; }
+        .status.processing { background: #FFF3CD; color: #F39C12; }
+        .status.error { background: #F8D7DA; color: #DC3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 PiCom Symbol Management</h1>
+            <p>AI-Enhanced AAC Symbol Database Administration</p>
+        </div>
+
+        <!-- Statistics Dashboard -->
+        <div class="card">
+            <h2>📊 Collection Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalImages">-</div>
+                    <div class="stat-label">Total Images</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="totalCategories">-</div>
+                    <div class="stat-label">Categories</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="processedSymbols">-</div>
+                    <div class="stat-label">Processed Symbols</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="uniqueTags">-</div>
+                    <div class="stat-label">Unique Tags</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Processing Controls -->
+        <div class="card">
+            <h2>⚙️ Processing Controls</h2>
+            <div class="status ready" id="systemStatus">System Ready</div>
+            
+            <div style="margin: 1rem 0;">
+                <button class="button" id="analyzeBtn" onclick="runAnalysis()">
+                    🔍 Analyze Images
+                </button>
+                <button class="button secondary" id="processBtn" onclick="startProcessing()" disabled>
+                    🚀 Process Batch
+                </button>
+                <button class="button success" id="searchTestBtn" onclick="testSearch()">
+                    🔍 Test Search
+                </button>
+            </div>
+
+            <div class="progress" id="progressContainer" style="display: none;">
+                <div class="progress-bar" id="progressBar" style="width: 0%;">0%</div>
+            </div>
+
+            <div class="log" id="logOutput">
+                <div class="info">📋 System ready. Click 'Analyze Images' to begin.</div>
+            </div>
+        </div>
+
+        <!-- Categories Overview -->
+        <div class="card">
+            <h2>📂 Categories</h2>
+            <div class="categories" id="categoriesContainer">
+                <div class="category-tag">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Symbol Search & Preview -->
+        <div class="card">
+            <h2>🔍 Symbol Search</h2>
+            <div class="search-section">
+                <input type="text" class="search-input" id="searchInput" placeholder="Search for symbols..." />
+                <button class="button" onclick="searchSymbols()">Search</button>
+            </div>
+            <div class="symbol-grid" id="searchResults">
+                <div class="symbol-card">
+                    <div class="symbol-image">🎭</div>
+                    <div><strong>Sample Symbol</strong></div>
+                    <div style="font-size: 0.8rem; color: #666;">emotions, happy</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let isProcessing = false;
+        let analysisComplete = false;
+        let processedCount = 0;
+        let totalToProcess = 0;
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStatistics();
+            loadCategories();
+            checkAnalysisStatus();
+        });
+
+        // Load collection statistics
+        async function loadStatistics() {
+            try {
+                const response = await fetch('/api/symbols/stats');
+                const data = await response.json();
+                
+                if (data.success && data.statistics) {
+                    const stats = data.statistics;
+                    document.getElementById('totalImages').textContent = stats.total_images || stats.total_symbols || 0;
+                    document.getElementById('totalCategories').textContent = Object.keys(stats.categories || {}).length;
+                    document.getElementById('processedSymbols').textContent = stats.total_symbols || 0;
+                    document.getElementById('uniqueTags').textContent = stats.unique_tags || 'N/A';
+                }
+                
+                log('info', `📊 Statistics loaded from ${data.source}`);
+            } catch (error) {
+                log('error', `❌ Failed to load statistics: ${error.message}`);
+            }
+        }
+
+        // Load available categories
+        async function loadCategories() {
+            try {
+                const response = await fetch('/api/symbols/categories');
+                const data = await response.json();
+                
+                const container = document.getElementById('categoriesContainer');
+                container.innerHTML = '';
+                
+                data.categories.forEach(category => {
+                    const tag = document.createElement('div');
+                    tag.className = 'category-tag';
+                    tag.textContent = `${category.name} (${category.count})`;
+                    container.appendChild(tag);
+                });
+                
+                log('info', `📂 Loaded ${data.categories.length} categories`);
+            } catch (error) {
+                log('error', `❌ Failed to load categories: ${error.message}`);
+            }
+        }
+
+        // Check if analysis is complete
+        async function checkAnalysisStatus() {
+            // This would check if picom_ready_for_ai_analysis.json exists
+            // For now, we'll assume it's ready
+            analysisComplete = true;
+            document.getElementById('processBtn').disabled = false;
+            updateStatus('ready', 'Analysis Complete - Ready to Process');
+        }
+
+        // Run image analysis
+        async function runAnalysis() {
+            if (isProcessing) return;
+            
+            isProcessing = true;
+            document.getElementById('analyzeBtn').disabled = true;
+            updateStatus('processing', 'Running Analysis...');
+            
+            try {
+                log('info', '🔍 Starting image analysis...');
+                
+                const response = await fetch('/api/symbols/analyze-picom', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // In real implementation, add auth header
+                        // 'Authorization': `Bearer ${getAuthToken()}`
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    log('success', `✅ Analysis complete! ${result.message}`);
+                    analysisComplete = true;
+                    document.getElementById('processBtn').disabled = false;
+                    updateStatus('ready', 'Analysis Complete');
+                    loadStatistics();
+                    loadCategories();
+                } else {
+                    throw new Error(result.error || 'Analysis failed');
+                }
+            } catch (error) {
+                log('error', `❌ Analysis failed: ${error.message}`);
+                updateStatus('error', 'Analysis Failed');
+            } finally {
+                isProcessing = false;
+                document.getElementById('analyzeBtn').disabled = false;
+            }
+        }
+
+        // Start batch processing
+        async function startProcessing() {
+            if (isProcessing || !analysisComplete) return;
+            
+            isProcessing = true;
+            processedCount = 0;
+            totalToProcess = parseInt(document.getElementById('totalImages').textContent) || 100;
+            
+            document.getElementById('processBtn').disabled = true;
+            document.getElementById('progressContainer').style.display = 'block';
+            updateStatus('processing', 'Processing Symbols...');
+            
+            const batchSize = 25;
+            let startIndex = 0;
+            let hasMore = true;
+            
+            try {
+                log('info', '🚀 Starting batch processing...');
+                
+                while (hasMore && isProcessing) {
+                    const response = await fetch('/api/symbols/process-batch', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            // In real implementation, add auth header
+                        },
+                        body: JSON.stringify({
+                            batch_size: batchSize,
+                            start_index: startIndex
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok && result.success) {
+                        processedCount += result.processed_count;
+                        startIndex = result.next_start_index;
+                        hasMore = result.remaining > 0;
+                        
+                        const progress = Math.min((processedCount / totalToProcess) * 100, 100);
+                        updateProgress(progress);
+                        
+                        log('info', `✨ Processed ${result.processed_count} symbols (${processedCount}/${totalToProcess})`);
+                        
+                        if (result.error_count > 0) {
+                            log('warning', `⚠️  ${result.error_count} errors in this batch`);
+                        }
+                        
+                        // Small delay between batches
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    } else {
+                        throw new Error(result.error || 'Processing failed');
+                    }
+                }
+                
+                log('success', `🎉 Processing complete! Processed ${processedCount} symbols`);
+                updateStatus('ready', 'Processing Complete');
+                loadStatistics();
+                
+            } catch (error) {
+                log('error', `❌ Processing failed: ${error.message}`);
+                updateStatus('error', 'Processing Failed');
+            } finally {
+                isProcessing = false;
+                document.getElementById('processBtn').disabled = false;
+                setTimeout(() => {
+                    document.getElementById('progressContainer').style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        // Test search functionality
+        async function testSearch() {
+            log('info', '🔍 Testing search functionality...');
+            
+            const testQueries = ['happy', 'food', 'action'];
+            const randomQuery = testQueries[Math.floor(Math.random() * testQueries.length)];
+            
+            document.getElementById('searchInput').value = randomQuery;
+            searchSymbols();
+        }
+
+        // Search for symbols
+        async function searchSymbols() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+            
+            try {
+                log('info', `🔍 Searching for: "${query}"`);
+                
+                const response = await fetch(`/api/symbols/search?query=${encodeURIComponent(query)}&limit=8`);
+                const data = await response.json();
+                
+                const container = document.getElementById('searchResults');
+                container.innerHTML = '';
+                
+                if (data.symbols && data.symbols.length > 0) {
+                    data.symbols.forEach(symbol => {
+                        const card = document.createElement('div');
+                        card.className = 'symbol-card';
+                        card.innerHTML = `
+                            <div class="symbol-image">🎭</div>
+                            <div><strong>${symbol.name || 'Unnamed'}</strong></div>
+                            <div style="font-size: 0.8rem; color: #666;">${symbol.categories?.join(', ') || 'No categories'}</div>
+                            <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${symbol.tags?.slice(0, 3).join(', ') || 'No tags'}</div>
+                        `;
+                        container.appendChild(card);
+                    });
+                    
+                    log('success', `✅ Found ${data.total_found} symbols matching "${query}"`);
+                } else {
+                    container.innerHTML = '<div class="symbol-card">No symbols found</div>';
+                    log('info', `❌ No symbols found for "${query}"`);
+                }
+                
+            } catch (error) {
+                log('error', `❌ Search failed: ${error.message}`);
+            }
+        }
+
+        // Update system status
+        function updateStatus(type, message) {
+            const statusEl = document.getElementById('systemStatus');
+            statusEl.className = `status ${type}`;
+            statusEl.textContent = message;
+        }
+
+        // Update progress bar
+        function updateProgress(percent) {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = `${percent}%`;
+            progressBar.textContent = `${Math.round(percent)}%`;
+        }
+
+        // Log messages
+        function log(type, message) {
+            const logOutput = document.getElementById('logOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.textContent = `${timestamp} ${message}`;
+            logOutput.appendChild(logEntry);
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+    </script>
+</body>
+</html>
