@@ -8918,8 +8918,8 @@ async def process_symbol_batch(
                 symbol_doc = {
                     'symbol_id': str(uuid.uuid4()),
                     'filename': image_data['filename'],
-                    'image_url': f"/PiComImages/{image_data['filename']}",  # Temporary local path
-                    'thumbnail_url': f"/PiComImages/{image_data['filename']}",
+                    'image_url': f"https://storage.googleapis.com/bravo-picom-symbols/symbols/{image_data['filename']}",
+                    'thumbnail_url': f"https://storage.googleapis.com/bravo-picom-symbols/symbols/{image_data['filename']}",
                     
                     # Core metadata
                     'name': image_data['description'],
