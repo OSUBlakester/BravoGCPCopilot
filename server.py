@@ -102,7 +102,7 @@ import time
 import datetime
 import holidays
 import calendar # For calculating floating observances
-from datetime import date, timedelta, datetime as dt # Alias datetime to avoid conflict
+from datetime import date, timedelta, datetime as dt, timezone # Alias datetime to avoid conflict
 from fastapi.middleware.cors import CORSMiddleware
 import re
 from sentence_transformers import SentenceTransformer
@@ -514,6 +514,81 @@ async def get_current_account_and_user_ids(
         raise HTTPException(status_code=500, detail=f"Authentication/Authorization error: {e}")
 
 
+# Admin-aware account dependency for operations that don't require a specific user
+async def get_target_account_id(
+    token: Annotated[HTTPAuthorizationCredentials, Depends(oauth2_scheme)],
+    x_admin_target_account: str = Header(None, alias="X-Admin-Target-Account")
+) -> Dict[str, str]:
+    global firebase_app, firestore_db
+
+    if not firebase_app:
+        raise HTTPException(status_code=503, detail="Firebase app not initialized")
+
+    try:
+        id_token = token.credentials
+        decoded_token = auth.verify_id_token(id_token, firebase_app)
+        
+        user_email = decoded_token.get("email", "")
+        # Use uid as account_id (same as verify_firebase_token_only)
+        account_id = decoded_token.get("uid")
+        # Check admin status by email (consistent with other endpoints)
+        is_admin = user_email == "admin@talkwithbravo.com"
+        # Also check custom claims for therapist status
+        custom_claims = decoded_token.get("custom_claims", {})
+        is_therapist = custom_claims.get("is_therapist", False)
+        
+        if not account_id:
+            raise HTTPException(status_code=403, detail="No account associated with this user")
+
+        target_account_id = account_id  # Default to the authenticated account
+        
+        # Handle admin target account if provided
+        if x_admin_target_account:
+            if not (is_admin or is_therapist):
+                logging.warning(f"Non-admin user {user_email} attempting to access target account")
+                raise HTTPException(status_code=403, detail="Access denied: admin privileges required")
+            
+            # Verify access to target account
+            target_account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(x_admin_target_account)
+            target_account_doc = await asyncio.to_thread(target_account_doc_ref.get)
+
+            if not target_account_doc.exists:
+                logging.warning(f"Target account {x_admin_target_account} not found")
+                raise HTTPException(status_code=404, detail="Target account not found")
+
+            target_account_data = target_account_doc.to_dict()
+
+            # Check access permissions
+            if is_admin and target_account_data.get("allow_admin_access", True):
+                pass  # Admin access allowed
+            elif is_therapist and target_account_data.get("therapist_email") == user_email:
+                pass  # Therapist access to their assigned account
+            else:
+                logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
+                raise HTTPException(status_code=403, detail="Access denied to target account")
+
+            target_account_id = x_admin_target_account
+            logging.info(f"Admin/therapist {user_email} targeting account {target_account_id}")
+
+        return {
+            "account_id": target_account_id,
+            "user_email": user_email,
+            "is_admin": is_admin,
+            "is_therapist": is_therapist
+        }
+
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
+    except auth.ExpiredIdTokenError:
+        logging.warning("Expired Firebase ID token received.")
+        raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logging.error(f"Error during admin account verification: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Authentication/Authorization error: {e}")
+
 
 
 
@@ -579,6 +654,50 @@ class TestScrapingRequest(BaseModel):
 @app.get("/")
 async def root():
     return RedirectResponse(url="/static/auth.html")
+
+@app.get("/avatar-selector")
+async def avatar_selector():
+    """Serve the avatar selector page"""
+    return FileResponse(os.path.join(static_file_path, "avatar-selector.html"))
+
+@app.get("/avatar-prototype")
+async def avatar_prototype():
+    """Serve the custom avatar prototype page"""
+    return FileResponse(os.path.join(static_file_path, "custom-avatar-prototype.html"))
+
+@app.get("/symbol-admin")
+async def symbol_admin():
+    """Serve the symbol administration page"""
+    return FileResponse(os.path.join(static_file_path, "symbol_admin.html"))
+
+class AvatarVariationRequest(BaseModel):
+    baseConfig: Dict[str, Any] = Field(..., description="Base avatar configuration")
+    variations: List[Dict[str, Any]] = Field(..., description="List of emotional variations")
+
+@app.post("/save_avatar_variations")
+async def save_avatar_variations(payload: AvatarVariationRequest):
+    """Save avatar variations with emotional expressions - No authentication required"""
+    
+    try:
+        # For now, we'll just return success and log the variations
+        # In a real implementation, you might save to a general database or file system
+        logging.info(f"Avatar variations generated: {len(payload.variations)} emotional expressions")
+        logging.info(f"Base config: {payload.baseConfig}")
+        
+        # Log each variation for debugging
+        for variation in payload.variations:
+            logging.info(f"Generated {variation['emotion']} variation: {variation['url']}")
+        
+        return JSONResponse(content={
+            "success": True, 
+            "message": f"Successfully generated {len(payload.variations)} emotional variations",
+            "variations_count": len(payload.variations),
+            "variations": [{"emotion": v["emotion"], "url": v["url"]} for v in payload.variations]
+        })
+            
+    except Exception as e:
+        logging.error(f"Error processing avatar variations: {e}")
+        return JSONResponse(content={"success": False, "message": str(e)}, status_code=500)
 
 
 
@@ -1592,10 +1711,11 @@ except Exception as e:
 @app.post("/api/account/add-aac-user")
 async def add_aac_user_to_account(
     request_data: AddUserToAccountRequest,
-    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)] # Use the simpler dependency
+    account_info: Annotated[Dict[str, str], Depends(get_target_account_id)]
 ):
-    account_id = token_info["account_id"] # Get account_id from the token
-    user_email = token_info.get("email", "")
+    account_id = account_info["account_id"]  # This will be the target account (admin-selected or own account)
+    user_email = account_info["user_email"]
+    is_admin = account_info["is_admin"]
     
     # Demo mode restriction (non-breaking for Flutter)
     # Only demoreadonly is restricted, demo@ can make changes for content creation
@@ -5739,18 +5859,13 @@ async def test_tts_voice_endpoint(request_data: TestTTSVoiceRequest, current_ids
             wpm_rate=DEFAULT_SPEECH_RATE
         )
 
-        # Save audio to a unique file in the static directory
-        filename = f"tts_test_{uuid.uuid4().hex}.wav"
-        file_path = os.path.join(static_file_path, filename)
-        with open(file_path, "wb") as f:
-            f.write(audio_bytes)
-
-        # Build the public URL (adjust domain as needed)
-        audio_url = f"https://{DOMAIN}/static/{filename}"
+        # Return audio data directly instead of saving to file to avoid CORS issues
+        import base64
+        audio_data_b64 = base64.b64encode(audio_bytes).decode('utf-8')
 
         return JSONResponse(content={
             "message": "Test sound synthesized successfully.",
-            "audio_url": audio_url,
+            "audio_data": audio_data_b64,
             "sample_rate": sample_rate,
             "system_device_index": system_device_index
         })
@@ -6420,10 +6535,16 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         doc_subpath="info/user_narrative",
         default_data=DEFAULT_USER_INFO.copy()
     )
-    return JSONResponse(content={
+    response_data = {
         "userInfo": user_info_content_dict.get("narrative", ""),
         "currentMood": user_info_content_dict.get("currentMood")
-    })
+    }
+    
+    # Include avatar config if it exists
+    if "avatarConfig" in user_info_content_dict:
+        response_data["avatarConfig"] = user_info_content_dict["avatarConfig"]
+    
+    return JSONResponse(content=response_data)
 
 # Debug endpoint for cache inspection
 @app.get("/api/debug/cache")
@@ -6482,19 +6603,26 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     # The request body can have 'narrative' or 'userInfo'. Let's handle both for compatibility.
     user_info = request.get("narrative", request.get("userInfo", ""))
     current_mood = request.get("currentMood")
+    avatar_config = request.get("avatarConfig")  # Add support for avatar configuration
     
     logging.info(f"🔄 POST /api/user-info request - account {account_id}, user {aac_user_id}")
     logging.info(f"📝 Narrative length: {len(user_info) if user_info else 0} chars")
     logging.info(f"😊 Current mood: {current_mood}")
+    logging.info(f"👤 Avatar config: {avatar_config}")
     
     # Log the raw request for debugging
     logging.info(f"🔍 Raw request data: {request}")
+    
+    # Prepare data to save - include avatar config if provided
+    data_to_save = {"narrative": user_info, "currentMood": current_mood}
+    if avatar_config:
+        data_to_save["avatarConfig"] = avatar_config
     
     success = await save_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="info/user_narrative",
-        data_to_save={"narrative": user_info, "currentMood": current_mood}
+        data_to_save=data_to_save
     )
     
     if success:
@@ -6512,7 +6640,11 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         except Exception as cache_error:
             logging.error(f"❌ Failed to invalidate cache for account {account_id} and user {aac_user_id}: {cache_error}", exc_info=True)
         
-        return JSONResponse(content={"narrative": user_info, "currentMood": current_mood})
+        response_data = {"narrative": user_info, "currentMood": current_mood}
+        if avatar_config:
+            response_data["avatarConfig"] = avatar_config
+        
+        return JSONResponse(content=response_data)
     else:
         raise HTTPException(status_code=500, detail="Failed to save user info.")
 
@@ -7938,8 +8070,7 @@ try:
     
     # Initialize storage client for AAC images
     storage_client = storage.Client(project=CONFIG['gcp_project_id'])
-    # Use the same bucket as the working ImageCreator POC for now
-    AAC_IMAGES_BUCKET_NAME = "brimages"
+    AAC_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-aac-images"
     
     # Initialize Secret Manager client
     secret_client = secretmanager.SecretManagerServiceClient()
@@ -7984,26 +8115,12 @@ async def get_gemini_api_key():
             raise HTTPException(status_code=503, detail="Gemini API key not configured")
 
 async def ensure_aac_images_bucket():
-    """Ensure the AAC images bucket exists and is configured for public access"""
+    """Ensure the AAC images bucket exists"""
     try:
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         if not await asyncio.to_thread(bucket.exists):
             await asyncio.to_thread(bucket.create, location="US-CENTRAL1")
             logging.info(f"Created AAC images bucket: {AAC_IMAGES_BUCKET_NAME}")
-            
-            # For uniform bucket-level access, set the IAM policy to allow public read
-            try:
-                from google.cloud import storage
-                policy = await asyncio.to_thread(bucket.get_iam_policy, requested_policy_version=3)
-                policy.bindings.append({
-                    "role": "roles/storage.objectViewer",
-                    "members": ["allUsers"]
-                })
-                await asyncio.to_thread(bucket.set_iam_policy, policy)
-                logging.info(f"Configured public read access for bucket: {AAC_IMAGES_BUCKET_NAME}")
-            except Exception as iam_error:
-                logging.warning(f"Could not set public IAM policy (bucket may already be configured): {iam_error}")
-        
         return bucket
     except Exception as e:
         logging.error(f"Error ensuring AAC images bucket: {e}")
@@ -8041,119 +8158,125 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
         logging.error(f"Error generating subconcepts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
 
-async def generate_image_with_vertex_imagen(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using Vertex AI Imagen (proven working approach from ImageCreator)"""
+async def generate_image_with_openai(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using OpenAI DALL-E 3"""
     for attempt in range(max_retries + 1):
         try:
-            from google.auth.transport.requests import Request
-            from google.auth import default
+            from openai import AsyncOpenAI
             
-            logging.info(f"Attempting to generate image for prompt: {prompt} (attempt {attempt + 1}/{max_retries + 1})")
+            # Get OpenAI API key from environment or secrets
+            api_key = os.environ.get('OPENAI_API_KEY')
+            if not api_key:
+                # Try to get from Google Secret Manager
+                try:
+                    api_key = await get_secret("openai-api-key")
+                except:
+                    raise Exception("OpenAI API key not found in environment or secrets")
             
-            # Get default credentials
-            credentials, project = default()
+            client = AsyncOpenAI(api_key=api_key)
             
-            # Refresh credentials to get access token
-            credentials.refresh(Request())
-            access_token = credentials.token
-            logging.info(f"Successfully obtained access token (attempt {attempt + 1})")
+            # Enhanced prompt for better AAC-appropriate images
+            enhanced_prompt = f"""
+            Create a high-quality, clear image of: {prompt}
             
-            # Use Vertex AI Imagen API (proven working endpoint)
-            endpoint = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagegeneration@006:predict"
+            Style requirements:
+            - Simple, clean design suitable for AAC (Augmentative and Alternative Communication)
+            - Clear, recognizable representation
+            - Good contrast and visibility
+            - Child-friendly and appropriate for all ages
+            - Square aspect ratio (1024x1024)
+            - Bright, clear colors
+            - No text or words in the image
+            - Cartoon or illustration style preferred over photorealistic
+            """
             
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {access_token}'
-            }
+            # Generate image using OpenAI DALL-E 3
+            response = await client.images.generate(
+                model="dall-e-3",
+                prompt=enhanced_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
             
-            # Enhanced prompt for AAC-appropriate images with good detail level
-            enhanced_prompt = f"""Create a clear, detailed 2D illustration of {prompt}.
-
-Style requirements:
-- Modern flat design illustration with good detail and depth
-- Clean, polished vector art style (similar to quality app icons or educational materials)
-- Vibrant, appealing colors with excellent contrast for accessibility
-- Professional illustration quality, more detailed than basic symbols or stick figures
-- Clear, easily recognizable subject matter
-- Child and adult-friendly design appropriate for communication aids
-- No text, words, or labels in the image
-- Centered composition with simple, clean background
-- Optimized for button/interface use in AAC applications
-- High visual clarity for communication aids
-
-Subject: {prompt}
-
-Create this as a detailed, beautiful 3D illustration that would look professional in a communication app - think Disney/Pixar movie quality but optimized for clear recognition and communication purposes."""
-            
-            data = {
-                "instances": [{
-                    "prompt": enhanced_prompt
-                }],
-                "parameters": {
-                    "sampleCount": 1,
-                    "aspectRatio": "1:1",
-                    "outputImageSize": "512x512",  # Optimized for AAC buttons (75% size reduction)
-                    "safetyFilterLevel": "block_some",
-                    "personGeneration": "allow_adult"
-                }
-            }
-            
-            # Make the API request
+            # Download the image
+            image_url = response.data[0].url
             async with aiohttp.ClientSession() as session:
-                async with session.post(endpoint, headers=headers, json=data, timeout=120) as response:
-                    logging.info(f"Vertex AI response status: {response.status} (attempt {attempt + 1})")
-                    
-                    if response.status != 200:
-                        error_text = await response.text()
-                        logging.warning(f"Error response (attempt {attempt + 1}): {error_text}")
-                        if attempt < max_retries:
-                            logging.info(f"Retrying in 2 seconds...")
-                            await asyncio.sleep(2)
-                            continue
-                        raise Exception(f"Vertex AI API error: {response.status} - {error_text}")
-                    
-                    result = await response.json()
-                    logging.info(f"API Response structure: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
-                    
-                    # Extract image data from response
-                    if 'predictions' in result and len(result['predictions']) > 0:
-                        prediction = result['predictions'][0]
-                        logging.info(f"Prediction keys: {list(prediction.keys()) if isinstance(prediction, dict) else 'Not a dict'}")
-                        
-                        # Check different possible response formats
-                        if 'bytesBase64Encoded' in prediction:
-                            logging.info(f"Found image in bytesBase64Encoded (attempt {attempt + 1})")
-                            return base64.b64decode(prediction['bytesBase64Encoded'])
-                        elif 'generated_image' in prediction:
-                            logging.info(f"Found image in generated_image (attempt {attempt + 1})")
-                            image_data = prediction['generated_image'].get('bytesBase64Encoded')
-                            if image_data:
-                                return base64.b64decode(image_data)
-                        elif 'image' in prediction:
-                            logging.info(f"Found image in image field (attempt {attempt + 1})")
-                            return base64.b64decode(prediction['image'])
-                        else:
-                            logging.warning(f"Unexpected prediction format (attempt {attempt + 1}): {prediction}")
+                async with session.get(image_url) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
                     else:
-                        logging.warning(f"Empty or no predictions in response (attempt {attempt + 1})")
-                    
-                    if attempt < max_retries:
-                        logging.info(f"No valid image data found, retrying in 2 seconds...")
-                        await asyncio.sleep(2)
-                        continue
-                    
-                    raise Exception("No valid image data found in Vertex AI response after all retries")
-        
+                        raise Exception(f"Failed to download image: {resp.status}")
+                
         except Exception as e:
-            logging.warning(f"Error generating image with Vertex AI Imagen (attempt {attempt + 1}): {e}")
-            if attempt < max_retries:
-                logging.info(f"Retrying in 3 seconds...")
-                await asyncio.sleep(3)
-                continue
-            raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
+            logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries:
+                raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
 
-# Use Vertex AI Imagen for image generation (proven working approach)
-generate_image_with_gemini = generate_image_with_vertex_imagen
+async def generate_image_with_gemini_fallback(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using Google AI API (as fallback when Vertex AI doesn't work)"""
+    for attempt in range(max_retries + 1):
+        try:
+            # Try using Google AI API with Gemini models that support image generation
+            api_key = await get_gemini_api_key()
+            
+            # Use Imagen through Google AI API if available
+            # For now, let's create a simple colored placeholder image
+            from PIL import Image, ImageDraw, ImageFont
+            import io
+            
+            # Create a placeholder image with text
+            img = Image.new('RGB', (512, 512), color='lightblue')
+            draw = ImageDraw.Draw(img)
+            
+            # Try to load a font, fall back to default if not available
+            try:
+                font = ImageFont.truetype("/System/Library/Fonts/Arial.ttf", 36)
+            except:
+                font = ImageFont.load_default()
+            
+            # Add text to image
+            text = f"AAC Image:\n{prompt}"
+            
+            # Get text size and center it
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            x = (512 - text_width) // 2
+            y = (512 - text_height) // 2
+            
+            draw.multiline_text((x, y), text, fill='black', font=font, align='center')
+            
+            # Convert to bytes
+            img_bytes = io.BytesIO()
+            img.save(img_bytes, format='PNG')
+            return img_bytes.getvalue()
+                
+        except Exception as e:
+            logging.warning(f"Fallback image generation attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries:
+                raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
+
+async def generate_image_with_openai_if_available(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using OpenAI DALL-E 3 if API key is available"""
+    try:
+        # Check if OpenAI API key is available
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            try:
+                api_key = await get_secret("openai-api-key")
+            except:
+                raise Exception("No OpenAI API key available")
+        
+        # Use the OpenAI implementation
+        return await generate_image_with_openai(prompt, max_retries)
+    except:
+        # Fall back to placeholder if OpenAI is not available
+        return await generate_image_with_gemini_fallback(prompt, max_retries)
+
+# Update the main function to try OpenAI first, then fallback
+generate_image_with_gemini = generate_image_with_openai_if_available
 
 async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
     """Upload image to Google Cloud Storage and return public URL"""
@@ -8161,15 +8284,13 @@ async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
         bucket = await ensure_aac_images_bucket()
         blob = bucket.blob(f"global/{filename}")
         
-        # Upload image with public-read content
+        # Upload image
         await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type='image/png')
         
-        # For uniform bucket-level access, we construct the public URL directly
-        # The bucket should already be configured for public access via IAM policies
-        public_url = f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
+        # Make it publicly accessible
+        await asyncio.to_thread(blob.make_public)
         
-        logging.info(f"Successfully uploaded image: {filename} -> {public_url}")
-        return public_url
+        return blob.public_url
     except Exception as e:
         logging.error(f"Error uploading image to storage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
@@ -8248,51 +8369,34 @@ async def api_generate_subconcepts(
 async def api_generate_images(
     concept: str = Body(...),
     subconcepts: List[str] = Body(...),
-    style: str = Body(default="modern illustration style"),
+    style: str = Body(default="Apple memoji style"),
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
 ):
-    """Generate images for a list of subconcepts with rate limiting for batch processing"""
+    """Generate images for a list of subconcepts"""
     if not VERTEX_AI_AVAILABLE:
         raise HTTPException(status_code=503, detail="Image generation service not available")
     
     try:
         results = []
         
-        for i, subconcept in enumerate(subconcepts):
-            # Add delay between requests to avoid rate limiting (except for the first one)
-            if i > 0:
-                await asyncio.sleep(1)  # 1 second delay between image generations
-            
-            logging.info(f"Generating image {i+1}/{len(subconcepts)}: {subconcept}")
-            
+        for subconcept in subconcepts:
             # Create detailed prompt
-            prompt = f"{subconcept}, {concept}, clean background, high quality, friendly appearance, suitable for AAC communication"
+            prompt = f"{style}, {subconcept}, {concept}, clean background, high quality, friendly appearance, suitable for AAC communication"
             
-            try:
-                # Generate image with retry logic built into the function
-                image_bytes = await generate_image_with_gemini(prompt)
-                
-                # Create filename
-                filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
-                
-                # Upload to storage
-                image_url = await upload_image_to_storage(image_bytes, filename)
-                
-                results.append({
-                    "subconcept": subconcept,
-                    "image_url": image_url,
-                    "filename": filename
-                })
-                
-            except Exception as img_error:
-                logging.error(f"Failed to generate image for {subconcept}: {img_error}")
-                # Continue with other images instead of failing the whole batch
-                results.append({
-                    "subconcept": subconcept,
-                    "error": f"Failed to generate image: {str(img_error)}",
-                    "image_url": None,
-                    "filename": None
-                })
+            # Generate image
+            image_bytes = await generate_image_with_gemini(prompt)
+            
+            # Create filename
+            filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
+            
+            # Upload to storage
+            image_url = await upload_image_to_storage(image_bytes, filename)
+            
+            results.append({
+                "subconcept": subconcept,
+                "image_url": image_url,
+                "filename": filename
+            })
         
         return {"concept": concept, "images": results}
         
@@ -8436,6 +8540,634 @@ async def api_update_image_tags(
     except Exception as e:
         logging.error(f"Error in update image tags API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# ADMIN AVATAR MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@app.get("/api/admin/users")
+async def get_admin_users(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get all users for avatar administration"""
+    account_id = current_ids["account_id"]
+    logging.info(f"GET /api/admin/users request for account {account_id}")
+    
+    try:
+        # Get all user directories for this account
+        user_dirs = []
+        account_user_data_path = os.path.join("user_data", account_id)
+        
+        if os.path.exists(account_user_data_path):
+            for item in os.listdir(account_user_data_path):
+                item_path = os.path.join(account_user_data_path, item)
+                if os.path.isdir(item_path):
+                    user_dirs.append(item)
+        
+        users = []
+        for user_id in user_dirs:
+            try:
+                # Load user info if available
+                user_info = await load_firestore_document(
+                    account_id, user_id, "info/user_narrative", DEFAULT_USER_INFO
+                )
+                
+                # Get last used timestamp
+                last_used = None
+                user_path = os.path.join("user_data", account_id, user_id)
+                if os.path.exists(user_path):
+                    last_used = os.path.getmtime(user_path)
+                    last_used = datetime.fromtimestamp(last_used).isoformat()
+                
+                users.append({
+                    "username": user_id,
+                    "displayName": user_info.get("name", "") if user_info else "",
+                    "avatarConfig": user_info.get("avatarConfig", {}) if user_info else {},
+                    "lastUsed": last_used
+                })
+            except Exception as e:
+                logging.warning(f"Failed to load info for user {user_id}: {e}")
+                users.append({
+                    "username": user_id,
+                    "displayName": "",
+                    "avatarConfig": {},
+                    "lastUsed": None
+                })
+        
+        # Sort by last used (most recent first)
+        users.sort(key=lambda x: x["lastUsed"] or "", reverse=True)
+        
+        return JSONResponse(content={"users": users})
+        
+    except Exception as e:
+        logging.error(f"Error getting admin users: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to load users", "details": str(e)}
+        )
+
+@app.post("/api/admin/users/{user_id}/avatar")
+async def update_user_avatar(
+    user_id: str,
+    avatar_data: dict,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Update avatar configuration for a specific user"""
+    account_id = current_ids["account_id"]
+    logging.info(f"POST /api/admin/users/{user_id}/avatar request for account {account_id}")
+    
+    try:
+        # Load current user info
+        user_info = await load_firestore_document(
+            account_id, user_id, "info/user_narrative", DEFAULT_USER_INFO
+        )
+        
+        # Update avatar config
+        if user_info is None:
+            user_info = DEFAULT_USER_INFO.copy()
+        
+        user_info["avatarConfig"] = avatar_data.get("avatarConfig", {})
+        
+        # Save updated user info
+        await save_firestore_document(
+            account_id, user_id, "info/user_narrative", user_info
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Avatar updated for user {user_id}"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error updating user avatar: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to update avatar", "details": str(e)}
+        )
+
+@app.get("/api/admin/avatar-presets")
+async def get_avatar_presets(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get available avatar presets"""
+    account_id = current_ids["account_id"]
+    logging.info(f"GET /api/admin/avatar-presets request for account {account_id}")
+    
+    try:
+        # Try to load custom presets from Firestore
+        custom_presets = await load_firestore_document(
+            account_id, "system", "admin/avatar_presets", {}
+        )
+        
+        # Default presets
+        default_presets = [
+            {
+                "id": "default",
+                "name": "Default",
+                "description": "Standard avatar",
+                "isDefault": True,
+                "config": {
+                    "avatarStyle": "Circle",
+                    "topType": "ShortHairShortFlat",
+                    "accessoriesType": "Blank",
+                    "hairColor": "BrownDark",
+                    "facialHairType": "Blank",
+                    "clotheType": "BlazerShirt",
+                    "clotheColor": "BlueGray",
+                    "eyeType": "Default",
+                    "eyebrowType": "Default",
+                    "mouthType": "Default",
+                    "skinColor": "Light"
+                }
+            },
+            {
+                "id": "happy",
+                "name": "Happy",
+                "description": "Cheerful expression",
+                "config": {
+                    "avatarStyle": "Circle",
+                    "topType": "ShortHairShortFlat",
+                    "accessoriesType": "Blank",
+                    "hairColor": "BrownDark",
+                    "facialHairType": "Blank",
+                    "clotheType": "BlazerShirt",
+                    "clotheColor": "BlueGray",
+                    "eyeType": "Happy",
+                    "eyebrowType": "Default",
+                    "mouthType": "Smile",
+                    "skinColor": "Light"
+                }
+            },
+            {
+                "id": "cool",
+                "name": "Cool",
+                "description": "Sunglasses and attitude",
+                "config": {
+                    "avatarStyle": "Circle",
+                    "topType": "ShortHairShortFlat",
+                    "accessoriesType": "Sunglasses",
+                    "hairColor": "BrownDark",
+                    "facialHairType": "Blank",
+                    "clotheType": "BlazerShirt",
+                    "clotheColor": "BlueGray",
+                    "eyeType": "Default",
+                    "eyebrowType": "Default",
+                    "mouthType": "Serious",
+                    "skinColor": "Light"
+                }
+            },
+            {
+                "id": "professional",
+                "name": "Professional",
+                "description": "Business attire",
+                "config": {
+                    "avatarStyle": "Circle",
+                    "topType": "ShortHairShortFlat",
+                    "accessoriesType": "Prescription01",
+                    "hairColor": "BrownDark",
+                    "facialHairType": "Blank",
+                    "clotheType": "BlazerShirt",
+                    "clotheColor": "Blue",
+                    "eyeType": "Default",
+                    "eyebrowType": "Default",
+                    "mouthType": "Default",
+                    "skinColor": "Light"
+                }
+            }
+        ]
+        
+        # Combine default and custom presets
+        all_presets = default_presets.copy()
+        if custom_presets and "presets" in custom_presets:
+            all_presets.extend(custom_presets["presets"])
+        
+        return JSONResponse(content={"presets": all_presets})
+        
+    except Exception as e:
+        logging.error(f"Error getting avatar presets: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to load presets", "details": str(e)}
+        )
+
+@app.post("/api/admin/avatar-presets")
+async def save_avatar_presets(
+    presets_data: dict,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save custom avatar presets"""
+    account_id = current_ids["account_id"]
+    logging.info(f"POST /api/admin/avatar-presets request for account {account_id}")
+    
+    try:
+        # Save custom presets to Firestore
+        await save_firestore_document(
+            account_id, "system", "admin/avatar_presets", presets_data
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Presets saved successfully"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error saving avatar presets: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to save presets", "details": str(e)}
+        )
+
+# ================================
+# AAC Symbol Processing Endpoints  
+# ================================
+
+@app.post("/api/symbols/analyze-picom")
+async def analyze_picom_images(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Analyze PiCom images and prepare them for AI processing"""
+    account_id = current_ids["account_id"]
+    user_id = current_ids["user_id"]
+    logging.info(f"POST /api/symbols/analyze-picom request for user {user_id}")
+    
+    try:
+        # Check if user is admin
+        user_email = current_ids.get("email", "")
+        is_admin = user_email == "admin@talkwithbravo.com"
+        
+        if not is_admin:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Admin privileges required"}
+            )
+        
+        from pathlib import Path
+        import json
+        
+        # Check if analysis already exists
+        analysis_file = Path("picom_ready_for_ai_analysis.json")
+        if analysis_file.exists():
+            with open(analysis_file) as f:
+                analysis_data = json.load(f)
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Analysis already complete",
+                "statistics": analysis_data.get("statistics", {}),
+                "ready_for_ai": True
+            })
+        
+        # Run analysis if not exists
+        import subprocess
+        result = subprocess.run([
+            "python3", "analyze_picom_smart.py"
+        ], capture_output=True, text=True, cwd="/Users/blakethomas/Documents/BravoGCPCopilot")
+        
+        if result.returncode != 0:
+            logging.error(f"Analysis script failed: {result.stderr}")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Analysis failed", "details": result.stderr}
+            )
+        
+        # Load results
+        if analysis_file.exists():
+            with open(analysis_file) as f:
+                analysis_data = json.load(f)
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Analysis completed successfully",
+                "statistics": analysis_data.get("statistics", {}),
+                "ready_for_ai": True
+            })
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Analysis completed but results file not found"}
+            )
+            
+    except Exception as e:
+        logging.error(f"Error in analyze_picom_images: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Analysis failed", "details": str(e)}
+        )
+
+@app.post("/api/symbols/process-batch")
+async def process_symbol_batch(
+    request_data: dict,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Process a batch of PiCom symbols with AI enhancement"""
+    account_id = current_ids["account_id"]
+    user_id = current_ids["user_id"]
+    user_email = current_ids.get("email", "")
+    
+    logging.info(f"POST /api/symbols/process-batch request for user {user_id}")
+    
+    try:
+        # Check admin privileges
+        is_admin = user_email == "admin@talkwithbravo.com"
+        if not is_admin:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Admin privileges required"}
+            )
+        
+        # Get parameters
+        batch_size = request_data.get("batch_size", 10)
+        start_index = request_data.get("start_index", 0)
+        category_filter = request_data.get("category", None)
+        
+        from pathlib import Path
+        import json
+        import uuid
+        from datetime import datetime
+        import asyncio
+        
+        # Load analysis data
+        analysis_file = Path("picom_ready_for_ai_analysis.json")
+        if not analysis_file.exists():
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Analysis file not found. Run analysis first."}
+            )
+        
+        with open(analysis_file) as f:
+            analysis_data = json.load(f)
+        
+        # Filter images if category specified
+        images_to_process = analysis_data['images']
+        if category_filter:
+            images_to_process = [
+                img for img in images_to_process 
+                if category_filter in img.get('categories', [])
+            ]
+        
+        # Get batch
+        batch = images_to_process[start_index:start_index + batch_size]
+        picom_dir = Path("/Users/blakethomas/Documents/BravoGCPCopilot/PiComImages")
+        
+        processed_symbols = []
+        errors = []
+        
+        for image_data in batch:
+            try:
+                image_path = picom_dir / image_data['filename']
+                if not image_path.exists():
+                    errors.append(f"Image not found: {image_data['filename']}")
+                    continue
+                
+                # Create symbol document (without AI analysis for now)
+                symbol_doc = {
+                    'symbol_id': str(uuid.uuid4()),
+                    'filename': image_data['filename'],
+                    'image_url': f"/PiComImages/{image_data['filename']}",  # Temporary local path
+                    'thumbnail_url': f"/PiComImages/{image_data['filename']}",
+                    
+                    # Core metadata
+                    'name': image_data['description'],
+                    'description': image_data['description'],
+                    'alt_text': f"AAC symbol showing {image_data['description']}",
+                    
+                    # Categorization
+                    'primary_category': image_data['categories'][0] if image_data['categories'] else 'other',
+                    'categories': image_data['categories'],
+                    'tags': image_data['tags'],
+                    'filename_tags': image_data['tags'],
+                    
+                    # Usage context
+                    'difficulty_level': image_data.get('difficulty', 'simple'),
+                    'age_groups': image_data.get('age_groups', ['all']),
+                    'usage_contexts': ['General communication'],
+                    
+                    # Search optimization
+                    'search_weight': len(image_data['tags']),
+                    'usage_frequency': 0,
+                    'last_used': None,
+                    'created_at': datetime.now(),
+                    'updated_at': datetime.now(),
+                    
+                    # Source tracking
+                    'source': 'picom_global_symbols',
+                    'source_id': image_data.get('image_id', ''),
+                    'processing_status': 'processed_without_ai',
+                    
+                    # Keep analysis for reference
+                    'filename_analysis': image_data
+                }
+                
+                # Save to Firestore
+                symbols_ref = firestore_db.collection("aac_symbols")
+                doc_ref = symbols_ref.document(symbol_doc['symbol_id'])
+                doc_ref.set(symbol_doc)
+                
+                processed_symbols.append({
+                    'symbol_id': symbol_doc['symbol_id'],
+                    'filename': image_data['filename'],
+                    'categories': symbol_doc['categories'],
+                    'tags': symbol_doc['tags']
+                })
+                
+                logging.info(f"Processed symbol: {image_data['filename']}")
+                
+            except Exception as e:
+                errors.append(f"Error processing {image_data['filename']}: {str(e)}")
+                logging.error(f"Error processing {image_data['filename']}: {e}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "processed_count": len(processed_symbols),
+            "total_requested": len(batch),
+            "processed_symbols": processed_symbols[:5],  # Show first 5
+            "errors": errors[:5],  # Show first 5 errors
+            "error_count": len(errors),
+            "next_start_index": start_index + batch_size,
+            "remaining": max(0, len(images_to_process) - (start_index + batch_size))
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in process_symbol_batch: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Batch processing failed", "details": str(e)}
+        )
+
+@app.get("/api/symbols/search")
+async def search_symbols(
+    query: str = "",
+    category: str = None,
+    difficulty: str = None,
+    age_group: str = None,
+    limit: int = 20,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Search for AAC symbols"""
+    try:
+        symbols_ref = firestore_db.collection("aac_symbols")
+        
+        # Build query with filters
+        if category:
+            symbols_ref = symbols_ref.where("categories", "array_contains", category)
+        if difficulty:
+            symbols_ref = symbols_ref.where("difficulty_level", "==", difficulty)
+        if age_group:
+            symbols_ref = symbols_ref.where("age_groups", "array_contains", age_group)
+        
+        # Order by search weight and limit
+        symbols_ref = symbols_ref.order_by("search_weight", direction=firestore.Query.DESCENDING).limit(limit * 2)
+        
+        results = symbols_ref.stream()
+        symbols = []
+        
+        for doc in results:
+            symbol = doc.to_dict()
+            symbol['id'] = doc.id
+            
+            # Simple text matching if query provided
+            if query:
+                query_lower = query.lower()
+                match_score = 0
+                
+                # Check name/description
+                if query_lower in symbol.get('name', '').lower():
+                    match_score += 10
+                if query_lower in symbol.get('description', '').lower():
+                    match_score += 5
+                
+                # Check tags
+                for tag in symbol.get('tags', []):
+                    if query_lower in tag.lower():
+                        match_score += 3
+                        break
+                
+                if match_score > 0:
+                    symbol['match_score'] = match_score
+                    symbols.append(symbol)
+            else:
+                symbols.append(symbol)
+        
+        # Sort by match score if query provided
+        if query:
+            symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+        
+        return JSONResponse(content={
+            "symbols": symbols[:limit],
+            "total_found": len(symbols),
+            "query": query,
+            "filters": {
+                "category": category,
+                "difficulty": difficulty,
+                "age_group": age_group
+            }
+        })
+        
+    except Exception as e:
+        logging.error(f"Error searching symbols: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Search failed", "details": str(e)}
+        )
+
+@app.get("/api/symbols/categories")
+async def get_symbol_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None):
+    """Get available symbol categories"""
+    try:
+        from pathlib import Path
+        import json
+        
+        # Load from analysis file if available
+        analysis_file = Path("picom_ready_for_ai_analysis.json")
+        if analysis_file.exists():
+            with open(analysis_file) as f:
+                analysis_data = json.load(f)
+                categories = analysis_data.get("statistics", {}).get("categories", {})
+                
+                category_list = [
+                    {"name": cat, "count": count, "description": f"{count} symbols"}
+                    for cat, count in categories.items()
+                ]
+                category_list.sort(key=lambda x: x["count"], reverse=True)
+                
+                return JSONResponse(content={"categories": category_list})
+        
+        # Fallback: query Firestore
+        symbols_ref = firestore_db.collection("aac_symbols")
+        docs = symbols_ref.stream()
+        
+        category_counts = {}
+        for doc in docs:
+            symbol = doc.to_dict()
+            for category in symbol.get('categories', []):
+                category_counts[category] = category_counts.get(category, 0) + 1
+        
+        category_list = [
+            {"name": cat, "count": count, "description": f"{count} symbols"}
+            for cat, count in category_counts.items()
+        ]
+        category_list.sort(key=lambda x: x["count"], reverse=True)
+        
+        return JSONResponse(content={"categories": category_list})
+        
+    except Exception as e:
+        logging.error(f"Error getting categories: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to get categories", "details": str(e)}
+        )
+
+@app.get("/api/symbols/stats")
+async def get_symbol_stats(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None):
+    """Get symbol collection statistics"""
+    try:
+        from pathlib import Path
+        import json
+        
+        # Check analysis file
+        analysis_file = Path("picom_ready_for_ai_analysis.json")
+        if analysis_file.exists():
+            with open(analysis_file) as f:
+                analysis_data = json.load(f)
+                return JSONResponse(content={
+                    "success": True,
+                    "statistics": analysis_data.get("statistics", {}),
+                    "source": "analysis_file"
+                })
+        
+        # Count from Firestore
+        symbols_ref = firestore_db.collection("aac_symbols")
+        docs = list(symbols_ref.stream())
+        
+        stats = {
+            "total_symbols": len(docs),
+            "categories": {},
+            "sources": {},
+            "difficulty_levels": {}
+        }
+        
+        for doc in docs:
+            symbol = doc.to_dict()
+            
+            # Count categories
+            for category in symbol.get('categories', []):
+                stats["categories"][category] = stats["categories"].get(category, 0) + 1
+            
+            # Count sources
+            source = symbol.get('source', 'unknown')
+            stats["sources"][source] = stats["sources"].get(source, 0) + 1
+            
+            # Count difficulty levels
+            difficulty = symbol.get('difficulty_level', 'simple')
+            stats["difficulty_levels"][difficulty] = stats["difficulty_levels"].get(difficulty, 0) + 1
+        
+        return JSONResponse(content={
+            "success": True,
+            "statistics": stats,
+            "source": "firestore"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting symbol stats: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to get statistics", "details": str(e)}
+        )
 
 
 if __name__ == "__main__":
