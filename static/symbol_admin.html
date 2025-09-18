@@ -231,6 +231,15 @@
             </div>
         </div>
 
+        <!-- Authentication Status -->
+        <div class="card" id="authStatusCard" style="display: none;">
+            <h2>🔐 Authentication Status</h2>
+            <div id="authStatusContent">
+                <p>⚠️ Authentication required for admin functions</p>
+                <p>Please log in at <a href="/admin.html" target="_blank">Admin Login</a> and return here to use processing features.</p>
+            </div>
+        </div>
+
                 </div>
 
         <!-- Processing Controls -->
@@ -312,12 +321,21 @@
             
             if (!authToken) {
                 log('warning', '⚠️  Not authenticated - admin functions will be limited');
-                document.getElementById('analyzeBtn').disabled = true;
-                document.getElementById('processBtn').disabled = true;
-                document.getElementById('authCard').style.display = 'block';
+                const analyzeBtn = document.getElementById('analyzeBtn');
+                const processBtn = document.getElementById('processBtn');
+                const authStatusCard = document.getElementById('authStatusCard');
+                if (analyzeBtn) analyzeBtn.disabled = true;
+                if (processBtn) processBtn.disabled = true;
+                if (authStatusCard) authStatusCard.style.display = 'block';
                 updateStatus('error', 'Authentication Required for Admin Functions');
             } else {
                 log('info', '✅ Authentication found - admin functions enabled');
+                const analyzeBtn = document.getElementById('analyzeBtn');
+                const processBtn = document.getElementById('processBtn');
+                const authStatusCard = document.getElementById('authStatusCard');
+                if (analyzeBtn) analyzeBtn.disabled = false;
+                if (processBtn) processBtn.disabled = false;
+                if (authStatusCard) authStatusCard.style.display = 'none';
             }
         }
 
