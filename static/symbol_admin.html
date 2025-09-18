@@ -236,7 +236,7 @@
             <h2>🔐 Authentication Status</h2>
             <div id="authStatusContent">
                 <p>⚠️ Authentication required for admin functions</p>
-                <p>Please log in at <a href="/admin.html" target="_blank">Admin Login</a> and return here to use processing features.</p>
+                <p>Please log in at <a href="/auth.html" target="_blank">Login Page</a> with admin@talkwithbravo.com and return here to use processing features.</p>
             </div>
         </div>
 
@@ -311,14 +311,10 @@
 
         // Check if user is authenticated
         function checkAuthentication() {
-            // Try to get token from localStorage (if user is logged in)
-            authToken = localStorage.getItem('firebase-auth-token');
+            // Get Firebase ID token from sessionStorage (set by auth.html)
+            authToken = sessionStorage.getItem('firebaseIdToken');
             
-            if (!authToken) {
-                // Try to get from sessionStorage
-                authToken = sessionStorage.getItem('firebase-auth-token');
-            }
-            
+            // If no token, user isn't authenticated
             if (!authToken) {
                 log('warning', '⚠️  Not authenticated - admin functions will be limited');
                 const analyzeBtn = document.getElementById('analyzeBtn');
@@ -329,13 +325,39 @@
                 if (authStatusCard) authStatusCard.style.display = 'block';
                 updateStatus('error', 'Authentication Required for Admin Functions');
             } else {
-                log('info', '✅ Authentication found - admin functions enabled');
+                // Verify this is an admin token by making a simple API call
+                verifyAdminAccess();
+            }
+        }
+
+        // Verify admin access by making an API call
+        async function verifyAdminAccess() {
+            try {
+                const response = await fetch('/api/symbols/stats', {
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                });
+                
+                if (response.ok) {
+                    log('info', '✅ Admin authentication verified - all functions enabled');
+                    const analyzeBtn = document.getElementById('analyzeBtn');
+                    const processBtn = document.getElementById('processBtn');
+                    const authStatusCard = document.getElementById('authStatusCard');
+                    if (analyzeBtn) analyzeBtn.disabled = false;
+                    if (processBtn) processBtn.disabled = false;
+                    if (authStatusCard) authStatusCard.style.display = 'none';
+                } else {
+                    throw new Error('Admin verification failed');
+                }
+            } catch (error) {
+                log('warning', '⚠️  Admin verification failed - functions will be limited');
                 const analyzeBtn = document.getElementById('analyzeBtn');
                 const processBtn = document.getElementById('processBtn');
                 const authStatusCard = document.getElementById('authStatusCard');
-                if (analyzeBtn) analyzeBtn.disabled = false;
-                if (processBtn) processBtn.disabled = false;
-                if (authStatusCard) authStatusCard.style.display = 'none';
+                if (analyzeBtn) analyzeBtn.disabled = true;
+                if (processBtn) processBtn.disabled = true;
+                if (authStatusCard) authStatusCard.style.display = 'block';
+                updateStatus('error', 'Admin Authentication Required');
             }
         }
 
