@@ -231,6 +231,8 @@
             </div>
         </div>
 
+                </div>
+
         <!-- Processing Controls -->
         <div class="card">
             <h2>⚙️ Processing Controls</h2>
@@ -288,13 +290,49 @@
         let analysisComplete = false;
         let processedCount = 0;
         let totalToProcess = 0;
+        let authToken = null;
 
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', function() {
+            checkAuthentication();
             loadStatistics();
             loadCategories();
             checkAnalysisStatus();
         });
+
+        // Check if user is authenticated
+        function checkAuthentication() {
+            // Try to get token from localStorage (if user is logged in)
+            authToken = localStorage.getItem('firebase-auth-token');
+            
+            if (!authToken) {
+                // Try to get from sessionStorage
+                authToken = sessionStorage.getItem('firebase-auth-token');
+            }
+            
+            if (!authToken) {
+                log('warning', '⚠️  Not authenticated - admin functions will be limited');
+                document.getElementById('analyzeBtn').disabled = true;
+                document.getElementById('processBtn').disabled = true;
+                document.getElementById('authCard').style.display = 'block';
+                updateStatus('error', 'Authentication Required for Admin Functions');
+            } else {
+                log('info', '✅ Authentication found - admin functions enabled');
+            }
+        }
+
+        // Get auth headers for API calls
+        function getAuthHeaders() {
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            
+            return headers;
+        }
 
         // Load collection statistics
         async function loadStatistics() {
@@ -360,11 +398,7 @@
                 
                 const response = await fetch('/api/symbols/analyze-picom', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        // In real implementation, add auth header
-                        // 'Authorization': `Bearer ${getAuthToken()}`
-                    }
+                    headers: getAuthHeaders()
                 });
                 
                 const result = await response.json();
@@ -410,10 +444,7 @@
                 while (hasMore && isProcessing) {
                     const response = await fetch('/api/symbols/process-batch', {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            // In real implementation, add auth header
-                        },
+                        headers: getAuthHeaders(),
                         body: JSON.stringify({
                             batch_size: batchSize,
                             start_index: startIndex

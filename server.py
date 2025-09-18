@@ -8995,10 +8995,9 @@ async def search_symbols(
     category: str = None,
     difficulty: str = None,
     age_group: str = None,
-    limit: int = 20,
-    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+    limit: int = 20
 ):
-    """Search for AAC symbols"""
+    """Search for AAC symbols - PUBLIC ENDPOINT"""
     try:
         symbols_ref = firestore_db.collection("aac_symbols")
         
@@ -9066,8 +9065,8 @@ async def search_symbols(
         )
 
 @app.get("/api/symbols/categories")
-async def get_symbol_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None):
-    """Get available symbol categories"""
+async def get_symbol_categories():
+    """Get available symbol categories - PUBLIC ENDPOINT"""
     try:
         from pathlib import Path
         import json
@@ -9113,8 +9112,8 @@ async def get_symbol_categories(current_ids: Annotated[Dict[str, str], Depends(g
         )
 
 @app.get("/api/symbols/stats")
-async def get_symbol_stats(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None):
-    """Get symbol collection statistics"""
+async def get_symbol_stats():
+    """Get symbol collection statistics - PUBLIC ENDPOINT"""
     try:
         from pathlib import Path
         import json
