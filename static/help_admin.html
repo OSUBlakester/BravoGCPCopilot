@@ -135,7 +135,8 @@
         async function initializeFirebase() {
             try {
                 const response = await fetch('/api/frontend-config');
-                firebaseConfig = await response.json();
+                const configData = await response.json();
+                firebaseConfig = configData.firebase_config || configData;
                 
                 const app = initializeApp(firebaseConfig);
                 auth = getAuth(app);

@@ -251,6 +251,96 @@ function getPictogramForText(text) {
     return null;
 }
 
+/**
+ * Fetches symbol image from the AAC symbol database with retry logic and caching
+ * @param {string} text - The button text to find a symbol for  
+ * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
+ */
+async function getSymbolImageForText(text) {
+    if (!text || text.trim() === '') return null;
+    
+    // Simple in-memory cache to avoid repeated requests
+    if (!window.symbolImageCache) {
+        window.symbolImageCache = new Map();
+    }
+    
+    const cacheKey = text.trim().toLowerCase();
+    if (window.symbolImageCache.has(cacheKey)) {
+        const cached = window.symbolImageCache.get(cacheKey);
+        if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
+            return cached.imageUrl;
+        }
+    }
+    
+    const maxRetries = 2;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Add a small delay for retries to avoid overwhelming the server
+            if (attempt > 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000); // Reduced to 4 seconds
+            
+            const response = await fetch(`/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`, {
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Return the first matching symbol's image URL
+                if (data.symbols && data.symbols.length > 0) {
+                    const symbol = data.symbols[0];
+                    const imageUrl = symbol.image_url;
+                    
+                    // Cache successful result
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl,
+                        timestamp: Date.now()
+                    });
+                    
+                    console.log(`Found symbol for "${text}":`, symbol.name, `(score: ${symbol.match_score || 'N/A'})`);
+                    return imageUrl;
+                } else {
+                    // Cache null result to avoid repeated requests
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: null,
+                        timestamp: Date.now()
+                    });
+                    return null;
+                }
+            } else if (response.status === 503) {
+                lastError = new Error(`Service unavailable (attempt ${attempt}/${maxRetries})`);
+                console.warn(`Symbol search service unavailable for "${text}" (attempt ${attempt}/${maxRetries}):`, response.status);
+                continue; // Try again
+            } else {
+                console.warn(`Symbol search failed for "${text}":`, response.status, response.statusText);
+                return null;
+            }
+        } catch (error) {
+            lastError = error;
+            if (error.name === 'AbortError') {
+                console.warn(`Symbol search timeout for "${text}" (attempt ${attempt}/${maxRetries})`);
+            } else {
+                console.warn(`Error fetching symbol for "${text}" (attempt ${attempt}/${maxRetries}):`, error.message);
+            }
+            
+            if (attempt === maxRetries) {
+                break;
+            }
+        }
+    }
+    
+    console.warn(`All symbol search attempts failed for "${text}", falling back to pictogram`);
+    return null;
+}
+
 
 // --- Utility to convert Base64 to ArrayBuffer (Needed for playing audio) ---
 function base64ToArrayBuffer(base64) {
@@ -588,6 +678,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 4. Show mood selection if enabled and not already set for this session
     await showMoodSelectionIfNeeded();
 
+    // 5. Initialize avatar selector with user's saved configuration now that authentication is complete
+    if (window.avatarSelector && window.avatarSelector.initializeAfterAuth) {
+        await window.avatarSelector.initializeAfterAuth();
+    }
+
     const gridContainer = document.getElementById('gridContainer');
     const params = new URLSearchParams(window.location.search);
     let pageName = params.get('page');
@@ -635,7 +730,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         sessionStorage.setItem('currentPageDisplayNameForBanner', pageToDisplay.displayName || capitalizeFirstLetter(pageToDisplay.name));
         setBannerAndPageTitle(); // Call again to set the correct title
 
-        generateGrid(pageToDisplay, gridContainer);
+        await generateGrid(pageToDisplay, gridContainer);
 
         const optionsParam = params.get('options');
         if (optionsParam) {
@@ -645,7 +740,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (options.length > 0) {
                 const optionsObjects = options.map(optText => ({ summary: optText, option: optText }));
                 console.log("Generating LLM buttons from URL params:", optionsObjects);
-                generateLlmButtons(optionsObjects);
+                await generateLlmButtons(optionsObjects);
             } else {
                 console.warn("Options parameter found but resulted in empty options array.");
             }
@@ -721,6 +816,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (logoutButton) {
         logoutButton.addEventListener('click', handleLogout);
+    }
+
+    // --- Avatar Manager Button ---
+    const avatarManagerButton = document.getElementById('avatar-manager-button');
+    
+    function handleAvatarManager() {
+        console.log("Opening Avatar Manager");
+        showAvatarManager().catch(error => {
+            console.error("Error opening avatar manager:", error);
+        });
+    }
+
+    if (avatarManagerButton) {
+        avatarManagerButton.addEventListener('click', handleAvatarManager);
     }
 
     // --- PIN Protection for Admin Toolbar ---
@@ -900,7 +1009,7 @@ function updateGridLayout() {
 }
 
 // --- Grid Generation ---
-function generateGrid(page, container) {
+async function generateGrid(page, container) {
     container.innerHTML = '';
     updateGridLayout();
 
@@ -925,40 +1034,77 @@ function generateGrid(page, container) {
     });
 
     // 3. Lay out buttons row by row, filling each row up to gridColumns
-    let currentRow = 0;
-    let currentCol = 0;
-    sortedButtons.forEach((buttonData, idx) => {
-        if (currentCol >= gridColumns) {
-            currentCol = 0;
-            currentRow++;
-        }
+    // Use Promise.all to load all symbol images in parallel
+    const buttonPromises = sortedButtons.map(async (buttonData, idx) => {
+        const currentRow = Math.floor(idx / gridColumns);
+        const currentCol = idx % gridColumns;
+        
         const button = document.createElement('button');
         
-        // Add pictogram support
-        const pictogram = getPictogramForText(buttonData.text);
-        if (pictogram) {
-            // Create container for pictogram and text
+        // Try to get symbol image first, fall back to pictogram if needed
+        let symbolImageUrl = await getSymbolImageForText(buttonData.text);
+        
+        if (symbolImageUrl) {
+            // Create container for symbol image and text
             const buttonContent = document.createElement('div');
             buttonContent.style.display = 'flex';
             buttonContent.style.flexDirection = 'column';
             buttonContent.style.alignItems = 'center';
             buttonContent.style.gap = '4px';
             
-            const pictogramSpan = document.createElement('span');
-            pictogramSpan.textContent = pictogram;
-            pictogramSpan.style.fontSize = '1.5em';
-            pictogramSpan.style.lineHeight = '1';
+            const imageElement = document.createElement('img');
+            imageElement.src = symbolImageUrl;
+            imageElement.alt = buttonData.text;
+            imageElement.style.width = '40px';
+            imageElement.style.height = '40px';
+            imageElement.style.objectFit = 'contain';
+            imageElement.onerror = () => {
+                // If image fails to load, fall back to pictogram
+                const pictogram = getPictogramForText(buttonData.text);
+                if (pictogram) {
+                    const pictogramSpan = document.createElement('span');
+                    pictogramSpan.textContent = pictogram;
+                    pictogramSpan.style.fontSize = '1.5em';
+                    pictogramSpan.style.lineHeight = '1';
+                    buttonContent.replaceChild(pictogramSpan, imageElement);
+                }
+            };
             
             const textSpan = document.createElement('span');
             textSpan.textContent = buttonData.text;
             textSpan.style.fontSize = '0.9em';
             textSpan.style.lineHeight = '1.2';
             
-            buttonContent.appendChild(pictogramSpan);
+            buttonContent.appendChild(imageElement);
             buttonContent.appendChild(textSpan);
             button.appendChild(buttonContent);
         } else {
-            button.textContent = buttonData.text;
+            // Fall back to pictogram if no symbol image found
+            const pictogram = getPictogramForText(buttonData.text);
+            if (pictogram) {
+                // Create container for pictogram and text
+                const buttonContent = document.createElement('div');
+                buttonContent.style.display = 'flex';
+                buttonContent.style.flexDirection = 'column';
+                buttonContent.style.alignItems = 'center';
+                buttonContent.style.gap = '4px';
+                
+                const pictogramSpan = document.createElement('span');
+                pictogramSpan.textContent = pictogram;
+                pictogramSpan.style.fontSize = '1.5em';
+                pictogramSpan.style.lineHeight = '1';
+                
+                const textSpan = document.createElement('span');
+                textSpan.textContent = buttonData.text;
+                textSpan.style.fontSize = '0.9em';
+                textSpan.style.lineHeight = '1.2';
+                
+                buttonContent.appendChild(pictogramSpan);
+                buttonContent.appendChild(textSpan);
+                button.appendChild(buttonContent);
+            } else {
+                button.textContent = buttonData.text;
+            }
         }
         
         button.dataset.llmQuery = buttonData.LLMQuery || '';
@@ -969,9 +1115,13 @@ function generateGrid(page, container) {
         button.style.gridRowStart = currentRow + 1;
         button.style.gridColumnStart = currentCol + 1;
         button.addEventListener('click', debounce(() => handleButtonClick(buttonData), clickDebounceDelay));
-        container.appendChild(button);
-        currentCol++;
+        
+        return button;
     });
+    
+    // Wait for all buttons to be created and append them to container
+    const buttons = await Promise.all(buttonPromises);
+    buttons.forEach(button => container.appendChild(button));
 
     // Delay scanning until after the page is rendered
     setTimeout(() => {
@@ -1087,7 +1237,7 @@ async function handleButtonClick(buttonData) {
             const tLLM1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: getLLMResponse took ${(tLLM1-tLLM0).toFixed(2)} ms`);
             const tGen0 = performance.now();
-            generateLlmButtons(options); // This function will restart scanning.
+            await generateLlmButtons(options); // This function will restart scanning.
             const tGen1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: generateLlmButtons took ${(tGen1-tGen0).toFixed(2)} ms`);
             debugTimes.llmBranch = performance.now();
@@ -1277,7 +1427,7 @@ async function getCurrentEvents(eventType) {
         console.log("Successfully received and parsed data:", optionsData);
 
         if (Array.isArray(optionsData)) {
-            generateLlmButtons(optionsData);
+            await generateLlmButtons(optionsData);
         } else {
             console.error("Error: Data received from server is not an array.", optionsData);
             isLLMProcessing = false; // Reset flag on error
@@ -1539,7 +1689,7 @@ function setupQuestionRecognition() {
                 document.getElementById('loading-indicator').style.display = 'flex';
                 const options = await getLLMResponse(promptForLLM);
                 if (Array.isArray(options) && (options.length === 0 || options.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
-                    querytype = "question"; generateLlmButtons(options);
+                    querytype = "question"; await generateLlmButtons(options);
                 } else {
                     console.error("LLM response invalid:", options); announce("Unexpected response.", "system", false);
                     isRestartingKeyword = true; setupSpeechRecognition();
@@ -2089,7 +2239,7 @@ async function resumeAuditoryScanning() {
 }
 
 // --- LLM Button Generation ---
-function generateLlmButtons(options) {
+async function generateLlmButtons(options) {
     document.getElementById('loading-indicator').style.display = 'none';
     isLLMProcessing = false; // Reset processing flag since LLM results are ready
     options = Array.isArray(options) ? options : [];
@@ -2112,36 +2262,78 @@ function generateLlmButtons(options) {
      const askAgainButtonColors = [ 'bg-yellow-500', 'border-yellow-700', 'hover:bg-yellow-600', 'hover:border-yellow-800', 'text-black', 'focus:ring-yellow-400' ];
      const goBackButtonColors = [ 'bg-gray-200', 'border-gray-400', 'hover:bg-gray-300', 'hover:border-gray-500', 'text-black', 'focus:ring-gray-300' ];
 
-    // --- Generate Buttons for LLM Options ---
-    options.forEach(optionData => {
-        if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') { console.warn("Skipping invalid option data:", optionData); return; }
+    // Generate buttons with async symbol loading
+    const buttonPromises = options.map(async optionData => {
+        if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') { 
+            console.warn("Skipping invalid option data:", optionData); 
+            return null; 
+        }
         const button = document.createElement('button');
         
-        // Add pictogram support for LLM-generated buttons
-        const pictogram = getPictogramForText(optionData.summary);
-        if (pictogram) {
-            // Create container for pictogram and text
+        // Try to get symbol image first, fall back to pictogram if needed
+        let symbolImageUrl = await getSymbolImageForText(optionData.summary);
+        
+        if (symbolImageUrl) {
+            // Create container for symbol image and text
             const buttonContent = document.createElement('div');
             buttonContent.style.display = 'flex';
             buttonContent.style.flexDirection = 'column';
             buttonContent.style.alignItems = 'center';
             buttonContent.style.gap = '4px';
             
-            const pictogramSpan = document.createElement('span');
-            pictogramSpan.textContent = pictogram;
-            pictogramSpan.style.fontSize = '1.5em';
-            pictogramSpan.style.lineHeight = '1';
+            const imageElement = document.createElement('img');
+            imageElement.src = symbolImageUrl;
+            imageElement.alt = optionData.summary;
+            imageElement.style.width = '40px';
+            imageElement.style.height = '40px';
+            imageElement.style.objectFit = 'contain';
+            imageElement.onerror = () => {
+                // If image fails to load, fall back to pictogram
+                const pictogram = getPictogramForText(optionData.summary);
+                if (pictogram) {
+                    const pictogramSpan = document.createElement('span');
+                    pictogramSpan.textContent = pictogram;
+                    pictogramSpan.style.fontSize = '1.5em';
+                    pictogramSpan.style.lineHeight = '1';
+                    buttonContent.replaceChild(pictogramSpan, imageElement);
+                }
+            };
             
             const textSpan = document.createElement('span');
             textSpan.textContent = optionData.summary;
             textSpan.style.fontSize = '0.9em';
             textSpan.style.lineHeight = '1.2';
             
-            buttonContent.appendChild(pictogramSpan);
+            buttonContent.appendChild(imageElement);
             buttonContent.appendChild(textSpan);
             button.appendChild(buttonContent);
         } else {
-            button.textContent = optionData.summary;
+            // Fall back to pictogram if no symbol image found
+            const pictogram = getPictogramForText(optionData.summary);
+            if (pictogram) {
+                // Create container for pictogram and text
+                const buttonContent = document.createElement('div');
+                buttonContent.style.display = 'flex';
+                buttonContent.style.flexDirection = 'column';
+                buttonContent.style.alignItems = 'center';
+                buttonContent.style.gap = '4px';
+                
+                const pictogramSpan = document.createElement('span');
+                pictogramSpan.textContent = pictogram;
+                pictogramSpan.style.fontSize = '1.5em';
+                pictogramSpan.style.lineHeight = '1';
+                
+                const textSpan = document.createElement('span');
+                textSpan.textContent = optionData.summary;
+                textSpan.style.fontSize = '0.9em';
+                textSpan.style.lineHeight = '1.2';
+                
+                buttonContent.appendChild(pictogramSpan);
+                buttonContent.appendChild(textSpan);
+                button.appendChild(buttonContent);
+            } else {
+                button.textContent = optionData.summary;
+            }
         }
         
         button.dataset.option = optionData.option;
@@ -2150,7 +2342,15 @@ function generateLlmButtons(options) {
         // The #gridContainer button CSS rules will handle the styling
         button.className = '';
 
-
+        return { button, optionData };
+    });
+    
+    // Wait for all buttons to be created
+    const buttonResults = await Promise.all(buttonPromises);
+    const validButtons = buttonResults.filter(result => result !== null);
+    
+    // Add event listeners and append buttons
+    validButtons.forEach(({ button, optionData }) => {
         // Pass the full optionData object, which now includes isLLMGenerated and originalPrompt
         button.addEventListener('click', debounce(async () => {
             if (isAnnouncing) { console.log("Announcement in progress..."); return; }
@@ -2256,7 +2456,7 @@ function generateLlmButtons(options) {
 
                     if (Array.isArray(response)) {
                         if (response.length > 0) {
-                            generateLlmButtons(response); // This will restart scanning
+                            await generateLlmButtons(response); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (array response).");
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
@@ -2266,7 +2466,7 @@ function generateLlmButtons(options) {
                         const newOptions = response.split("\n").map(option => option.replace(/^\s*\d+[\.\)]?\s*|\s*\*+\s*|["']/g, '').trim()).filter(option => option !== "");
                         if (newOptions.length > 0) {
                             const newOptionsObjects = newOptions.map(optText => ({ summary: optText, option: optText }));
-                            generateLlmButtons(newOptionsObjects); // This will restart scanning
+                            await generateLlmButtons(newOptionsObjects); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (string response).");
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
@@ -2454,6 +2654,392 @@ function stopGamepadPolling() {
         cancelAnimationFrame(gamepadPollInterval);
         gamepadPollInterval = null;
         console.log("Stopped gamepad polling.");
+    }
+}
+
+// --- Avatar Manager Modal ---
+async function showAvatarManager() {
+    // Create avatar manager modal
+    const modal = document.createElement('div');
+    modal.id = 'avatar-manager-modal';
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    `;
+
+    const container = document.createElement('div');
+    container.style.cssText = `
+        background-color: white;
+        border-radius: 16px;
+        padding: 1.5rem;
+        max-width: 95vw;
+        max-height: 95vh;
+        overflow-y: auto;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        width: 90vw;
+    `;
+
+    container.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 1rem;">
+            <h2 style="font-size: 1.8rem; font-weight: 600; color: #2d3748; margin: 0;">
+                🧑‍💻 Avatar & Mood Settings
+            </h2>
+            <button id="close-avatar-manager" style="background: #e2e8f0; color: #2d3748; border: none; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 500;">
+                ✕ Close
+            </button>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2rem; height: calc(90vh - 150px);">
+            <!-- Left Panel: Preview and Actions -->
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <div style="background: #f7fafc; padding: 1.5rem; border-radius: 12px; border: 2px solid #e2e8f0; text-align: center;">
+                    <h3 style="margin-top: 0; color: #2d3748; font-size: 1.2rem;">Avatar Preview</h3>
+                    <div id="current-avatar-preview" style="display: flex; justify-content: center; margin: 1rem 0;">
+                        <div style="color: #4a5568;">Loading...</div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem;">
+                        <button id="random-avatar" style="background: #805ad5; color: white; border: none; padding: 0.75rem; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 500;">
+                            🎲 Random
+                        </button>
+                        <button id="reset-avatar" style="background: #e53e3e; color: white; border: none; padding: 0.75rem; border-radius: 8px; cursor: pointer; font-size: 0.9rem; font-weight: 500;">
+                            � Reset
+                        </button>
+                    </div>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <button id="save-current-avatar" style="background: #38a169; color: white; border: none; padding: 0.75rem 1rem; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 500;">
+                        � Save Avatar
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Right Panel: Avatar Customization -->
+            <div style="overflow-y: auto; padding-right: 0.5rem;">
+                <div id="avatar-customization-container">
+                    <!-- Avatar customization controls will be loaded here -->
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.appendChild(container);
+    document.body.appendChild(modal);
+
+    // Initialize avatar selector and set up customization
+    const avatarSelector = window.avatarSelector || new AvatarSelector();
+    window.modalAvatarSelector = avatarSelector;
+
+    // Load user's saved avatar configuration first
+    await avatarSelector.loadAvatarConfig();
+
+    // Set up the full avatar customization interface after loading config
+    setupAvatarCustomization();
+
+    // Random avatar button
+    document.getElementById('random-avatar').addEventListener('click', () => {
+        // Generate random config
+        const options = {
+            topType: ['NoHair', 'ShortHairShortFlat', 'ShortHairShortRound', 'ShortHairSides', 'LongHairBob', 'LongHairStraight', 'LongHairCurly', 'ShortHairTheCaesar', 'LongHairBun'],
+            accessoriesType: ['Blank', 'Sunglasses', 'Prescription01', 'Round', 'Wayfarers'],
+            hairColor: ['Black', 'BrownDark', 'Brown', 'Blonde', 'Red', 'Auburn'],
+            facialHairType: ['Blank', 'BeardLight', 'BeardMedium', 'MoustacheFancy'],
+            facialHairColor: ['Black', 'BrownDark', 'Brown', 'Auburn', 'Blonde', 'Red'],
+            clotheType: ['BlazerShirt', 'Hoodie', 'ShirtCrewNeck', 'GraphicShirt', 'CollarSweater', 'BlazerSweater'],
+            clotheColor: ['Black', 'Blue01', 'Blue02', 'Blue03', 'Gray01', 'Gray02', 'Red', 'White'],
+            skinColor: ['Light', 'Tanned', 'Brown', 'DarkBrown', 'Pale']
+        };
+        
+        const randomConfig = {};
+        Object.keys(options).forEach(category => {
+            const categoryOptions = options[category];
+            randomConfig[category] = categoryOptions[Math.floor(Math.random() * categoryOptions.length)];
+        });
+        randomConfig.avatarStyle = 'Circle';
+        
+        avatarSelector.currentConfig = randomConfig;
+        setupAvatarCustomization(); // Refresh the UI with new config
+    });
+
+    // Reset avatar button
+    document.getElementById('reset-avatar').addEventListener('click', () => {
+        avatarSelector.currentConfig = {
+            avatarStyle: 'Circle',
+            topType: 'ShortHairShortFlat',
+            accessoriesType: 'Blank',
+            hairColor: 'BrownDark',
+            facialHairType: 'Blank',
+            facialHairColor: 'BrownDark',
+            clotheType: 'BlazerShirt',
+            clotheColor: 'BlueGray',
+            skinColor: 'Light'
+        };
+        setupAvatarCustomization(); // Refresh the UI with default config
+    });
+
+    // Save avatar button
+    document.getElementById('save-current-avatar').addEventListener('click', async () => {
+        try {
+            const saved = await avatarSelector.saveAvatarConfig();
+            if (saved) {
+                // Show success message
+                const button = document.getElementById('save-current-avatar');
+                const originalText = button.innerHTML;
+                button.innerHTML = '✅ Saved!';
+                button.style.background = '#38a169';
+                setTimeout(() => {
+                    button.innerHTML = originalText;
+                    button.style.background = '#38a169';
+                }, 2000);
+            } else {
+                alert('Failed to save avatar. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error saving avatar:', error);
+            alert('Error saving avatar. Please try again.');
+        }
+    });
+
+    function setupAvatarCustomization() {
+        const container = document.getElementById('avatar-customization-container');
+        if (!container) return;
+
+        // Get current avatar config or default
+        let currentConfig = avatarSelector.currentConfig || {
+            avatarStyle: 'Circle',
+            topType: 'ShortHairShortFlat',
+            accessoriesType: 'Blank',
+            hairColor: 'BrownDark',
+            facialHairType: 'Blank',
+            facialHairColor: 'BrownDark',
+            clotheType: 'BlazerShirt',
+            clotheColor: 'BlueGray',
+            skinColor: 'Light'
+        };
+        
+        console.log('Setting up avatar customization with config:', currentConfig);
+
+        // Create dropdown-based customization interface like avatar-selector.html
+        container.innerHTML = `
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <!-- Hair Style -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Hair Style</label>
+                    <select id="modal-topType" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="NoHair">No Hair</option>
+                        <option value="Eyepatch">Eyepatch</option>
+                        <option value="Hat">Hat</option>
+                        <option value="Hijab">Hijab</option>
+                        <option value="Turban">Turban</option>
+                        <option value="WinterHat1">Winter Hat 1</option>
+                        <option value="WinterHat2">Winter Hat 2</option>
+                        <option value="WinterHat3">Winter Hat 3</option>
+                        <option value="WinterHat4">Winter Hat 4</option>
+                        <option value="LongHairBigHair">Long Hair Big Hair</option>
+                        <option value="LongHairBob">Long Hair Bob</option>
+                        <option value="LongHairBun">Long Hair Bun</option>
+                        <option value="LongHairCurly">Long Hair Curly</option>
+                        <option value="LongHairCurvy">Long Hair Curvy</option>
+                        <option value="LongHairDreads">Long Hair Dreads</option>
+                        <option value="LongHairFrida">Long Hair Frida</option>
+                        <option value="LongHairFro">Long Hair Fro</option>
+                        <option value="LongHairFroBand">Long Hair Fro Band</option>
+                        <option value="LongHairNotTooLong">Long Hair Not Too Long</option>
+                        <option value="LongHairShavedSides">Long Hair Shaved Sides</option>
+                        <option value="LongHairMiaWallace">Long Hair Mia Wallace</option>
+                        <option value="LongHairStraight">Long Hair Straight</option>
+                        <option value="LongHairStraight2">Long Hair Straight 2</option>
+                        <option value="LongHairStraightStrand">Long Hair Straight Strand</option>
+                        <option value="ShortHairDreads01">Short Hair Dreads 01</option>
+                        <option value="ShortHairDreads02">Short Hair Dreads 02</option>
+                        <option value="ShortHairFrizzle">Short Hair Frizzle</option>
+                        <option value="ShortHairShaggyMullet">Short Hair Shaggy Mullet</option>
+                        <option value="ShortHairShortCurly">Short Hair Short Curly</option>
+                        <option value="ShortHairShortFlat">Short Hair Short Flat</option>
+                        <option value="ShortHairShortRound">Short Hair Short Round</option>
+                        <option value="ShortHairShortWaved">Short Hair Short Waved</option>
+                        <option value="ShortHairSides">Short Hair Sides</option>
+                        <option value="ShortHairTheCaesar">Short Hair The Caesar</option>
+                        <option value="ShortHairTheCaesarSidePart">Short Hair The Caesar Side Part</option>
+                    </select>
+                </div>
+
+                <!-- Hair Color -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Hair Color</label>
+                    <select id="modal-hairColor" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="Auburn">Auburn</option>
+                        <option value="Black">Black</option>
+                        <option value="Blonde">Blonde</option>
+                        <option value="BlondeGolden">Blonde Golden</option>
+                        <option value="Brown">Brown</option>
+                        <option value="BrownDark">Brown Dark</option>
+                        <option value="PastelPink">Pastel Pink</option>
+                        <option value="Platinum">Platinum</option>
+                        <option value="Red">Red</option>
+                        <option value="SilverGray">Silver Gray</option>
+                    </select>
+                </div>
+
+                <!-- Facial Hair -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Facial Hair</label>
+                    <select id="modal-facialHairType" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="Blank">None</option>
+                        <option value="BeardMedium">Beard Medium</option>
+                        <option value="BeardLight">Beard Light</option>
+                        <option value="BeardMajestic">Beard Majestic</option>
+                        <option value="MoustacheFancy">Moustache Fancy</option>
+                        <option value="MoustacheMagnum">Moustache Magnum</option>
+                    </select>
+                </div>
+
+                <!-- Facial Hair Color -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Facial Hair Color</label>
+                    <select id="modal-facialHairColor" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="Auburn">Auburn</option>
+                        <option value="Black">Black</option>
+                        <option value="Blonde">Blonde</option>
+                        <option value="BlondeGolden">Blonde Golden</option>
+                        <option value="Brown">Brown</option>
+                        <option value="BrownDark">Brown Dark</option>
+                        <option value="Platinum">Platinum</option>
+                        <option value="Red">Red</option>
+                    </select>
+                </div>
+
+                <!-- Accessories -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Accessories</label>
+                    <select id="modal-accessoriesType" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="Blank">None</option>
+                        <option value="Kurt">Kurt</option>
+                        <option value="Prescription01">Glasses Prescription 01</option>
+                        <option value="Prescription02">Glasses Prescription 02</option>
+                        <option value="Round">Glasses Round</option>
+                        <option value="Sunglasses">Sunglasses</option>
+                        <option value="Wayfarers">Wayfarers</option>
+                    </select>
+                </div>
+
+                <!-- Clothing -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Clothing</label>
+                    <select id="modal-clotheType" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="BlazerShirt">Blazer Shirt</option>
+                        <option value="BlazerSweater">Blazer Sweater</option>
+                        <option value="CollarSweater">Collar Sweater</option>
+                        <option value="GraphicShirt">Graphic Shirt</option>
+                        <option value="Hoodie">Hoodie</option>
+                        <option value="Overall">Overall</option>
+                        <option value="ShirtCrewNeck">Shirt Crew Neck</option>
+                        <option value="ShirtScoopNeck">Shirt Scoop Neck</option>
+                        <option value="ShirtVNeck">Shirt V Neck</option>
+                    </select>
+                </div>
+
+                <!-- Clothing Color -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Clothing Color</label>
+                    <select id="modal-clotheColor" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="Black">Black</option>
+                        <option value="Blue01">Blue 01</option>
+                        <option value="Blue02">Blue 02</option>
+                        <option value="Blue03">Blue 03</option>
+                        <option value="Gray01">Gray 01</option>
+                        <option value="Gray02">Gray 02</option>
+                        <option value="Heather">Heather</option>
+                        <option value="PastelBlue">Pastel Blue</option>
+                        <option value="PastelGreen">Pastel Green</option>
+                        <option value="PastelOrange">Pastel Orange</option>
+                        <option value="PastelRed">Pastel Red</option>
+                        <option value="PastelYellow">Pastel Yellow</option>
+                        <option value="Pink">Pink</option>
+                        <option value="Red">Red</option>
+                        <option value="White">White</option>
+                    </select>
+                </div>
+
+                <!-- Skin Color -->
+                <div>
+                    <label style="display: block; font-size: 0.9rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem;">Skin Color</label>
+                    <select id="modal-skinColor" style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.9rem; background: white; color: #374151;">
+                        <option value="Tanned">Tanned</option>
+                        <option value="Yellow">Yellow</option>
+                        <option value="Pale">Pale</option>
+                        <option value="Light">Light</option>
+                        <option value="Brown">Brown</option>
+                        <option value="DarkBrown">Dark Brown</option>
+                        <option value="Black">Black</option>
+                    </select>
+                </div>
+            </div>
+        `;
+
+        // Set current values in dropdowns
+        Object.keys(currentConfig).forEach(key => {
+            const select = document.getElementById(`modal-${key}`);
+            if (select && currentConfig[key]) {
+                select.value = currentConfig[key];
+            }
+        });
+
+        // Add event listeners to dropdowns
+        ['topType', 'hairColor', 'facialHairType', 'facialHairColor', 'accessoriesType', 'clotheType', 'clotheColor', 'skinColor'].forEach(configKey => {
+            const select = document.getElementById(`modal-${configKey}`);
+            if (select) {
+                select.addEventListener('change', (e) => {
+                    console.log(`Changed ${configKey} to ${e.target.value}`);
+                    currentConfig[configKey] = e.target.value;
+                    avatarSelector.currentConfig = currentConfig;
+                    console.log('Updated avatarSelector.currentConfig:', avatarSelector.currentConfig);
+                    updateAvatarPreview();
+                });
+            }
+        });
+
+        // Update initial preview
+        updateAvatarPreview();
+    }
+
+    document.getElementById('close-avatar-manager').addEventListener('click', () => {
+        modal.remove();
+        delete window.modalAvatarSelector;
+    });
+
+    // Click outside modal to close
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+            delete window.modalAvatarSelector;
+        }
+    });
+
+    function updateAvatarPreview() {
+        const previewDiv = document.getElementById('current-avatar-preview');
+        if (previewDiv && avatarSelector) {
+            const config = avatarSelector.currentConfig;
+            const params = new URLSearchParams();
+            
+            Object.keys(config).forEach(key => {
+                if (config[key]) {
+                    params.append(key, config[key]);
+                }
+            });
+            
+            const avatarUrl = 'https://avataaars.io/?' + params.toString();
+            previewDiv.innerHTML = `<img src="${avatarUrl}" alt="Current Avatar" style="width: 120px; height: 120px; border-radius: 50%; border: 3px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">`;
+        }
     }
 }
 
