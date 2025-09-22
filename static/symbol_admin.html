@@ -236,7 +236,7 @@
             <h2>🔐 Authentication Status</h2>
             <div id="authStatusContent">
                 <p>⚠️ Authentication required for admin functions</p>
-                <p>Please log in at <a href="/auth.html" target="_blank">Login Page</a> with admin@talkwithbravo.com and return here to use processing features.</p>
+                <p>Please log in at <a href="/static/auth.html" target="_blank">Login Page</a> with admin@talkwithbravo.com and return here to use processing features.</p>
             </div>
         </div>
 
@@ -307,6 +307,7 @@
             loadStatistics();
             loadCategories();
             checkAnalysisStatus();
+            loadSampleSymbols(); // Load some symbols to display
         });
 
         // Check if user is authenticated
@@ -314,50 +315,65 @@
             // Get Firebase ID token from sessionStorage (set by auth.html)
             authToken = sessionStorage.getItem('firebaseIdToken');
             
+            // Debug logging
+            console.log('Checking authentication...');
+            console.log('Token from sessionStorage:', authToken ? 'Found' : 'Not found');
+            console.log('All sessionStorage keys:', Object.keys(sessionStorage));
+            
             // If no token, user isn't authenticated
             if (!authToken) {
-                log('warning', '⚠️  Not authenticated - admin functions will be limited');
-                const analyzeBtn = document.getElementById('analyzeBtn');
-                const processBtn = document.getElementById('processBtn');
-                const authStatusCard = document.getElementById('authStatusCard');
-                if (analyzeBtn) analyzeBtn.disabled = true;
-                if (processBtn) processBtn.disabled = true;
-                if (authStatusCard) authStatusCard.style.display = 'block';
-                updateStatus('error', 'Authentication Required for Admin Functions');
+                log('warning', '⚠️  No authentication token found - admin functions will be limited');
+                showAuthRequired();
             } else {
+                log('info', 'Authentication token found, verifying admin access...');
                 // Verify this is an admin token by making a simple API call
                 verifyAdminAccess();
             }
+        }
+        
+        // Show authentication required state
+        function showAuthRequired() {
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const processBtn = document.getElementById('processBtn');
+            const authStatusCard = document.getElementById('authStatusCard');
+            if (analyzeBtn) analyzeBtn.disabled = true;
+            if (processBtn) processBtn.disabled = true;
+            if (authStatusCard) authStatusCard.style.display = 'block';
+            updateStatus('error', 'Authentication Required for Admin Functions');
         }
 
         // Verify admin access by making an API call
         async function verifyAdminAccess() {
             try {
-                const response = await fetch('/api/symbols/stats', {
+                console.log('Making admin verification call to /api/admin/verify');
+                const response = await fetch('/api/admin/verify', {
                     method: 'GET',
                     headers: getAuthHeaders()
                 });
                 
+                console.log('Admin verification response:', response.status, response.statusText);
+                
                 if (response.ok) {
-                    log('info', '✅ Admin authentication verified - all functions enabled');
+                    const data = await response.json();
+                    log('info', `✅ Admin authentication verified for ${data.admin_email} - all functions enabled`);
                     const analyzeBtn = document.getElementById('analyzeBtn');
                     const processBtn = document.getElementById('processBtn');
                     const authStatusCard = document.getElementById('authStatusCard');
                     if (analyzeBtn) analyzeBtn.disabled = false;
                     if (processBtn) processBtn.disabled = false;
                     if (authStatusCard) authStatusCard.style.display = 'none';
+                } else if (response.status === 401) {
+                    throw new Error(`Authentication failed: Invalid token`);
+                } else if (response.status === 403) {
+                    throw new Error(`Access denied: Admin privileges required`);
                 } else {
-                    throw new Error('Admin verification failed');
+                    console.error('Admin verification failed:', response.status, response.statusText);
+                    throw new Error(`Admin verification failed: ${response.status}`);
                 }
             } catch (error) {
-                log('warning', '⚠️  Admin verification failed - functions will be limited');
-                const analyzeBtn = document.getElementById('analyzeBtn');
-                const processBtn = document.getElementById('processBtn');
-                const authStatusCard = document.getElementById('authStatusCard');
-                if (analyzeBtn) analyzeBtn.disabled = true;
-                if (processBtn) processBtn.disabled = true;
-                if (authStatusCard) authStatusCard.style.display = 'block';
-                updateStatus('error', 'Admin Authentication Required');
+                console.error('Admin verification error:', error);
+                log('warning', `⚠️  Admin verification failed: ${error.message}`);
+                showAuthRequired();
             }
         }
 
@@ -377,7 +393,12 @@
         // Load collection statistics
         async function loadStatistics() {
             try {
-                const response = await fetch('/api/symbols/stats');
+                const response = await retryRequest('/api/symbols/stats');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const data = await response.json();
                 
                 if (data.success && data.statistics) {
@@ -426,6 +447,33 @@
         }
 
         // Run image analysis
+        // Helper function for retrying requests with exponential backoff
+        async function retryRequest(url, options = {}, maxRetries = 3) {
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    
+                    // If it's a 503 (Service Unavailable) or 502 (Bad Gateway), retry
+                    if ((response.status === 503 || response.status === 502) && attempt < maxRetries) {
+                        const delay = Math.min(1000 * Math.pow(2, attempt), 10000); // Cap at 10 seconds
+                        log('warning', `⚠️ Service unavailable (${response.status}), retrying in ${delay}ms... (attempt ${attempt}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    
+                    return response;
+                } catch (error) {
+                    if (attempt < maxRetries) {
+                        const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
+                        log('warning', `⚠️ Network error, retrying in ${delay}ms... (attempt ${attempt}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    throw error;
+                }
+            }
+        }
+
         async function runAnalysis() {
             if (isProcessing) return;
             
@@ -436,14 +484,18 @@
             try {
                 log('info', '🔍 Starting image analysis...');
                 
-                const response = await fetch('/api/symbols/analyze-picom', {
+                const response = await retryRequest('/api/symbols/analyze-picom', {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
                 const result = await response.json();
                 
-                if (response.ok && result.success) {
+                if (result.success) {
                     log('success', `✅ Analysis complete! ${result.message}`);
                     analysisComplete = true;
                     document.getElementById('processBtn').disabled = false;
@@ -482,7 +534,7 @@
                 log('info', '🚀 Starting batch processing...');
                 
                 while (hasMore && isProcessing) {
-                    const response = await fetch('/api/symbols/process-batch', {
+                    const response = await retryRequest('/api/symbols/process-batch', {
                         method: 'POST',
                         headers: getAuthHeaders(),
                         body: JSON.stringify({
@@ -491,9 +543,13 @@
                         })
                     });
                     
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
                     const result = await response.json();
                     
-                    if (response.ok && result.success) {
+                    if (result.success) {
                         processedCount += result.processed_count;
                         startIndex = result.next_start_index;
                         hasMore = result.remaining > 0;
@@ -507,8 +563,8 @@
                             log('warning', `⚠️  ${result.error_count} errors in this batch`);
                         }
                         
-                        // Small delay between batches
-                        await new Promise(resolve => setTimeout(resolve, 500));
+                        // Small delay between batches to avoid overwhelming the service
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                     } else {
                         throw new Error(result.error || 'Processing failed');
                     }
@@ -549,7 +605,7 @@
             try {
                 log('info', `🔍 Searching for: "${query}"`);
                 
-                const response = await fetch(`/api/symbols/search?query=${encodeURIComponent(query)}&limit=8`);
+                const response = await fetch(`/api/symbols/button-search?q=${encodeURIComponent(query)}&limit=8`);
                 const data = await response.json();
                 
                 const container = document.getElementById('searchResults');
@@ -559,16 +615,28 @@
                     data.symbols.forEach(symbol => {
                         const card = document.createElement('div');
                         card.className = 'symbol-card';
+                        
+                        // Show match info for semantic matches
+                        const matchInfo = symbol.matched_term && symbol.matched_term !== query ? 
+                            `<div style="font-size: 0.7rem; color: #0066cc; margin-top: 0.3rem;">📍 Found via: "${symbol.matched_term}" (Score: ${symbol.match_score?.toFixed(1)})</div>` : 
+                            '';
+                        
                         card.innerHTML = `
-                            <div class="symbol-image">🎭</div>
+                            <div class="symbol-image">
+                                <img src="${symbol.image_url}" alt="${symbol.name || 'Symbol'}" 
+                                     style="width: 100%; height: 100%; object-fit: contain;" 
+                                     onerror="this.src='data:image/svg+xml,<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"64\\" height=\\"64\\" viewBox=\\"0 0 64 64\\"><rect width=\\"64\\" height=\\"64\\" fill=\\"%23f0f0f0\\"/><text x=\\"32\\" y=\\"36\\" text-anchor=\\"middle\\" font-family=\\"Arial\\" font-size=\\"24\\">🎭</text></svg>'" />
+                            </div>
                             <div><strong>${symbol.name || 'Unnamed'}</strong></div>
                             <div style="font-size: 0.8rem; color: #666;">${symbol.categories?.join(', ') || 'No categories'}</div>
                             <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${symbol.tags?.slice(0, 3).join(', ') || 'No tags'}</div>
+                            ${matchInfo}
                         `;
                         container.appendChild(card);
                     });
                     
-                    log('success', `✅ Found ${data.total_found} symbols matching "${query}"`);
+                    const searchTypeInfo = data.search_type === 'semantic_match' ? ' (with semantic matching)' : '';
+                    log('success', `✅ Found ${data.total_found} symbols matching "${query}"${searchTypeInfo}`);
                 } else {
                     container.innerHTML = '<div class="symbol-card">No symbols found</div>';
                     log('info', `❌ No symbols found for "${query}"`);
@@ -577,6 +645,81 @@
             } catch (error) {
                 log('error', `❌ Search failed: ${error.message}`);
             }
+        }
+
+        // Load some sample symbols to display on page load
+        async function loadSampleSymbols() {
+            try {
+                log('info', '🎨 Loading sample symbols...');
+                
+                // Try to load some symbols with a common search term
+                const response = await retryRequest(`/api/symbols/button-search?q=animal&limit=8`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                if (data.symbols && data.symbols.length > 0) {
+                    displaySymbols(data.symbols, 'Animal Symbols');
+                } else {
+                    // No animal symbols found, try loading any symbols with another common term
+                    const response2 = await retryRequest(`/api/symbols/button-search?q=happy&limit=8`);
+                    if (!response2.ok) throw new Error(`HTTP ${response2.status}`);
+                    const data2 = await response2.json();
+                    displaySymbols(data2.symbols || [], 'Happy Symbols');
+                }
+            } catch (error) {
+                log('warning', `⚠️ Could not load sample symbols: ${error.message}`);
+                // Show placeholder message
+                const container = document.getElementById('searchResults');
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: #666;">Search for symbols above to view them</div>';
+            }
+        }
+
+        // Helper function to display symbols
+        function displaySymbols(symbols, title) {
+            const container = document.getElementById('searchResults');
+            container.innerHTML = '';
+            
+            if (symbols.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 2rem; color: #666;">No symbols found</div>';
+                return;
+            }
+            
+            // Add title
+            const titleEl = document.createElement('h3');
+            titleEl.textContent = title;
+            titleEl.style.marginBottom = '1rem';
+            container.appendChild(titleEl);
+            
+            symbols.forEach(symbol => {
+                const card = document.createElement('div');
+                card.className = 'symbol-card';
+                
+                // Add semantic match information if available
+                let matchInfo = '';
+                if (symbol.match_score || symbol.matched_term) {
+                    matchInfo = `
+                        <div style="font-size: 0.7rem; color: #28a745; margin-top: 0.5rem;">
+                            ${symbol.matched_term ? `Matched: ${symbol.matched_term}` : ''}
+                            ${symbol.match_score ? ` (Score: ${symbol.match_score})` : ''}
+                        </div>
+                    `;
+                }
+                
+                card.innerHTML = `
+                    <div class="symbol-image">
+                        <img src="${symbol.image_url}" alt="${symbol.name || 'Symbol'}" 
+                             style="width: 100%; height: 100%; object-fit: contain;" 
+                             onerror="this.src='data:image/svg+xml,<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"64\\" height=\\"64\\" viewBox=\\"0 0 64 64\\"><rect width=\\"64\\" height=\\"64\\" fill=\\"%23f0f0f0\\"/><text x=\\"32\\" y=\\"36\\" text-anchor=\\"middle\\" font-family=\\"Arial\\" font-size=\\"24\\">🎭</text></svg>'" />
+                    </div>
+                    <div><strong>${symbol.name || 'Unnamed'}</strong></div>
+                    <div style="font-size: 0.8rem; color: #666;">${symbol.categories?.join(', ') || 'No categories'}</div>
+                    <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${symbol.tags?.slice(0, 3).join(', ') || 'No tags'}</div>
+                    ${matchInfo}
+                `;
+                container.appendChild(card);
+            });
         }
 
         // Update system status

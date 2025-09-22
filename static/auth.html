@@ -415,7 +415,7 @@
                     <label for="newUserDisplayName" class="sr-only">New User Display Name</label>
                     <input type="text" id="newUserDisplayName" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter new user's display name" required>
                 </div>
-                <button id="add-user-button" class="w-full mt-2 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New User</button>
+                <button id="add-user-button" class="w-full mt-2 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
                 <p id="add-user-status" class="text-sm text-center mt-2 h-4"></p>
             </div>
 
@@ -1140,12 +1140,22 @@
                 addUserButton.disabled = true;
 
                 try {
+                    // Check if admin has selected a target account
+                    const adminSelectedAccountId = sessionStorage.getItem('adminSelectedAccountId');
+                    
+                    const headers = {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    };
+                    
+                    // Add admin target account header if applicable
+                    if (adminSelectedAccountId) {
+                        headers['X-Admin-Target-Account'] = adminSelectedAccountId;
+                    }
+                    
                     const response = await fetch('/api/account/add-aac-user', {
                         method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${idToken}`,
-                            'Content-Type': 'application/json'
-                        },
+                        headers: headers,
                         body: JSON.stringify({ display_name: newName })
                     });
 
@@ -1868,6 +1878,7 @@ registerForm.addEventListener('submit', async (e) => {
         });
     })(); // End of IIFE for async setup
     </script>
+    <script src="/static/avatar-selector.js"></script>
     <script src="/static/mood-selection.js"></script>
 </body>
 </html>

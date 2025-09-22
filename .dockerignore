@@ -1,0 +1,76 @@
+# Docker ignore file for a Python/FastAPI project
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-wheel-metadata/
+.installed.cfg
+*.egg-info
+.idea/
+.vscode/
+
+# Node.js (if you use it for frontend dependencies)
+node_modules/
+npm-debug.log
+
+# Build artifacts
+dist/
+build/
+*.egg
+
+# Local files
+.DS_Store
+*.log
+*.db
+*.sqlite3
+my_chroma_db/
+user_data/
+user_docs/
+requirements-local.txt
+APIKEYS.reg
+server - Copy.py.txt
+server - Copy2.py.txt
+server - Copy3.py.txt
+server - Copy4.py.txt
+server copy.py.txt
+server copy5.py.txt
+server copy6.py.txt
+server copy7.py.txt
+server.py.save
+gridpage - Copy.js.txt
+gridpage.js.backup
+gridpage.js.save
+gridpage.js.save.1
+test.txt
+test.wav
+user_info_admin_backup.js
+user_info_admin_fixed.js
+user_info_admin_new.js
+user_info_admin_old.js
+settings.json
+removelockedorientation.js
+cloud-sql-proxy
+exportdb.py
+fix_emojis.py
+listmodels.py
+test_llm_direct.py
+test_llm_gcloud.sh
+test_llm_http.py
+test_llm_recovery.py
+user_vectors.json
+create_test_favorite.py
+config_secure.py
+config.py.template
+birthdays.json
+audio_config.json
+model_config.json
+APIKEYS.reg

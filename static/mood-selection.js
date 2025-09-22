@@ -3,28 +3,28 @@
  * Displays a mood selection interface at session start when enabled
  */
 
-// Predefined mood options with emojis
+// Predefined mood options with emojis and avatar mappings
 const MOOD_OPTIONS = [
-    { name: 'Happy', emoji: '😊' },
-    { name: 'Sad', emoji: '😢' },
-    { name: 'Excited', emoji: '🤩' },
-    { name: 'Calm', emoji: '😌' },
-    { name: 'Angry', emoji: '😠' },
-    { name: 'Silly', emoji: '🤪' },
-    { name: 'Tired', emoji: '😴' },
-    { name: 'Anxious', emoji: '😰' },
-    { name: 'Confused', emoji: '😕' },
-    { name: 'Surprised', emoji: '😲' },
-    { name: 'Proud', emoji: '😎' },
-    { name: 'Worried', emoji: '😟' },
-    { name: 'Cranky', emoji: '😤' },
-    { name: 'Peaceful', emoji: '🕊️' },
-    { name: 'Playful', emoji: '😄' },
-    { name: 'Frustrated', emoji: '😫' },
-    { name: 'Curious', emoji: '🤔' },
-    { name: 'Grateful', emoji: '🙏' },
-    { name: 'Lonely', emoji: '😔' },
-    { name: 'Content', emoji: '😊' }
+    { name: 'Happy', emoji: '😊', avatarEmotion: 'happy' },
+    { name: 'Sad', emoji: '😢', avatarEmotion: 'sad' },
+    { name: 'Excited', emoji: '🤩', avatarEmotion: 'excited' },
+    { name: 'Calm', emoji: '😌', avatarEmotion: 'neutral' },
+    { name: 'Angry', emoji: '😠', avatarEmotion: 'angry' },
+    { name: 'Silly', emoji: '🤪', avatarEmotion: 'laughing' },
+    { name: 'Tired', emoji: '😴', avatarEmotion: 'tired' },
+    { name: 'Anxious', emoji: '😰', avatarEmotion: 'worried' },
+    { name: 'Confused', emoji: '😕', avatarEmotion: 'confused' },
+    { name: 'Surprised', emoji: '😲', avatarEmotion: 'surprised' },
+    { name: 'Proud', emoji: '😎', avatarEmotion: 'proud' },
+    { name: 'Worried', emoji: '😟', avatarEmotion: 'worried' },
+    { name: 'Cranky', emoji: '😤', avatarEmotion: 'angry' },
+    { name: 'Peaceful', emoji: '🕊️', avatarEmotion: 'neutral' },
+    { name: 'Playful', emoji: '😄', avatarEmotion: 'laughing' },
+    { name: 'Frustrated', emoji: '😫', avatarEmotion: 'disgusted' },
+    { name: 'Curious', emoji: '🤔', avatarEmotion: 'thinking' },
+    { name: 'Grateful', emoji: '🙏', avatarEmotion: 'love' },
+    { name: 'Lonely', emoji: '😔', avatarEmotion: 'sad' },
+    { name: 'Content', emoji: '😊', avatarEmotion: 'happy' }
 ];
 
 // Export to global scope for use by other scripts
@@ -50,6 +50,126 @@ class MoodSelection {
         this.gamepadPollInterval = null;
         this.lastGamepadInputTime = 0;
         this.gamepadEnabled = false; // Track if we should handle gamepad input
+        
+        // Avatar generation variables
+        this.baseAvatarConfig = null;
+        this.emotionalCombinations = null;
+        this.useAvatars = true; // Flag to enable/disable avatar integration
+    }
+
+    /**
+     * Initialize avatar generation by loading the base avatar configuration
+     * This method tries to get the current avatar from the avatar selector or uses defaults
+     */
+    async initializeAvatarGeneration() {
+        try {
+            // Try to get base avatar config from avatar selector if available
+            if (window.AvatarSelector && window.avatarSelector) {
+                this.baseAvatarConfig = { ...window.avatarSelector.currentConfig };
+                this.emotionalCombinations = window.avatarSelector.emotionalCombinations;
+                console.log('Using avatar selector configuration for mood buttons');
+            } else {
+                // Try to load avatar config from user data
+                const fetchFunction = window.authenticatedFetch || fetch;
+                try {
+                    const response = await fetchFunction('/api/user-info', {
+                        method: 'GET',
+                        credentials: 'include'
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.avatarConfig) {
+                            this.baseAvatarConfig = data.avatarConfig;
+                            console.log('Loaded avatar configuration from user data for mood buttons');
+                        }
+                    }
+                } catch (error) {
+                    console.log('Could not load avatar config from user data:', error);
+                }
+                
+                // If no saved config, use defaults
+                if (!this.baseAvatarConfig) {
+                    this.baseAvatarConfig = {
+                        avatarStyle: 'Circle',
+                        topType: 'ShortHairShortFlat',
+                        accessoriesType: 'Blank',
+                        hairColor: 'BrownDark',
+                        facialHairType: 'Blank',
+                        facialHairColor: 'BrownDark',
+                        clotheType: 'BlazerShirt',
+                        clotheColor: 'BlueGray',
+                        eyeType: 'Default',
+                        eyebrowType: 'Default',
+                        mouthType: 'Default',
+                        skinColor: 'Light'
+                    };
+                    console.log('Using default avatar configuration for mood buttons');
+                }
+                
+                // Define minimal emotional combinations if avatar selector not available
+                this.emotionalCombinations = [
+                    { name: 'happy', eyeType: 'Happy', eyebrowType: 'Default', mouthType: 'Smile' },
+                    { name: 'sad', eyeType: 'Cry', eyebrowType: 'SadConcerned', mouthType: 'Sad' },
+                    { name: 'angry', eyeType: 'Squint', eyebrowType: 'AngryNatural', mouthType: 'Grimace' },
+                    { name: 'surprised', eyeType: 'Surprised', eyebrowType: 'RaisedExcited', mouthType: 'Disbelief' },
+                    { name: 'excited', eyeType: 'Hearts', eyebrowType: 'RaisedExcited', mouthType: 'Smile' },
+                    { name: 'neutral', eyeType: 'Default', eyebrowType: 'Default', mouthType: 'Default' },
+                    { name: 'confused', eyeType: 'Dizzy', eyebrowType: 'RaisedExcitedNatural', mouthType: 'Concerned' },
+                    { name: 'worried', eyeType: 'Side', eyebrowType: 'SadConcernedNatural', mouthType: 'Concerned' },
+                    { name: 'laughing', eyeType: 'Squint', eyebrowType: 'Default', mouthType: 'Tongue' },
+                    { name: 'proud', eyeType: 'Default', eyebrowType: 'RaisedExcited', mouthType: 'Smile' },
+                    { name: 'tired', eyeType: 'EyeRoll', eyebrowType: 'Default', mouthType: 'Eating' },
+                    { name: 'love', eyeType: 'Hearts', eyebrowType: 'Default', mouthType: 'Twinkle' },
+                    { name: 'thinking', eyeType: 'Side', eyebrowType: 'FlatNatural', mouthType: 'Default' },
+                    { name: 'disgusted', eyeType: 'Side', eyebrowType: 'AngryNatural', mouthType: 'Grimace' }
+                ];
+            }
+        } catch (error) {
+            console.warn('Failed to initialize avatar generation, falling back to emojis:', error);
+            this.useAvatars = false;
+        }
+    }
+
+    /**
+     * Generate avatar URL for a specific mood
+     * @param {string} avatarEmotion - The emotion to apply to the avatar
+     * @returns {string} The avatar URL
+     */
+    generateMoodAvatarURL(avatarEmotion) {
+        if (!this.useAvatars || !this.baseAvatarConfig || !this.emotionalCombinations) {
+            return null;
+        }
+
+        try {
+            const emotionalOverride = this.emotionalCombinations.find(e => e.name === avatarEmotion);
+            if (!emotionalOverride) {
+                console.warn(`Emotional combination not found: ${avatarEmotion}`);
+                return null;
+            }
+
+            const params = new URLSearchParams();
+            const config = { ...this.baseAvatarConfig };
+            
+            // Apply emotional override
+            if (emotionalOverride.eyeType) config.eyeType = emotionalOverride.eyeType;
+            if (emotionalOverride.eyebrowType) config.eyebrowType = emotionalOverride.eyebrowType;
+            if (emotionalOverride.mouthType) config.mouthType = emotionalOverride.mouthType;
+            
+            for (const [key, value] of Object.entries(config)) {
+                if (value) {
+                    params.append(key, value);
+                }
+            }
+            
+            // Always ensure transparent background
+            params.append('background', 'transparent');
+            
+            return `https://avataaars.io/?${params.toString()}`;
+        } catch (error) {
+            console.error('Error generating mood avatar URL:', error);
+            return null;
+        }
     }
 
     /**
@@ -109,7 +229,10 @@ class MoodSelection {
     /**
      * Creates the mood selection interface
      */
-    createMoodInterface() {
+    async createMoodInterface() {
+        // Initialize avatar generation
+        await this.initializeAvatarGeneration();
+        
         // Remove existing overlay if it exists
         this.removeMoodInterface();
 
@@ -136,25 +259,61 @@ class MoodSelection {
         const moodGrid = document.createElement('div');
         moodGrid.className = 'mood-grid';
 
-        // Add mood buttons
-        MOOD_OPTIONS.forEach(mood => {
+        // Add mood buttons with avatar integration
+        for (const mood of MOOD_OPTIONS) {
             const button = document.createElement('button');
             button.className = 'mood-button';
             button.setAttribute('data-mood', mood.name);
             
-            const emoji = document.createElement('div');
-            emoji.className = 'mood-emoji';
-            emoji.textContent = mood.emoji;
+            // Create avatar container
+            const avatarContainer = document.createElement('div');
+            avatarContainer.className = 'mood-avatar-container';
+            
+            // Try to generate avatar first
+            if (this.useAvatars && mood.avatarEmotion) {
+                const avatarUrl = this.generateMoodAvatarURL(mood.avatarEmotion);
+                if (avatarUrl) {
+                    const avatarImg = document.createElement('img');
+                    avatarImg.className = 'mood-avatar';
+                    avatarImg.src = avatarUrl;
+                    avatarImg.alt = mood.name;
+                    
+                    // Fallback to emoji on avatar load error
+                    avatarImg.onerror = () => {
+                        console.warn(`Failed to load avatar for ${mood.name}, falling back to emoji`);
+                        avatarContainer.innerHTML = '';
+                        const emoji = document.createElement('div');
+                        emoji.className = 'mood-emoji';
+                        emoji.textContent = mood.emoji;
+                        avatarContainer.appendChild(emoji);
+                    };
+                    
+                    avatarContainer.appendChild(avatarImg);
+                } else {
+                    // Fallback to emoji if avatar URL generation failed
+                    const emoji = document.createElement('div');
+                    emoji.className = 'mood-emoji';
+                    emoji.textContent = mood.emoji;
+                    avatarContainer.appendChild(emoji);
+                }
+            } else {
+                // Use emoji if avatars disabled or no avatar emotion mapped
+                const emoji = document.createElement('div');
+                emoji.className = 'mood-emoji';
+                emoji.textContent = mood.emoji;
+                avatarContainer.appendChild(emoji);
+            }
             
             const name = document.createElement('div');
+            name.className = 'mood-name';
             name.textContent = mood.name;
             
-            button.appendChild(emoji);
+            button.appendChild(avatarContainer);
             button.appendChild(name);
             
             button.addEventListener('click', () => this.selectMood(mood.name, button));
             moodGrid.appendChild(button);
-        });
+        }
 
         // Create action buttons (only Skip button now)
         const actions = document.createElement('div');
@@ -332,9 +491,16 @@ class MoodSelection {
             return;
         }
 
+        // Speak initial prompt
+        this.speakText("How are you feeling today?");
+
         this.currentButtonIndex = 0;
         this.isScanning = true;
-        this.scanStep();
+        
+        // Delay first scan step to allow initial prompt to finish
+        setTimeout(() => {
+            this.scanStep();
+        }, 2000);
     }
 
     /**
@@ -406,7 +572,7 @@ class MoodSelection {
         let textToSpeak;
         if (button.classList.contains('mood-button')) {
             const moodName = button.getAttribute('data-mood');
-            textToSpeak = `Mood: ${moodName}`;
+            textToSpeak = moodName; // Just say the mood name without "Mood:" prefix
         } else if (button.classList.contains('mood-skip-button')) {
             textToSpeak = 'Skip mood selection';
         } else {
@@ -427,6 +593,24 @@ class MoodSelection {
         }
 
         console.log('Scanning:', textToSpeak);
+    }
+
+    /**
+     * Speak text using speech synthesis
+     */
+    speakText(text) {
+        if ('speechSynthesis' in window && text) {
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.8;
+            utterance.pitch = 1;
+            utterance.volume = 0.8;
+            
+            window.speechSynthesis.speak(utterance);
+        }
+        console.log('Speaking:', text);
     }
 
     /**

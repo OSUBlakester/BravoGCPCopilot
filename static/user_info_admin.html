@@ -135,8 +135,9 @@
             try {
                 const response = await fetch('/api/frontend-config');
                 if (!response.ok) throw new Error(`Server error (${response.status})`);
-                firebaseConfig = await response.json();
-                if (!firebaseConfig.apiKey) throw new Error('Invalid config from server.');
+                const configData = await response.json();
+                firebaseConfig = configData.firebase_config || configData;
+                if (!firebaseConfig || !firebaseConfig.apiKey) throw new Error('Invalid config from server.');
             } catch (error) {
                 console.error('Fatal: Could not load application configuration.', error);
                 document.body.innerHTML = `<div style="padding: 2rem; text-align: center; color: red; font-family: sans-serif;">Failed to load application configuration. Please refresh the page.</div>`;
