@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Games</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/static/splash-screen.css">
+    <style>
+        /* --- Basic Body Style --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f7f6;
+        }
+
+        /* --- Admin Toolbar Styles --- */
+        .admin-toolbar {
+            background-color: #ffffff;
+            padding: 0.25rem 0.5rem;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        .admin-toolbar button {
+            padding: 0.25rem 0.5rem;
+            border: 1px solid #ccc;
+            background-color: #f8f9fa;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .admin-toolbar button:hover {
+            background-color: #e9ecef;
+            border-color: #adb5bd;
+        }
+
+        /* --- Page Banner Styles --- */
+        .page-banner {
+            background-color: #002244;
+            color: #FB4F14;
+            padding: 0.75em 1.5em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .page-banner h1 {
+            margin: 0;
+            font-size: 1.75em;
+            font-weight: 500;
+            text-align: left;
+        }
+
+        /* --- Game Container Styles --- */
+        .game-container {
+            max-width: 1200px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+
+        /* --- Game Menu Styles --- */
+        .game-menu {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .game-card {
+            background: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+        }
+
+        .game-card:hover {
+            border-color: #FB4F14;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .game-card i {
+            font-size: 3rem;
+            color: #FB4F14;
+            margin-bottom: 1rem;
+        }
+
+        .game-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #002244;
+        }
+
+        .game-card p {
+            color: #666;
+            line-height: 1.5;
+        }
+
+        /* --- Game Grid Styles --- */
+        .game-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .game-button {
+            background: white;
+            border: 3px solid #ddd;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #002244;
+        }
+
+        .game-button:hover {
+            border-color: #FB4F14;
+            background-color: #fff5f3;
+            transform: translateY(-2px);
+        }
+
+        .game-button.selected {
+            border-color: #FB4F14;
+            background-color: #FB4F14;
+            color: white;
+        }
+
+        .game-button.scanning {
+            border-color: #fbbf24;
+            background-color: #fef3c7;
+            animation: pulse 1s infinite;
+        }
+
+        .game-button i {
+            display: block;
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: inherit;
+        }
+
+        /* --- Game Status Styles --- */
+        .game-status {
+            background: white;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .game-status h2 {
+            color: #002244;
+            margin-bottom: 1rem;
+        }
+
+        .game-status .status-text {
+            font-size: 1.1rem;
+            color: #666;
+            margin-bottom: 1rem;
+        }
+
+        .game-status .counter {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #FB4F14;
+        }
+
+        /* --- Question History Styles --- */
+        .question-history {
+            background: white;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .question-history h3 {
+            color: #002244;
+            margin-bottom: 1rem;
+        }
+
+        .qa-item {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .qa-item:last-child {
+            border-bottom: none;
+        }
+
+        .qa-question {
+            font-weight: 500;
+            color: #002244;
+        }
+
+        .qa-answer {
+            color: #FB4F14;
+            font-weight: bold;
+        }
+
+        /* --- Action Buttons --- */
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            margin: 2rem 0;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .action-button {
+            background: #FB4F14;
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            padding: 1rem 2rem;
+            font-size: 1.1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .action-button:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
+        }
+
+        .action-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .action-button.secondary {
+            background: white;
+            color: #002244;
+            border: 2px solid #002244;
+        }
+
+        .action-button.secondary:hover {
+            background: #002244;
+            color: white;
+        }
+
+        /* --- Back Button --- */
+        .back-button {
+            position: fixed;
+            bottom: 2rem;
+            left: 2rem;
+            background: #002244;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 1rem 1.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+        }
+
+        .back-button:hover {
+            background: #1e3a8a;
+            transform: translateY(-2px);
+        }
+
+        /* --- Listening Indicator --- */
+        .listening-indicator {
+            background: #22c55e;
+            color: white;
+            border-radius: 1rem;
+            padding: 1rem;
+            text-align: center;
+            margin: 1rem 0;
+            animation: pulse 2s infinite;
+        }
+
+        /* --- Loading States --- */
+        .loading {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .loading i {
+            font-size: 3rem;
+            color: #FB4F14;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* --- Hidden State --- */
+        .hidden {
+            display: none !important;
+        }
+
+        /* --- Error States --- */
+        .error-state {
+            background: #fee2e2;
+            border: 2px solid #fca5a5;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            text-align: center;
+            margin: 1rem 0;
+        }
+
+        .error-state i {
+            font-size: 2rem;
+            color: #dc2626;
+            margin-bottom: 1rem;
+        }
+
+        .error-state h3 {
+            color: #dc2626;
+            margin-bottom: 0.5rem;
+        }
+
+        .error-state p {
+            color: #7f1d1d;
+        }
+    </style>
+</head>
+<body>
+    <!-- Splash Screen -->
+    <div id="splashScreen" class="splash-screen">
+        <div class="splash-content">
+            <i class="fas fa-gamepad" style="font-size: 4rem; color: #FB4F14; margin-bottom: 1rem;"></i>
+            <h2>Loading Games...</h2>
+        </div>
+    </div>
+
+    <!-- Page Banner -->
+    <div class="page-banner">
+        <h1>🎮 Games</h1>
+        <div class="admin-toolbar">
+            <!-- Admin toolbar content can be added here -->
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="mainContent" class="game-container">
+        
+        <!-- Game Menu (Initial View) -->
+        <div id="gameMenu" class="game-menu">
+            <div class="game-card" onclick="startTwentyQuestions()">
+                <i class="fas fa-question-circle"></i>
+                <h3>20 Questions</h3>
+                <p>Play the classic guessing game! One player thinks of something and the other tries to guess it by asking yes or no questions.</p>
+            </div>
+            
+            <!-- Future games can be added here -->
+            <div class="game-card" style="opacity: 0.5; cursor: not-allowed;">
+                <i class="fas fa-puzzle-piece"></i>
+                <h3>More Games</h3>
+                <p>Additional games coming soon! Stay tuned for more fun activities.</p>
+            </div>
+        </div>
+
+        <!-- 20 Questions Game View -->
+        <div id="twentyQuestionsGame" class="hidden">
+            
+            <!-- Game Status -->
+            <div id="gameStatus" class="game-status">
+                <h2 id="gameTitle">20 Questions</h2>
+                <div id="statusText" class="status-text">Choose how you want to play!</div>
+                <div id="gameCounter" class="counter"></div>
+            </div>
+
+            <!-- Role Selection -->
+            <div id="roleSelection" class="game-grid">
+                <div class="game-button" onclick="selectRole('ask')">
+                    <i class="fas fa-user-friends"></i>
+                    I ask the questions
+                </div>
+                <div class="game-button" onclick="selectRole('answer')">
+                    <i class="fas fa-lightbulb"></i>
+                    You ask the questions
+                </div>
+            </div>
+
+            <!-- Category Selection -->
+            <div id="categorySelection" class="game-grid hidden">
+                <div class="game-button" onclick="selectCategory('person')">
+                    <i class="fas fa-user"></i>
+                    Person
+                </div>
+                <div class="game-button" onclick="selectCategory('place')">
+                    <i class="fas fa-map-marker-alt"></i>
+                    Place
+                </div>
+                <div class="game-button" onclick="selectCategory('thing')">
+                    <i class="fas fa-cube"></i>
+                    Thing
+                </div>
+            </div>
+
+            <!-- Options Selection (for questions, guesses, or P/P/T options) -->
+            <div id="optionsSelection" class="game-grid hidden">
+                <!-- Options will be populated dynamically -->
+            </div>
+
+            <!-- Question History -->
+            <div id="questionHistory" class="question-history hidden">
+                <h3>Questions Asked:</h3>
+                <div id="qaList">
+                    <!-- Q&A pairs will be added here -->
+                </div>
+            </div>
+
+            <!-- Listening Indicator -->
+            <div id="listeningIndicator" class="listening-indicator hidden">
+                <i class="fas fa-microphone"></i>
+                <div>Listening...</div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loadingState" class="loading hidden">
+                <i class="fas fa-spinner"></i>
+                <div>Generating options...</div>
+            </div>
+
+            <!-- Error State -->
+            <div id="errorState" class="error-state hidden">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Oops!</h3>
+                <p id="errorMessage">Something went wrong. Please try again.</p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div id="actionButtons" class="action-buttons hidden">
+                <button id="askAnotherBtn" class="action-button" onclick="askAnother()">Ask Another Question</button>
+                <button id="makeGuessBtn" class="action-button" onclick="makeGuess()">Make a Guess</button>
+                <button id="newGameBtn" class="action-button secondary" onclick="newGame()">New Game</button>
+                <button id="exitGameBtn" class="action-button secondary" onclick="exitGame()">Exit Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Back Button -->
+    <button class="back-button" onclick="goBack()">
+        <i class="fas fa-arrow-left"></i> Back
+    </button>
+
+    <!-- Include JavaScript -->
+    <script src="/static/splash-screen.js"></script>
+    
+    <script>
+        // Authentication variables (same pattern as gridpage.js)
+        let currentAacUserId = null;
+        let firebaseIdToken = null;
+        const AAC_USER_ID_SESSION_KEY = "currentAacUserId";
+        const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
+        
+        // Game state variables
+        let currentGame = null;
+        let gameState = {
+            role: null, // 'ask' or 'answer'
+            category: null, // 'person', 'place', 'thing'
+            selectedItem: null, // The item being guessed (for 'answer' role)
+            askedQuestions: [], // Array of {question, answer} objects
+            questionCount: 0,
+            guessCount: 0,
+            maxQuestions: 20,
+            maxGuesses: 3,
+            wakeWord: 'bravo', // Will be loaded from settings
+            isListening: false,
+            currentPhase: 'menu' // 'menu', 'role', 'category', 'ready', 'playing', 'guessing', 'finished'
+        };
+
+        // Speech recognition setup
+        let recognition = null;
+        let isRecognitionActive = false;
+        
+        // Scanning system
+        let scanningSystem = {
+            isScanning: false,
+            currentContainer: null,
+            currentIndex: 0,
+            buttons: [],
+            interval: null,
+            scanDelay: 2000, // 2 seconds per button
+            restartDelay: 500
+        };
+
+        // Authenticated fetch function (same as other pages)
+        async function authenticatedFetch(url, options = {}) {
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.error("Authentication: Firebase ID Token or AAC User ID not found. Redirecting to login.");
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                throw new Error("Authentication required.");
+            }
+
+            const headers = {
+                'Authorization': `Bearer ${firebaseIdToken}`,
+                'X-User-ID': currentAacUserId,
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            const response = await fetch(url, { ...options, headers });
+
+            if (response.status === 401 || response.status === 403) {
+                console.warn(`Authentication failed (${response.status}) for ${url}. Redirecting to login.`);
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                throw new Error("Authentication failed");
+            }
+
+            return response;
+        }
+
+        // Initialize user context (same pattern as other pages)
+        async function initializeUserContext() {
+            console.log('initializeUserContext: Starting initialization...');
+            
+            firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+            currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.log("No Firebase ID Token or AAC User ID found in session. Redirecting to auth.html.");
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                return false;
+            }
+            
+            console.log(`User context initialized. AAC User ID: ${currentAacUserId}`);
+            return true;
+        }
+
+        // Initialize page when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Games page initializing...');
+            initializeGamesPage();
+        });
+
+        // Initialize the games page
+        async function initializeGamesPage() {
+            try {
+                // Initialize authentication
+                const userReady = await initializeUserContext();
+                if (!userReady) {
+                    return; // Redirection already handled
+                }
+                
+                // Load user settings for wake word
+                await loadUserSettings();
+                
+                // Initialize speech recognition
+                initializeSpeechRecognition();
+                
+                // Hide splash screen
+                hideSplashScreen();
+                
+            } catch (error) {
+                console.error('Error initializing games page:', error);
+                showError('Failed to initialize games. Please refresh the page.');
+                hideSplashScreen();
+            }
+        }
+
+        // Load user settings
+        async function loadUserSettings() {
+            try {
+                const response = await authenticatedFetch('/api/settings');
+                if (response.ok) {
+                    const settings = await response.json();
+                    gameState.wakeWord = (settings.wakeWordInterjection + ' ' + settings.wakeWordName).toLowerCase();
+                    console.log('Wake word loaded:', gameState.wakeWord);
+                }
+            } catch (error) {
+                console.error('Error loading user settings:', error);
+                // Use default wake word
+                gameState.wakeWord = 'hey bravo';
+            }
+        }
+
+        // Initialize speech recognition
+        function initializeSpeechRecognition() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                recognition.onstart = function() {
+                    console.log('Speech recognition started');
+                    isRecognitionActive = true;
+                    showListening();
+                };
+                
+                recognition.onresult = function(event) {
+                    const transcript = event.results[0][0].transcript.toLowerCase().trim();
+                    console.log('Speech recognized:', transcript);
+                    handleSpeechResult(transcript);
+                };
+                
+                recognition.onerror = function(event) {
+                    console.error('Speech recognition error:', event.error);
+                    hideListening();
+                    isRecognitionActive = false;
+                    
+                    // Auto-restart for certain phases
+                    if (gameState.currentPhase === 'ready' || 
+                        gameState.currentPhase === 'awaiting_wake_word' ||
+                        gameState.currentPhase === 'awaiting_answer') {
+                        setTimeout(() => {
+                            if (gameState.currentPhase === 'ready' || 
+                                gameState.currentPhase === 'awaiting_wake_word' ||
+                                gameState.currentPhase === 'awaiting_answer') {
+                                startListening();
+                            }
+                        }, 1500);
+                    }
+                };
+                
+                recognition.onend = function() {
+                    console.log('Speech recognition ended');
+                    hideListening();
+                    isRecognitionActive = false;
+                    
+                    // Auto-restart for certain phases
+                    if (gameState.currentPhase === 'ready' || 
+                        gameState.currentPhase === 'awaiting_wake_word' ||
+                        gameState.currentPhase === 'awaiting_answer') {
+                        setTimeout(() => {
+                            if (gameState.currentPhase === 'ready' || 
+                                gameState.currentPhase === 'awaiting_wake_word' ||
+                                gameState.currentPhase === 'awaiting_answer') {
+                                startListening();
+                            }
+                        }, 1000);
+                    }
+                };
+            } else {
+                console.warn('Speech recognition not supported in this browser');
+            }
+        }
+
+        // Handle speech recognition results
+        function handleSpeechResult(transcript) {
+            hideListening();
+            
+            // Check for wake word during scanning
+            if (scanningSystem.isScanning && 
+                (transcript.includes(gameState.wakeWord.replace(' ', '')) || 
+                 transcript.includes(gameState.wakeWord))) {
+                selectCurrentScannedButton();
+                return;
+            }
+            
+            if (gameState.currentPhase === 'ready') {
+                // Waiting for "ready"
+                if (transcript.includes('ready')) {
+                    proceedAfterReady();
+                } else {
+                    announce("I'm waiting for you to say 'ready'");
+                    // Don't restart here - let the onend handler do it
+                }
+            } else if (gameState.currentPhase === 'awaiting_answer') {
+                // Waiting for yes/no answer
+                if (transcript.includes('yes')) {
+                    handleAnswer('Yes');
+                } else if (transcript.includes('no')) {
+                    handleAnswer('No');
+                } else {
+                    announce("Please say 'yes' or 'no'");
+                    // Restart listening after a delay
+                    setTimeout(() => {
+                        if (gameState.currentPhase === 'awaiting_answer') {
+                            startListening();
+                        }
+                    }, 2000);
+                }
+            } else if (gameState.currentPhase === 'awaiting_wake_word') {
+                // Waiting for wake word
+                if (transcript.includes(gameState.wakeWord.replace(' ', '')) || 
+                    transcript.includes(gameState.wakeWord)) {
+                    handleWakeWord();
+                } else {
+                    // Keep listening for wake word silently
+                    setTimeout(() => {
+                        if (gameState.currentPhase === 'awaiting_wake_word') {
+                            startListening();
+                        }
+                    }, 1000);
+                }
+            } else if (gameState.currentPhase === 'listening_for_intent') {
+                // Waiting for "question" or "guess"
+                if (transcript.includes('question')) {
+                    handlePlayerIntent('question');
+                } else if (transcript.includes('guess')) {
+                    handlePlayerIntent('guess');
+                } else {
+                    announce("Do you have a question or guess?");
+                    // Restart listening after a delay
+                    setTimeout(() => {
+                        if (gameState.currentPhase === 'listening_for_intent') {
+                            startListening();
+                        }
+                    }, 2000);
+                }
+            } else if (gameState.currentPhase === 'listening_for_question') {
+                // Listening for the actual question
+                handlePlayerQuestion(transcript);
+            } else if (gameState.currentPhase === 'listening_for_guess') {
+                // Listening for the actual guess
+                handlePlayerGuess(transcript);
+            } else if (gameState.currentPhase === 'awaiting_result') {
+                // Waiting for "right" or "wrong"
+                if (transcript.includes('right') || transcript.includes('correct')) {
+                    handleGuessResult(true);
+                } else if (transcript.includes('wrong') || transcript.includes('incorrect')) {
+                    handleGuessResult(false);
+                } else {
+                    announce("Please say 'right' or 'wrong'");
+                    // Restart listening after a delay
+                    setTimeout(() => {
+                        if (gameState.currentPhase === 'awaiting_result') {
+                            startListening();
+                        }
+                    }, 2000);
+                }
+            }
+        }
+
+        // Start listening for speech
+        function startListening() {
+            if (recognition && !isRecognitionActive) {
+                try {
+                    recognition.start();
+                } catch (error) {
+                    console.error('Error starting speech recognition:', error);
+                    // Retry after a short delay
+                    setTimeout(() => {
+                        if (!isRecognitionActive && 
+                            (gameState.currentPhase === 'ready' || 
+                             gameState.currentPhase === 'awaiting_wake_word' ||
+                             gameState.currentPhase === 'awaiting_answer')) {
+                            startListening();
+                        }
+                    }, 1000);
+                }
+            }
+        }
+
+        // Scanning System Functions
+        function startScanning(containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            scanningSystem.currentContainer = container;
+            scanningSystem.buttons = Array.from(container.querySelectorAll('.game-button'));
+            scanningSystem.currentIndex = 0;
+            scanningSystem.isScanning = true;
+            
+            if (scanningSystem.buttons.length === 0) return;
+            
+            // Start scanning cycle
+            scanNextButton();
+        }
+
+        function scanNextButton() {
+            if (!scanningSystem.isScanning || scanningSystem.buttons.length === 0) return;
+            
+            // Remove scanning class from all buttons
+            scanningSystem.buttons.forEach(btn => {
+                btn.classList.remove('scanning');
+            });
+            
+            // Add scanning class to current button
+            const currentButton = scanningSystem.buttons[scanningSystem.currentIndex];
+            if (currentButton) {
+                currentButton.classList.add('scanning');
+            }
+            
+            // Move to next button
+            scanningSystem.currentIndex = (scanningSystem.currentIndex + 1) % scanningSystem.buttons.length;
+            
+            // Schedule next scan
+            scanningSystem.interval = setTimeout(scanNextButton, scanningSystem.scanDelay);
+        }
+
+        function stopScanning() {
+            scanningSystem.isScanning = false;
+            if (scanningSystem.interval) {
+                clearTimeout(scanningSystem.interval);
+                scanningSystem.interval = null;
+            }
+            
+            // Remove scanning class from all buttons
+            if (scanningSystem.buttons) {
+                scanningSystem.buttons.forEach(btn => {
+                    btn.classList.remove('scanning');
+                });
+            }
+        }
+
+        function selectCurrentScannedButton() {
+            if (!scanningSystem.isScanning || scanningSystem.buttons.length === 0) return;
+            
+            // Get the currently scanning button (previous index since we increment after highlighting)
+            const currentIndex = (scanningSystem.currentIndex - 1 + scanningSystem.buttons.length) % scanningSystem.buttons.length;
+            const currentButton = scanningSystem.buttons[currentIndex];
+            
+            if (currentButton) {
+                stopScanning();
+                currentButton.click();
+            }
+        }
+
+        // Show/hide listening indicator
+        function showListening() {
+            document.getElementById('listeningIndicator').classList.remove('hidden');
+        }
+
+        function hideListening() {
+            document.getElementById('listeningIndicator').classList.add('hidden');
+        }
+
+        // Announce text using speech synthesis
+        function announce(text) {
+            console.log('Announcing:', text);
+            
+            if ('speechSynthesis' in window) {
+                // Cancel any ongoing speech
+                speechSynthesis.cancel();
+                
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 0.9;
+                utterance.pitch = 1.0;
+                utterance.volume = 1.0;
+                
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        // Start 20 Questions game
+        function startTwentyQuestions() {
+            currentGame = '20_questions';
+            gameState = {
+                role: null,
+                category: null,
+                selectedItem: null,
+                askedQuestions: [],
+                questionCount: 0,
+                guessCount: 0,
+                maxQuestions: 20,
+                maxGuesses: 3,
+                wakeWord: gameState.wakeWord,
+                isListening: false,
+                currentPhase: 'role'
+            };
+            
+            // Hide menu and show game
+            document.getElementById('gameMenu').classList.add('hidden');
+            document.getElementById('twentyQuestionsGame').classList.remove('hidden');
+            
+            // Show role selection
+            document.getElementById('statusText').textContent = 'Choose how you want to play:';
+            document.getElementById('roleSelection').classList.remove('hidden');
+            
+            announce("Let's play 20 questions!");
+        }
+
+        // Select game role
+        function selectRole(role) {
+            gameState.role = role;
+            
+            // Hide role selection
+            document.getElementById('roleSelection').classList.add('hidden');
+            
+            if (role === 'ask') {
+                // User will ask questions - skip category selection, go straight to ready
+                gameState.currentPhase = 'ready';
+                gameState.category = 'thing'; // Default to 'thing', LLM will ask "Is it a person?" etc.
+                document.getElementById('statusText').textContent = 'Say "ready" when you have selected something for me to guess';
+                announce('Say "ready" when you have selected something for me to guess');
+                
+                // Start listening for "ready"
+                setTimeout(() => {
+                    startListening();
+                }, 2000);
+                
+            } else {
+                // User will answer questions - show category selection with scanning
+                gameState.currentPhase = 'category';
+                document.getElementById('statusText').textContent = 'What type of thing are you thinking of?';
+                document.getElementById('categorySelection').classList.remove('hidden');
+                
+                // Start scanning for category selection
+                startScanning('categorySelection');
+            }
+        }
+
+        // Select category
+        function selectCategory(category) {
+            gameState.category = category;
+            
+            // Stop scanning
+            stopScanning();
+            
+            // Hide category selection
+            document.getElementById('categorySelection').classList.add('hidden');
+            
+            if (gameState.role === 'ask') {
+                // This path should not be reached since we skip category for 'ask' role
+                // But just in case, handle it
+                gameState.currentPhase = 'ready';
+                document.getElementById('statusText').textContent = 'Say "ready" when you have selected your ' + category;
+                announce('Say "ready" when you have selected your ' + category);
+                
+                // Start listening for "ready"
+                setTimeout(() => {
+                    startListening();
+                }, 2000);
+                
+            } else {
+                // User will answer questions - show P/P/T options
+                gameState.currentPhase = 'selecting';
+                loadGameOptions();
+            }
+        }
+
+        // Proceed after user says "ready"
+        async function proceedAfterReady() {
+            gameState.currentPhase = 'playing';
+            document.getElementById('statusText').textContent = 'Let me think of some questions...';
+            
+            // Generate first set of questions
+            await loadQuestions();
+        }
+
+        // Load game options (person/place/thing choices)
+        async function loadGameOptions() {
+            showLoading();
+            
+            try {
+                const response = await authenticatedFetch('/api/games/options', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        game_type: '20_questions',
+                        category: gameState.category,
+                        request_different: false
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Game options loaded:', data);
+                
+                hideLoading();
+                displayOptions(data.options, 'select');
+                
+                // Start scanning for selection
+                setTimeout(() => {
+                    startScanning('optionsSelection');
+                    startListening(); // Also listen for wake word
+                }, 500);
+                
+            } catch (error) {
+                console.error('Error loading game options:', error);
+                hideLoading();
+                showError('Failed to load options. Please try again.');
+            }
+        }
+
+        // Load questions for the game
+        async function loadQuestions() {
+            showLoading();
+            
+            try {
+                const response = await authenticatedFetch('/api/games/questions', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        game_type: '20_questions',
+                        category: gameState.category,
+                        asked_questions: gameState.askedQuestions,
+                        question_count: gameState.questionCount
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Questions loaded:', data);
+                
+                hideLoading();
+                displayOptions(data.questions, 'question');
+                updateQuestionCounter();
+                
+            } catch (error) {
+                console.error('Error loading questions:', error);
+                hideLoading();
+                showError('Failed to load questions. Please try again.');
+            }
+        }
+
+        // Load guess options
+        async function loadGuesses() {
+            showLoading();
+            
+            try {
+                const response = await authenticatedFetch('/api/games/guesses', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        game_type: '20_questions',
+                        category: gameState.category,
+                        asked_questions: gameState.askedQuestions,
+                        guess_count: gameState.guessCount
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Guesses loaded:', data);
+                
+                hideLoading();
+                displayOptions(data.guesses, 'guess');
+                
+            } catch (error) {
+                console.error('Error loading guesses:', error);
+                hideLoading();
+                showError('Failed to load guesses. Please try again.');
+            }
+        }
+
+        // Display options (questions, guesses, or selections)
+        function displayOptions(options, type) {
+            const container = document.getElementById('optionsSelection');
+            container.innerHTML = '';
+            container.classList.remove('hidden');
+            
+            // Add the main options
+            options.forEach((option, index) => {
+                const button = document.createElement('div');
+                button.className = 'game-button';
+                button.onclick = () => handleOptionClick(option, type);
+                
+                if (type === 'question') {
+                    button.innerHTML = `<i class="fas fa-question"></i>${option}`;
+                } else if (type === 'guess') {
+                    button.innerHTML = `<i class="fas fa-lightbulb"></i>${option}`;
+                } else if (type === 'select') {
+                    button.innerHTML = `<i class="fas fa-star"></i>${option}`;
+                }
+                
+                container.appendChild(button);
+            });
+            
+            // Add "Something Else" button
+            const somethingElseButton = document.createElement('div');
+            somethingElseButton.className = 'game-button';
+            somethingElseButton.onclick = () => handleSomethingElse(type);
+            somethingElseButton.innerHTML = `<i class="fas fa-sync-alt"></i>Something Else`;
+            container.appendChild(somethingElseButton);
+            
+            // Add "Exit Game" button
+            const exitButton = document.createElement('div');
+            exitButton.className = 'game-button';
+            exitButton.style.backgroundColor = '#dc2626';
+            exitButton.style.color = 'white';
+            exitButton.onclick = () => exitGame();
+            exitButton.innerHTML = `<i class="fas fa-times"></i>Exit Game`;
+            container.appendChild(exitButton);
+            
+            // Update status text based on type
+            if (type === 'question') {
+                document.getElementById('statusText').textContent = `Questions remaining: ${gameState.maxQuestions - gameState.questionCount}`;
+            } else if (type === 'guess') {
+                document.getElementById('statusText').textContent = `Guesses remaining: ${gameState.maxGuesses - gameState.guessCount}`;
+            } else if (type === 'select') {
+                document.getElementById('statusText').textContent = `Choose your ${gameState.category}:`;
+            }
+            
+            // Start scanning and listening after options are displayed
+            setTimeout(() => {
+                startScanning('optionsSelection');
+                startListening(); // Listen for wake word to select
+            }, 500);
+        }
+
+        // Handle option click
+        function handleOptionClick(option, type) {
+            // Stop scanning when option is selected
+            stopScanning();
+            
+            if (type === 'question') {
+                askQuestion(option);
+            } else if (type === 'guess') {
+                makeGuessAttempt(option);
+            } else if (type === 'select') {
+                selectItem(option);
+            }
+        }
+
+        // Handle "Something Else" button
+        function handleSomethingElse(type) {
+            // Stop current scanning
+            stopScanning();
+            
+            if (type === 'question') {
+                loadQuestions();
+            } else if (type === 'guess') {
+                loadGuesses();
+            } else if (type === 'select') {
+                // Request different options
+                loadDifferentOptions();
+            }
+        }
+
+        // Load different options for selection
+        async function loadDifferentOptions() {
+            showLoading();
+            
+            try {
+                const response = await authenticatedFetch('/api/games/options', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        game_type: '20_questions',
+                        category: gameState.category,
+                        request_different: true
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Different options loaded:', data);
+                
+                hideLoading();
+                displayOptions(data.options, 'select');
+                
+            } catch (error) {
+                console.error('Error loading different options:', error);
+                hideLoading();
+                showError('Failed to load different options. Please try again.');
+            }
+        }
+
+        // Select an item for the "you ask questions" mode
+        function selectItem(item) {
+            gameState.selectedItem = item;
+            gameState.currentPhase = 'awaiting_wake_word';
+            
+            // Hide options
+            document.getElementById('optionsSelection').classList.add('hidden');
+            
+            document.getElementById('statusText').textContent = `I'm ready. To ask a question or make a guess, start with "${gameState.wakeWord}".`;
+            announce(`I'm ready. To ask a question or make a guess, start with ${gameState.wakeWord}.`);
+            
+            // Start listening for wake word
+            setTimeout(() => {
+                startListening();
+            }, 3000);
+        }
+
+        // Handle wake word detected
+        function handleWakeWord() {
+            gameState.currentPhase = 'listening_for_intent';
+            announce("I'm listening. Do you have a question or guess?");
+            
+            setTimeout(() => {
+                startListening();
+            }, 2000);
+        }
+
+        // Handle player intent (question or guess)
+        function handlePlayerIntent(intent) {
+            if (intent === 'question') {
+                gameState.currentPhase = 'listening_for_question';
+                announce("Ready for your question");
+                
+                setTimeout(() => {
+                    startListening();
+                }, 2000);
+                
+            } else if (intent === 'guess') {
+                gameState.currentPhase = 'listening_for_guess';
+                announce("Ready for your guess");
+                
+                setTimeout(() => {
+                    startListening();
+                }, 2000);
+            }
+        }
+
+        // Handle player question
+        async function handlePlayerQuestion(question) {
+            gameState.questionCount++;
+            updateQuestionCounter();
+            
+            // Get answer from LLM
+            try {
+                const response = await authenticatedFetch('/api/games/answer', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        game_type: '20_questions',
+                        selected_item: gameState.selectedItem,
+                        player_question: question
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                const answer = data.answer;
+                
+                // Add to history
+                gameState.askedQuestions.push({
+                    question: question,
+                    answer: answer
+                });
+                
+                // Announce answer
+                announce(answer);
+                
+                // Update question history display
+                updateQuestionHistory();
+                
+                // Announce remaining questions
+                const remaining = gameState.maxQuestions - gameState.questionCount;
+                if (remaining > 0) {
+                    setTimeout(() => {
+                        announce(`You have ${remaining} questions left`);
+                        
+                        // Continue waiting for wake word
+                        gameState.currentPhase = 'awaiting_wake_word';
+                        setTimeout(() => {
+                            startListening();
+                        }, 2000);
+                    }, 2000);
+                } else {
+                    // No more questions left
+                    setTimeout(() => {
+                        announce("That was your last question. Time to make your final guess!");
+                        gameState.currentPhase = 'listening_for_guess';
+                        setTimeout(() => {
+                            startListening();
+                        }, 2000);
+                    }, 2000);
+                }
+                
+            } catch (error) {
+                console.error('Error getting answer:', error);
+                announce("Sorry, I didn't understand that question. Please try again.");
+                
+                gameState.currentPhase = 'awaiting_wake_word';
+                setTimeout(() => {
+                    startListening();
+                }, 2000);
+            }
+        }
+
+        // Handle player guess
+        function handlePlayerGuess(guess) {
+            gameState.guessCount++;
+            
+            // Check if guess is correct
+            const isCorrect = guess.toLowerCase().includes(gameState.selectedItem.toLowerCase()) ||
+                             gameState.selectedItem.toLowerCase().includes(guess.toLowerCase());
+            
+            if (isCorrect) {
+                announce("You got it! Great job!");
+                setTimeout(() => {
+                    goBackToMenu();
+                }, 3000);
+            } else {
+                const remaining = gameState.maxGuesses - gameState.guessCount;
+                if (remaining > 0) {
+                    announce(`Sorry, not right. You have ${remaining} guesses left`);
+                    
+                    // Continue waiting for wake word
+                    gameState.currentPhase = 'awaiting_wake_word';
+                    setTimeout(() => {
+                        startListening();
+                    }, 2000);
+                } else {
+                    // No more guesses
+                    announce(`Sorry, the correct answer was ${gameState.selectedItem}. Better luck next time!`);
+                    setTimeout(() => {
+                        goBackToMenu();
+                    }, 4000);
+                }
+            }
+        }
+
+        // Ask a question (user asking mode)
+        function askQuestion(question) {
+            gameState.questionCount++;
+            gameState.currentPhase = 'awaiting_answer';
+            
+            // Hide options
+            document.getElementById('optionsSelection').classList.add('hidden');
+            
+            // Announce the question
+            announce(question);
+            
+            // Start listening for yes/no after announcement
+            setTimeout(() => {
+                startListening();
+            }, 3000);
+        }
+
+        // Handle yes/no answer
+        function handleAnswer(answer) {
+            // Add to question history
+            const lastQuestion = gameState.askedQuestions.length > 0 ? 
+                gameState.askedQuestions[gameState.askedQuestions.length - 1].question : 'Unknown';
+            
+            // Find the current question from the last asked
+            // We need to store the current question when it's asked
+            if (!gameState.currentQuestion) {
+                gameState.currentQuestion = 'Question';
+            }
+            
+            gameState.askedQuestions.push({
+                question: gameState.currentQuestion,
+                answer: answer
+            });
+            
+            updateQuestionHistory();
+            updateQuestionCounter();
+            
+            // Show action buttons or continue based on question count
+            if (gameState.questionCount >= gameState.maxQuestions) {
+                // Maximum questions reached, must guess
+                loadGuesses();
+            } else {
+                // Show action buttons
+                showActionButtons();
+            }
+        }
+
+        // Store current question when asking
+        function storeCurrentQuestion(question) {
+            gameState.currentQuestion = question;
+        }
+
+        // Modified askQuestion to store current question
+        function askQuestion(question) {
+            gameState.questionCount++;
+            gameState.currentPhase = 'awaiting_answer';
+            gameState.currentQuestion = question; // Store the question
+            
+            // Hide options
+            document.getElementById('optionsSelection').classList.add('hidden');
+            
+            // Announce the question
+            announce(question);
+            
+            // Start listening for yes/no after announcement
+            setTimeout(() => {
+                startListening();
+            }, 3000);
+        }
+
+        // Show action buttons
+        function showActionButtons() {
+            document.getElementById('actionButtons').classList.remove('hidden');
+            document.getElementById('statusText').textContent = 'What would you like to do next?';
+        }
+
+        // Ask another question
+        function askAnother() {
+            document.getElementById('actionButtons').classList.add('hidden');
+            gameState.currentPhase = 'playing';
+            loadQuestions();
+        }
+
+        // Make a guess
+        function makeGuess() {
+            document.getElementById('actionButtons').classList.add('hidden');
+            gameState.currentPhase = 'guessing';
+            loadGuesses();
+        }
+
+        // Make a guess attempt
+        function makeGuessAttempt(guess) {
+            gameState.guessCount++;
+            gameState.currentPhase = 'awaiting_result';
+            
+            // Hide options
+            document.getElementById('optionsSelection').classList.add('hidden');
+            
+            // Announce the guess
+            announce(guess);
+            
+            // Start listening for right/wrong after announcement
+            setTimeout(() => {
+                startListening();
+            }, 3000);
+        }
+
+        // Handle guess result
+        function handleGuessResult(isCorrect) {
+            if (isCorrect) {
+                announce("Great game! Thanks for playing!");
+                setTimeout(() => {
+                    goBackToMenu();
+                }, 3000);
+            } else {
+                if (gameState.guessCount >= gameState.maxGuesses) {
+                    announce("That was tough! I hope I do better next time!");
+                    setTimeout(() => {
+                        goBackToMenu();
+                    }, 3000);
+                } else {
+                    announce("Oops, trying one more time");
+                    setTimeout(() => {
+                        loadGuesses();
+                    }, 2000);
+                }
+            }
+        }
+
+        // Update question counter
+        function updateQuestionCounter() {
+            const counter = document.getElementById('gameCounter');
+            if (gameState.role === 'ask') {
+                counter.textContent = `Questions: ${gameState.questionCount}/${gameState.maxQuestions}`;
+            } else {
+                counter.textContent = `Questions: ${gameState.questionCount} | Guesses: ${gameState.guessCount}/${gameState.maxGuesses}`;
+            }
+        }
+
+        // Update question history display
+        function updateQuestionHistory() {
+            const historyContainer = document.getElementById('questionHistory');
+            const qaList = document.getElementById('qaList');
+            
+            if (gameState.askedQuestions.length > 0) {
+                historyContainer.classList.remove('hidden');
+                
+                qaList.innerHTML = '';
+                gameState.askedQuestions.forEach(qa => {
+                    const item = document.createElement('div');
+                    item.className = 'qa-item';
+                    item.innerHTML = `
+                        <div class="qa-question">Q: ${qa.question}</div>
+                        <div class="qa-answer">A: ${qa.answer}</div>
+                    `;
+                    qaList.appendChild(item);
+                });
+            }
+        }
+
+        // New game
+        function newGame() {
+            // Stop scanning and speech recognition
+            stopScanning();
+            if (recognition && isRecognitionActive) {
+                recognition.stop();
+            }
+            
+            // Reset game state but stay in game view
+            gameState = {
+                role: null,
+                category: null,
+                selectedItem: null,
+                askedQuestions: [],
+                questionCount: 0,
+                guessCount: 0,
+                maxQuestions: 20,
+                maxGuesses: 3,
+                wakeWord: gameState.wakeWord,
+                isListening: false,
+                currentPhase: 'role'
+            };
+            
+            // Hide all game sections
+            document.getElementById('categorySelection').classList.add('hidden');
+            document.getElementById('optionsSelection').classList.add('hidden');
+            document.getElementById('questionHistory').classList.add('hidden');
+            document.getElementById('actionButtons').classList.add('hidden');
+            document.getElementById('listeningIndicator').classList.add('hidden');
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('errorState').classList.add('hidden');
+            
+            // Show role selection
+            document.getElementById('statusText').textContent = 'Choose how you want to play:';
+            document.getElementById('roleSelection').classList.remove('hidden');
+            document.getElementById('gameCounter').textContent = '';
+            
+            announce("Let's play another round of 20 questions!");
+        }
+
+        // Exit game
+        function exitGame() {
+            goBackToMenu();
+        }
+
+        // Go back to main menu
+        function goBackToMenu() {
+            // Reset everything
+            currentGame = null;
+            gameState.currentPhase = 'menu';
+            
+            // Stop scanning
+            stopScanning();
+            
+            // Stop any ongoing speech recognition
+            if (recognition && isRecognitionActive) {
+                recognition.stop();
+            }
+            
+            // Cancel speech synthesis
+            if ('speechSynthesis' in window) {
+                speechSynthesis.cancel();
+            }
+            
+            // Hide game view and show menu
+            document.getElementById('twentyQuestionsGame').classList.add('hidden');
+            document.getElementById('gameMenu').classList.remove('hidden');
+            
+            // Reset all game sections
+            document.getElementById('roleSelection').classList.add('hidden');
+            document.getElementById('categorySelection').classList.add('hidden');
+            document.getElementById('optionsSelection').classList.add('hidden');
+            document.getElementById('questionHistory').classList.add('hidden');
+            document.getElementById('actionButtons').classList.add('hidden');
+            document.getElementById('listeningIndicator').classList.add('hidden');
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('errorState').classList.add('hidden');
+        }
+
+        // Show/hide loading state
+        function showLoading() {
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('optionsSelection').classList.add('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingState').classList.add('hidden');
+        }
+
+        // Show error
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorState').classList.remove('hidden');
+            
+            // Hide error after 5 seconds
+            setTimeout(() => {
+                document.getElementById('errorState').classList.add('hidden');
+            }, 5000);
+        }
+
+        // Go back to previous page
+        function goBack() {
+            // Check if there's a referrer or previous page in history
+            if (document.referrer && document.referrer.includes(window.location.hostname)) {
+                window.history.back();
+            } else {
+                window.location.href = 'gridpage.html';
+            }
+        }
+
+        // Hide splash screen
+        function hideSplashScreen() {
+            const splashScreen = document.getElementById('splashScreen');
+            if (splashScreen) {
+                splashScreen.style.display = 'none';
+            }
+            
+            // Also check for splash screen managed by splash-screen.js
+            if (window.splashScreen && window.splashScreen.hide) {
+                window.splashScreen.hide();
+            }
+        }
+    </script>
+</body>
+</html>
