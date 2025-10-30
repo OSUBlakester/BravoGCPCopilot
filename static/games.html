@@ -796,6 +796,16 @@
             const currentButton = scanningSystem.buttons[scanningSystem.currentIndex];
             if (currentButton) {
                 currentButton.classList.add('scanning');
+                
+                // Get button text for speech synthesis (like gridpage)
+                let buttonText = currentButton.textContent || currentButton.innerText || '';
+                // Clean up the text (remove extra whitespace)
+                buttonText = buttonText.trim().replace(/\s+/g, ' ');
+                
+                // Announce the button text
+                if (buttonText && buttonText !== 'Something Else' && buttonText !== 'Exit Game') {
+                    announce(buttonText);
+                }
             }
             
             // Move to next button
@@ -885,6 +895,12 @@
             document.getElementById('roleSelection').classList.remove('hidden');
             
             announce("Let's play 20 questions!");
+            
+            // Start scanning for role selection
+            setTimeout(() => {
+                startScanning('roleSelection');
+                startListening(); // Listen for wake word
+            }, 2000);
         }
 
         // Select game role
@@ -960,16 +976,22 @@
             showLoading();
             
             try {
+                const requestPayload = {
+                    game_type: '20_questions',
+                    category: gameState.category,
+                    request_different: false
+                };
+                
+                console.log('Sending options request:', requestPayload);
+                
                 const response = await authenticatedFetch('/api/games/options', {
                     method: 'POST',
-                    body: JSON.stringify({
-                        game_type: '20_questions',
-                        category: gameState.category,
-                        request_different: false
-                    })
+                    body: JSON.stringify(requestPayload)
                 });
                 
                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API error response:', errorText);
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 
@@ -997,17 +1019,23 @@
             showLoading();
             
             try {
+                const requestPayload = {
+                    game_type: '20_questions',
+                    category: gameState.category,
+                    asked_questions: gameState.askedQuestions,
+                    question_count: gameState.questionCount
+                };
+                
+                console.log('Sending questions request:', requestPayload);
+                
                 const response = await authenticatedFetch('/api/games/questions', {
                     method: 'POST',
-                    body: JSON.stringify({
-                        game_type: '20_questions',
-                        category: gameState.category,
-                        asked_questions: gameState.askedQuestions,
-                        question_count: gameState.questionCount
-                    })
+                    body: JSON.stringify(requestPayload)
                 });
                 
                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('API error response:', errorText);
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 
@@ -1519,6 +1547,12 @@
             document.getElementById('gameCounter').textContent = '';
             
             announce("Let's play another round of 20 questions!");
+            
+            // Start scanning for role selection
+            setTimeout(() => {
+                startScanning('roleSelection');
+                startListening(); // Listen for wake word
+            }, 2000);
         }
 
         // Exit game
