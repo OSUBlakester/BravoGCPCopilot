@@ -11,6 +11,7 @@
      <!-- Ensure mood-selection.js is loaded before admin_settings.js -->
     <script src="/static/mood-selection.js" defer></script>
     <!-- Ensure admin_settings.js is loaded with defer -->
+    <script src="/static/sight-word-service.js"></script>
     <script src="/static/admin_settings.js" defer></script>
     <style>
         /* Custom base styles */
@@ -398,6 +399,18 @@
                     <label for="enablePictograms" class="block text-lg font-medium text-gray-700 mb-2">Enable AAC Pictograms</label>
                     <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                     <p class="text-xs text-gray-500 mt-1">Show pictogram/symbol icons on buttons to assist with AAC (Augmentative and Alternative Communication).</p>
+                </div>
+                <div>
+                    <label for="sightWordGradeLevel" class="block text-lg font-medium text-gray-700 mb-2">Sight Words Grade Level:</label>
+                    <select id="sightWordGradeLevel" name="sightWordGradeLevel" class="w-full max-w-xs">
+                        <option value="pre_k">Pre-Kindergarten</option>
+                        <option value="kindergarten">Kindergarten (includes Pre-K)</option>
+                        <option value="first_grade">First Grade (includes Pre-K + K)</option>
+                        <option value="second_grade">Second Grade (includes Pre-K + K + 1st)</option>
+                        <option value="third_grade">Third Grade (includes Pre-K + K + 1st + 2nd)</option>
+                        <option value="third_grade_with_nouns">Third Grade + Nouns (complete list)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Dolch sight words at or below this level will show as text-only buttons (no pictograms) even when pictograms are enabled. Selection is cumulative - higher grades include all lower grade words.</p>
                 </div>
                 <div>
                     <label class="block text-lg font-medium text-gray-700 mb-2">Location:</label>

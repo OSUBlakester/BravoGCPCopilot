@@ -67,7 +67,7 @@
             display: flex;             /* For centering text */
             align-items: center;
             justify-content: center;
-            margin-bottom: 18px; /* Add space below for the tail + grid gap consideration */
+            margin-bottom: 8px; /* Reduced margin since speech bubble tail was removed */
             box-shadow: 0 1px 3px rgba(0,0,0,0.12); /* Optional: subtle shadow for depth */
             transition: transform 0.1s ease-out, font-size 0.2s ease-out; /* Smooth transitions */
             word-wrap: break-word;     /* Allow text to wrap if needed */
@@ -83,28 +83,11 @@
             transform: scale(0.97);
          }
 
-        /* Speech Bubble Tail */
+        /* Speech Bubble Tail - REMOVED */
+        /* Removed speech bubble tail/triangle to clean up button appearance */
         #gridContainer button::before,
         #gridContainer button::after {
-            content: "";
-            width: 0px;
-            height: 0px;
-            position: absolute;
-            border-right: 10px solid transparent;  /* Makes the shape triangular on the right */
-            border-bottom: 10px solid transparent; /* Makes the shape triangular on the bottom */
-        }
-        #gridContainer button::before { /* This creates the dark blue border of the tail */
-            border-left: 10px solid #002244;
-            border-top: 10px solid #002244;
-            left: 15px;  /* Position from the left edge of the button */
-            bottom: -18px; /* Positions the tail below the button */
-        }
-        #gridContainer button::after { /* This creates the white fill of the tail */
-            border-left: 10px solid white;
-            border-top: 10px solid white;
-            left: 17px;  /* Offset by 2px from ::before (button border thickness) */
-            bottom: -16px; /* Offset by 2px from ::before (button border thickness) */
-            z-index: 1;  /* Ensures the white fill is on top of the blue tail border */
+            display: none; /* Hide the speech bubble tail completely */
         }
 
 
@@ -359,9 +342,10 @@
 
 
     <script src="/static/splash-screen.js"></script>
-    <script src="/static/avatar-selector.js?v=9"></script>
+    <script src="/static/avatar-selector.js"></script>
     <script src="/static/mood-selection.js"></script>
-    <script src="/static/gridpage.js?v=9"></script>
+    <script src="/static/sight-word-service.js"></script>
+    <script src="/static/gridpage.js"></script>
     <script>
     // --- Help Modal Logic ---
     const helpIcon = document.getElementById('help-icon');

@@ -12,6 +12,7 @@ STATIC_PAGES = [
     "admin_settings.html",
     "user_current_admin.html",
     "audio_admin.html",
+    "missing_images.html",
     "currentevents.html",
     "user_info_admin.html",
     "user_favorites_admin.html",

@@ -1,4 +1,5 @@
 # Multi-environment Docker build for Bravo AAC Application
+# Using Docker Hub with potential retry handling via Cloud Build
 FROM python:3.12-slim
 
 # Recommended: Set environment variables for non-interactive commands

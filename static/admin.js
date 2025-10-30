@@ -202,12 +202,43 @@ function generateGrid() {
             // Inputs for button properties
             const labelInput = document.createElement('input'); labelInput.type = 'text'; labelInput.placeholder = 'Label'; labelInput.setAttribute('aria-label', `Label R${row+1}C${col+1}`);
             const speechInput = document.createElement('input'); speechInput.type = 'text'; speechInput.placeholder = 'Speech'; speechInput.setAttribute('aria-label', `Speech R${row+1}C${col+1}`);
+            const audioFileInput = document.createElement('input'); audioFileInput.type = 'file'; audioFileInput.accept = 'audio/*'; audioFileInput.placeholder = 'MP3 Audio'; audioFileInput.setAttribute('aria-label', `MP3 Audio R${row+1}C${col+1}`); audioFileInput.className = 'audio-file-input text-xs';
+            
+            // Add upload handler for audio files
+            audioFileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        const response = await fetch('/api/admin/upload-button-audio', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (response.ok) {
+                            const result = await response.json();
+                            audioFileInput.dataset.audioUrl = result.audio_url;
+                            audioFileInput.style.backgroundColor = '#d1fae5'; // Green background to indicate upload success
+                            console.log('Audio uploaded successfully:', result.audio_url);
+                        } else {
+                            throw new Error('Upload failed');
+                        }
+                    } catch (error) {
+                        console.error('Error uploading audio:', error);
+                        audioFileInput.style.backgroundColor = '#fecaca'; // Red background to indicate error
+                        alert('Failed to upload audio file. Please try again.');
+                    }
+                }
+            });
             const targetInput = document.createElement('input'); targetInput.type = 'text'; targetInput.placeholder = 'Target'; targetInput.setAttribute('aria-label', `Target R${row+1}C${col+1}`);
             const llmQueryInput = document.createElement('textarea'); llmQueryInput.placeholder = 'LLM Query'; llmQueryInput.setAttribute('aria-label', `LLM Query R${row+1}C${col+1}`);
             const querytypeInput = document.createElement('input'); querytypeInput.type = 'text'; querytypeInput.placeholder = 'Q Type'; querytypeInput.setAttribute('aria-label', `Q Type R${row+1}C${col+1}`);
 
             cell.appendChild(labelInput);
             cell.appendChild(speechInput);
+            cell.appendChild(audioFileInput);
             cell.appendChild(targetInput);
             cell.appendChild(llmQueryInput);
             cell.appendChild(querytypeInput);
@@ -276,6 +307,12 @@ function populateGrid(buttons) {
         if (cell) {
             cell.querySelector('input[placeholder="Label"]').value = button.text || '';
             cell.querySelector('input[placeholder="Speech"]').value = button.speechPhrase || '';
+            const audioFileInput = cell.querySelector('.audio-file-input');
+            if (audioFileInput && button.customAudioFile) {
+                audioFileInput.dataset.audioUrl = button.customAudioFile;
+                audioFileInput.style.backgroundColor = '#d1fae5'; // Green to indicate audio file assigned
+                audioFileInput.title = 'Audio file assigned: ' + button.customAudioFile;
+            }
             cell.querySelector('input[placeholder="Target"]').value = button.targetPage || '';
             cell.querySelector('textarea[placeholder="LLM Query"]').value = button.LLMQuery || '';
             cell.querySelector('input[placeholder="Q Type"]').value = button.queryType || '';
@@ -356,9 +393,11 @@ async function savePage(event) {
     buttonGrid.querySelectorAll('.gridCell').forEach(cell => {
         const text = cell.querySelector('input[placeholder="Label"]').value.trim();
         if (text) { // Only save if Label has text
+            const audioFileInput = cell.querySelector('.audio-file-input');
             pageData.buttons.push({
                 row: parseInt(cell.dataset.row), col: parseInt(cell.dataset.col), text: text,
                 speechPhrase: cell.querySelector('input[placeholder="Speech"]').value.trim(),
+                customAudioFile: audioFileInput ? audioFileInput.dataset.audioUrl || null : null,
                 targetPage: cell.querySelector('input[placeholder="Target"]').value.trim(),
                 LLMQuery: cell.querySelector('textarea[placeholder="LLM Query"]').value.trim(),
                 queryType: cell.querySelector('input[placeholder="Q Type"]').value.trim(),
