@@ -56,11 +56,11 @@ echo "📋 Setting active GCP project..."
 gcloud config set project $PROJECT_ID
 
 
-# Build the Docker image
-echo "🏗️ Building Docker image..."
+# Build the Docker image using Cloud Build configuration
+echo "🏗️ Building Docker image with cloudbuild.yaml..."
 IMAGE_TAG="gcr.io/$PROJECT_ID/$SERVICE_NAME:latest"
 
-gcloud builds submit . --tag "$IMAGE_TAG" --region="$REGION"
+gcloud builds submit . --config=cloudbuild.yaml --substitutions=_SERVICE_NAME=$SERVICE_NAME,_PROJECT_ID=$PROJECT_ID --region="$REGION"
 
 # Deploy to Cloud Run
 echo "🚀 Deploying to Cloud Run..."

@@ -1,0 +1,240 @@
+[
+  {
+    "created_at": "2025-09-28T19:41:26.544503+00:00",
+    "concept": "learning_concepts",
+    "tags": [
+      "less",
+      "learning concepts",
+      "yellow",
+      "less than symbol",
+      "math",
+      "comparison",
+      "greater than",
+      "inequality",
+      "orange shadow",
+      "simple",
+      "back arrow"
+    ],
+    "updated_by": "repair_script_v2",
+    "subconcept": "less",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/learning_concepts_less_20250928_134125.png",
+    "image_type": "global",
+    "repair_info": {
+      "repair_method": "filename_reconstruction",
+      "repaired_at": "2025-09-30T18:00:30.019865+00:00",
+      "original_subconcept": "less",
+      "repair_reasons": [
+        "truncated_subconcept: 'less' \u2192 'learning_concepts_less'"
+      ]
+    },
+    "user_id": null,
+    "approved": true,
+    "updated_at": "2025-09-30T18:00:30.019854+00:00",
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "TXVCcDG75KsMsycTeZSy",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "subconcept": "less",
+    "concept": "abstract",
+    "tags": [
+      "less",
+      "abstract",
+      "hand",
+      "giving up possessions",
+      "losing belongings",
+      "blue and orange books",
+      "wristwatch",
+      "mobile phone",
+      "simplifying life",
+      "downsizing",
+      "decluttering",
+      "minimalism"
+    ],
+    "created_at": "2025-10-02T04:05:00.611187+00:00",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/abstract_less_20251001_220458.png",
+    "image_type": "global",
+    "user_id": null,
+    "approved": true,
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "cnF9x3bafEVcueKuQ9Po",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "subconcept": "far",
+    "concept": "abstract",
+    "tags": [
+      "far",
+      "abstract",
+      "gray figure",
+      "blue waves",
+      "reaching",
+      "distance",
+      "gold star",
+      "concept",
+      "aspirations",
+      "achieving goal",
+      "target"
+    ],
+    "created_at": "2025-10-02T04:05:23.447218+00:00",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/abstract_far_20251001_220521.png",
+    "image_type": "global",
+    "user_id": null,
+    "approved": true,
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "eVPE4vdolam4ApQ51C4G",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "subconcept": "low",
+    "concept": "abstract",
+    "tags": [
+      "low",
+      "abstract",
+      "blue letters",
+      "simple word",
+      "cartoon",
+      "reading material",
+      "educational",
+      "learning",
+      "vocabulary",
+      "indigo",
+      "downwards"
+    ],
+    "created_at": "2025-10-02T04:05:41.389413+00:00",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/abstract_low_20251001_220538.png",
+    "image_type": "global",
+    "user_id": null,
+    "approved": true,
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "ehQjD0BS7KYff1hnX8RA",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "subconcept": "near",
+    "concept": "abstract",
+    "tags": [
+      "near",
+      "abstract",
+      "ear",
+      "hearing",
+      "listening",
+      "yellow",
+      "pink",
+      "lobe",
+      "thick outline",
+      "human",
+      "body part"
+    ],
+    "created_at": "2025-10-02T04:05:54.706421+00:00",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/abstract_near_20251001_220552.png",
+    "image_type": "global",
+    "user_id": null,
+    "approved": true,
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "pLatQXFsbnV1duqOoQ8X",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "created_at": "2025-09-28T17:50:23.220825+00:00",
+    "concept": "clothing",
+    "tags": [
+      "high",
+      "clothing",
+      "red stiletto heel",
+      "pointy toe",
+      "formal shoe",
+      "women's fashion",
+      "party wear",
+      "shiny",
+      "date night",
+      "elegant footwear"
+    ],
+    "updated_by": "repair_script_v2",
+    "subconcept": "high",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/clothing_high_20250928_115022.png",
+    "image_type": "global",
+    "repair_info": {
+      "repair_method": "filename_reconstruction",
+      "repaired_at": "2025-09-30T16:27:07.825325+00:00",
+      "original_subconcept": "high",
+      "repair_reasons": [
+        "truncated_subconcept: 'high' \u2192 'clothing_high'"
+      ]
+    },
+    "user_id": null,
+    "approved": true,
+    "updated_at": "2025-09-30T16:27:07.825321+00:00",
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "HbwwH9M9zLtpXtlmbRAh",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "created_at": "2025-09-28T19:43:15.107915+00:00",
+    "concept": "social_interaction",
+    "tags": [
+      "high",
+      "social interaction",
+      "hand",
+      "stop gesture",
+      "orange",
+      "cartoon",
+      "greeting",
+      "five fingers",
+      "raised hand",
+      "hello",
+      "goodbye"
+    ],
+    "updated_by": "repair_script_v2",
+    "subconcept": "high",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/social_interaction_high_20250928_134314.png",
+    "image_type": "global",
+    "repair_info": {
+      "repair_method": "filename_reconstruction",
+      "repaired_at": "2025-09-30T16:31:27.510699+00:00",
+      "original_subconcept": "high",
+      "repair_reasons": [
+        "truncated_subconcept: 'high' \u2192 'social_interaction_high'"
+      ]
+    },
+    "user_id": null,
+    "approved": true,
+    "updated_at": "2025-09-30T16:31:27.510696+00:00",
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "Ia4rVXfEt6cI2SIwCszO",
+    "match_type": "fuzzy_subconcept"
+  },
+  {
+    "subconcept": "high",
+    "concept": "abstract",
+    "tags": [
+      "high",
+      "abstract",
+      "blue text",
+      "word",
+      "cartoon",
+      "rounded letters",
+      "shadow",
+      "simple",
+      "sans-serif",
+      "light blue",
+      "dark outline"
+    ],
+    "created_at": "2025-10-02T04:06:03.107795+00:00",
+    "source": "bravo_images",
+    "image_url": "https://storage.googleapis.com/bravo-dev-465400-aac-images/bravo_images/abstract_high_20251001_220600.png",
+    "image_type": "global",
+    "user_id": null,
+    "approved": true,
+    "created_by": "bulk_import_bravo",
+    "firestore_id": "YWEml0OKNkLJgBJO578H",
+    "match_type": "fuzzy_subconcept"
+  }
+]

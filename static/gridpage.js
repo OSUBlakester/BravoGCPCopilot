@@ -234,6 +234,11 @@ const PICTOGRAM_MAP = {
 function getPictogramForText(text) {
     if (!enablePictograms || !text) return null;
     
+    // Check if this text is a sight word - if so, force text-only display
+    if (window.isSightWord && window.isSightWord(text)) {
+        return null;
+    }
+    
     const lowerText = text.toLowerCase().trim();
     
     // Direct match
@@ -252,19 +257,159 @@ function getPictogramForText(text) {
 }
 
 /**
+ * Intelligently extracts search terms for image matching by removing question words
+ * @param {string} summary - The summary text that may start with question words
+ * @param {Array<string>} keywords - Array of semantic keywords
+ * @returns {string} - Optimized search term for image matching
+ */
+function getOptimizedSearchTerm(summary, keywords = null) {
+    if (!summary || typeof summary !== 'string') return '';
+    
+    console.log(`🔧 DEBUG: Processing "${summary}" with keywords:`, keywords);
+    
+    const questionWords = ['what', 'who', 'where', 'when', 'why', 'how'];
+    const words = summary.toLowerCase().trim().split(/\s+/);
+    
+    // Remove question words from the beginning
+    let meaningfulWords = [...words];
+    while (meaningfulWords.length > 0 && questionWords.includes(meaningfulWords[0])) {
+        meaningfulWords.shift();
+    }
+    
+    // Remove common filler words and clean punctuation
+    const fillerWords = ['is', 'are', 'the', 'a', 'an', 'that', 'this', 'it', 'do', 'does', 'did', 'can', 'will', 'would', 'should'];
+    meaningfulWords = meaningfulWords
+        .filter(word => !fillerWords.includes(word))
+        .map(word => word.replace(/[?!.,;:]/g, ''))  // Remove punctuation
+        .filter(word => word.length > 0);  // Remove empty strings
+    
+    // If we have keywords, prioritize them (but skip question words and generic terms)
+    if (keywords && Array.isArray(keywords) && keywords.length > 0) {
+        // Find the first keyword that isn't a question word, filler word, or generic term
+        const questionAndFillerWords = [...questionWords, ...fillerWords, 'question', 'curiosity', 'that', 'this'];
+        const genericTerms = ['color', 'thing', 'object', 'item', 'stuff', 'shape', 'size'];
+        
+        const meaningfulKeyword = keywords.find(keyword => {
+            const cleanKeyword = keyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
+            return cleanKeyword.length > 2 && 
+                   !questionAndFillerWords.includes(cleanKeyword) &&
+                   !genericTerms.includes(cleanKeyword);
+        });
+        
+        if (meaningfulKeyword) {
+            const cleanKeyword = meaningfulKeyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
+            console.log(`🔧 DEBUG: Using meaningful keyword: "${cleanKeyword}"`);
+            return cleanKeyword;
+        }
+    }
+    
+    // Use the most meaningful word from the remaining words
+    if (meaningfulWords.length > 0) {
+        // For single word inputs that are specific (like colors, objects), prefer the original case
+        const originalWordLower = summary.toLowerCase().trim();
+        const originalWord = summary.trim(); // Preserve original case
+        if (meaningfulWords.includes(originalWordLower) && originalWordLower.length > 2) {
+            console.log(`🔧 DEBUG: Using original specific word with preserved case: "${originalWord}"`);
+            return originalWord;
+        }
+        
+        // Otherwise, prioritize nouns and verbs (longer words are more likely to be meaningful)
+        // Find the corresponding original case word
+        const sortedWords = meaningfulWords.sort((a, b) => b.length - a.length);
+        const selectedLowerWord = sortedWords[0];
+        
+        // Try to find the original case version of the selected word
+        const originalWords = summary.trim().split(/\s+/);
+        const originalCaseWord = originalWords.find(word => 
+            word.toLowerCase().replace(/[?!.,;:]/g, '') === selectedLowerWord
+        );
+        
+        const finalWord = originalCaseWord || selectedLowerWord;
+        console.log(`🔧 DEBUG: Meaningful words found:`, meaningfulWords, `→ Selected: "${finalWord}"`);
+        return finalWord;
+    }
+    
+    // Fallback to original summary if no meaningful words found (preserve case)
+    console.log(`🔧 DEBUG: No meaningful words found, using original: "${summary.trim()}"`);
+    return summary.trim();
+}
+
+/**
+ * Simple pluralization helper to generate both singular and plural forms
+ * @param {string} word - The word to generate variants for
+ * @returns {Array<string>} - Array of word variants (original, singular, plural)
+ */
+function getWordVariants(word) {
+    if (!word || typeof word !== 'string') return [word];
+    
+    const variants = [word]; // Always include original
+    const lowerWord = word.toLowerCase();
+    
+    // Generate singular form (remove common plural endings)
+    if (lowerWord.endsWith('ies') && lowerWord.length > 4) {
+        // parties → party, stories → story
+        variants.push(word.slice(0, -3) + 'y');
+    } else if (lowerWord.endsWith('es') && lowerWord.length > 3) {
+        // Only remove 'es' if the word stem suggests it needs 'es' for pluralization
+        // boxes → box, dishes → dish, glasses → glass, but NOT jokes → jok
+        const stem = lowerWord.slice(0, -2);
+        if (stem.endsWith('ch') || stem.endsWith('sh') || stem.endsWith('x') || 
+            stem.endsWith('z') || stem.endsWith('s') || stem.endsWith('ss')) {
+            variants.push(word.slice(0, -2));
+        }
+        // For other 'es' endings, treat as regular 's' plural (jokes → joke)
+        else {
+            variants.push(word.slice(0, -1));
+        }
+    } else if (lowerWord.endsWith('s') && lowerWord.length > 2 && !lowerWord.endsWith('ss')) {
+        // questions → question, foods → food, but not "bass"
+        variants.push(word.slice(0, -1));
+    }
+    
+    // Generate plural form (add common plural endings)
+    if (!lowerWord.endsWith('s')) {
+        if (lowerWord.endsWith('y') && lowerWord.length > 2 && !'aeiou'.includes(lowerWord[lowerWord.length - 2])) {
+            // party → parties, story → stories
+            variants.push(word.slice(0, -1) + 'ies');
+        } else if (lowerWord.endsWith('ch') || lowerWord.endsWith('sh') || lowerWord.endsWith('x') || lowerWord.endsWith('z') || lowerWord.endsWith('s')) {
+            // box → boxes, dish → dishes
+            variants.push(word + 'es');
+        } else {
+            // question → questions, food → foods
+            variants.push(word + 's');
+        }
+    }
+    
+    // Remove duplicates and return
+    return [...new Set(variants)];
+}
+
+/**
  * Fetches symbol image from the AAC symbol database with retry logic and caching
- * @param {string} text - The button text to find a symbol for  
+ * @param {string} text - The button text to find a symbol for
+ * @param {Array<string>} keywords - Optional semantic keywords for LLM-generated content  
  * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
  */
-async function getSymbolImageForText(text) {
+async function getSymbolImageForText(text, keywords = null) {
     if (!text || text.trim() === '') return null;
+    
+    // Check if pictograms/images are enabled
+    if (!enablePictograms) {
+        return null;
+    }
+    
+    // Check if this text is a sight word - if so, force text-only display (no images)
+    if (window.isSightWord && window.isSightWord(text)) {
+        console.log(`🔤 Gridpage sight word detected: "${text}" - using text-only display`);
+        return null;
+    }
     
     // Simple in-memory cache to avoid repeated requests
     if (!window.symbolImageCache) {
         window.symbolImageCache = new Map();
     }
     
-    const cacheKey = text.trim().toLowerCase();
+    const cacheKey = `v2_${text.trim().toLowerCase()}`; // v2 cache key for tag position prioritization fix
     if (window.symbolImageCache.has(cacheKey)) {
         const cached = window.symbolImageCache.get(cacheKey);
         if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
@@ -275,6 +420,10 @@ async function getSymbolImageForText(text) {
     const maxRetries = 2;
     let lastError = null;
     
+    // Get word variants (original, singular, plural) to try
+    const wordVariants = getWordVariants(text.trim());
+    console.log(`🔧 DEBUG: Trying word variants for "${text}":`, wordVariants);
+    
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
             // Add a small delay for retries to avoid overwhelming the server
@@ -282,51 +431,87 @@ async function getSymbolImageForText(text) {
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
             }
             
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4000); // Reduced to 4 seconds
+            let bestMatch = null;
+            let bestScore = -1;
+            let bestSource = '';
             
-            const response = await fetch(`/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`, {
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (response.ok) {
-                const data = await response.json();
+            // Try each word variant until we find a match
+            for (const variant of wordVariants) {
+                if (bestMatch) break; // Stop if we found a good match
                 
-                // Return the first matching symbol's image URL
-                if (data.symbols && data.symbols.length > 0) {
-                    const symbol = data.symbols[0];
-                    const imageUrl = symbol.image_url;
-                    
-                    // Cache successful result
-                    window.symbolImageCache.set(cacheKey, {
-                        imageUrl,
-                        timestamp: Date.now()
-                    });
-                    
-                    console.log(`Found symbol for "${text}":`, symbol.name, `(score: ${symbol.match_score || 'N/A'})`);
-                    return imageUrl;
-                } else {
-                    // Cache null result to avoid repeated requests
-                    window.symbolImageCache.set(cacheKey, {
-                        imageUrl: null,
-                        timestamp: Date.now()
-                    });
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds for BravoImages priority search
+                
+                // Use unified button-search that searches both collections with proper prioritization
+                const symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(variant)}&limit=1`;
+                const symbolsUrlWithKeywords = keywords && Array.isArray(keywords) && keywords.length > 0 ? 
+                    `${symbolsUrl}&keywords=${encodeURIComponent(JSON.stringify(keywords))}` : symbolsUrl;
+                
+                // Single unified search call
+                const [symbolsResponse] = await Promise.allSettled([
+                    fetch(symbolsUrlWithKeywords, { signal: controller.signal })
+                ]);
+                
+                clearTimeout(timeoutId);
+                
+                // Process unified button-search response (handles both collections with proper prioritization)
+                if (symbolsResponse.status === 'fulfilled' && symbolsResponse.value.ok) {
+                    try {
+                        const symbolsData = await symbolsResponse.value.json();
+                        if (symbolsData.symbols && symbolsData.symbols.length > 0) {
+                            const symbol = symbolsData.symbols[0];
+                            const symbolScore = symbol.match_score || 5;
+                            
+                            bestMatch = {
+                                image_url: symbol.image_url,
+                                name: symbol.name || symbol.subconcept || 'Image',
+                                match_score: symbolScore,
+                                source: symbol.source || 'unified_search'
+                            };
+                            bestScore = symbolScore;
+                            bestSource = symbol.source === 'bravo_images' ? 'BravoImages' : 'Symbols';
+                            
+                            console.log(`Found ${bestSource} for "${text}" using variant "${variant}": ${symbol.name || symbol.subconcept} (score: ${symbolScore})`);
+                            break; // Found a match, stop trying variants
+                        }
+                    } catch (e) {
+                        if (e.name !== 'AbortError') {
+                            console.warn('Error parsing unified search response:', e);
+                        }
+                    }
+                }
+            }
+            
+            if (bestMatch) {
+                // Cache successful result
+                window.symbolImageCache.set(cacheKey, {
+                    imageUrl: bestMatch.image_url,
+                    timestamp: Date.now()
+                });
+                
+                return bestMatch.image_url;
+            } else {
+                // Cache null result to avoid repeated requests
+                window.symbolImageCache.set(cacheKey, {
+                    imageUrl: null,
+                    timestamp: Date.now()
+                });
+                
+                // If both searches failed, continue to retry logic
+                if (attempt === maxRetries) {
+                    console.warn(`No symbols or images found for "${text}" after ${maxRetries} attempts`);
+                    // Note: Missing image logging happens automatically in the server-side
+                    // public_bravo_images_search endpoint when it returns zero results
                     return null;
                 }
-            } else if (response.status === 503) {
-                lastError = new Error(`Service unavailable (attempt ${attempt}/${maxRetries})`);
-                console.warn(`Symbol search service unavailable for "${text}" (attempt ${attempt}/${maxRetries}):`, response.status);
                 continue; // Try again
-            } else {
-                console.warn(`Symbol search failed for "${text}":`, response.status, response.statusText);
-                return null;
             }
         } catch (error) {
             lastError = error;
             if (error.name === 'AbortError') {
-                console.warn(`Symbol search timeout for "${text}" (attempt ${attempt}/${maxRetries})`);
+                // Don't retry on timeout - likely server overload
+                console.warn(`Symbol search timeout for "${text}" - skipping retries`);
+                return null;
             } else {
                 console.warn(`Error fetching symbol for "${text}" (attempt ${attempt}/${maxRetries}):`, error.message);
             }
@@ -449,6 +634,11 @@ async function loadScanSettings() {
         ScanningOff = settings.ScanningOff === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
+        
+        // Update sight word service with new settings
+        if (window.updateSightWordSettings) {
+            window.updateSightWordSettings(settings);
+        }
 
         // Load Grid Columns (for standardized button sizing)
         if (settings && typeof settings.gridColumns === 'number' && !isNaN(settings.gridColumns)) {
@@ -738,7 +928,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 .map((option) => option.replace(/^\d+\.\s*|\\|['"]+|^\(+\d\s*/g, '').replace('1. ', '').trim())
                 .filter(Boolean);
             if (options.length > 0) {
-                const optionsObjects = options.map(optText => ({ summary: optText, option: optText }));
+                const optionsObjects = options.map(optText => ({ summary: optText, option: optText, keywords: [] }));
                 console.log("Generating LLM buttons from URL params:", optionsObjects);
                 await generateLlmButtons(optionsObjects);
             } else {
@@ -1034,49 +1224,114 @@ async function generateGrid(page, container) {
     });
 
     // 3. Lay out buttons row by row, filling each row up to gridColumns
-    // Use Promise.all to load all symbol images in parallel
+    // Use throttled loading to prevent server overwhelm
     const buttonPromises = sortedButtons.map(async (buttonData, idx) => {
         const currentRow = Math.floor(idx / gridColumns);
         const currentCol = idx % gridColumns;
         
         const button = document.createElement('button');
         
-        // Try to get symbol image first, fall back to pictogram if needed
-        let symbolImageUrl = await getSymbolImageForText(buttonData.text);
-        
-        if (symbolImageUrl) {
-            // Create container for symbol image and text
+        // Check if this is a sight word - if so, render as text-only
+        if (window.sightWordService && await window.sightWordService.isSightWord(buttonData.text)) {
+            console.log('[SIGHT WORD] Rendering text-only button for:', buttonData.text);
+            button.textContent = buttonData.text;
+            button.style.fontSize = '1.8em';
+            button.style.fontWeight = 'bold';
+            button.style.color = '#333';
+            button.style.backgroundColor = '#f8f9fa';
+            button.style.border = '2px solid #ddd';
+            button.style.borderRadius = '8px';
+            button.style.display = 'flex';
+            button.style.alignItems = 'center';
+            button.style.justifyContent = 'center';
+            button.style.textAlign = 'center';
+            button.style.padding = '8px';
+        } else {
+            // Check for manually assigned image first, then search if not found
+            let symbolImageUrl = buttonData.assigned_image_url || null;
+            
+            if (!symbolImageUrl) {
+                // Add delay between requests to prevent server overwhelm (200ms per button for better spacing)
+                await new Promise(resolve => setTimeout(resolve, idx * 200));
+                
+                // Try to get symbol image through search, fall back to pictogram if needed
+                symbolImageUrl = await getSymbolImageForText(buttonData.text);
+            }
+            
+            if (symbolImageUrl) {
+            // Create container with dedicated image area and text footer
             const buttonContent = document.createElement('div');
+            buttonContent.style.position = 'relative';
+            buttonContent.style.width = '100%';
+            buttonContent.style.height = '100%';
             buttonContent.style.display = 'flex';
             buttonContent.style.flexDirection = 'column';
-            buttonContent.style.alignItems = 'center';
-            buttonContent.style.gap = '4px';
+            
+            // Image container (takes up most of button height)
+            const imageContainer = document.createElement('div');
+            imageContainer.style.flex = '1';
+            imageContainer.style.width = '100%';
+            imageContainer.style.overflow = 'hidden';
+            imageContainer.style.borderRadius = '8px 8px 0 0';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
             
             const imageElement = document.createElement('img');
             imageElement.src = symbolImageUrl;
             imageElement.alt = buttonData.text;
-            imageElement.style.width = '40px';
-            imageElement.style.height = '40px';
-            imageElement.style.objectFit = 'contain';
+            imageElement.style.width = '100%';
+            imageElement.style.height = '100%';
+            imageElement.style.objectFit = 'cover';
             imageElement.onerror = () => {
                 // If image fails to load, fall back to pictogram
                 const pictogram = getPictogramForText(buttonData.text);
                 if (pictogram) {
                     const pictogramSpan = document.createElement('span');
                     pictogramSpan.textContent = pictogram;
-                    pictogramSpan.style.fontSize = '1.5em';
+                    pictogramSpan.style.fontSize = '3em';
                     pictogramSpan.style.lineHeight = '1';
-                    buttonContent.replaceChild(pictogramSpan, imageElement);
+                    pictogramSpan.style.color = '#666';
+                    imageContainer.replaceChild(pictogramSpan, imageElement);
                 }
             };
             
+            // Text footer (edge to edge, no margins)
+            const textFooter = document.createElement('div');
+            textFooter.style.height = '18px';
+            textFooter.style.width = '100%';
+            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            textFooter.style.color = 'white';
+            textFooter.style.display = 'flex';
+            textFooter.style.alignItems = 'center';
+            textFooter.style.justifyContent = 'center';
+            textFooter.style.padding = '1px 2px';
+            textFooter.style.margin = '0';
+            textFooter.style.borderRadius = '0';
+            textFooter.style.position = 'absolute';
+            textFooter.style.bottom = '0';
+            textFooter.style.left = '0';
+            textFooter.style.right = '0';
+            
             const textSpan = document.createElement('span');
             textSpan.textContent = buttonData.text;
-            textSpan.style.fontSize = '0.9em';
-            textSpan.style.lineHeight = '1.2';
+            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontWeight = 'bold';
+            textSpan.style.textAlign = 'center';
+            textSpan.style.lineHeight = '1.1';
+            textSpan.style.wordWrap = 'break-word';
+            textSpan.style.hyphens = 'auto';
+            textSpan.style.overflow = 'hidden';
+            textSpan.style.display = '-webkit-box';
+            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitBoxOrient = 'vertical';
+            textSpan.style.margin = '0';
+            textSpan.style.padding = '0';
             
-            buttonContent.appendChild(imageElement);
-            buttonContent.appendChild(textSpan);
+            imageContainer.appendChild(imageElement);
+            textFooter.appendChild(textSpan);
+            buttonContent.appendChild(imageContainer);
+            buttonContent.appendChild(textFooter);
             button.appendChild(buttonContent);
         } else {
             // Fall back to pictogram if no symbol image found
@@ -1105,6 +1360,7 @@ async function generateGrid(page, container) {
             } else {
                 button.textContent = buttonData.text;
             }
+            }
         }
         
         button.dataset.llmQuery = buttonData.LLMQuery || '';
@@ -1114,6 +1370,12 @@ async function generateGrid(page, container) {
         button.className = '';
         button.style.gridRowStart = currentRow + 1;
         button.style.gridColumnStart = currentCol + 1;
+        button.style.minHeight = '100px'; // Ensure buttons are tall enough for images
+        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
+        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
+        button.style.padding = '0'; // Remove all padding
+        button.style.margin = '0'; // Remove all margin
+        button.style.border = 'none'; // Remove border
         button.addEventListener('click', debounce(() => handleButtonClick(buttonData), clickDebounceDelay));
         
         return button;
@@ -1155,6 +1417,7 @@ async function handleButtonClick(buttonData) {
     const llmQuery = buttonData.LLMQuery || '';
     const targetPage = buttonData.targetPage || '';
     const speechPhrase = buttonData.speechPhrase || '';
+    const customAudioFile = buttonData.customAudioFile || null;
 
     const buttonLabel = buttonData.option || buttonData.text || '';
     const buttonSummary = buttonData.summary || buttonLabel;
@@ -1209,6 +1472,14 @@ async function handleButtonClick(buttonData) {
                 await announce(speechPhrase, "system"); // Announce while speech bubble is clear.
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+            }
+            
+            // Play custom MP3 audio file if assigned
+            if (customAudioFile) {
+                const tAudio0 = performance.now();
+                await playCustomButtonAudio(customAudioFile);
+                const tAudio1 = performance.now();
+                console.log(`[DEBUG] handleButtonClick: playCustomButtonAudio took ${(tAudio1-tAudio0).toFixed(2)} ms`);
             }
             
             // Show loading indicator AFTER the speech announcement is complete
@@ -1315,6 +1586,14 @@ async function handleButtonClick(buttonData) {
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (nav) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
             }
+            
+            // Play custom MP3 audio file if assigned
+            if (customAudioFile) {
+                const tAudio0 = performance.now();
+                await playCustomButtonAudio(customAudioFile);
+                const tAudio1 = performance.now();
+                console.log(`[DEBUG] handleButtonClick: playCustomButtonAudio (nav) took ${(tAudio1-tAudio0).toFixed(2)} ms`);
+            }
             // Navigate immediately (no delay)
             if (typeof targetPage === 'string' && targetPage.startsWith('!')) {
                 // Special page: navigate directly to the corresponding HTML
@@ -1324,6 +1603,33 @@ async function handleButtonClick(buttonData) {
                 if (specialPage === 'favorites') {
                     const currentUrl = window.location.href;
                     window.location.href = `${specialPage}.html?from=${encodeURIComponent(currentUrl)}`;
+                } else if (specialPage === 'freestyle') {
+                    // For freestyle page, pass context information for contextual word suggestions
+                    console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
+                    console.log('DEBUG: Before freestyle navigation - activeOriginatingButtonText:', activeOriginatingButtonText);
+                    console.log('DEBUG: Before freestyle navigation - pageInfo:', pageInfo);
+                    
+                    const params = new URLSearchParams();
+                    
+                    // Pass current page name as source context
+                    if (pageInfo?.name && pageInfo.name !== 'UnknownPage') {
+                        params.set('source_page', pageInfo.name);
+                    }
+                    
+                    // Pass LLM context if available (indicates LLM-generated page)
+                    if (activeLLMPromptForContext) {
+                        params.set('context', activeLLMPromptForContext);
+                        params.set('is_llm_generated', 'true');
+                    }
+                    
+                    // Pass originating button text if available
+                    if (activeOriginatingButtonText) {
+                        params.set('originating_button', activeOriginatingButtonText);
+                    }
+                    
+                    console.log('DEBUG: Freestyle navigation params:', params.toString());
+                    const queryString = params.toString();
+                    window.location.href = queryString ? `${specialPage}.html?${queryString}` : `${specialPage}.html`;
                 } else {
                     window.location.href = `${specialPage}.html`;
                 }
@@ -1333,13 +1639,23 @@ async function handleButtonClick(buttonData) {
             }
             debugTimes.targetPageBranch = performance.now();
 
-        } else if (speechPhrase) {
-            // Case 4: Button just speaks a phrase.
+        } else if (speechPhrase || customAudioFile) {
+            // Case 4: Button just speaks a phrase or plays audio.
             activeOriginatingButtonText = null;
-            const tAnnounce0 = performance.now();
-            await announce(speechPhrase, "system");
-            const tAnnounce1 = performance.now();
-            console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (speak only) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+            if (speechPhrase) {
+                const tAnnounce0 = performance.now();
+                await announce(speechPhrase, "system");
+                const tAnnounce1 = performance.now();
+                console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (speak only) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+            }
+            
+            // Play custom MP3 audio file if assigned
+            if (customAudioFile) {
+                const tAudio0 = performance.now();
+                await playCustomButtonAudio(customAudioFile);
+                const tAudio1 = performance.now();
+                console.log(`[DEBUG] handleButtonClick: playCustomButtonAudio (speak only) took ${(tAudio1-tAudio0).toFixed(2)} ms`);
+            }
             // CRITICAL: Hide spinner and restart scanning for simple speak actions.
             document.getElementById('loading-indicator').style.display = 'none';
             startAuditoryScanning();
@@ -1472,10 +1788,11 @@ async function getLLMResponse(prompt) {
             }
 
             const summary = item.summary;
+            const keywords = item.keywords; // Preserve keywords field
             let option = null;
 
-            // Find the key that is NOT 'summary' and use its value as the 'option'
-            const otherKeys = Object.keys(item).filter(key => key !== 'summary');
+            // Find the key that is NOT 'summary' or 'keywords' and use its value as the 'option'
+            const otherKeys = Object.keys(item).filter(key => key !== 'summary' && key !== 'keywords');
             if (otherKeys.length > 0) {
                 option = item[otherKeys[0]]; // Take the value of the first other key
             }
@@ -1485,6 +1802,7 @@ async function getLLMResponse(prompt) {
                 return {
                     option: String(option), // Ensure they are strings
                     summary: String(summary),
+                    keywords: keywords, // Include keywords if present
                     isLLMGenerated: true,
                     originalPrompt: activeLLMPromptForContext,
                     originatingButtonText: activeOriginatingButtonText
@@ -1681,10 +1999,11 @@ function setupQuestionRecognition() {
                 const promptForLLM = `
                     Provide up to "${LLMOptions}" short, single-phrase options related to: "${currentQuestion}".
                     Do not include any introductory or concluding text.
-                    Format your response as a JSON list where each item has "option" and "summary" keys.
+                    Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
                     The "option" key should contain the FULL option text. If the option contains a question and answer, like a joke, the option contain the question and the answer.
                     ${summaryInstruction}
-                    Example: [{"option": "...", "summary": "..."}]
+                    The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
+                    Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
                 `;
                 document.getElementById('loading-indicator').style.display = 'flex';
                 const options = await getLLMResponse(promptForLLM);
@@ -1915,6 +2234,43 @@ function generateFavoriteSelectionButtons(favoriteOptions) {
     }
 }
 
+
+// --- Custom Button Audio Playback Function ---
+async function playCustomButtonAudio(audioUrl) {
+    try {
+        console.log(`[AUDIO] Playing custom button audio: ${audioUrl}`);
+        
+        // Create audio element
+        const audio = new Audio(audioUrl);
+        
+        // Wait for the audio to load and play
+        return new Promise((resolve, reject) => {
+            audio.addEventListener('loadeddata', () => {
+                console.log('[AUDIO] Custom audio loaded, starting playback');
+            });
+            
+            audio.addEventListener('ended', () => {
+                console.log('[AUDIO] Custom audio playback completed');
+                resolve();
+            });
+            
+            audio.addEventListener('error', (e) => {
+                console.error('[AUDIO] Error playing custom audio:', e);
+                resolve(); // Don't reject, just continue silently
+            });
+            
+            // Start playback
+            audio.play().catch(error => {
+                console.error('[AUDIO] Failed to play custom audio:', error);
+                resolve(); // Continue silently on error
+            });
+        });
+        
+    } catch (error) {
+        console.error('[AUDIO] Error in playCustomButtonAudio:', error);
+        // Don't throw error, just continue silently
+    }
+}
 
 // --- Core Audio Playback Function (Centralized audio processing) ---
 // This function is called by `processAnnouncementQueue` to play synthesized audio.
@@ -2262,50 +2618,100 @@ async function generateLlmButtons(options) {
      const askAgainButtonColors = [ 'bg-yellow-500', 'border-yellow-700', 'hover:bg-yellow-600', 'hover:border-yellow-800', 'text-black', 'focus:ring-yellow-400' ];
      const goBackButtonColors = [ 'bg-gray-200', 'border-gray-400', 'hover:bg-gray-300', 'hover:border-gray-500', 'text-black', 'focus:ring-gray-300' ];
 
-    // Generate buttons with async symbol loading
-    const buttonPromises = options.map(async optionData => {
+    // Generate buttons with async symbol loading (throttled to prevent server overwhelm)
+    const buttonPromises = options.map(async (optionData, idx) => {
         if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') { 
             console.warn("Skipping invalid option data:", optionData); 
             return null; 
         }
         const button = document.createElement('button');
         
+        // Add delay between requests to prevent server overwhelm (200ms per button for better spacing)
+        await new Promise(resolve => setTimeout(resolve, idx * 200));
+        
+        // Get optimized search term for better image matching (removes question words like "what", "who", etc.)
+        const optimizedSearchTerm = getOptimizedSearchTerm(optionData.summary, optionData.keywords);
+        console.log(`🔍 Image search optimization: "${optionData.summary}" → "${optimizedSearchTerm}"`);
+        
         // Try to get symbol image first, fall back to pictogram if needed
-        let symbolImageUrl = await getSymbolImageForText(optionData.summary);
+        let symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, optionData.keywords);
+        
+        if (!symbolImageUrl) {
+            console.warn(`🚨 LLM Option: No image found for "${optimizedSearchTerm}" (original: "${optionData.summary}")`);
+        }
         
         if (symbolImageUrl) {
-            // Create container for symbol image and text
+            // Create container with dedicated image area and text footer
             const buttonContent = document.createElement('div');
+            buttonContent.style.position = 'relative';
+            buttonContent.style.width = '100%';
+            buttonContent.style.height = '100%';
             buttonContent.style.display = 'flex';
             buttonContent.style.flexDirection = 'column';
-            buttonContent.style.alignItems = 'center';
-            buttonContent.style.gap = '4px';
+            
+            // Image container (takes up most of button height)
+            const imageContainer = document.createElement('div');
+            imageContainer.style.flex = '1';
+            imageContainer.style.width = '100%';
+            imageContainer.style.overflow = 'hidden';
+            imageContainer.style.borderRadius = '8px 8px 0 0';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
             
             const imageElement = document.createElement('img');
             imageElement.src = symbolImageUrl;
             imageElement.alt = optionData.summary;
-            imageElement.style.width = '40px';
-            imageElement.style.height = '40px';
-            imageElement.style.objectFit = 'contain';
+            imageElement.style.width = '100%';
+            imageElement.style.height = '100%';
+            imageElement.style.objectFit = 'cover';
             imageElement.onerror = () => {
                 // If image fails to load, fall back to pictogram
                 const pictogram = getPictogramForText(optionData.summary);
                 if (pictogram) {
                     const pictogramSpan = document.createElement('span');
                     pictogramSpan.textContent = pictogram;
-                    pictogramSpan.style.fontSize = '1.5em';
+                    pictogramSpan.style.fontSize = '3em';
                     pictogramSpan.style.lineHeight = '1';
-                    buttonContent.replaceChild(pictogramSpan, imageElement);
+                    pictogramSpan.style.color = '#666';
+                    imageContainer.replaceChild(pictogramSpan, imageElement);
                 }
             };
             
+            // Text footer (edge to edge, no margins)
+            const textFooter = document.createElement('div');
+            textFooter.style.height = '18px';
+            textFooter.style.width = '100%';
+            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            textFooter.style.color = 'white';
+            textFooter.style.display = 'flex';
+            textFooter.style.alignItems = 'center';
+            textFooter.style.justifyContent = 'center';
+            textFooter.style.padding = '1px 2px';
+            textFooter.style.margin = '0';
+            textFooter.style.borderRadius = '0';
+            textFooter.style.position = 'absolute';
+            textFooter.style.bottom = '0';
+            textFooter.style.left = '0';
+            textFooter.style.right = '0';
+            
             const textSpan = document.createElement('span');
             textSpan.textContent = optionData.summary;
-            textSpan.style.fontSize = '0.9em';
-            textSpan.style.lineHeight = '1.2';
+            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontWeight = 'bold';
+            textSpan.style.textAlign = 'center';
+            textSpan.style.lineHeight = '1.1';
+            textSpan.style.wordWrap = 'break-word';
+            textSpan.style.hyphens = 'auto';
+            textSpan.style.overflow = 'hidden';
+            textSpan.style.display = '-webkit-box';
+            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitBoxOrient = 'vertical';
             
-            buttonContent.appendChild(imageElement);
-            buttonContent.appendChild(textSpan);
+            imageContainer.appendChild(imageElement);
+            textFooter.appendChild(textSpan);
+            buttonContent.appendChild(imageContainer);
+            buttonContent.appendChild(textFooter);
             button.appendChild(buttonContent);
         } else {
             // Fall back to pictogram if no symbol image found
@@ -2341,6 +2747,13 @@ async function generateLlmButtons(options) {
         // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
         // The #gridContainer button CSS rules will handle the styling
         button.className = '';
+        
+        // Apply same edge-to-edge styling as regular buttons
+        button.style.padding = '0'; // Remove all padding
+        button.style.margin = '0'; // Remove all margin
+        button.style.border = 'none'; // Remove border
+        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
+        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
 
         return { button, optionData };
     });
@@ -2389,7 +2802,7 @@ async function generateLlmButtons(options) {
                 console.log("Announcement finished for:", button.dataset.option);
 
                 // Clear the question display after announcement
-                activeLLMPromptForContext = null; // Clear context after selection
+                // NOTE: Keep activeLLMPromptForContext intact for context-aware navigation (e.g., to freestyle)
                 const questionDisplay = document.getElementById('question-display');
                 if (questionDisplay) { questionDisplay.value = ''; }
 
@@ -2445,10 +2858,11 @@ async function generateLlmButtons(options) {
                         For the question "${currentQuestion}", provide new options.
                         IMPORTANTLY, exclude the following options if possible: "${excludedOptionsText}".
                         Return ONLY a numbered list of the new options. Do not include any introductory or concluding text.
-                        Format your response as a JSON list where each item has "option" and "summary" keys.
+                        Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
                         ${summaryInstruction}
                         The "option" key should contain the FULL option text. If the option contains a question and answer, like a joke, the option contain the question and the answer.
-                        Example: [{"option": "...", "summary": "..."}]
+                        The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
+                        Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
                     `;
                     console.log("Sending prompt for 'Something Else' options:", prompt);
 
@@ -2465,7 +2879,7 @@ async function generateLlmButtons(options) {
                         console.warn("Received string response from getLLMResponse for 'Something Else', expected array. Processing as string.");
                         const newOptions = response.split("\n").map(option => option.replace(/^\s*\d+[\.\)]?\s*|\s*\*+\s*|["']/g, '').trim()).filter(option => option !== "");
                         if (newOptions.length > 0) {
-                            const newOptionsObjects = newOptions.map(optText => ({ summary: optText, option: optText }));
+                            const newOptionsObjects = newOptions.map(optText => ({ summary: optText, option: optText, keywords: [] }));
                             await generateLlmButtons(newOptionsObjects); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (string response).");
@@ -2509,10 +2923,34 @@ async function generateLlmButtons(options) {
     freeStyleButton.className = '';
     freeStyleButton.addEventListener('click', () => {
         stopAuditoryScanning();
-        activeOriginatingButtonText = null; // Reset on navigation
-        activeLLMPromptForContext = null; // Clear context on navigation
-        // Navigate to freestyle.html
-        window.location.href = 'freestyle.html';
+        console.log('DEBUG: LLM-generated Free Style clicked - preserving context');
+        console.log('DEBUG: activeLLMPromptForContext:', activeLLMPromptForContext);
+        console.log('DEBUG: activeOriginatingButtonText:', activeOriginatingButtonText);
+        
+        // Build URL parameters for context-aware freestyle
+        const params = new URLSearchParams();
+        
+        // Pass current page name as source context
+        const pageInfo = getCurrentPageInfo();
+        if (pageInfo?.name && pageInfo.name !== 'UnknownPage') {
+            params.set('source_page', pageInfo.name);
+        }
+        
+        // Pass LLM context if available (indicates LLM-generated page)
+        if (activeLLMPromptForContext) {
+            params.set('context', activeLLMPromptForContext);
+            params.set('is_llm_generated', 'true');
+        }
+        
+        // Pass originating button text if available
+        if (activeOriginatingButtonText) {
+            params.set('originating_button', activeOriginatingButtonText);
+        }
+        
+        console.log('DEBUG: LLM-generated freestyle navigation params:', params.toString());
+        const queryString = params.toString();
+        // Navigate to freestyle.html with context
+        window.location.href = queryString ? `freestyle.html?${queryString}` : 'freestyle.html';
     });
     gridContainer.appendChild(freeStyleButton);
 

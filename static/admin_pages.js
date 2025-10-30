@@ -18,6 +18,7 @@ let helpWizardBtn = null;
 // Modal Elements
 let buttonEditorModal = null;
 let helpWizardModal = null;
+let imagePickerModal = null;
 
 
 // --- State Variables ---
@@ -32,6 +33,7 @@ const SPECIAL_PAGES = [
     { name: 'freestyle', displayName: 'Freestyle Page' },
     { name: 'threads', displayName: 'Threads Page' },
     { name: 'favorites', displayName: 'Favorites Page' },
+    { name: 'mood', displayName: 'Mood Selection Page' },
     // Add more special pages here as needed
 ];
 
@@ -90,6 +92,7 @@ function assignDOMElements() {
     // Modal elements
     buttonEditorModal = document.getElementById('buttonEditorModal');
     helpWizardModal = document.getElementById('helpWizardModal');
+    imagePickerModal = document.getElementById('imagePickerModal');
 
 }
 
@@ -98,7 +101,7 @@ function validateDOMElements() {
         pageForm, selectPage, buttonGrid, 
         newPageDisplayNameInput, createNewPageBtn, updatePageBtn, deletePageButton, 
         revertPageBtn, saveButtonsBtn, helpWizardBtn,
-        buttonEditorModal, helpWizardModal
+        buttonEditorModal, helpWizardModal, imagePickerModal
     ];
     return required.every(element => element !== null);
 }
@@ -121,6 +124,99 @@ function setupEventListeners() {
     document.getElementById('saveButtonEdit').addEventListener('click', saveButtonEdit);
     document.getElementById('clearButtonBtn').addEventListener('click', clearCurrentButton);
     
+    // Audio File Upload
+    const customAudioFileInput = document.getElementById('customAudioFile');
+    const audioUploadStatus = document.getElementById('audioUploadStatus');
+    
+    if (customAudioFileInput) {
+        customAudioFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                audioUploadStatus.className = 'text-xs mt-1 text-blue-600';
+                audioUploadStatus.textContent = 'Uploading audio file...';
+                audioUploadStatus.classList.remove('hidden');
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    const response = await window.authenticatedFetch('/api/admin/upload-button-audio', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (response.ok) {
+                        const result = await response.json();
+                        document.getElementById('customAudioFileUrl').value = result.audio_url;
+                        audioUploadStatus.className = 'text-xs mt-1 text-green-600';
+                        audioUploadStatus.textContent = `Audio uploaded: ${file.name}`;
+                        console.log('Audio uploaded successfully:', result.audio_url);
+                    } else {
+                        throw new Error('Upload failed');
+                    }
+                } catch (error) {
+                    console.error('Error uploading audio:', error);
+                    audioUploadStatus.className = 'text-xs mt-1 text-red-600';
+                    audioUploadStatus.textContent = 'Upload failed. Please try again.';
+                    document.getElementById('customAudioFileUrl').value = '';
+                }
+            }
+        });
+    }
+
+    // Image Assignment
+    const browseImagesBtn = document.getElementById('browseImagesBtn');
+    const clearImageBtn = document.getElementById('clearImageBtn');
+    
+    if (browseImagesBtn) {
+        browseImagesBtn.addEventListener('click', openImagePicker);
+    } else {
+        console.error('browseImagesBtn not found in DOM');
+    }
+    
+    if (clearImageBtn) {
+        clearImageBtn.addEventListener('click', clearAssignedImage);
+    } else {
+        console.error('clearImageBtn not found in DOM');
+    }
+    
+    // Image Picker Modal
+    const imagePickerElements = [
+        'closeImagePicker', 'cancelImageSelection', 'selectImageBtn', 
+        'imageSearchBtn', 'clearImageSearch', 'imagePrevPage', 'imageNextPage', 'imageSearchInput'
+    ];
+    
+    imagePickerElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (!element) {
+            console.error(`Image picker element '${id}' not found in DOM`);
+        }
+    });
+    
+    const closeImagePickerBtn = document.getElementById('closeImagePicker');
+    const cancelImageSelectionBtn = document.getElementById('cancelImageSelection');
+    const selectImageBtn = document.getElementById('selectImageBtn');
+    const imageSearchBtn = document.getElementById('imageSearchBtn');
+    const clearImageSearchBtn = document.getElementById('clearImageSearch');
+    const imagePrevPageBtn = document.getElementById('imagePrevPage');
+    const imageNextPageBtn = document.getElementById('imageNextPage');
+    const imageSearchInput = document.getElementById('imageSearchInput');
+    
+    if (closeImagePickerBtn) closeImagePickerBtn.addEventListener('click', closeImagePicker);
+    if (cancelImageSelectionBtn) cancelImageSelectionBtn.addEventListener('click', closeImagePicker);
+    if (selectImageBtn) selectImageBtn.addEventListener('click', selectAssignedImage);
+    if (imageSearchBtn) imageSearchBtn.addEventListener('click', searchImages);
+    if (clearImageSearchBtn) clearImageSearchBtn.addEventListener('click', clearImageSearch);
+    if (imagePrevPageBtn) imagePrevPageBtn.addEventListener('click', () => navigateImagePage(-1));
+    if (imageNextPageBtn) imageNextPageBtn.addEventListener('click', () => navigateImagePage(1));
+    
+    // Image search on Enter key
+    if (imageSearchInput) {
+        imageSearchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchImages();
+        });
+    }
+    
     // Help Wizard Modal
     document.getElementById('closeHelpWizard').addEventListener('click', closeHelpWizard);
     document.getElementById('wizardCancelBtn').addEventListener('click', closeHelpWizard);
@@ -130,7 +226,7 @@ function setupEventListeners() {
     document.getElementById('wizardRejectBtn').addEventListener('click', wizardReject);
     
     // Real-time preview updates in button editor
-    ['buttonText', 'speechPhrase', 'targetPage', 'llmQuery', 'buttonHidden'].forEach(id => {
+    ['buttonText', 'speechPhrase', 'targetPage', 'llmQuery', 'buttonHidden', 'assignedImageUrl'].forEach(id => {
         const element = document.getElementById(id);
         if (element) {
             element.addEventListener('input', updateButtonPreview);
@@ -164,8 +260,19 @@ function createVisualButton(row, col) {
     const buttonData = findButtonAtPosition(row, col);
     
     if (buttonData && buttonData.text) {
-        buttonDiv.textContent = buttonData.text;
         buttonDiv.classList.add('has-content');
+        
+        // Show assigned image if available
+        if (buttonData.assigned_image_url) {
+            buttonDiv.style.backgroundImage = `url('${buttonData.assigned_image_url}')`;
+            buttonDiv.style.backgroundSize = 'cover';
+            buttonDiv.style.backgroundPosition = 'center';
+            buttonDiv.style.color = 'white';
+            buttonDiv.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)';
+            buttonDiv.innerHTML = `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 4px; font-size: 12px;">${buttonData.text}</div>`;
+        } else {
+            buttonDiv.textContent = buttonData.text;
+        }
         
         // Add indicators based on button type
         addButtonIndicators(buttonDiv, buttonData);
@@ -297,6 +404,21 @@ function openButtonEditor(row, col) {
     document.getElementById('speechPhrase').value = buttonData.speechPhrase || '';
     document.getElementById('llmQuery').value = buttonData.LLMQuery || '';
     document.getElementById('buttonHidden').checked = buttonData.hidden || false;
+    document.getElementById('assignedImageUrl').value = buttonData.assigned_image_url || '';
+    document.getElementById('customAudioFileUrl').value = buttonData.customAudioFile || '';
+    
+    // Update audio upload status if audio file exists
+    const audioUploadStatus = document.getElementById('audioUploadStatus');
+    if (buttonData.customAudioFile) {
+        audioUploadStatus.className = 'text-xs mt-1 text-green-600';
+        audioUploadStatus.textContent = 'Audio file assigned';
+        audioUploadStatus.classList.remove('hidden');
+    } else {
+        audioUploadStatus.classList.add('hidden');
+    }
+    
+    // Update image preview
+    updateAssignedImagePreview(buttonData.assigned_image_url);
     
     // Populate target page dropdown
     populateTargetPageDropdown();
@@ -320,16 +442,22 @@ function closeButtonEditor() {
 function saveButtonEdit() {
     if (!currentEditingButton) return;
     
+    const assignedImageUrl = document.getElementById('assignedImageUrl').value.trim();
     const buttonData = {
         row: currentEditingButton.row,
         col: currentEditingButton.col,
         text: document.getElementById('buttonText').value.trim(),
         speechPhrase: document.getElementById('speechPhrase').value.trim() || null,
+        customAudioFile: document.getElementById('customAudioFileUrl').value.trim() || null,
         targetPage: document.getElementById('targetPage').value.trim(),
         LLMQuery: document.getElementById('llmQuery').value.trim(),
         queryType: "options", // Always options
-        hidden: document.getElementById('buttonHidden').checked
+        hidden: document.getElementById('buttonHidden').checked,
+        assigned_image_url: assignedImageUrl || null
     };
+    
+    console.log('Saving button data:', buttonData);
+    console.log('Assigned image URL:', assignedImageUrl);
     
     // Remove existing button at this position
     if (!currentPageData.buttons) currentPageData.buttons = [];
@@ -371,10 +499,20 @@ function updateButtonPreview() {
     const targetPage = document.getElementById('targetPage').value.trim();
     const llmQuery = document.getElementById('llmQuery').value.trim();
     const hidden = document.getElementById('buttonHidden').checked;
+    const assignedImageUrl = document.getElementById('assignedImageUrl').value.trim();
     
     // Update preview button
     if (text) {
-        preview.innerHTML = `<div class="visual-button has-content">${text}</div>`;
+        let buttonHTML = `<div class="visual-button has-content">`;
+        if (assignedImageUrl) {
+            buttonHTML += `<div style="position: relative; width: 100%; height: 80px; background-image: url('${assignedImageUrl}'); background-size: cover; background-position: center; border-radius: 6px;">`;
+            buttonHTML += `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: white; padding: 4px; font-size: 12px; text-align: center;">${text}</div>`;
+            buttonHTML += `</div>`;
+        } else {
+            buttonHTML += text;
+        }
+        buttonHTML += `</div>`;
+        preview.innerHTML = buttonHTML;
     } else {
         preview.innerHTML = `<div class="visual-button undefined">Undefined</div>`;
     }
@@ -1012,6 +1150,187 @@ document.addEventListener('adminUserContextReady', function() {
     console.log("admin_pages.js: Received adminUserContextReady event. Calling authContextIsReady().");
     authContextIsReady();
 });
+
+// --- Image Assignment Functions ---
+let currentImageSearch = '';
+let currentImagePage = 0;
+let totalImagePages = 0;
+let allImages = [];
+let selectedImageUrl = null;
+
+function updateAssignedImagePreview(imageUrl) {
+    const preview = document.getElementById('assignedImagePreview');
+    const thumb = document.getElementById('assignedImageThumb');
+    const clearBtn = document.getElementById('clearImageBtn');
+    
+    if (imageUrl) {
+        preview.classList.remove('hidden');
+        clearBtn.classList.remove('hidden');
+        thumb.src = imageUrl;
+        thumb.alt = 'Assigned image';
+    } else {
+        preview.classList.add('hidden');
+        clearBtn.classList.add('hidden');
+        thumb.src = '';
+        thumb.alt = '';
+    }
+}
+
+function openImagePicker() {
+    console.log('openImagePicker called');
+    console.log('imagePickerModal:', imagePickerModal);
+    
+    selectedImageUrl = null;
+    const selectBtn = document.getElementById('selectImageBtn');
+    if (selectBtn) {
+        selectBtn.disabled = true;
+    }
+    
+    if (imagePickerModal) {
+        imagePickerModal.classList.remove('hidden');
+        loadImages();
+    } else {
+        console.error('imagePickerModal is null - cannot open modal');
+    }
+}
+
+function closeImagePicker() {
+    imagePickerModal.classList.add('hidden');
+    document.getElementById('imageSearchInput').value = '';
+    currentImageSearch = '';
+    currentImagePage = 0;
+    selectedImageUrl = null;
+}
+
+function clearAssignedImage() {
+    document.getElementById('assignedImageUrl').value = '';
+    updateAssignedImagePreview('');
+    updateButtonPreview();
+}
+
+async function loadImages(searchTerm = '', page = 0) {
+    const loadingIndicator = document.getElementById('imageLoadingIndicator');
+    const imageGrid = document.getElementById('imageGrid');
+    const resultsInfo = document.getElementById('imageResultsInfo');
+    const pageInfo = document.getElementById('imagePageInfo');
+    const prevBtn = document.getElementById('imagePrevPage');
+    const nextBtn = document.getElementById('imageNextPage');
+    
+    try {
+        loadingIndicator.classList.remove('hidden');
+        imageGrid.innerHTML = '';
+        
+        const params = new URLSearchParams({
+            page: page.toString(),
+            limit: '48'
+        });
+        
+        if (searchTerm) {
+            params.append('search', searchTerm);
+        }
+        
+        const response = await window.authenticatedFetch(`/api/admin/images/browse?${params}`, {
+            method: 'GET'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        allImages = data.images || [];
+        currentImagePage = data.page || 0;
+        totalImagePages = data.total_pages || 0;
+        
+        // Update UI
+        resultsInfo.textContent = `Showing ${allImages.length} of ${data.total_count || 0} images`;
+        pageInfo.textContent = `Page ${currentImagePage + 1} of ${totalImagePages}`;
+        
+        prevBtn.disabled = currentImagePage <= 0;
+        nextBtn.disabled = currentImagePage >= totalImagePages - 1;
+        
+        // Render images
+        renderImageGrid();
+        
+    } catch (error) {
+        console.error('Error loading images:', error);
+        resultsInfo.textContent = 'Error loading images';
+        imageGrid.innerHTML = '<div class="col-span-full text-center text-red-500 py-8">Failed to load images. Please try again.</div>';
+    } finally {
+        loadingIndicator.classList.add('hidden');
+    }
+}
+
+function renderImageGrid() {
+    const imageGrid = document.getElementById('imageGrid');
+    imageGrid.innerHTML = '';
+    
+    allImages.forEach(image => {
+        const imageCard = document.createElement('div');
+        imageCard.className = 'relative cursor-pointer border-2 border-transparent hover:border-blue-500 rounded-md overflow-hidden bg-gray-100';
+        imageCard.onclick = () => selectImageInGrid(image.image_url, imageCard);
+        
+        const displayName = image.subconcept || image.concept || 'Image';
+        
+        imageCard.innerHTML = `
+            <img src="${image.image_url}" alt="${displayName}" 
+                 class="w-full h-20 object-cover" 
+                 loading="lazy"
+                 onerror="this.parentElement.innerHTML='<div class=\\'w-full h-20 flex items-center justify-center bg-gray-200 text-gray-500 text-xs\\'>Image failed to load</div>'">
+            <div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">
+                ${displayName}
+            </div>
+        `;
+        
+        imageGrid.appendChild(imageCard);
+    });
+}
+
+function selectImageInGrid(imageUrl, cardElement) {
+    // Remove previous selection
+    document.querySelectorAll('#imageGrid > div').forEach(card => {
+        card.classList.remove('border-blue-500', 'bg-blue-50');
+        card.classList.add('border-transparent');
+    });
+    
+    // Highlight selected
+    cardElement.classList.remove('border-transparent');
+    cardElement.classList.add('border-blue-500', 'bg-blue-50');
+    
+    selectedImageUrl = imageUrl;
+    document.getElementById('selectImageBtn').disabled = false;
+}
+
+function selectAssignedImage() {
+    if (selectedImageUrl) {
+        document.getElementById('assignedImageUrl').value = selectedImageUrl;
+        updateAssignedImagePreview(selectedImageUrl);
+        updateButtonPreview();
+        closeImagePicker();
+    }
+}
+
+function searchImages() {
+    const searchTerm = document.getElementById('imageSearchInput').value.trim();
+    currentImageSearch = searchTerm;
+    currentImagePage = 0;
+    loadImages(searchTerm, 0);
+}
+
+function clearImageSearch() {
+    document.getElementById('imageSearchInput').value = '';
+    currentImageSearch = '';
+    currentImagePage = 0;
+    loadImages('', 0);
+}
+
+function navigateImagePage(direction) {
+    const newPage = currentImagePage + direction;
+    if (newPage >= 0 && newPage < totalImagePages) {
+        currentImagePage = newPage;
+        loadImages(currentImageSearch, newPage);
+    }
+}
 
 // Fallback: Check if auth context already exists
 if (typeof window.adminContextInitializedByInlineScript !== 'undefined' && window.adminContextInitializedByInlineScript) {

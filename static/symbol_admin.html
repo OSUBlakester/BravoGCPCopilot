@@ -20,8 +20,7 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 2rem;
-            border-radius: 16px;
-            margin-bottom: 2rem;
+            border-radius: 16px;                const response = await fetch(`/api/imagecreator/search?tag=${encodeURIComponent(query)}&limit=8`);            margin-bottom: 2rem;
             text-align: center;
         }
         .header h1 {
@@ -280,8 +279,9 @@
         <div class="card">
             <h2>🔍 Symbol Search</h2>
             <div class="search-section">
-                <input type="text" class="search-input" id="searchInput" placeholder="Search for symbols..." />
-                <button class="button" onclick="searchSymbols()">Search</button>
+                <input type="text" class="search-input" id="searchInput" placeholder="Search for symbols and BravoImages..." />
+                <button class="button" onclick="searchSymbols()">Search All</button>
+                <button class="button success" onclick="searchBravoImages()">🖼️ BravoImages Only</button>
             </div>
             <div class="symbol-grid" id="searchResults">
                 <div class="symbol-card">
@@ -590,14 +590,15 @@
         async function testSearch() {
             log('info', '🔍 Testing search functionality...');
             
-            const testQueries = ['happy', 'food', 'action'];
+            // Include terms that should find BravoImages
+            const testQueries = ['happy', 'food', 'action', 'backpack', 'emotions', 'clothing', 'animals', 'technology', 'household'];
             const randomQuery = testQueries[Math.floor(Math.random() * testQueries.length)];
             
             document.getElementById('searchInput').value = randomQuery;
             searchSymbols();
         }
 
-        // Search for symbols
+        // Search for symbols (searches both aac_images and aac_images collections)
         async function searchSymbols() {
             const query = document.getElementById('searchInput').value.trim();
             if (!query) return;
@@ -605,45 +606,182 @@
             try {
                 log('info', `🔍 Searching for: "${query}"`);
                 
-                const response = await fetch(`/api/symbols/button-search?q=${encodeURIComponent(query)}&limit=8`);
-                const data = await response.json();
+                // Search both collections in parallel
+                const [symbolsResponse, imagesResponse] = await Promise.all([
+                    fetch(`/api/symbols/button-search?q=${encodeURIComponent(query)}&limit=8`),
+                    fetch(`/api/imagecreator/search?tag=${encodeURIComponent(query)}&limit=8`)
+                ]);
+                
+                const symbolsData = await symbolsResponse.json();
+                const imagesData = await imagesResponse.json();
                 
                 const container = document.getElementById('searchResults');
                 container.innerHTML = '';
                 
-                if (data.symbols && data.symbols.length > 0) {
-                    data.symbols.forEach(symbol => {
+                // Combine results from both collections
+                const allResults = [];
+                
+                // Add symbols from aac_images collection
+                if (symbolsData.symbols && symbolsData.symbols.length > 0) {
+                    symbolsData.symbols.forEach(symbol => {
+                        allResults.push({
+                            ...symbol,
+                            source: 'aac_images',
+                            display_name: symbol.name || 'Unnamed',
+                            display_categories: symbol.categories?.join(', ') || 'No categories'
+                        });
+                    });
+                }
+                
+                // Add images from aac_images collection (your BravoImages)
+                if (imagesData.images && imagesData.images.length > 0) {
+                    imagesData.images.forEach(image => {
+                        allResults.push({
+                            ...image,
+                            source: 'aac_images',
+                            display_name: image.subconcept || 'Unnamed', 
+                            display_categories: image.concept || 'No category',
+                            name: image.subconcept // For consistency
+                        });
+                    });
+                }
+                
+                if (allResults.length > 0) {
+                    // Sort results to show BravoImages first, then traditional symbols
+                    allResults.sort((a, b) => {
+                        if (a.source === 'aac_images' && b.source === 'aac_images') return -1;
+                        if (a.source === 'aac_images' && b.source === 'aac_images') return 1;
+                        return 0;
+                    });
+                    
+                    allResults.forEach(item => {
                         const card = document.createElement('div');
                         card.className = 'symbol-card';
                         
+                        // Different styling for different sources
+                        const sourceLabel = item.source === 'aac_images' ? 
+                            `<div style="font-size: 0.6rem; color: #007acc; font-weight: bold; margin-bottom: 0.2rem;">🖼️ BravoImage</div>` : 
+                            `<div style="font-size: 0.6rem; color: #6c757d; font-weight: bold; margin-bottom: 0.2rem;">🎭 Symbol</div>`;
+                        
                         // Show match info for semantic matches
-                        const matchInfo = symbol.matched_term && symbol.matched_term !== query ? 
-                            `<div style="font-size: 0.7rem; color: #0066cc; margin-top: 0.3rem;">📍 Found via: "${symbol.matched_term}" (Score: ${symbol.match_score?.toFixed(1)})</div>` : 
+                        const matchInfo = item.matched_term && item.matched_term !== query ? 
+                            `<div style="font-size: 0.7rem; color: #0066cc; margin-top: 0.3rem;">📍 Found via: "${item.matched_term}" (Score: ${item.match_score?.toFixed(1)})</div>` : 
                             '';
                         
                         card.innerHTML = `
+                            ${sourceLabel}
                             <div class="symbol-image">
-                                <img src="${symbol.image_url}" alt="${symbol.name || 'Symbol'}" 
+                                <img src="${item.image_url}" alt="${item.display_name}" 
                                      style="width: 100%; height: 100%; object-fit: contain;" 
                                      onerror="this.src='data:image/svg+xml,<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"64\\" height=\\"64\\" viewBox=\\"0 0 64 64\\"><rect width=\\"64\\" height=\\"64\\" fill=\\"%23f0f0f0\\"/><text x=\\"32\\" y=\\"36\\" text-anchor=\\"middle\\" font-family=\\"Arial\\" font-size=\\"24\\">🎭</text></svg>'" />
                             </div>
-                            <div><strong>${symbol.name || 'Unnamed'}</strong></div>
-                            <div style="font-size: 0.8rem; color: #666;">${symbol.categories?.join(', ') || 'No categories'}</div>
-                            <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${symbol.tags?.slice(0, 3).join(', ') || 'No tags'}</div>
+                            <div><strong>${item.display_name}</strong></div>
+                            <div style="font-size: 0.8rem; color: #666;">${item.display_categories}</div>
+                            <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${item.tags?.slice(0, 3).join(', ') || 'No tags'}</div>
                             ${matchInfo}
                         `;
                         container.appendChild(card);
                     });
                     
-                    const searchTypeInfo = data.search_type === 'semantic_match' ? ' (with semantic matching)' : '';
-                    log('success', `✅ Found ${data.total_found} symbols matching "${query}"${searchTypeInfo}`);
+                    const symbolCount = symbolsData.symbols?.length || 0;
+                    const imageCount = imagesData.images?.length || 0;
+                    log('success', `✅ Found ${allResults.length} results: ${imageCount} BravoImages + ${symbolCount} symbols for "${query}"`);
                 } else {
-                    container.innerHTML = '<div class="symbol-card">No symbols found</div>';
-                    log('info', `❌ No symbols found for "${query}"`);
+                    container.innerHTML = '<div class="symbol-card">No symbols or images found</div>';
+                    log('info', `❌ No results found for "${query}"`);
                 }
                 
             } catch (error) {
                 log('error', `❌ Search failed: ${error.message}`);
+            }
+        }
+
+        // Search only BravoImages (aac_images collection)
+        async function searchBravoImages() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) {
+                // Show random BravoImages if no query
+                showRandomBravoImages();
+                return;
+            }
+            
+            try {
+                log('info', `🖼️ Searching BravoImages for: "${query}"`);
+                
+                const response = await fetch(`/api/imagecreator/search?tag=${encodeURIComponent(query)}&limit=12`);
+                const data = await response.json();
+                
+                const container = document.getElementById('searchResults');
+                container.innerHTML = '';
+                
+                if (data.images && data.images.length > 0) {
+                    data.images.forEach(image => {
+                        const card = document.createElement('div');
+                        card.className = 'symbol-card';
+                        
+                        card.innerHTML = `
+                            <div style="font-size: 0.6rem; color: #007acc; font-weight: bold; margin-bottom: 0.2rem;">🖼️ BravoImage</div>
+                            <div class="symbol-image">
+                                <img src="${image.image_url}" alt="${image.subconcept}" 
+                                     style="width: 100%; height: 100%; object-fit: contain;" 
+                                     onerror="this.src='data:image/svg+xml,<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"64\\" height=\\"64\\" viewBox=\\"0 0 64 64\\"><rect width=\\"64\\" height=\\"64\\" fill=\\"%23f0f0f0\\"/><text x=\\"32\\" y=\\"36\\" text-anchor=\\"middle\\" font-family=\\"Arial\\" font-size=\\"24\\">🖼️</text></svg>'" />
+                            </div>
+                            <div><strong>${image.subconcept || 'Unnamed'}</strong></div>
+                            <div style="font-size: 0.8rem; color: #666;">${image.concept || 'No category'}</div>
+                            <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${image.tags?.slice(0, 4).join(', ') || 'No tags'}</div>
+                            <div style="font-size: 0.6rem; color: #28a745; margin-top: 0.3rem;">Source: ${image.source || 'bravo_images'}</div>
+                        `;
+                        container.appendChild(card);
+                    });
+                    
+                    log('success', `✅ Found ${data.images.length} BravoImages matching "${query}"`);
+                } else {
+                    container.innerHTML = '<div class="symbol-card">No BravoImages found for this search</div>';
+                    log('info', `❌ No BravoImages found for "${query}"`);
+                }
+                
+            } catch (error) {
+                log('error', `❌ BravoImages search failed: ${error.message}`);
+            }
+        }
+
+        // Show random BravoImages
+        async function showRandomBravoImages() {
+            try {
+                log('info', '🎲 Loading random BravoImages...');
+                
+                const response = await fetch('/api/imagecreator/search?limit=12');
+                const data = await response.json();
+                
+                const container = document.getElementById('searchResults');
+                container.innerHTML = '';
+                
+                if (data.images && data.images.length > 0) {
+                    data.images.forEach(image => {
+                        const card = document.createElement('div');
+                        card.className = 'symbol-card';
+                        
+                        card.innerHTML = `
+                            <div style="font-size: 0.6rem; color: #007acc; font-weight: bold; margin-bottom: 0.2rem;">🖼️ BravoImage</div>
+                            <div class="symbol-image">
+                                <img src="${image.image_url}" alt="${image.subconcept}" 
+                                     style="width: 100%; height: 100%; object-fit: contain;" />
+                            </div>
+                            <div><strong>${image.subconcept || 'Unnamed'}</strong></div>
+                            <div style="font-size: 0.8rem; color: #666;">${image.concept || 'No category'}</div>
+                            <div style="font-size: 0.7rem; color: #999; margin-top: 0.5rem;">${image.tags?.slice(0, 4).join(', ') || 'No tags'}</div>
+                        `;
+                        container.appendChild(card);
+                    });
+                    
+                    log('success', `✅ Loaded ${data.images.length} random BravoImages`);
+                } else {
+                    container.innerHTML = '<div class="symbol-card">No BravoImages available</div>';
+                    log('warning', '⚠️ No BravoImages found in database');
+                }
+                
+            } catch (error) {
+                log('error', `❌ Failed to load random BravoImages: ${error.message}`);
             }
         }
 

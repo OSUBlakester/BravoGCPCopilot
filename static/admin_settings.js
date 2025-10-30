@@ -19,6 +19,7 @@ const displaySplashInput = document.getElementById('displaySplash');
 const displaySplashTimeInput = document.getElementById('displaySplashTime');
 const enableMoodSelectionInput = document.getElementById('enableMoodSelection');
 const enablePictogramsInput = document.getElementById('enablePictograms');
+const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
 const testTtsVoiceButton = document.getElementById('testTtsVoiceButton');
 const ttsVoiceStatus = document.getElementById('tts-voice-status');
@@ -120,6 +121,7 @@ async function loadSettings() {
         if (displaySplashTimeInput) { displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000; }
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
         if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms || false; }
+        if (sightWordGradeLevelInput) { sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k'; }
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
             ttsVoiceSelect.value = currentSettings.selected_tts_voice_name;
         }
@@ -172,6 +174,7 @@ async function saveSettings() {
     const newDisplaySplashTime = displaySplashTimeInput.value ? parseInt(displaySplashTimeInput.value) : 3000;
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
     const newEnablePictograms = enablePictogramsInput.checked;
+    const newSightWordGradeLevel = sightWordGradeLevelInput.value;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
     const newGridColumns = gridColumnsSlider ? parseInt(gridColumnsSlider.value) : 6;
     const newToolbarPIN = toolbarPINInput ? toolbarPINInput.value.trim() : null;
@@ -250,6 +253,7 @@ async function saveSettings() {
         displaySplashTime: newDisplaySplashTime,
         enableMoodSelection: newEnableMoodSelection,
         enablePictograms: newEnablePictograms,
+        sightWordGradeLevel: newSightWordGradeLevel,
         selected_tts_voice_name: newSelectedTtsVoice,
         llm_provider: newLlmProvider, // Updated to use provider instead of specific model
         gridColumns: newGridColumns // Add gridColumns to save payload
@@ -306,6 +310,11 @@ async function saveSettings() {
                 displaySplash: newDisplaySplash,
                 displaySplashTime: newDisplaySplashTime
             });
+        }
+        
+        // Update sight word service settings if the function exists
+        if (typeof window.updateSightWordSettings === 'function') {
+            window.updateSightWordSettings(currentSettings);
         }
         
         showTemporaryStatus(settingsStatus, 'Settings saved successfully!', false);

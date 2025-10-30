@@ -47,6 +47,482 @@ let currentChooseWordCategory = "";
 let currentCategoryWords = [];
 let currentScanningContext = "main"; // "main", "spelling-letters", "spelling-predictions", "choose-word-categories", "choose-word-options"
 
+// Navigation context from URL parameters
+function getNavigationContext() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        source_page: params.get('source_page') || null,
+        context: params.get('context') || null,
+        is_llm_generated: params.get('is_llm_generated') === 'true',
+        originating_button: params.get('originating_button') || null
+    };
+}
+
+// --- Pictogram Support ---
+let enablePictograms = false; // Global setting for pictogram display - loaded from user settings
+
+const PICTOGRAM_MAP = {
+    // Emotions & Feelings
+    'happy': '😊', 'joy': '😊', 'glad': '😊', 'cheerful': '😊', 'delighted': '😊',
+    'sad': '😢', 'unhappy': '😢', 'crying': '😭', 'tears': '😭', 'weep': '😭',
+    'angry': '😠', 'mad': '😠', 'furious': '😡', 'rage': '😡', 'upset': '😠',
+    'tired': '😴', 'sleepy': '😴', 'exhausted': '😴', 'weary': '😴',
+    'excited': '🤩', 'thrilled': '🤩', 'enthusiastic': '🤩',
+    'confused': '😕', 'puzzled': '🤔', 'thinking': '🤔', 'wonder': '🤔',
+    'surprised': '😲', 'shocked': '😱', 'amazed': '😲',
+    'scared': '😨', 'afraid': '😨', 'frightened': '😨', 'worried': '😟',
+    'love': '❤️', 'heart': '❤️', 'care': '❤️', 'affection': '❤️',
+    'like': '👍', 'enjoy': '😊', 'prefer': '👍',
+    'hurt': '🤕', 'pain': '🤕', 'injured': '🤕', 'sore': '🤕',
+    'sick': '🤢', 'ill': '🤢', 'unwell': '🤢', 'nauseous': '🤮',
+    'calm': '😌', 'peaceful': '😌', 'relaxed': '😌', 'serene': '😌',
+
+    // Basic Communication
+    'hello': '👋', 'hi': '👋', 'hey': '👋', 'greetings': '👋', 'wave': '👋',
+    'goodbye': '👋', 'bye': '👋', 'farewell': '👋', 'see you': '👋',
+    'yes': '✅', 'okay': '✅', 'ok': '✅', 'agree': '✅', 'correct': '✅',
+    'no': '❌', 'nope': '❌', 'disagree': '❌', 'wrong': '❌', 'incorrect': '❌',
+    'please': '🙏', 'thank you': '🙏', 'thanks': '🙏', 'grateful': '🙏',
+    'help': '🆘', 'assist': '🆘', 'support': '🆘', 'aid': '🆘',
+    'sorry': '😞', 'apologize': '😞', 'excuse me': '🙏',
+
+    // Actions & Activities
+    'eat': '🍽️', 'eating': '🍽️', 'meal': '🍽️', 'dining': '🍽️',
+    'drink': '🥤', 'drinking': '🥤', 'sip': '🥤', 'beverage': '🥤',
+    'sleep': '😴', 'sleeping': '😴', 'nap': '😴', 'rest': '😴',
+    'wake up': '⏰', 'awake': '⏰', 'get up': '⏰',
+    'walk': '🚶', 'walking': '🚶', 'stroll': '🚶', 'hike': '🥾',
+    'run': '🏃', 'running': '🏃', 'jog': '🏃', 'sprint': '🏃',
+    'sit': '🪑', 'sitting': '🪑', 'chair': '🪑',
+    'stand': '🧍', 'standing': '🧍',
+    'play': '🎮', 'playing': '🎮', 'game': '🎮', 'fun': '🎉',
+    'work': '💼', 'working': '💼', 'job': '💼', 'office': '🏢',
+    'study': '📚', 'studying': '📚', 'learn': '📚', 'education': '🎓',
+    'read': '📖', 'reading': '📚', 'book': '📚',
+    'write': '✍️', 'writing': '✍️', 'pen': '🖊️', 'pencil': '✏️',
+    'listen': '👂', 'hearing': '👂', 'sound': '🔊',
+    'watch': '👀', 'look': '👀', 'see': '👀', 'observe': '👀',
+    'talk': '💬', 'speak': '💬', 'say': '💬', 'tell': '💬',
+    'sing': '🎤', 'singing': '🎤', 'song': '🎵', 'music': '🎵',
+    'dance': '💃', 'dancing': '💃',
+    'cook': '👨‍🍳', 'cooking': '👨‍🍳', 'chef': '👨‍🍳',
+    'clean': '🧹', 'cleaning': '🧹', 'tidy': '🧹',
+    'drive': '🚗', 'driving': '🚗',
+
+    // Food & Drink
+    'food': '🍽️', 'hungry': '🍽️', 'appetite': '🍽️',
+    'water': '💧', 'thirsty': '💧',
+    'coffee': '☕', 'tea': '🍵',
+    'bread': '🍞', 'toast': '🍞',
+    'fruit': '🍎', 'apple': '🍎', 'orange': '🍊', 'banana': '🍌',
+    'vegetables': '🥕', 'carrot': '🥕', 'broccoli': '🥦',
+    'meat': '🥩', 'chicken': '🍗', 'beef': '🥩', 'fish': '🐟',
+    'milk': '🥛', 'cheese': '🧀', 'egg': '🥚',
+    'pizza': '🍕', 'burger': '🍔', 'sandwich': '🥪',
+    'cake': '🎂', 'cookie': '🍪', 'candy': '🍬',
+    'hot': '🔥', 'warm': '🔥', 'cold': '🧊', 'cool': '❄️',
+
+    // Places & Locations
+    'home': '🏠', 'house': '🏠', 'apartment': '🏢',
+    'school': '🏫', 'classroom': '🏫', 'university': '🎓',
+    'hospital': '🏥', 'doctor': '👩‍⚕️', 'nurse': '👩‍⚕️',
+    'store': '🏪', 'shop': '🏪', 'market': '🏪',
+    'restaurant': '🍽️', 'cafe': '☕',
+    'park': '🌳', 'garden': '🌻', 'outdoors': '🌲',
+    'beach': '🏖️', 'ocean': '🌊', 'water': '💧',
+    'bathroom': '🚻', 'toilet': '🚽', 'shower': '🚿',
+    'bedroom': '🛏️', 'bed': '🛏️',
+    'kitchen': '🍽️', 'living room': '🛋️',
+    'car': '🚗', 'bus': '🚌', 'train': '🚆', 'plane': '✈️',
+
+    // People & Relationships
+    'family': '👨‍👩‍👧‍👦', 'mom': '👩', 'mother': '👩', 'dad': '👨', 'father': '👨',
+    'child': '👶', 'baby': '👶', 'kid': '🧒', 'boy': '👦', 'girl': '👧',
+    'friend': '👫', 'buddy': '👫', 'pal': '👫',
+    'person': '👤', 'people': '👥', 'everyone': '👥',
+    'teacher': '👩‍🏫', 'student': '👨‍🎓',
+
+    // Objects & Technology
+    'phone': '📱', 'computer': '💻', 'tablet': '📲',
+    'tv': '📺', 'television': '📺', 'screen': '📺',
+    'book': '📚', 'magazine': '📖', 'newspaper': '📰',
+    'toy': '🧸', 'ball': '⚽', 'game': '🎮',
+    'clothes': '👕', 'shirt': '👕', 'pants': '👖', 'shoes': '👟',
+    'glasses': '👓', 'hat': '👒',
+    'money': '💰', 'dollar': '💵', 'coin': '🪙',
+    'key': '🔑', 'door': '🚪', 'window': '🪟',
+    'light': '💡', 'lamp': '🔦',
+
+    // Time & Weather
+    'morning': '🌅', 'afternoon': '☀️', 'evening': '🌅', 'night': '🌙',
+    'today': '📅', 'tomorrow': '📅', 'yesterday': '📅',
+    'time': '🕐', 'clock': '🕐', 'hour': '🕐', 'minute': '⏰',
+    'sun': '☀️', 'sunny': '☀️', 'rain': '🌧️', 'rainy': '🌧️',
+    'snow': '❄️', 'snowy': '❄️', 'wind': '💨', 'windy': '💨',
+    'cloud': '☁️', 'cloudy': '☁️', 'storm': '⛈️',
+
+    // Body Parts & Health
+    'head': '🗣️', 'face': '😊', 'eye': '👁️', 'nose': '👃', 'mouth': '👄',
+    'ear': '👂', 'hand': '🤚', 'finger': '👆', 'arm': '💪', 'leg': '🦵',
+    'foot': '🦶', 'body': '🧍', 'hair': '💇',
+    'medicine': '💊', 'pill': '💊', 'bandage': '🩹',
+    'healthy': '💪', 'strong': '💪', 'weak': '😞',
+
+    // Directions & Movement
+    'up': '⬆️', 'down': '⬇️', 'left': '⬅️', 'right': '➡️',
+    'forward': '⬆️', 'back': '⬇️', 'backward': '⬇️',
+    'here': '👇', 'there': '👆', 'where': '❓',
+    'come': '👈', 'go': '🏃', 'stop': '✋', 'wait': '⏸️',
+    'fast': '💨', 'slow': '🐌', 'quick': '⚡',
+
+    // Colors
+    'red': '🔴', 'blue': '🔵', 'green': '🟢', 'yellow': '🟡',
+    'orange': '🟠', 'purple': '🟣', 'pink': '🩷', 'brown': '🟤',
+    'black': '⚫', 'white': '⚪', 'gray': '🔘', 'grey': '🔘',
+
+    // Numbers (basic)
+    'one': '1️⃣', 'two': '2️⃣', 'three': '3️⃣', 'four': '4️⃣', 'five': '5️⃣',
+    'six': '6️⃣', 'seven': '7️⃣', 'eight': '8️⃣', 'nine': '9️⃣', 'ten': '🔟',
+    'first': '1️⃣', 'second': '2️⃣', 'third': '3️⃣',
+
+    // Size & Quantity
+    'big': '📏', 'large': '📏', 'huge': '📏', 'giant': '📏',
+    'small': '🤏', 'little': '🤏', 'tiny': '🤏', 'mini': '🤏',
+    'more': '➕', 'less': '➖', 'many': '📊', 'few': '🤏',
+    'all': '💯', 'some': '📊', 'none': '⭕',
+
+    // Actions/States
+    'on': '🔛', 'off': '📴', 'open': '📂', 'close': '📁', 'closed': '📁',
+    'start': '▶️', 'begin': '▶️', 'finish': '⏹️', 'end': '⏹️',
+    'finished': '✅', 'done': '✅', 'complete': '✅',
+    'good': '👍', 'great': '👍', 'excellent': '⭐', 'perfect': '💯',
+    'bad': '👎', 'terrible': '👎', 'awful': '👎',
+    'new': '🆕', 'old': '📜', 'broken': '💔', 'fix': '🔧',
+    'clean': '✨', 'dirty': '🧽', 'messy': '🌪️',
+    'full': '💯', 'empty': '⭕', 'half': '½',
+
+    // Questions
+    'what': '❓', 'where': '📍', 'when': '🕐', 'who': '👤', 'why': '❓', 'how': '❓',
+    'question': '❓', 'answer': '💡', 'know': '🧠', 'understand': '🧠',
+
+    // Emergency & Safety
+    'emergency': '🚨', 'danger': '⚠️', 'safe': '🛡️', 'careful': '⚠️',
+    'fire': '🔥', 'police': '👮', 'ambulance': '🚑',
+
+    // Technology & Communication
+    'internet': '🌐', 'wifi': '📶', 'email': '📧', 'message': '💬',
+    'call': '📞', 'video': '📹', 'photo': '📷', 'picture': '🖼️',
+
+    // Shopping & Money
+    'buy': '🛒', 'sell': '💰', 'pay': '💳', 'cost': '💰', 'price': '💰',
+    'expensive': '💸', 'cheap': '💰', 'free': '🆓',
+
+    // Feelings about activities
+    'boring': '😴', 'interesting': '🤔', 'fun': '🎉', 'exciting': '🤩',
+    'easy': '👍', 'hard': '😤', 'difficult': '😤',
+
+    // Transportation
+    'bike': '🚲', 'bicycle': '🚲', 'motorcycle': '🏍️', 'truck': '🚚',
+    'taxi': '🚕', 'subway': '🚇', 'boat': '⛵', 'ship': '🚢',
+
+    // Animals
+    'dog': '🐕', 'cat': '🐱', 'bird': '🐦', 'fish': '🐟',
+    'horse': '🐴', 'cow': '🐄', 'pig': '🐷', 'chicken': '🐔',
+
+    // Nature
+    'tree': '🌳', 'flower': '🌸', 'grass': '🌱', 'mountain': '⛰️',
+    'river': '🏞️', 'lake': '🏞️', 'forest': '🌿', 'desert': '🏜️'
+};
+
+function getPictogramForText(text) {
+    if (!enablePictograms || !text) return null;
+    
+    // Check if this text is a sight word - if so, force text-only display
+    if (window.isSightWord && window.isSightWord(text)) {
+        console.log(`🔤 Sight word pictogram blocked: "${text}" - using text-only display`);
+        return null;
+    }
+    
+    const lowerText = text.toLowerCase().trim();
+    
+    // Direct match
+    if (PICTOGRAM_MAP[lowerText]) {
+        return PICTOGRAM_MAP[lowerText];
+    }
+    
+    // Partial matches for phrases containing key words
+    for (const [key, symbol] of Object.entries(PICTOGRAM_MAP)) {
+        if (lowerText.includes(key)) {
+            return symbol;
+        }
+    }
+    
+    return null;
+}
+
+// --- Shared Image Functions (from gridpage.js) ---
+function getOptimizedSearchTerm(summary, keywords = null) {
+    if (!summary || typeof summary !== 'string') return '';
+    
+    console.log(`🔧 DEBUG: Processing "${summary}" with keywords:`, keywords);
+    
+    const questionWords = ['what', 'who', 'where', 'when', 'why', 'how'];
+    const words = summary.toLowerCase().trim().split(/\s+/);
+    
+    // Remove question words from the beginning
+    let meaningfulWords = [...words];
+    while (meaningfulWords.length > 0 && questionWords.includes(meaningfulWords[0])) {
+        meaningfulWords.shift();
+    }
+    
+    // Remove common filler words and clean punctuation
+    const fillerWords = ['is', 'are', 'the', 'a', 'an', 'that', 'this', 'it', 'do', 'does', 'did', 'can', 'will', 'would', 'should'];
+    meaningfulWords = meaningfulWords
+        .filter(word => !fillerWords.includes(word))
+        .map(word => word.replace(/[?!.,;:]/g, ''))  // Remove punctuation
+        .filter(word => word.length > 0);  // Remove empty strings
+    
+    // If we have keywords, prioritize them (but skip question words and generic terms)
+    if (keywords && Array.isArray(keywords) && keywords.length > 0) {
+        // Find the first keyword that isn't a question word, filler word, or generic term
+        const questionAndFillerWords = [...questionWords, ...fillerWords, 'question', 'curiosity', 'that', 'this'];
+        const genericTerms = ['color', 'thing', 'object', 'item', 'stuff', 'shape', 'size'];
+        
+        const meaningfulKeyword = keywords.find(keyword => {
+            const cleanKeyword = keyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
+            return cleanKeyword.length > 2 && 
+                   !questionAndFillerWords.includes(cleanKeyword) &&
+                   !genericTerms.includes(cleanKeyword);
+        });
+        
+        if (meaningfulKeyword) {
+            const cleanKeyword = meaningfulKeyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
+            console.log(`🔧 DEBUG: Using meaningful keyword: "${cleanKeyword}"`);
+            return cleanKeyword;
+        }
+    }
+    
+    // Use the most meaningful word from the remaining words
+    if (meaningfulWords.length > 0) {
+        // For single word inputs that are specific (like colors, objects), prefer the original case
+        const originalWordLower = summary.toLowerCase().trim();
+        const originalWord = summary.trim(); // Preserve original case
+        if (meaningfulWords.includes(originalWordLower) && originalWordLower.length > 2) {
+            console.log(`🔧 DEBUG: Using original specific word with preserved case: "${originalWord}"`);
+            return originalWord;
+        }
+        
+        // Otherwise, prioritize nouns and verbs (longer words are more likely to be meaningful)
+        // Find the corresponding original case word
+        const sortedWords = meaningfulWords.sort((a, b) => b.length - a.length);
+        const selectedLowerWord = sortedWords[0];
+        
+        // Try to find the original case version of the selected word
+        const originalWords = summary.trim().split(/\s+/);
+        const originalCaseWord = originalWords.find(word => 
+            word.toLowerCase().replace(/[?!.,;:]/g, '') === selectedLowerWord
+        );
+        
+        const finalWord = originalCaseWord || selectedLowerWord;
+        console.log(`🔧 DEBUG: Meaningful words found:`, meaningfulWords, `→ Selected: "${finalWord}"`);
+        return finalWord;
+    }
+    
+    // Fallback to original summary if no meaningful words found (preserve case)
+    console.log(`🔧 DEBUG: No meaningful words found, using original: "${summary.trim()}"`);
+    return summary.trim();
+}
+
+/**
+ * Simple pluralization helper to generate both singular and plural forms
+ * @param {string} word - The word to generate variants for
+ * @returns {Array<string>} - Array of word variants (original, singular, plural)
+ */
+function getWordVariants(word) {
+    if (!word || typeof word !== 'string') return [word];
+    
+    const variants = [word]; // Always include original
+    const lowerWord = word.toLowerCase();
+    
+    // Generate singular form (remove common plural endings)
+    if (lowerWord.endsWith('ies') && lowerWord.length > 4) {
+        // parties → party, stories → story
+        variants.push(word.slice(0, -3) + 'y');
+    } else if (lowerWord.endsWith('es') && lowerWord.length > 3) {
+        // Only remove 'es' if the word stem suggests it needs 'es' for pluralization
+        // boxes → box, dishes → dish, glasses → glass, but NOT jokes → jok
+        const stem = lowerWord.slice(0, -2);
+        if (stem.endsWith('ch') || stem.endsWith('sh') || stem.endsWith('x') || 
+            stem.endsWith('z') || stem.endsWith('s') || stem.endsWith('ss')) {
+            variants.push(word.slice(0, -2));
+        }
+        // For other 'es' endings, treat as regular 's' plural (jokes → joke)
+        else {
+            variants.push(word.slice(0, -1));
+        }
+    } else if (lowerWord.endsWith('s') && lowerWord.length > 2 && !lowerWord.endsWith('ss')) {
+        // questions → question, foods → food, but not "bass"
+        variants.push(word.slice(0, -1));
+    }
+    
+    // Generate plural form (add common plural endings)
+    if (!lowerWord.endsWith('s')) {
+        if (lowerWord.endsWith('y') && lowerWord.length > 2 && !'aeiou'.includes(lowerWord[lowerWord.length - 2])) {
+            // party → parties, story → stories
+            variants.push(word.slice(0, -1) + 'ies');
+        } else if (lowerWord.endsWith('ch') || lowerWord.endsWith('sh') || lowerWord.endsWith('x') || lowerWord.endsWith('z') || lowerWord.endsWith('s')) {
+            // box → boxes, dish → dishes
+            variants.push(word + 'es');
+        } else {
+            // question → questions, food → foods
+            variants.push(word + 's');
+        }
+    }
+    
+    // Remove duplicates and return
+    return [...new Set(variants)];
+}
+
+/**
+ * Fetches symbol image from the AAC symbol database with retry logic and caching
+ * @param {string} text - The button text to find a symbol for
+ * @param {Array<string>} keywords - Optional semantic keywords for LLM-generated content  
+ * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
+ */
+async function getSymbolImageForText(text, keywords = null) {
+    if (!text || text.trim() === '') return null;
+    
+    // Check if pictograms/images are enabled
+    if (!enablePictograms) {
+        return null;
+    }
+    
+    // Check if this text is a sight word - if so, force text-only display (no images)
+    if (window.isSightWord && window.isSightWord(text)) {
+        console.log(`🔤 Sight word detected: "${text}" - using text-only display`);
+        return null;
+    }
+    
+    // Simple in-memory cache to avoid repeated requests
+    if (!window.symbolImageCache) {
+        window.symbolImageCache = new Map();
+    }
+    
+    const cacheKey = `v2_${text.trim().toLowerCase()}`; // v2 cache key for tag position prioritization fix
+    if (window.symbolImageCache.has(cacheKey)) {
+        const cached = window.symbolImageCache.get(cacheKey);
+        if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
+            return cached.imageUrl;
+        }
+    }
+    
+    // Get word variants (original, singular, plural) to try
+    const wordVariants = getWordVariants(text.trim());
+    console.log(`🔧 DEBUG: Trying word variants for "${text}":`, wordVariants);
+    
+    const maxRetries = 2;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            // Add a small delay for retries to avoid overwhelming the server
+            if (attempt > 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+            
+            let bestMatch = null;
+            let bestScore = -1;
+            let bestSource = '';
+            
+            // Try each word variant until we find a match
+            for (const variant of wordVariants) {
+                if (bestMatch) break; // Stop if we found a good match
+                
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds for BravoImages priority search
+                
+                // Use unified button-search that searches both collections with proper prioritization
+                const symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(variant)}&limit=1`;
+                const symbolsUrlWithKeywords = keywords && Array.isArray(keywords) && keywords.length > 0 ? 
+                    `${symbolsUrl}&keywords=${encodeURIComponent(JSON.stringify(keywords))}` : symbolsUrl;
+                
+                // Single unified search call
+                const [symbolsResponse] = await Promise.allSettled([
+                    fetch(symbolsUrlWithKeywords, { signal: controller.signal })
+                ]);
+                
+                clearTimeout(timeoutId);
+                
+                // Process unified button-search response (handles both collections with proper prioritization)
+                if (symbolsResponse.status === 'fulfilled' && symbolsResponse.value.ok) {
+                    try {
+                        const symbolsData = await symbolsResponse.value.json();
+                        if (symbolsData.symbols && symbolsData.symbols.length > 0) {
+                            const symbol = symbolsData.symbols[0];
+                            const symbolScore = symbol.match_score || 5;
+                            
+                            bestMatch = {
+                                image_url: symbol.image_url,
+                                name: symbol.name || symbol.subconcept || 'Image',
+                                match_score: symbolScore,
+                                source: symbol.source || 'unified_search'
+                            };
+                            bestScore = symbolScore;
+                            bestSource = symbol.source === 'bravo_images' ? 'BravoImages' : 'Symbols';
+                            
+                            console.log(`Found ${bestSource} for "${text}" using variant "${variant}": ${symbol.name || symbol.subconcept} (score: ${symbolScore})`);
+                            break; // Found a match, stop trying variants
+                        }
+                    } catch (e) {
+                        if (e.name !== 'AbortError') {
+                            console.warn('Error parsing unified search response:', e);
+                        }
+                    }
+                }
+            }
+            
+            if (bestMatch) {
+                // Cache successful result
+                window.symbolImageCache.set(cacheKey, {
+                    imageUrl: bestMatch.image_url,
+                    timestamp: Date.now()
+                });
+                
+                return bestMatch.image_url;
+            } else {
+                // Cache null result to avoid repeated requests
+                window.symbolImageCache.set(cacheKey, {
+                    imageUrl: null,
+                    timestamp: Date.now()
+                });
+                
+                // If both searches failed, continue to retry logic
+                if (attempt === maxRetries) {
+                    console.warn(`No symbols or images found for "${text}" after ${maxRetries} attempts`);
+                    return null;
+                }
+                continue; // Try again
+            }
+        } catch (error) {
+            lastError = error;
+            if (error.name === 'AbortError') {
+                // Don't retry on timeout - likely server overload
+                console.warn(`Symbol search timeout for "${text}" - skipping retries`);
+                return null;
+            } else {
+                console.warn(`Error fetching symbol for "${text}" (attempt ${attempt}/${maxRetries}):`, error.message);
+            }
+            
+            if (attempt === maxRetries) {
+                break;
+            }
+        }
+    }
+    
+    console.warn(`All symbol search attempts failed for "${text}", falling back to pictogram`);
+    return null;
+}
+
 // --- Initialize on Page Load ---
 document.addEventListener('DOMContentLoaded', async () => {
     const userReady = await initializeUserContext();
@@ -151,6 +627,15 @@ async function loadScanSettings() {
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
             autoClean = settings.autoClean || false; // Load Auto Clean setting
+            enablePictograms = settings.enablePictograms === true; // Load pictograms setting
+            
+            // Update sight word service with new settings
+            if (window.updateSightWordSettings) {
+                window.updateSightWordSettings(settings);
+                console.log('🔤 Updated sight word settings:', settings.sightWordGradeLevel);
+            } else {
+                console.warn('🔤 Sight word service not available');
+            }
             
             // Load gridColumns setting
             if (settings && typeof settings.gridColumns === 'number' && !isNaN(settings.gridColumns)) {
@@ -160,7 +645,7 @@ async function loadScanSettings() {
                 gridColumns = 6; // Default value for alphabet grid
             }
             
-            console.log('Scan settings loaded:', { defaultDelay, scanLoopLimit, gridColumns, autoClean });
+            console.log('Scan settings loaded:', { defaultDelay, scanLoopLimit, gridColumns, autoClean, enablePictograms });
         }
     } catch (error) {
         console.error('Error loading scan settings:', error);
@@ -442,14 +927,26 @@ async function loadWordOptions() {
         isLLMProcessing = true;
         showLoadingIndicator(true);
         
+        // Get navigation context for contextual word suggestions
+        const navContext = getNavigationContext();
+        console.log('DEBUG: Navigation context:', navContext);
+        console.log('DEBUG: URL params:', window.location.search);
+        
+        const requestPayload = {
+            build_space_text: currentBuildSpaceText,
+            context: navContext.context,
+            source_page: navContext.source_page,
+            is_llm_generated: navContext.is_llm_generated,
+            originating_button_text: navContext.originating_button
+        };
+        console.log('DEBUG: Freestyle API request payload:', requestPayload);
+        
         const response = await authenticatedFetch('/api/freestyle/word-options', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                build_space_text: currentBuildSpaceText
-            })
+            body: JSON.stringify(requestPayload)
         });
         
         if (response.ok) {
@@ -482,21 +979,152 @@ async function loadWordOptions() {
     }
 }
 
-function renderWordOptionsGrid() {
+async function renderWordOptionsGrid() {
     const grid = document.getElementById('word-options-grid');
     grid.innerHTML = '';
     
     // Update grid layout to use current gridColumns setting
     updateWordOptionsGridLayout();
     
-    currentWordOptions.forEach((word, index) => {
+    // Create word option buttons with images
+    for (let i = 0; i < currentWordOptions.length; i++) {
+        const word = currentWordOptions[i];
+        const wordData = currentWordOptions[i];
+        
         const button = document.createElement('button');
         button.className = 'word-option-btn';
-        button.textContent = word;
-        button.setAttribute('data-index', index);
+        button.setAttribute('data-index', i);
         button.addEventListener('click', () => handleWordOptionClick(word));
+        
+        // Get keywords if available (from LLM responses)
+        const keywords = (typeof wordData === 'object' && wordData.keywords) ? wordData.keywords : null;
+        const displayText = (typeof wordData === 'object' && wordData.text) ? wordData.text : wordData;
+        
+        // Check for sight words BEFORE optimization (using original text)
+        let symbolImageUrl = null;
+        if (window.isSightWord && window.isSightWord(displayText)) {
+            console.log(`🔤 Main freestyle sight word detected: "${displayText}" - using text-only display`);
+            symbolImageUrl = null; // Force text-only for sight words
+        } else {
+            // Get optimized search term for better image matching
+            const optimizedSearchTerm = getOptimizedSearchTerm(displayText, keywords);
+            console.log(`🔍 Image search optimization: "${displayText}" → "${optimizedSearchTerm}"`);
+            
+            // Try to get symbol image first, fall back to pictogram if needed
+            symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, keywords);
+        }
+        
+        if (symbolImageUrl) {
+            // Create container with dedicated image area and text footer
+            const buttonContent = document.createElement('div');
+            buttonContent.style.position = 'relative';
+            buttonContent.style.width = '100%';
+            buttonContent.style.height = '100%';
+            buttonContent.style.display = 'flex';
+            buttonContent.style.flexDirection = 'column';
+            
+            // Image container (takes up most of button height)
+            const imageContainer = document.createElement('div');
+            imageContainer.style.flex = '1';
+            imageContainer.style.width = '100%';
+            imageContainer.style.overflow = 'hidden';
+            imageContainer.style.borderRadius = '8px 8px 0 0';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
+            
+            const imageElement = document.createElement('img');
+            imageElement.src = symbolImageUrl;
+            imageElement.alt = displayText;
+            imageElement.style.width = '100%';
+            imageElement.style.height = '100%';
+            imageElement.style.objectFit = 'cover';
+            imageElement.onerror = () => {
+                // If image fails to load, fall back to pictogram
+                const pictogram = getPictogramForText(displayText);
+                if (pictogram) {
+                    const pictogramSpan = document.createElement('span');
+                    pictogramSpan.textContent = pictogram;
+                    pictogramSpan.style.fontSize = '3em';
+                    pictogramSpan.style.lineHeight = '1';
+                    pictogramSpan.style.color = '#666';
+                    imageContainer.replaceChild(pictogramSpan, imageElement);
+                }
+            };
+            
+            // Text footer (edge to edge, no margins)
+            const textFooter = document.createElement('div');
+            textFooter.style.height = '18px';
+            textFooter.style.width = '100%';
+            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            textFooter.style.color = 'white';
+            textFooter.style.display = 'flex';
+            textFooter.style.alignItems = 'center';
+            textFooter.style.justifyContent = 'center';
+            textFooter.style.padding = '1px 2px';
+            textFooter.style.margin = '0';
+            textFooter.style.borderRadius = '0';
+            textFooter.style.position = 'absolute';
+            textFooter.style.bottom = '0';
+            textFooter.style.left = '0';
+            textFooter.style.right = '0';
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = displayText;
+            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontWeight = 'bold';
+            textSpan.style.textAlign = 'center';
+            textSpan.style.lineHeight = '1.1';
+            textSpan.style.wordWrap = 'break-word';
+            textSpan.style.hyphens = 'auto';
+            textSpan.style.overflow = 'hidden';
+            textSpan.style.display = '-webkit-box';
+            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitBoxOrient = 'vertical';
+            
+            imageContainer.appendChild(imageElement);
+            textFooter.appendChild(textSpan);
+            buttonContent.appendChild(imageContainer);
+            buttonContent.appendChild(textFooter);
+            button.appendChild(buttonContent);
+        } else {
+            // Fall back to pictogram if no symbol image found
+            const pictogram = getPictogramForText(displayText);
+            if (pictogram) {
+                const pictogramSpan = document.createElement('span');
+                pictogramSpan.textContent = pictogram;
+                pictogramSpan.style.fontSize = '3.5em';
+                pictogramSpan.style.lineHeight = '1';
+                pictogramSpan.style.color = '#666';
+                pictogramSpan.style.textAlign = 'center';
+                pictogramSpan.style.display = 'block';
+                pictogramSpan.style.marginBottom = '5px';
+                
+                const textSpan = document.createElement('span');
+                textSpan.textContent = displayText;
+                textSpan.style.fontSize = '0.9em';
+                textSpan.style.fontWeight = '500';
+                textSpan.style.display = 'block';
+                textSpan.style.textAlign = 'center';
+                textSpan.style.wordWrap = 'break-word';
+                textSpan.style.hyphens = 'auto';
+                
+                button.appendChild(pictogramSpan);
+                button.appendChild(textSpan);
+            } else {
+                // Pure text fallback - increase text size for sight words
+                button.textContent = displayText;
+                button.style.fontSize = '1.8em'; // Double the size
+                button.style.fontWeight = 'bold';
+                button.style.textAlign = 'center';
+                button.style.display = 'flex';
+                button.style.alignItems = 'center';
+                button.style.justifyContent = 'center';
+            }
+        }
+        
         grid.appendChild(button);
-    });
+    }
     
     // Add Choose Word button (comes first)
     const chooseWordButton = document.createElement('button');
@@ -567,10 +1195,14 @@ async function loadMoreWordOptions() {
 }
 
 async function handleWordOptionClick(word) {
-    // Announce the selected word
-    await announce(word, "system", true);
+    // Extract the display text from word object if needed
+    const displayText = (typeof word === 'object' && word.text) ? word.text : word;
     
-    addWordToBuildSpace(word);
+    // Announce the selected word
+    await announce(displayText, "system", true);
+    
+    // Use display text for build space as well
+    addWordToBuildSpace(displayText);
     
     // Stop scanning completely and restart only after word options are reloaded
     if (scanningInterval) {
@@ -1067,20 +1699,137 @@ async function generateCategoryWords(categoryName, excludeWords = []) {
     }
 }
 
-function displayCategoryWords() {
+async function displayCategoryWords() {
     const wordOptionsGrid = document.getElementById('category-word-options-grid');
     
     // Clear existing words
     wordOptionsGrid.innerHTML = '';
     
-    // Add word buttons
-    currentCategoryWords.forEach((word) => {
+    // Add word buttons with images
+    for (let i = 0; i < currentCategoryWords.length; i++) {
+        const word = currentCategoryWords[i];
+        const wordData = currentCategoryWords[i];
+        
         const button = document.createElement('button');
         button.className = 'freestyle-modal-btn word-option-btn';
-        button.textContent = word;
         button.addEventListener('click', () => selectCategoryWord(word));
+        
+        // Get keywords if available (from LLM responses)
+        const keywords = (typeof wordData === 'object' && wordData.keywords) ? wordData.keywords : null;
+        const displayText = (typeof wordData === 'object' && wordData.text) ? wordData.text : wordData;
+        
+        // Get optimized search term for better image matching
+        const optimizedSearchTerm = getOptimizedSearchTerm(displayText, keywords);
+        console.log(`🔍 Choose Word image search optimization: "${displayText}" → "${optimizedSearchTerm}"`);
+        
+        // Try to get symbol image first, fall back to pictogram if needed
+        let symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, keywords);
+        
+        if (symbolImageUrl) {
+            // Create container with dedicated image area and text footer
+            const buttonContent = document.createElement('div');
+            buttonContent.style.position = 'relative';
+            buttonContent.style.width = '100%';
+            buttonContent.style.height = '100%';
+            buttonContent.style.display = 'flex';
+            buttonContent.style.flexDirection = 'column';
+            
+            // Image container (takes up most of button height)
+            const imageContainer = document.createElement('div');
+            imageContainer.style.flex = '1';
+            imageContainer.style.width = '100%';
+            imageContainer.style.overflow = 'hidden';
+            imageContainer.style.borderRadius = '8px 8px 0 0';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
+            
+            const imageElement = document.createElement('img');
+            imageElement.src = symbolImageUrl;
+            imageElement.alt = displayText;
+            imageElement.style.width = '100%';
+            imageElement.style.height = '100%';
+            imageElement.style.objectFit = 'cover';
+            imageElement.onerror = () => {
+                // If image fails to load, fall back to pictogram
+                const pictogram = getPictogramForText(displayText);
+                if (pictogram) {
+                    const pictogramSpan = document.createElement('span');
+                    pictogramSpan.textContent = pictogram;
+                    pictogramSpan.style.fontSize = '3em';
+                    pictogramSpan.style.lineHeight = '1';
+                    pictogramSpan.style.color = '#666';
+                    imageContainer.replaceChild(pictogramSpan, imageElement);
+                }
+            };
+            
+            // Text footer (edge to edge, no margins)
+            const textFooter = document.createElement('div');
+            textFooter.style.height = '18px';
+            textFooter.style.width = '100%';
+            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            textFooter.style.color = 'white';
+            textFooter.style.display = 'flex';
+            textFooter.style.alignItems = 'center';
+            textFooter.style.justifyContent = 'center';
+            textFooter.style.padding = '1px 2px';
+            textFooter.style.margin = '0';
+            textFooter.style.borderRadius = '0';
+            textFooter.style.position = 'absolute';
+            textFooter.style.bottom = '0';
+            textFooter.style.left = '0';
+            textFooter.style.right = '0';
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = displayText;
+            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontWeight = 'bold';
+            textSpan.style.textAlign = 'center';
+            textSpan.style.lineHeight = '1.1';
+            textSpan.style.wordWrap = 'break-word';
+            textSpan.style.hyphens = 'auto';
+            textSpan.style.overflow = 'hidden';
+            textSpan.style.display = '-webkit-box';
+            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitBoxOrient = 'vertical';
+            
+            imageContainer.appendChild(imageElement);
+            textFooter.appendChild(textSpan);
+            buttonContent.appendChild(imageContainer);
+            buttonContent.appendChild(textFooter);
+            button.appendChild(buttonContent);
+        } else {
+            // Fall back to pictogram if no symbol image found
+            const pictogram = getPictogramForText(displayText);
+            if (pictogram) {
+                const pictogramSpan = document.createElement('span');
+                pictogramSpan.textContent = pictogram;
+                pictogramSpan.style.fontSize = '3.5em';
+                pictogramSpan.style.lineHeight = '1';
+                pictogramSpan.style.color = '#666';
+                pictogramSpan.style.textAlign = 'center';
+                pictogramSpan.style.display = 'block';
+                pictogramSpan.style.marginBottom = '5px';
+                
+                const textSpan = document.createElement('span');
+                textSpan.textContent = displayText;
+                textSpan.style.fontSize = '0.9em';
+                textSpan.style.fontWeight = '500';
+                textSpan.style.display = 'block';
+                textSpan.style.textAlign = 'center';
+                textSpan.style.wordWrap = 'break-word';
+                textSpan.style.hyphens = 'auto';
+                
+                button.appendChild(pictogramSpan);
+                button.appendChild(textSpan);
+            } else {
+                // Pure text fallback
+                button.textContent = displayText;
+            }
+        }
+        
         wordOptionsGrid.appendChild(button);
-    });
+    }
     
     // Update scanning
     if (scanningInterval) {
@@ -1103,11 +1852,14 @@ async function generateDifferentWords() {
 async function selectCategoryWord(word) {
     console.log('Selected word:', word);
     
+    // Extract the display text from word object if needed
+    const displayText = (typeof word === 'object' && word.text) ? word.text : word;
+    
     // Announce the selected word
-    await announce(word, "system", true);
+    await announce(displayText, "system", true);
     
     // Add word to build space
-    addWordToBuildSpace(word);
+    addWordToBuildSpace(displayText);
     
     // Close modal
     closeChooseWordModal();

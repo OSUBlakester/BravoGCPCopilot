@@ -35,6 +35,16 @@ build/
 my_chroma_db/
 user_data/
 user_docs/
+
+# Image folders - these are stored in GCS, not needed in container
+BravoImages/
+PiComImages/
+bravo_images/
+picom_images/
+**/BravoImages/
+**/PiComImages/
+**/bravo_images/
+**/picom_images/
 requirements-local.txt
 APIKEYS.reg
 server - Copy.py.txt

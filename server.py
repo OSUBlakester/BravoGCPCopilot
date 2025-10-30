@@ -90,7 +90,7 @@ except ImportError:
     print(f"   Debug Mode: {DEBUG}")
 
 
-from fastapi import FastAPI, Request, HTTPException, Body, Path, Response, Header, Depends
+from fastapi import FastAPI, Request, HTTPException, Body, Path, Response, Header, Depends, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -124,6 +124,8 @@ from google.cloud import texttospeech as google_tts # Import Google Cloud Text-t
 from contextlib import asynccontextmanager # Import for lifespan
 import re # For regular expressions (used in model filtering)
 from collections import Counter # Add this import at the top with other collections imports
+import redis
+import json
 
 import firebase_admin
 from firebase_admin import credentials, auth, firestore
@@ -137,6 +139,9 @@ oauth2_scheme = HTTPBearer()
 
 # Mood update tracking to prevent race conditions
 mood_update_timestamps = {}  # Format: {account_id/aac_user_id: timestamp}
+
+# Redis cache client (initialized in lifespan)
+redis_client = None
 
 app = FastAPI()
 
@@ -249,6 +254,12 @@ async def get_frontend_config():
                 'error': 'Configuration temporarily unavailable'
         })
 
+# Alternative endpoint path for firebase-config (used by some components)
+@app.get("/api/firebase-config")
+async def get_firebase_config():
+    """Alias for frontend-config to maintain compatibility"""
+    return await get_frontend_config()
+
 
 # NEW: Files that should be copied for a new user, relative to the user's data directory.
 # This list is used by the _initialize_new_aac_user_profile helper function.
@@ -272,7 +283,8 @@ template_user_data_paths = {
         "darkColorValue": 4278198852,
         "toolbarPIN": "1234",  # Default PIN for toolbar
         "autoClean": False,  # Default Auto Clean setting for freestyle (automatic cleanup on Speak Display)
-        "enablePictograms": False  # Default AAC pictograms disabled
+        "enablePictograms": False,  # Default AAC pictograms disabled
+        "sightWordGradeLevel": "pre_k"  # Default sight word grade level
     }, indent=4),
     "birthdays.json": json.dumps({"userBirthdate": None, "friendsFamily": []}, indent=4),
     "user_diary.json": json.dumps([], indent=4),
@@ -287,30 +299,34 @@ template_user_data_paths = {
         "name": "home",
         "displayName": "Home",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "", "targetPage": "greetings", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "Going On", "LLMQuery": "", "targetPage": "goingon", "queryType": "", "speechPhrase": "Let's talk about things that are going on", "hidden": False},
-            {"row": 0,"col": 2,"text": "Describe", "LLMQuery": "", "targetPage": "describe", "queryType": "", "speechPhrase": "Here's what I think", "hidden": False},
-            {"row": 0,"col": 3,"text": "Favorite Topics", "LLMQuery": "", "targetPage": "!favorites", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 4,"text": "About Me", "LLMQuery": "Based on the details provided in the context, generate #LLMOptions different statements about the user.  The statements should be in first person, as if the user was telling someone about the user.  Statements can include information like age, family, disability and favorites.  The statements should also be conversational, not just presenting a fact.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 5,"text": "Help", "LLMQuery": "Refer to the user info for most common physical issues and needs that can impact the user. Also include general physical issues that could be impacting someone with a similar condition to the user. Create up to #LLMOptions different statements that the user would announce if one of these physical issues was making the user uncomfortable or needing something addressed.  Each statement should be formed as if they are coming from the user and letting someone close by that the user is physically uncomfortable or needing something.  If there is a simple resolution for the issue, include it in the phrase with politely, including words like Please and Thank You, asking for the resolution.", "targetPage": "", "queryType": "options", "speechPhrase": "I need some help", "hidden": False},
-            {"row": 0,"col": 6,"text": "Questions", "targetPage": "questions", "queryType": "", "speechPhrase": "I have a question", "hidden": False},
-            {"row": 0,"col": 7,"text": "Free Style", "targetPage": "!freestyle", "queryType": "", "speechPhrase": "I'm picking my words.  Give me a minute:", "hidden": False},
-            {"row": 0,"col": 8,"text": "Open Thread", "targetPage": "!threads", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 9,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 10,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "", "targetPage": "greetings", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "Going On", "LLMQuery": "", "targetPage": "goingon", "queryType": "", "speechPhrase": "Let's talk about things that are going on", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "Do Something", "LLMQuery": "Generate #LLMOptions specific, actionable activity suggestions based on my current location and interests. Focus only on activities, like 'Watch a movie' or 'Listen to music.' or 'Play a game'.   Do not include questions or discussion topics, like 'Ask.. about...' or 'Talk about'.  Phrase the option as if it is coming from the user and asking, suggesting or recommending the activity for those nearby.  Prioritize options that are more relevant to the current location and people in the room.", "targetPage": "", "queryType": "", "speechPhrase": "I want to do something", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Go Somewhere", "LLMQuery": "Generate #LLMOptions suggestions for going somewhere, phrased as if I want to go. Include options for specific rooms in the house, visiting people, and places for fun activities. Make sure they are phrased as requests or recommendations, and can include mentioning who I want to go with.", "targetPage": "", "queryType": "", "speechPhrase": "I want to go somewhere", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "Talk About", "LLMQuery": "Generate #LLMOptions conversation starters and topic suggestions for discussing a new, specific topic. Consider the user's current location, people present, personal interests, and the time of year. Phrase each option as if the user is initiating the discussion, asking a question, or making a recommendation. Conclude each option with a clear invitation or prompt for others to engage with the topic.", "targetPage": "", "queryType": "", "speechPhrase": "I want to talk about something", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Questions", "targetPage": "questions", "queryType": "", "speechPhrase": "I have a question", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Describe", "LLMQuery": "", "targetPage": "describe", "queryType": "", "speechPhrase": "Here's what I think", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 7,"text": "Favorite Topics", "LLMQuery": "", "targetPage": "!favorites", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 8,"text": "Help", "LLMQuery": "Refer to the user info for most common physical issues and needs that can impact the user. Also include general physical issues that could be impacting someone with a similar condition to the user. Create up to #LLMOptions different statements that the user would announce if one of these physical issues was making the user uncomfortable or needing something addressed.  Each statement should be formed as if they are coming from the user and letting someone close by that the user is physically uncomfortable or needing something.  If there is a simple resolution for the issue, include it in the phrase with politely, including words like Please and Thank You, asking for the resolution.", "targetPage": "", "queryType": "options", "speechPhrase": "I need some help", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 9,"text": "About Me", "LLMQuery": "Based on the details provided in the context, generate #LLMOptions different statements about the user.  The statements should be in first person, as if the user was telling someone about the user.  Statements can include information like age, family, disability and favorites.  The statements should also be conversational, not just presenting a fact.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 10,"text": "Free Style", "targetPage": "!freestyle", "queryType": "", "speechPhrase": "I'm picking my words.  Give me a minute:", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 11,"text": "Open Thread", "targetPage": "!threads", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 12,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 13,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 14,"text": "My Mood", "targetPage": "!mood", "queryType": "", "speechPhrase": "I want to update how I'm feeling", "customAudioFile": None, "hidden": False},
         ]
     },
     {
         "name": "greetings",
         "displayName": "Greetings",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 2,"text": "Current Location", "LLMQuery": "Using the 'People Present' values from context, generate #LLMOptions expressive greetings.  Each item should be a single sentence and be very energetic and engaging.  The greetings should be in first person from the user, as if the user was speaking to someone in the room or a general greeting.  If there is information about one of the People Present in the user data, use that information to craft a more personal greeting.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 3,"text": "Jokes", "LLMQuery": "Generate #LLMOptions completely unique, creative jokes or comedic observations. CRITICAL: Review the chat history thoroughly and absolutely DO NOT repeat any jokes, punchlines, or similar setups that have been used before. Each joke must be completely original and different from previous ones. Mix different comedy styles: observational humor, wordplay, puns, absurd situations, unexpected twists, or clever one-liners. Draw inspiration from current events, everyday situations, or creative scenarios. Each joke should include both the question and punchline together in the format 'Question? Punchline!' OR be a complete one-liner statement. Prioritize creativity and uniqueness over everything else.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 4,"text": "Would you rather", "LLMQuery": "Generate #LLMOptions creative and fun would-you-rather type questions that could be used to start a conversation.  The more obscure comparison, the better.  Begin each option with Would you rather...", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 5,"text": "Did you know", "LLMQuery": "Generate #LLMOptions random, creative and possibly obscure trivia facts that can be used start a conversation.  You can user some of the user context select most of the trivia topics, but do not limit the topics on just the user's context.  The funnier that trivia fact, the better.'", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 6,"text": "Affirmations", "LLMQuery": "Generate #LLMOptions positive affirmations for the user to share with everyone around", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "Current Location", "LLMQuery": "Using the 'People Present' values from context, generate #LLMOptions expressive greetings.  Each item should be a single sentence and be very energetic and engaging.  The greetings should be in first person from the user, as if the user was speaking to someone in the room or a general greeting.  If there is information about one of the People Present in the user data, use that information to craft a more personal greeting.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Jokes", "LLMQuery": "Generate #LLMOptions completely unique, creative jokes or comedic observations. CRITICAL: Review the chat history thoroughly and absolutely DO NOT repeat any jokes, punchlines, or similar setups that have been used before. Each joke must be completely original and different from previous ones. Mix different comedy styles: observational humor, wordplay, puns, absurd situations, unexpected twists, or clever one-liners. Draw inspiration from current events, everyday situations, or creative scenarios. Each joke should include both the question and punchline together in the format 'Question? Punchline!' OR be a complete one-liner statement. Prioritize creativity and uniqueness over everything else.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "Would you rather", "LLMQuery": "Generate #LLMOptions creative and fun would-you-rather type questions that could be used to start a conversation.  The more obscure comparison, the better.  Begin each option with Would you rather...", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Did you know", "LLMQuery": "Generate #LLMOptions random, creative and possibly obscure trivia facts that can be used start a conversation.  You can user some of the user context select most of the trivia topics, but do not limit the topics on just the user's context.  The funnier that trivia fact, the better.'", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Affirmations", "LLMQuery": "Generate #LLMOptions positive affirmations for the user to share with everyone around", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
         ]
 
     },
@@ -318,38 +334,39 @@ template_user_data_paths = {
         "name": "goingon",
         "displayName": "Going On",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions  statements based on the most recent activities.  Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Based on the user diary and the current date, generate #LLMOptions statements based ONLY on diary entries with dates AFTER today's date. COMPLETELY IGNORE all entries from today or earlier dates. Only include future planned activities scheduled for dates later than today. Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user is planning to do or has coming up in the future.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "hidden": False},
-            {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "hidden": False}
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions  statements based on the most recent activities.  Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Based on the user diary and the current date, generate #LLMOptions statements based ONLY on diary entries with dates AFTER today's date. COMPLETELY IGNORE all entries from today or earlier dates. Only include future planned activities scheduled for dates later than today. Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user is planning to do or has coming up in the future.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "customAudioFile": None, "hidden": False}
         ]
     },
     {
         "name": "describe",
         "displayName": "Describe",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 1,"text": "Positive", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something positive, as if someone was very excited", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 2,"text": "Negative", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something negative, as if someone was very upset", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 3,"text": "Strange", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something the user just heard or saw that was strange, odd or weird, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 4,"text": "Funny", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases to describe something the user just heard or saw that was funny as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 5,"text": "Scary", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was scary, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 6,"text": "Sad", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was sad.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},
-            [{"row": 0,"col": 7,"text": "Beautiful", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was beautiful, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "hidden": False},]
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "Positive", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something positive, as if someone was very excited", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "Negative", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something negative, as if someone was very upset", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Strange", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something the user just heard or saw that was strange, odd or weird, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "Funny", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases to describe something the user just heard or saw that was funny as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Scary", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was scary, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Sad", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was sad.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 7,"text": "Beautiful", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity, and descriptive words or short phrases the user could use to describe something the user just heard or saw that was beautiful, as if someone was very excited.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 8,"text": "Change Mood", "targetPage": "!mood", "queryType": "", "speechPhrase": "Let me update how I'm feeling", "customAudioFile": None, "hidden": False}
         ]
     },
     {
         "name": "questions",
         "displayName": "Questions",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 1,"text": "What?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with what, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as What is That?  Phrase each question as if it was asked by the user. All options must begin with What...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 2,"text": "Who?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with who, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Who is that?  Phrase each question as if it was asked by the user. All options must begin with Who...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 3,"text": "Where?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with where, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Where is that?  Phrase each question as if it was asked by the user. All options must begin with Where...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 4,"text": "When?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with when, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as When is that?  Phrase each question as if it was asked by the user. All options must begin with When...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 5,"text": "Why?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with why, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Why is that?  Phrase each question as if it was asked by the user. All options must begin with Why...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False},
-            {"row": 0,"col": 6,"text": "How?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with how, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as How is that?  Phrase each question as if it was asked by the user. All options must begin with How...", "targetPage": "home", "queryType": "", "speechPhrase": "", "hidden": False}
+            {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "What?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with what, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as What is That?  Phrase each question as if it was asked by the user. All options must begin with What...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "Who?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with who, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Who is that?  Phrase each question as if it was asked by the user. All options must begin with Who...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Where?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with where, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Where is that?  Phrase each question as if it was asked by the user. All options must begin with Where...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "When?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with when, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as When is that?  Phrase each question as if it was asked by the user. All options must begin with When...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "Why?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with why, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as Why is that?  Phrase each question as if it was asked by the user. All options must begin with Why...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "How?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with how, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as How is that?  Phrase each question as if it was asked by the user. All options must begin with How...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False}
         ]
     }
 ], indent=4),
@@ -1151,15 +1168,22 @@ async def manage_user_current_favorite(payload: ManageFavoriteRequest, current_i
 class GeneratePromptRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=500)
 
+class FreestyleWordOptionsRequest(BaseModel):
+    context: Optional[str] = Field(None, description="Context from LLM query or button label")
+    source_page: Optional[str] = Field(None, description="Page name the user navigated from")
+    is_llm_generated: bool = Field(default=False, description="Whether the source page was LLM-generated")
+    build_space_text: Optional[str] = Field(default="", description="Current text in build space")
+    single_words_only: Optional[bool] = Field(default=True, description="Whether to return only single words")
+    request_different_options: bool = Field(default=False, description="Request alternative/different options")
+    originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
+
 @app.post("/api/generate-llm-prompt")
 async def generate_llm_prompt(payload: GeneratePromptRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     """Generate an optimized LLM prompt from a user's natural language description"""
-    try:
-        user_description = payload.description.strip()
-        
-        # Create a prompt to generate an optimized LLM query
-        meta_prompt = f"""
-You are an expert at creating prompts for language models in AAC (Augmentative and Alternative Communication) applications.
+    
+    user_description = payload.description
+    
+    meta_prompt = f"""You are an expert at creating prompts for language models in AAC (Augmentative and Alternative Communication) applications.
 
 A user wants to create a button that will use AI to generate options. They described what they want as: "{user_description}"
 
@@ -1177,8 +1201,15 @@ Examples of good prompts:
 
 Generate ONLY the prompt text, nothing else:"""
 
+    try:
         # Use the LLM to generate the optimized prompt
-        response_text = await _generate_gemini_content_with_fallback(meta_prompt)
+        response_text = await _generate_gemini_content_with_fallback(meta_prompt, None, current_ids["account_id"], current_ids["aac_user_id"])
+        
+        return JSONResponse(content={"prompt": response_text.strip()})
+        
+    except Exception as e:
+        logging.error(f"Error generating LLM prompt: {e}", exc_info=True)
+        return JSONResponse(content={"error": "Failed to generate prompt"}, status_code=500)
         
         if response_text:
             # Clean up the response - remove any extra quotes or formatting
@@ -1192,7 +1223,7 @@ Generate ONLY the prompt text, nothing else:"""
     except Exception as e:
         logging.error(f"Error generating LLM prompt: {e}")
         # Return a simple fallback prompt
-        fallback_prompt = f"Generate #LLMOptions options for {payload.description}."
+        fallback_prompt = f"Generate #LLMOptions options for the requested topic."
         return {"success": True, "prompt": fallback_prompt}
 
 
@@ -1260,7 +1291,8 @@ DEFAULT_SETTINGS = {
     "displaySplash": False,  # Default splash screen display setting
     "displaySplashTime": 3000,  # Default splash screen duration (3 seconds)
     "enableMoodSelection": True,  # Default mood selection enabled
-    "enablePictograms": False  # Default AAC pictograms disabled
+    "enablePictograms": False,  # Default AAC pictograms disabled
+    "sightWordGradeLevel": "pre_k"  # Default sight word grade level
 }
 
 
@@ -1578,16 +1610,16 @@ DEFAULT_HOME_PAGE_CONTENT = [
         "name": "home",
         "displayName": "Home",
         "buttons": [
-            {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters. Each item should be a single sentence and have varying levels of energy, creativity and engagement. The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "Feelings", "LLMQuery": "Generate #LLMOptions common feelings or emotions to express, ranging from happy to sad, excited to calm.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 2,"text": "Needs", "LLMQuery": "Generate #LLMOptions common personal needs to express, like needing help, food, water, rest, or a break.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 3,"text": "Questions", "LLMQuery": "Generate #LLMOptions some general spoken questions that an AAC user might ask to lead to further options, e.g. 'Can I ask a question?' or 'Tell me about something'.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 4,"text": "About Me", "LLMQuery": "Generate #LLMOptions common facts or personal details about myself, my likes, dislikes, or interests, suitable for sharing in conversation.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 5,"text": "My Day", "LLMQuery": "Generate #LLMOptions common activities or events that might occur during my day, e.g., work, therapy, social events, meals.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 6,"text": "Current Events", "targetPage": "!currentevents", "queryType": "currentevents", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 7,"text": "Favorites", "targetPage": "!favorites", "queryType": "favorites", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 8,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
-            {"row": 0,"col": 9,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "hidden": False},
+            {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters. Each item should be a single sentence and have varying levels of energy, creativity and engagement. The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "Feelings", "LLMQuery": "Generate #LLMOptions common feelings or emotions to express, ranging from happy to sad, excited to calm.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "Needs", "LLMQuery": "Generate #LLMOptions common personal needs to express, like needing help, food, water, rest, or a break.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 3,"text": "Questions", "LLMQuery": "Generate #LLMOptions some general spoken questions that an AAC user might ask to lead to further options, e.g. 'Can I ask a question?' or 'Tell me about something'.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 4,"text": "About Me", "LLMQuery": "Generate #LLMOptions common facts or personal details about myself, my likes, dislikes, or interests, suitable for sharing in conversation.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 5,"text": "My Day", "LLMQuery": "Generate #LLMOptions common activities or events that might occur during my day, e.g., work, therapy, social events, meals.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 6,"text": "Current Events", "targetPage": "!currentevents", "queryType": "currentevents", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 7,"text": "Favorites", "targetPage": "!favorites", "queryType": "favorites", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 8,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 9,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
         ]
     }
 ]
@@ -2493,7 +2525,7 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
             raise HTTPException(status_code=500, detail="LLM returned empty response")
         
         return response_text
-    except (google.api_core.exceptions.ResourceExhausted, google.api_core.exceptions.ServiceUnavailable) as e_primary:
+    except (google.api_core.exceptions.ResourceExhausted, google.api_core.exceptions.ServiceUnavailable, google.api_core.exceptions.InternalServerError) as e_primary:
         logging.warning(f"Primary LLM ({primary_llm_model_instance.model_name}) failed with {type(e_primary).__name__}: {e_primary}. Attempting fallback.")
         if fallback_llm_model_instance:
             try:
@@ -2714,9 +2746,10 @@ CREATIVITY BOOSTERS:
     # Define generation config and add JSON formatting instructions  
     generation_config = {"response_mime_type": "application/json", "temperature": 0.9}  # Increased temperature for more creativity
     json_format_instructions = """
-CRITICAL: Format your response as a JSON list where each item has "option" and "summary" keys.
+CRITICAL: Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
 If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
 The "option" key should contain the FULL option text.
+The "keywords" key should be a list of 3-5 keywords that include BOTH the specific descriptive words from the generated option AND relevant emotional/contextual terms for image matching. Always include the key descriptive words from your generated text (like "fantastic", "delightful", "cloud", "bursting", etc.) along with relevant emotional terms. For example: ["fantastic", "amazing", "positive", "excited"], ["delightful", "wonderful", "happy", "joyful"], or ["cloud", "nine", "elated", "high"].
 IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND punchline in the SAME "option". Format them as: "Question? Punchline!"
 
 ⚠️ CRITICAL SUMMARY RULE: NEVER include the user's name in the "summary" field. The summary is what the user will hear when the option is spoken aloud. Remove any personal names from summaries and use generic language instead. For example, if the option is "Jon is excited to learn", the summary should be "Excited to learn", not "Jon excited to learn".
@@ -2935,6 +2968,36 @@ def initialize_backend_services():
         except Exception as e:
             logging.error(f"Error initializing Firebase Admin SDK: {e}", exc_info=True)
             firebase_app = None
+
+        # --- Initialize Redis Cache ---
+        logging.info("Initializing Redis cache...")
+        global redis_client
+        try:
+            # Only initialize Redis if explicitly enabled
+            redis_host = os.getenv('REDIS_HOST')
+            if redis_host:
+                redis_port = int(os.getenv('REDIS_PORT', 6379))
+                redis_client = redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True)
+                
+                # Test connection
+                redis_client.ping()
+                logging.info("Redis cache initialized successfully.")
+                
+                # Prewarm cache with common terms in background (with error handling)
+                async def safe_prewarm():
+                    try:
+                        await asyncio.sleep(5)  # Wait 5 seconds after startup
+                        await prewarm_common_searches()
+                    except Exception as e:
+                        logging.warning(f"Background cache prewarming failed: {e}")
+                
+                asyncio.create_task(safe_prewarm())
+            else:
+                logging.info("Redis not configured (REDIS_HOST not set). Continuing without cache.")
+                redis_client = None
+        except Exception as e:
+            logging.warning(f"Redis cache initialization failed: {e}. Continuing without cache.")
+            redis_client = None
 
         logging.info("All shared backend services initialized successfully.")
 
@@ -5298,6 +5361,7 @@ class SettingsModel(BaseModel):
     displaySplashTime: Optional[int] = Field(None, description="Duration in milliseconds to display splash screen.", ge=500, le=10000)
     enableMoodSelection: Optional[bool] = Field(None, description="Enable/disable mood selection at session start.")
     enablePictograms: Optional[bool] = Field(None, description="Enable/disable AAC pictogram display on buttons.")
+    sightWordGradeLevel: Optional[str] = Field(None, description="Dolch sight word grade level for text-only buttons (pre_k, kindergarten, first_grade, second_grade, third_grade, third_grade_with_nouns)")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -7400,11 +7464,6 @@ async def get_freestyle_word_prediction(
         return JSONResponse(content={"predictions": []})
     
 
-class FreestyleWordOptionsRequest(BaseModel):
-    build_space_text: Optional[str] = None
-    request_different_options: Optional[bool] = False
-
-
 @app.post("/api/freestyle/word-options")
 async def get_freestyle_word_options(
     request: FreestyleWordOptionsRequest,
@@ -7415,6 +7474,9 @@ async def get_freestyle_word_options(
     """
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
+    
+    # DEBUG: Log what we received
+    logging.warning(f"DEBUG Freestyle API - Received request: context='{request.context}', source_page='{request.source_page}', is_llm_generated={request.is_llm_generated}, originating_button='{request.originating_button_text}', build_space='{request.build_space_text}'")
     
     try:
         # Load user settings to get FreestyleOptions
@@ -7454,34 +7516,80 @@ async def get_freestyle_word_options(
 
         logging.info(f"Raw build space text: '{build_space_text}'")
         logging.info(f"Context for word options: '{context_str}'")
+        logging.info(f"Source page context: source_page='{request.source_page}', context='{request.context}', is_llm_generated={request.is_llm_generated}, originating_button='{request.originating_button_text}'")
         
+        # Determine word complexity based on context and parameters
+        word_type = "single words only" if request.single_words_only else "words or short phrases"
+        
+        # Build contextual information for the prompt
+        contextual_info = context_str
+        if request.context and request.source_page:
+            if request.is_llm_generated:
+                contextual_info += f" | Coming from LLM-generated page '{request.source_page}' with context: {request.context}"
+            else:
+                contextual_info += f" | Coming from page '{request.source_page}' with topic: {request.context}"
+        elif request.originating_button_text:
+            contextual_info += f" | Coming from button: {request.originating_button_text}"
         
         if build_space_text.strip():
-            # If there's text in build space, provide contextual next words
+            # If there's text in build space, provide contextual continuations
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
-            prompt = f"""Given this context: {context_str} and the partial sentence '{build_space_text}', provide exactly {freestyle_options} {variation_text} useful words or short phrases that would logically complete or continue this communication. 
+            prompt = f"""The user is building a communication phrase and has already written: "{build_space_text}"
+
+Provide exactly {freestyle_options} {variation_text} word options that could logically continue or complete this phrase for AAC communication.
 
 Requirements:
-- Each option should be DIFFERENT and UNIQUE
-- Focus on words that would naturally follow what's already written
-- Provide variety in the suggestions (different topics, actions, descriptions)
-- Return only the words/phrases, one per line
-- Do not repeat the same option multiple times
-- Make each option distinct and useful
+- Provide words or short phrases (1-3 words) that naturally continue the existing phrase
+- Each option should make grammatical sense when added to "{build_space_text}"
+- Think about what would make a complete, meaningful sentence
+- Focus on common AAC communication continuations: verbs, prepositions, objects, descriptors
+- For each continuation, provide a related keyword for image searching
+- Format: "continuation|keyword" (e.g., "to play|playground", "for fun|smile", "please|polite")
+- The keyword should help find relevant images that represent the continuation concept
+- Make each option distinct and useful for completing communication
+- Consider natural sentence flow and common AAC patterns
 
-Examples of good variety: verbs, adjectives, locations, time expressions, etc."""
+Examples for "{build_space_text}":
+- If the phrase is about movement, suggest destinations or purposes
+- If the phrase is about wants/needs, suggest objects or actions
+- If the phrase is about feelings, suggest intensifiers or reasons
+
+Context (use only for word relevance): {contextual_info}"""
         else:
-            # If no build space text, provide conversation starters
+            # If no build space text, provide core AAC words for starting communication
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
-            prompt = f"""Given this context: {context_str}, provide exactly {freestyle_options} {variation_text} useful words or short phrases to START AAC communication. 
+            
+            # Focus on core AAC vocabulary regardless of source context
+            base_aac_words = [
+                "I", "want", "need", "like", "go", "see", "eat", "drink", "play", "help",
+                "more", "stop", "done", "good", "bad", "yes", "no", "please", "thank", "you",
+                "me", "my", "we", "they", "this", "that", "here", "there", "now", "later"
+            ]
+            
+            # Create context-aware but AAC-focused prompt
+            if request.context and request.is_llm_generated:
+                # User came from an LLM-generated page - provide AAC words that could relate to that topic
+                context_hint = f"The user came from a page about '{request.context}', so include some words that might relate to this topic alongside core AAC words."
+            else:
+                context_hint = "Focus on core AAC communication words that can start any conversation."
+            
+            prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
+
+{context_hint}
 
 Requirements:
-- Each option should be DIFFERENT and UNIQUE
-- Include common conversation starters like 'I', 'You', 'Where', 'Who', 'What', 'Can', 'Want', 'Need', etc.
-- Provide variety in the suggestions (questions, statements, greetings, etc.)
-- Return only the words/phrases, one per line
-- Do not repeat the same option multiple times
-- Make each option distinct and useful"""
+- ONLY provide single words (no phrases or sentences)
+- Focus on core AAC vocabulary: pronouns (I, you, we), basic verbs (want, need, like, go), common nouns, simple adjectives
+- Include essential communication starters: "I", "want", "need", "like", "go", "see", "help", "more", "please"
+- Provide variety across word types: pronouns, verbs, nouns, adjectives, question words
+- For each word, provide a related keyword for image searching
+- Format: "word|keyword" (e.g., "I|person", "want|desire", "go|arrow", "happy|smile", "food|food")
+- The keyword should help find relevant images that represent the word
+- Each option should be useful for starting or building communication
+- Include both basic needs words and descriptive words
+- Make each word distinct and commonly used in AAC
+
+Context for word selection: {contextual_info}"""
         
         logging.info(f"Generated prompt for LLM: {prompt}")
 
@@ -7492,25 +7600,78 @@ Requirements:
             "candidate_count": 1
         }
         
+        logging.warning(f"DEBUG Freestyle API - About to call LLM with freestyle_options={freestyle_options}, prompt length={len(prompt)}")
         response_text = await _generate_gemini_content_with_fallback(prompt, generation_config, account_id, aac_user_id)
+        logging.warning(f"DEBUG Freestyle API - LLM response length: {len(response_text)}, content: {response_text[:500]}...")
         
-        # Parse options and ensure uniqueness
-        all_options = [line.strip() for line in response_text.split('\n') if line.strip()]
+        # Parse options with keywords and ensure uniqueness  
+        all_lines = [line.strip() for line in response_text.split('\n') if line.strip()]
         
-        # Remove duplicates while preserving order
+        # Filter out preamble/instructional lines that aren't actual options
+        def is_preamble_line(line):
+            preamble_indicators = [
+                "here are", "here's", "i'll provide", "providing", "below are",
+                "the following", "these are", "let me give", "i can offer",
+                "varied and diverse", "different and unique", "suggestions:",
+                "options:", "words:", "phrases:", "requirements:",
+                "format:", "examples:", "note:", "remember:"
+            ]
+            line_lower = line.lower()
+            # Check if line is too long (likely explanatory text)
+            if len(line) > 50:
+                return True
+            # Check for preamble indicators
+            for indicator in preamble_indicators:
+                if indicator in line_lower:
+                    return True
+            return False
+        
+        # Filter out preamble lines
+        word_lines = [line for line in all_lines if not is_preamble_line(line)]
+        
+        # Remove duplicates while preserving order and parse word|keyword format
         unique_options = []
         seen = set()
-        for option in all_options:
-            option_lower = option.lower()
-            if option_lower not in seen and option:
-                unique_options.append(option)
-                seen.add(option_lower)
+        for line in word_lines:
+            if '|' in line:
+                # Parse word|keyword format
+                parts = line.split('|', 1)
+                first_part = parts[0].strip()
+                second_part = parts[1].strip() if len(parts) > 1 else first_part
+                
+                # For build space continuation, first part is the continuation text to display
+                # For initial generation, first part is also the word to display
+                word = first_part  # Always use the first part as the display text
+                keyword = second_part  # Always use the second part as the keyword for images
+                unique_key = word.lower().strip()  # Use the word text for uniqueness
+                
+                if unique_key not in seen and word:
+                    unique_options.append({
+                        "text": word,
+                        "keywords": [keyword] if keyword != word else []
+                    })
+                    seen.add(unique_key)
+            else:
+                # Fallback for lines without keyword format
+                word = line.strip()
+                unique_key = word.lower()
+                if unique_key not in seen and word:
+                    unique_options.append({
+                        "text": word,
+                        "keywords": []
+                    })
+                    seen.add(unique_key)
         
         # Take only the requested number
         options = unique_options[:freestyle_options]
         
+        logging.warning(f"DEBUG Freestyle API - Parsed {len(unique_options)} unique options, requested {freestyle_options}, returning {len(options)}")
+        logging.warning(f"DEBUG Freestyle API - All lines: {len(all_lines)}, Filtered lines: {len(word_lines)}")
+        logging.warning(f"DEBUG Freestyle API - Filtered lines: {word_lines[:10] if len(word_lines) > 10 else word_lines}")
+        logging.warning(f"DEBUG Freestyle API - Build space text: '{build_space_text}', has build space: {bool(build_space_text.strip())}")
+        logging.warning(f"DEBUG Freestyle API - Unique options: {[opt['text'] for opt in unique_options[:10]]}")
         logging.info(f"Generated {len(options)} unique word options for build space: '{build_space_text}' with context: {context_str}")
-        logging.info(f"Options: {options}")
+        logging.info(f"Options: {[opt['text'] for opt in options]}")
         return JSONResponse(content={"word_options": options})
         
     except Exception as e:
@@ -7579,6 +7740,118 @@ Return only the improved text, nothing else."""
         logging.error(f"Error cleaning up text for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
         # Return original text if cleanup fails
         return JSONResponse(content={"cleaned_text": request.text_to_cleanup})
+
+
+# --- Mood Selection Endpoint ---
+
+@app.get("/api/mood/options")
+async def get_mood_options(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """
+    Provides mood selection options for the special !mood page
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Get current mood from user info
+        user_info = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        
+        current_mood = user_info.get("currentMood")
+        
+        # Define standard mood options
+        mood_options = [
+            {"text": "Happy", "keywords": ["happy", "smile"], "current": current_mood == "Happy"},
+            {"text": "Excited", "keywords": ["excited", "energy"], "current": current_mood == "Excited"},
+            {"text": "Calm", "keywords": ["calm", "peaceful"], "current": current_mood == "Calm"},
+            {"text": "Sad", "keywords": ["sad", "down"], "current": current_mood == "Sad"},
+            {"text": "Frustrated", "keywords": ["frustrated", "annoyed"], "current": current_mood == "Frustrated"},
+            {"text": "Tired", "keywords": ["tired", "sleepy"], "current": current_mood == "Tired"},
+            {"text": "Anxious", "keywords": ["anxious", "worried"], "current": current_mood == "Anxious"},
+            {"text": "Proud", "keywords": ["proud", "accomplished"], "current": current_mood == "Proud"},
+            {"text": "Confused", "keywords": ["confused", "puzzled"], "current": current_mood == "Confused"},
+            {"text": "Grateful", "keywords": ["grateful", "thankful"], "current": current_mood == "Grateful"},
+            {"text": "Playful", "keywords": ["playful", "fun"], "current": current_mood == "Playful"},
+            {"text": "Peaceful", "keywords": ["peaceful", "zen"], "current": current_mood == "Peaceful"},
+            {"text": "Clear Mood", "keywords": ["clear", "reset"], "current": current_mood is None or current_mood == ""},
+        ]
+        
+        logging.info(f"Generated {len(mood_options)} mood options for account {account_id}, user {aac_user_id}. Current mood: {current_mood}")
+        return JSONResponse(content={"mood_options": mood_options, "current_mood": current_mood})
+        
+    except Exception as e:
+        logging.error(f"Error generating mood options for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
+        return JSONResponse(content={"mood_options": [], "current_mood": None})
+
+class SetMoodRequest(BaseModel):
+    mood: Optional[str] = Field(None, description="Mood to set (None or empty string clears mood)")
+
+@app.post("/api/mood/set")
+async def set_mood(
+    request: SetMoodRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Sets the user's current mood
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Get current user info
+        user_info = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        
+        # Clear mood if request.mood is None, empty, or "Clear Mood"
+        new_mood = None if (not request.mood or request.mood == "Clear Mood") else request.mood
+        
+        # Update mood in user info
+        updated_data = {
+            "narrative": user_info.get("narrative", ""),
+            "currentMood": new_mood
+        }
+        
+        # Include avatar config if it exists
+        if "avatarConfig" in user_info:
+            updated_data["avatarConfig"] = user_info["avatarConfig"]
+        
+        success = await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            data_to_save=updated_data
+        )
+        
+        if success:
+            try:
+                # Track mood update timestamp
+                global mood_update_timestamps
+                user_key = f"{account_id}/{aac_user_id}"
+                mood_update_timestamps[user_key] = time.time()
+                logging.info(f"🕐 Mood update timestamp recorded for {user_key}: {new_mood}")
+                
+                # Invalidate cache since mood affects context
+                logging.info(f"✅ Mood updated for {account_id}/{aac_user_id}. New mood: {new_mood}. Invalidating cache...")
+                await cache_manager.invalidate_cache(account_id, aac_user_id)
+                logging.info(f"🗑️ Cache invalidated successfully for mood change")
+            except Exception as cache_error:
+                logging.error(f"❌ Failed to invalidate cache for mood change: {cache_error}", exc_info=True)
+            
+            return JSONResponse(content={"success": True, "mood": new_mood})
+        else:
+            return JSONResponse(content={"success": False, "error": "Failed to save mood"}, status_code=500)
+            
+    except Exception as e:
+        logging.error(f"Error setting mood for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 class FreestyleCategoryWordsRequest(BaseModel):
@@ -7655,29 +7928,57 @@ Requirements:
 - Prioritize words from user context when applicable
 - Words should be commonly used and appropriate for AAC communication
 - Each word should be useful for building messages
-- Return only the words, one per line, no numbering or formatting
+- For each word, provide a related keyword for image searching
+- Format: "word|keyword" (e.g., "mom|mother", "dog|animal", "happy|smile")
+- The keyword should be a single word that would help find relevant images
+- If the word itself is the best keyword, use the same word (e.g., "car|car")
+- For colors, always use the color name itself as the keyword (e.g., "red|red", "blue|blue")
+- For specific objects, people, or actions, use the word itself unless there's a better search term
 
 Category: {request.category}"""
 
         # Generate words using LLM
         words_response = await _generate_gemini_content_with_fallback(prompt, None, account_id, aac_user_id)
         
-        # Parse the response into individual words
+        # Parse the response into individual words with keywords
         words = []
         if words_response:
             lines = words_response.strip().split('\n')
             for line in lines:
-                word = line.strip().strip('-').strip('*').strip().strip('"').strip("'")
-                if word and len(word.split()) == 1:  # Ensure single words only
-                    words.append(word)
+                clean_line = line.strip().strip('-').strip('*').strip().strip('"').strip("'")
+                
+                if '|' in clean_line:
+                    # Parse word|keyword format
+                    parts = clean_line.split('|', 1)
+                    word = parts[0].strip()
+                    keyword = parts[1].strip() if len(parts) > 1 else word
+                    
+                    if word and len(word.split()) == 1:  # Ensure single words only
+                        words.append({
+                            "text": word,
+                            "keywords": [keyword] if keyword != word else []
+                        })
+                else:
+                    # Fallback for lines without keyword format
+                    word = clean_line
+                    if word and len(word.split()) == 1:  # Ensure single words only
+                        words.append({
+                            "text": word,
+                            "keywords": []
+                        })
         
         # Ensure we have the right number of words
         if len(words) < freestyle_options:
             # If we don't have enough, pad with generic words for the category
             generic_words = get_generic_category_words(request.category)
+            existing_word_texts = [w.get("text", w) if isinstance(w, dict) else w for w in words]
+            
             for generic_word in generic_words:
-                if generic_word not in words and generic_word not in request.exclude_words:
-                    words.append(generic_word)
+                if generic_word not in existing_word_texts and generic_word not in request.exclude_words:
+                    words.append({
+                        "text": generic_word,
+                        "keywords": []
+                    })
                     if len(words) >= freestyle_options:
                         break
         
@@ -8116,12 +8417,48 @@ async def get_gemini_api_key():
             raise HTTPException(status_code=503, detail="Gemini API key not configured")
 
 async def ensure_aac_images_bucket():
-    """Ensure the AAC images bucket exists"""
+    """Ensure the AAC images bucket exists with proper permissions for public access"""
     try:
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        
         if not await asyncio.to_thread(bucket.exists):
+            # Create bucket with uniform bucket-level access
             await asyncio.to_thread(bucket.create, location="US-CENTRAL1")
+            
+            # Enable uniform bucket-level access
+            bucket.iam_configuration.uniform_bucket_level_access_enabled = True
+            await asyncio.to_thread(bucket.patch)
+            
             logging.info(f"Created AAC images bucket: {AAC_IMAGES_BUCKET_NAME}")
+        
+        # Ensure bucket has uniform bucket-level access enabled and public read permissions
+        try:
+            # Reload bucket to get current configuration
+            await asyncio.to_thread(bucket.reload)
+            
+            # Make sure uniform bucket-level access is enabled
+            if not bucket.iam_configuration.uniform_bucket_level_access_enabled:
+                bucket.iam_configuration.uniform_bucket_level_access_enabled = True
+                await asyncio.to_thread(bucket.patch)
+                logging.info(f"Enabled uniform bucket-level access for {AAC_IMAGES_BUCKET_NAME}")
+            
+            # Set IAM policy to allow public read access
+            from google.cloud import iam
+            policy = await asyncio.to_thread(bucket.get_iam_policy, requested_policy_version=3)
+            
+            # Add allUsers as Storage Object Viewer
+            policy.bindings.append({
+                "role": "roles/storage.objectViewer",
+                "members": {"allUsers"}
+            })
+            
+            await asyncio.to_thread(bucket.set_iam_policy, policy)
+            logging.info(f"Set public read permissions for {AAC_IMAGES_BUCKET_NAME}")
+            
+        except Exception as iam_error:
+            logging.warning(f"Could not set public permissions for bucket {AAC_IMAGES_BUCKET_NAME}: {iam_error}")
+            # Continue anyway - images might still be accessible through other means
+        
         return bucket
     except Exception as e:
         logging.error(f"Error ensuring AAC images bucket: {e}")
@@ -8176,20 +8513,8 @@ async def generate_image_with_openai(prompt: str, max_retries: int = 2) -> bytes
             
             client = AsyncOpenAI(api_key=api_key)
             
-            # Enhanced prompt for better AAC-appropriate images
-            enhanced_prompt = f"""
-            Create a high-quality, clear image of: {prompt}
-            
-            Style requirements:
-            - Simple, clean design suitable for AAC (Augmentative and Alternative Communication)
-            - Clear, recognizable representation
-            - Good contrast and visibility
-            - Child-friendly and appropriate for all ages
-            - Square aspect ratio (1024x1024)
-            - Bright, clear colors
-            - No text or words in the image
-            - Cartoon or illustration style preferred over photorealistic
-            """
+            # Simple AAC-focused prompt that works well
+            enhanced_prompt = f'Create an image based on the word "{prompt}". The image will be used for AAC. Therefore, it is essential that the image fully represents the meaning of the word so that the AAC user will have a good understanding of the word. The image should capture the definition of "{prompt}" well enough for the user to understand that the image represents the word "{prompt}". Consider the core meaning of the word and common and contemporary uses and expressions of the word to determine what to include in the image. Use a simple, expressive, cartoon sticker style with a transparent background.'
             
             # Generate image using OpenAI DALL-E 3
             response = await client.images.generate(
@@ -8276,8 +8601,91 @@ async def generate_image_with_openai_if_available(prompt: str, max_retries: int 
         # Fall back to placeholder if OpenAI is not available
         return await generate_image_with_gemini_fallback(prompt, max_retries)
 
-# Update the main function to try OpenAI first, then fallback
-generate_image_with_gemini = generate_image_with_openai_if_available
+async def generate_image_with_vertex_ai_imagen(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate image using Vertex AI Imagen model"""
+    for attempt in range(max_retries + 1):
+        try:
+            import requests
+            import base64
+            import json
+            
+            # Get access token for Vertex AI
+            import google.auth.transport.requests
+            import google.oauth2.service_account
+            
+            # Use default credentials
+            from google.auth import default
+            credentials, project_id = default()
+            
+            # Refresh credentials to get access token
+            auth_req = google.auth.transport.requests.Request()
+            credentials.refresh(auth_req)
+            access_token = credentials.token
+            
+            # AAC-focused prompt with even stronger simplicity and icon directives
+            enhanced_prompt = f'''
+Create an extremely simple image for the AAC symbol representing "{prompt}".
+Use a 2D cartoon style with bold lines and bright colors.
+Use a random gender, race, and age for any people depicted.
+The user of this image may have cognitive disabilities, so clarity and simplicity are paramount.
+The goal is to create an image that anyone, regardless of age or ability, can quickly identify and understand as representing "{prompt}".
+The image should be a clean, minimalistic icon or cartoon that clearly conveys the meaning of "{prompt}" without any unnecessary details or complexity. 
+The image will be used on buttons in an AAC app, so it must be easily recognizable at small sizes.
+Use bold lines, simple shapes, and a limited color palette to ensure the image is easily recognizable at small sizes. 
+The background should be plain or transparent to avoid distractions. Focus on the core concept of "{prompt}" and avoid any abstract or artistic interpretations. 
+'''          
+            # Vertex AI Imagen endpoint
+            endpoint = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagegeneration@006:predict"
+            
+            # Request payload with improved parameters
+            payload = {
+                "instances": [
+                    {
+                        "prompt": enhanced_prompt
+                    }
+                ],
+                "parameters": {
+                    "sampleCount": 1,
+                    "aspectRatio": "1:1",
+                    "safetyFilterLevel": "block_none"  # Less restrictive to allow more stylized results
+                    # Note: seed parameter removed because it's not supported when watermark is enabled
+                }
+            }
+            
+            # Headers (fix the authorization bug)
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Make the request
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Extract image data
+                if 'predictions' in result and len(result['predictions']) > 0:
+                    prediction = result['predictions'][0]
+                    
+                    # Try different response formats
+                    if 'bytesBase64Encoded' in prediction:
+                        return base64.b64decode(prediction['bytesBase64Encoded'])
+                    elif 'generated_image' in prediction and 'bytesBase64Encoded' in prediction['generated_image']:
+                        return base64.b64decode(prediction['generated_image']['bytesBase64Encoded'])
+                    elif 'image' in prediction:
+                        return base64.b64decode(prediction['image'])
+                
+            raise Exception(f"Vertex AI request failed: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            logging.warning(f"Vertex AI Imagen generation attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries:
+                # Fall back to placeholder if Vertex AI fails
+                return await generate_image_with_gemini_fallback(prompt, 0)
+
+# Update the main function to use Vertex AI Imagen directly
+generate_image_with_gemini = generate_image_with_vertex_ai_imagen
 
 async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
     """Upload image to Google Cloud Storage and return public URL"""
@@ -8288,10 +8696,10 @@ async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
         # Upload image
         await asyncio.to_thread(blob.upload_from_string, image_bytes, content_type='image/png')
         
-        # Make it publicly accessible
-        await asyncio.to_thread(blob.make_public)
-        
-        return blob.public_url
+        # With uniform bucket-level access, objects are publicly readable by default
+        # if the bucket has the allUsers Storage Object Viewer role
+        # Return the public URL directly without calling make_public()
+        return f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
     except Exception as e:
         logging.error(f"Error uploading image to storage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
@@ -8387,8 +8795,10 @@ async def api_generate_images(
             # Generate image
             image_bytes = await generate_image_with_gemini(prompt)
             
-            # Create filename
-            filename = f"{concept}_{subconcept}_{uuid.uuid4().hex[:8]}.png"
+            # Create filename - sanitize by removing spaces and special characters
+            safe_concept = re.sub(r'[^\w\-_]', '_', concept)
+            safe_subconcept = re.sub(r'[^\w\-_]', '_', subconcept)
+            filename = f"{safe_concept}_{safe_subconcept}_{uuid.uuid4().hex[:8]}.png"
             
             # Upload to storage
             image_url = await upload_image_to_storage(image_bytes, filename)
@@ -8492,6 +8902,417 @@ async def api_get_images(
         logging.error(f"Error in get images API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/imagecreator/search")
+async def public_bravo_images_search(
+    tag: str = "",
+    concept: str = "",
+    limit: int = 12
+):
+    """
+    Public search endpoint for BravoImages - accessible without authentication.
+    Used by frontend search functionality in symbol_admin and gridpage.
+    Includes Redis caching for improved performance.
+    """
+    try:
+        # Create cache key with version for tag position prioritization fix
+        cache_key = f"bravo_images_v2:{tag.lower()}:{concept.lower()}:{limit}"
+        
+        # Try Redis cache first
+        if redis_client:
+            try:
+                cached_result = redis_client.get(cache_key)
+                if cached_result:
+                    logging.debug(f"Cache HIT for search: {tag or concept}")
+                    return json.loads(cached_result)
+            except Exception as redis_error:
+                logging.warning(f"Redis cache read error: {redis_error}")
+        
+        logging.debug(f"Cache MISS for search: {tag or concept} - querying Firestore")
+        
+        if not tag and not concept:
+            # Return random images if no search criteria
+            query = firestore_db.collection("aac_images").where("source", "==", "bravo_images").limit(limit)
+            docs = await asyncio.to_thread(query.get)
+        else:
+            # For case-insensitive search, we need to try multiple variations
+            all_docs = []
+            base_query = firestore_db.collection("aac_images").where("source", "==", "bravo_images")
+            
+            if concept:
+                base_query = base_query.where("concept", "==", concept)
+            
+            if tag:
+                # Try the most common case variations (optimized for speed)
+                tag_variations = [
+                    tag,                    # Original case
+                    tag.lower(),            # All lowercase (most common)
+                    tag.capitalize()        # First letter capitalized (common for proper nouns)
+                ]
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_variations = []
+                for variation in tag_variations:
+                    if variation not in seen:
+                        seen.add(variation)
+                        unique_variations.append(variation)
+                
+                # Search all variations to get comprehensive results for proper scoring
+                found_docs = set()  # Use set to avoid duplicates
+                for variation in unique_variations:
+                    try:
+                        query = base_query.where("tags", "array_contains", variation).limit(limit * 5)  # Get more docs for scoring
+                        docs = await asyncio.to_thread(query.get)
+                        for doc in docs:
+                            if doc.id not in found_docs:
+                                found_docs.add(doc.id)
+                                all_docs.append(doc)
+                        
+                        # Continue to next variation to collect all possible matches
+                        
+                    except Exception as variation_error:
+                        logging.warning(f"Error searching for variation '{variation}': {variation_error}")
+                        continue
+            else:
+                # No tag filter, just concept filter
+                query = base_query.limit(limit)
+                all_docs = await asyncio.to_thread(query.get)
+            
+            docs = all_docs[:limit * 3]  # Get more docs for better scoring
+        
+        # Score and sort images by tag position priority
+        scored_images = []
+        search_term = tag.lower() if tag else None
+        
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+                data["created_at"] = data["created_at"].isoformat()
+            
+            # Calculate tag position bonus if we have a search term
+            match_score = 50  # Base score
+            if search_term:
+                tags = data.get('tags', [])
+                for pos, tag_item in enumerate(tags):
+                    if tag_item.lower() == search_term:
+                        if pos == 0:
+                            match_score += 20  # First tag gets big bonus
+                        elif pos == 1:
+                            match_score += 10  # Second tag gets medium bonus
+                        elif pos <= 3:
+                            match_score += 5   # Early tags get small bonus
+                        break
+            
+            data['match_score'] = match_score
+            scored_images.append(data)
+        
+        # Sort by match score (highest first) 
+        scored_images.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+        
+        # Take top results and remove match_score for clean response
+        images = []
+        for data in scored_images[:limit]:
+            # Remove match_score from response (internal use only)
+            if 'match_score' in data:
+                del data['match_score']
+            images.append(data)
+        
+        result = {
+            "images": images,
+            "total_found": len(images),
+            "search_type": "bravo_images",
+            "query": tag or concept or "random"
+        }
+        
+        # Log missing images for permanent tracking
+        if len(images) == 0 and (tag or concept):
+            from datetime import datetime
+            search_term = tag or concept
+            logging.info(f"🚨 MISSING IMAGE: No results found for '{search_term}' - logging to Firestore")
+            try:
+                await log_missing_image(search_term, {
+                    "tag": tag,
+                    "concept": concept,
+                    "search_query": search_term,
+                    "timestamp": datetime.now().isoformat()
+                })
+                logging.info(f"✅ Successfully logged missing image: '{search_term}'")
+            except Exception as log_error:
+                logging.error(f"❌ Failed to log missing image '{search_term}': {log_error}")
+        
+        # Cache the result for 1 hour (3600 seconds)
+        if redis_client:
+            try:
+                redis_client.setex(cache_key, 3600, json.dumps(result))
+                logging.debug(f"Cached search result for: {tag or concept}")
+            except Exception as redis_error:
+                logging.warning(f"Redis cache write error: {redis_error}")
+        
+        return result
+        
+    except Exception as e:
+        logging.error(f"Error in BravoImages search API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Missing image logging functions
+def normalize_search_term(term: str) -> str:
+    """Normalize search term to base form for deduplication (singular form)"""
+    if not term or not isinstance(term, str):
+        return term
+        
+    term_lower = term.lower().strip()
+    
+    # Remove common plural endings to get base form
+    if term_lower.endswith('ies') and len(term_lower) > 4:
+        # parties → party, stories → story
+        return term[:-3] + 'y'
+    elif term_lower.endswith('es') and len(term_lower) > 3:
+        # Check if it needs 'es' for pluralization
+        stem = term_lower[:-2]
+        if stem.endswith(('ch', 'sh', 'x', 'z', 's', 'ss')):
+            # boxes → box, dishes → dish
+            return term[:-2]
+        else:
+            # jokes → joke
+            return term[:-1]
+    elif term_lower.endswith('s') and len(term_lower) > 2 and not term_lower.endswith('ss'):
+        # questions → question, foods → food, but not "bass"
+        return term[:-1]
+    
+    return term
+
+async def log_missing_image(search_term: str, search_context: dict = None):
+    """Log a missing image to Firestore for permanent tracking"""
+    try:
+        from datetime import datetime
+        
+        # Normalize search term to base form (remove common plural endings)
+        normalized_term = normalize_search_term(search_term)
+        
+        # Create document ID from normalized term
+        doc_id = normalized_term.lower().replace(" ", "_").replace("-", "_").replace(".", "_")
+        logging.debug(f"📝 Logging missing image - original: '{search_term}', normalized: '{normalized_term}', doc_id: '{doc_id}'")
+        
+        # Reference to missing images collection
+        missing_images_ref = firestore_db.collection("missing_images").document(doc_id)
+        
+        # Check if this search term already exists
+        existing_doc = await asyncio.to_thread(missing_images_ref.get)
+        
+        if existing_doc.exists:
+            # Update existing record - increment count and update last seen
+            from google.cloud.firestore import Increment, ArrayUnion
+            existing_data = existing_doc.to_dict()
+            original_terms = existing_data.get('original_search_terms', [])
+            
+            update_data = {
+                "last_searched": datetime.now(),
+                "search_count": Increment(1)
+            }
+            
+            # Add original search term to array if not already present
+            if search_term not in original_terms:
+                update_data["original_search_terms"] = ArrayUnion([search_term])
+            
+            await asyncio.to_thread(missing_images_ref.update, update_data)
+            logging.debug(f"🔄 Updated existing missing image log for: '{search_term}' (normalized: '{normalized_term}')")
+        else:
+            # Create new record
+            missing_image_data = {
+                "search_term": normalized_term,  # Store normalized term as primary
+                "original_search_terms": [search_term],  # Track all original variants
+                "normalized_term": doc_id,
+                "first_searched": datetime.now(),
+                "last_searched": datetime.now(),
+                "search_count": 1,
+                "search_context": search_context or {},
+                "status": "missing",  # missing, in_progress, resolved
+                "priority": "medium",  # low, medium, high
+                "notes": "",
+                "created_at": datetime.now()
+            }
+            
+            await asyncio.to_thread(missing_images_ref.set, missing_image_data)
+            logging.info(f"📋 Created new missing image record: '{search_term}'")
+            
+    except Exception as e:
+        logging.error(f"❌ Error logging missing image '{search_term}': {e}")
+        raise  # Re-raise so the caller can handle it
+
+# Redis cache helper functions
+async def clear_image_cache(pattern: str = "bravo_images:*"):
+    """Clear image search cache by pattern"""
+    if redis_client:
+        try:
+            keys = redis_client.keys(pattern)
+            if keys:
+                redis_client.delete(*keys)
+                logging.info(f"Cleared {len(keys)} cache entries matching pattern: {pattern}")
+            return len(keys)
+        except Exception as e:
+            logging.warning(f"Error clearing cache: {e}")
+            return 0
+    return 0
+
+async def prewarm_common_searches():
+    """Prewarm cache with common admin button searches"""
+    common_terms = [
+        "home", "house", "family",
+        "something else", "else", "other", "different", 
+        "freestyle", "free", "style", "open", "custom",
+        "go back", "back", "return", "previous",
+        "positive", "good", "happy", "great",
+        "negative", "bad", "sad", "not good",
+        "funny", "laugh", "joke", "humor",
+        "scary", "afraid", "fear", "spooky",
+        "strange", "weird", "odd", "unusual"
+    ]
+    
+    prewarmed_count = 0
+    for term in common_terms:
+        try:
+            # Call the search to populate cache
+            result = await public_bravo_images_search(tag=term, limit=1)
+            if result.get("images"):
+                prewarmed_count += 1
+                logging.debug(f"Prewarmed cache for: {term}")
+        except Exception as e:
+            logging.warning(f"Failed to prewarm cache for '{term}': {e}")
+    
+    logging.info(f"Prewarmed cache for {prewarmed_count}/{len(common_terms)} common terms")
+    return prewarmed_count
+
+@app.post("/api/admin/cache/clear")
+async def clear_cache_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    pattern: str = "bravo_images:*"
+):
+    """Admin endpoint to clear image search cache"""
+    try:
+        cleared_count = await clear_image_cache(pattern)
+        return {
+            "success": True,
+            "message": f"Cleared {cleared_count} cache entries",
+            "pattern": pattern
+        }
+    except Exception as e:
+        logging.error(f"Error clearing cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/cache/prewarm")
+async def prewarm_cache_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)]
+):
+    """Admin endpoint to prewarm cache with common terms"""
+    try:
+        prewarmed_count = await prewarm_common_searches()
+        return {
+            "success": True,
+            "message": f"Prewarmed cache for {prewarmed_count} common terms",
+            "prewarmed_count": prewarmed_count
+        }
+    except Exception as e:
+        logging.error(f"Error prewarming cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/images/browse")
+async def browse_images_for_admin(
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+    search: str = "",
+    limit: int = 20,
+    page: int = 0,
+    source: str = "all"
+):
+    """
+    Admin endpoint to browse and search all images for management.
+    Returns paginated results with preview information.
+    Only requires Firebase authentication, not specific user validation.
+    """
+    try:
+        # Base query - get all images or filter by source
+        if source == "all":
+            base_query = firestore_db.collection("aac_images")
+        else:
+            base_query = firestore_db.collection("aac_images").where("source", "==", source)
+        
+        if search:
+            # Use the same case-insensitive search logic as the public endpoint
+            search_variations = [
+                search,
+                search.lower(),
+                search.capitalize()
+            ]
+            
+            all_docs = []
+            found_doc_ids = set()
+            
+            for variation in search_variations:
+                try:
+                    query = base_query.where("tags", "array_contains", variation).limit(limit * 2)  # Get more for filtering
+                    docs = await asyncio.to_thread(query.get)
+                    for doc in docs:
+                        if doc.id not in found_doc_ids:
+                            found_doc_ids.add(doc.id)
+                            all_docs.append(doc)
+                    
+                    if len(all_docs) >= limit:
+                        break
+                        
+                except Exception as variation_error:
+                    logging.warning(f"Error searching for variation '{variation}': {variation_error}")
+                    continue
+        else:
+            # No search term, get all matching images up to limit
+            if limit > 5000:  # Cap at reasonable limit for performance
+                limit = 5000
+            query = base_query.limit(limit)
+            all_docs = await asyncio.to_thread(query.get)
+        
+        # For image management, we want all results, not paginated
+        # Apply pagination only if requested (page > 0)
+        if page > 0:
+            offset = page * limit
+            paginated_docs = all_docs[offset:offset + limit]
+        else:
+            paginated_docs = all_docs
+        
+        images = []
+        for doc in paginated_docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            if "created_at" in data and hasattr(data["created_at"], "isoformat"):
+                data["created_at"] = data["created_at"].isoformat()
+            
+            # Return comprehensive image data for management interface
+            admin_data = {
+                "id": data["id"],
+                "image_url": data.get("image_url", ""),
+                "source": data.get("source", "unknown"),
+                "subconcept": data.get("subconcept", ""),
+                "concept": data.get("concept", ""),
+                "tags": data.get("tags", []),
+                "keywords": data.get("keywords", []),
+                "created_at": data.get("created_at"),
+                "preview_url": data.get("image_url", "")
+            }
+            images.append(admin_data)
+        
+        total_pages = (len(all_docs) + limit - 1) // limit if limit > 0 else 1
+        
+        return {
+            "images": images,
+            "total_count": len(all_docs),
+            "page": page,
+            "total_pages": total_pages,
+            "limit": limit,
+            "has_more": len(all_docs) > (page * limit + len(paginated_docs)) if page > 0 else False
+        }
+        
+    except Exception as e:
+        logging.error(f"Error in admin images browse API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/imagecreator/images/{image_id}")
 async def api_delete_image(
     image_id: str,
@@ -8540,6 +9361,43 @@ async def api_update_image_tags(
         raise
     except Exception as e:
         logging.error(f"Error in update image tags API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/admin/images/bulk-delete")
+async def api_bulk_delete_images(
+    token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+    image_ids: List[str] = Body(...)
+):
+    """Bulk delete AAC images"""
+    try:
+        deleted_count = 0
+        failed_deletions = []
+        
+        for image_id in image_ids:
+            try:
+                # Get image document
+                doc_ref = firestore_db.collection("aac_images").document(image_id)
+                doc = await asyncio.to_thread(doc_ref.get)
+                
+                if doc.exists:
+                    # Delete from Firestore
+                    await asyncio.to_thread(doc_ref.delete)
+                    deleted_count += 1
+                else:
+                    failed_deletions.append({"id": image_id, "reason": "Not found"})
+                    
+            except Exception as e:
+                failed_deletions.append({"id": image_id, "reason": str(e)})
+        
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "failed_deletions": failed_deletions,
+            "message": f"Successfully deleted {deleted_count} images"
+        }
+        
+    except Exception as e:
+        logging.error(f"Error in bulk delete images API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -8776,6 +9634,199 @@ async def save_avatar_presets(
         )
 
 # ================================
+# BravoImages Repair Endpoint
+# ================================
+
+@app.post("/api/admin/repair-bravo-images")
+async def repair_bravo_images_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Admin endpoint to repair BravoImages with truncated subconcepts"""
+    account_id = current_ids["account_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Admin access only
+    if user_email != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        # Import required libraries
+        from google.cloud import firestore
+        from google.cloud import storage as gcs
+        import google.generativeai as genai
+        import time
+        import re
+        
+        # Initialize clients (using server's existing configuration)
+        db = firestore_db
+        if not db:
+            raise HTTPException(status_code=503, detail="Firestore not initialized")
+        
+        storage_client = gcs.Client()
+        bucket = storage_client.bucket('bravo-image-db')
+        
+        logging.info("🔧 Starting BravoImages repair process...")
+        
+        # Step 1: Find all BravoImages documents
+        bravo_images_ref = db.collection('BravoImages')
+        docs = bravo_images_ref.stream()
+        
+        problematic_images = []
+        total_checked = 0
+        
+        # Step 2: Check each image for truncated subconcepts
+        for doc in docs:
+            total_checked += 1
+            data = doc.to_dict()
+            
+            if not data:
+                continue
+                
+            subconcept = data.get('subconcept', '')
+            image_url = data.get('image_url', '')
+            
+            # Skip if no image_url to reconstruct from
+            if not image_url:
+                continue
+            
+            # Extract filename from URL for analysis
+            filename = image_url.split('/')[-1] if '/' in image_url else ''
+            
+            if not filename:
+                continue
+            
+            # Check if this looks like a truncated subconcept
+            # Pattern: subconcept is single word but filename suggests multi-word
+            if subconcept and '_' not in subconcept and len(subconcept.split()) == 1:
+                # Check if filename has multiple words (indicated by underscores before timestamp)
+                # Expected pattern: word1_word2_word3_YYYYMMDD_HHMMSS.ext
+                name_without_ext = filename.rsplit('.', 1)[0]
+                parts = name_without_ext.split('_')
+                
+                # Look for timestamp pattern (YYYYMMDD_HHMMSS)
+                timestamp_found = False
+                timestamp_index = -1
+                
+                for i, part in enumerate(parts):
+                    if re.match(r'^\d{8}$', part) and i + 1 < len(parts) and re.match(r'^\d{6}$', parts[i + 1]):
+                        timestamp_found = True
+                        timestamp_index = i
+                        break
+                
+                if timestamp_found and timestamp_index > 1:
+                    # Reconstruct the full subconcept (everything before timestamp)
+                    reconstructed_subconcept = '_'.join(parts[:timestamp_index])
+                    
+                    if reconstructed_subconcept != subconcept:
+                        problematic_images.append({
+                            'doc_id': doc.id,
+                            'current_subconcept': subconcept,
+                            'reconstructed_subconcept': reconstructed_subconcept,
+                            'filename': filename,
+                            'image_url': image_url,
+                            'doc_data': data
+                        })
+        
+        logging.info(f"🔍 Checked {total_checked} images, found {len(problematic_images)} with truncated subconcepts")
+        
+        if not problematic_images:
+            return JSONResponse(content={
+                "success": True,
+                "message": f"No truncated subconcepts found. Checked {total_checked} images.",
+                "repaired_count": 0,
+                "total_checked": total_checked
+            })
+        
+        # Step 3: Repair each problematic image
+        repaired_count = 0
+        failed_repairs = []
+        
+        for img_data in problematic_images[:50]:  # Process in batches of 50
+            try:
+                doc_id = img_data['doc_id']
+                new_subconcept = img_data['reconstructed_subconcept']
+                old_subconcept = img_data['current_subconcept']
+                
+                logging.info(f"🔧 Repairing {doc_id}: '{old_subconcept}' → '{new_subconcept}'")
+                
+                # Generate new tags for the corrected subconcept
+                try:
+                    tag_prompt = f"""Generate descriptive tags for an AAC (Augmentative and Alternative Communication) image with the concept: "{new_subconcept}".
+
+The tags should help users find this image when searching. Consider:
+- The literal meaning of "{new_subconcept}"
+- Related emotional states, actions, or contexts
+- Alternative words someone might search for
+- Both simple and complex vocabulary levels
+
+Return 8-12 relevant tags as a comma-separated list. Make tags specific and useful for AAC communication."""
+
+                    response = await asyncio.to_thread(
+                        primary_llm_model_instance.generate_content, 
+                        tag_prompt,
+                        generation_config={"temperature": 0.7}
+                    )
+                    
+                    new_tags_text = response.text.strip()
+                    new_tags = [tag.strip() for tag in new_tags_text.split(',')]
+                    new_tags = [tag for tag in new_tags if tag]  # Remove empty tags
+                    
+                    if not new_tags:
+                        new_tags = [new_subconcept.replace('_', ' ')]
+                    
+                except Exception as tag_error:
+                    logging.warning(f"Failed to generate new tags for {doc_id}: {tag_error}")
+                    new_tags = [new_subconcept.replace('_', ' ')]
+                
+                # Update the document
+                update_data = {
+                    'subconcept': new_subconcept,
+                    'tags': new_tags,
+                    'repaired_at': firestore.SERVER_TIMESTAMP,
+                    'repair_info': {
+                        'old_subconcept': old_subconcept,
+                        'repair_method': 'filename_reconstruction',
+                        'repaired_by': 'admin_repair_endpoint'
+                    }
+                }
+                
+                # Update in Firestore
+                bravo_images_ref.document(doc_id).update(update_data)
+                repaired_count += 1
+                
+                # Small delay to avoid rate limits
+                if repaired_count % 10 == 0:
+                    await asyncio.sleep(1)
+                
+            except Exception as repair_error:
+                logging.error(f"Failed to repair {img_data['doc_id']}: {repair_error}")
+                failed_repairs.append({
+                    'doc_id': img_data['doc_id'],
+                    'error': str(repair_error)
+                })
+        
+        success_message = f"✅ Repair completed! Repaired {repaired_count} images out of {len(problematic_images)} identified."
+        if failed_repairs:
+            success_message += f" {len(failed_repairs)} repairs failed."
+        
+        logging.info(success_message)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": success_message,
+            "repaired_count": repaired_count,
+            "failed_count": len(failed_repairs),
+            "total_problematic": len(problematic_images),
+            "total_checked": total_checked,
+            "failed_repairs": failed_repairs[:5]  # Include first 5 failures for debugging
+        })
+        
+    except Exception as e:
+        error_msg = f"BravoImages repair failed: {str(e)}"
+        logging.error(error_msg, exc_info=True)
+        raise HTTPException(status_code=500, detail=error_msg)
+
+# ================================
 # AAC Symbol Processing Endpoints  
 # ================================
 
@@ -8954,7 +10005,7 @@ async def process_symbol_batch(
                 }
                 
                 # Save to Firestore
-                symbols_ref = firestore_db.collection("aac_symbols")
+                symbols_ref = firestore_db.collection("aac_images")
                 doc_ref = symbols_ref.document(symbol_doc['symbol_id'])
                 doc_ref.set(symbol_doc)
                 
@@ -8989,6 +10040,200 @@ async def process_symbol_batch(
             content={"error": "Batch processing failed", "details": str(e)}
         )
 
+@app.post("/api/symbols/import-extended")
+async def import_extended_symbols(
+    request_data: dict,
+    admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]
+):
+    """Import symbols from extended sources (OpenMoji, Noun Project, etc.)"""
+    logging.info(f"POST /api/symbols/import-extended request for admin user {admin_user.get('email')}")
+    
+    try:
+        from pathlib import Path
+        import json
+        import uuid
+        from datetime import datetime
+        
+        # Load extended symbols data
+        import_file = Path("extended_symbols_import.json")
+        if not import_file.exists():
+            return JSONResponse(
+                status_code=404,
+                content={"error": "Extended symbols import file not found. Run extend_symbol_database.py first."}
+            )
+        
+        with open(import_file) as f:
+            import_data = json.load(f)
+        
+        batch_size = request_data.get("batch_size", 25)
+        start_index = request_data.get("start_index", 0)
+        
+        symbols_to_import = import_data['symbols'][start_index:start_index + batch_size]
+        processed_symbols = []
+        errors = []
+        
+        for symbol_data in symbols_to_import:
+            try:
+                # Create symbol document for Firestore
+                symbol_doc = {
+                    'symbol_id': str(uuid.uuid4()),
+                    'name': symbol_data['name'],
+                    'name_lower': symbol_data['name'].lower(),
+                    'description': symbol_data['description'],
+                    'tags': symbol_data['tags'],
+                    'categories': symbol_data['categories'],
+                    'primary_category': symbol_data['categories'][0] if symbol_data['categories'] else 'other',
+                    'age_groups': symbol_data['age_groups'],
+                    'difficulty_level': symbol_data['difficulty_level'],
+                    'search_weight': symbol_data['search_weight'],
+                    'filename': f"{symbol_data['name']}.png",  # Will be generated/downloaded
+                    'source': symbol_data['source'],
+                    'source_url': symbol_data.get('source_url', ''),
+                    'image_url': '',  # Will be populated after image processing
+                    'thumbnail_url': '',  # Will be populated after image processing
+                    'alt_text': f"AAC symbol showing {symbol_data['name']}",
+                    'usage_contexts': ["General communication"],
+                    'usage_frequency': 0,
+                    'last_used': None,
+                    'created_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow(),
+                    'processing_status': 'needs_image_processing'  # Will need image download/generation
+                }
+                
+                # Save to Firestore
+                symbols_ref = firestore_db.collection("aac_images")
+                doc_ref = symbols_ref.document(symbol_doc['symbol_id'])
+                doc_ref.set(symbol_doc)
+                
+                processed_symbols.append({
+                    'symbol_id': symbol_doc['symbol_id'],
+                    'name': symbol_data['name'],
+                    'source': symbol_data['source'],
+                    'tags': symbol_doc['tags']
+                })
+                
+                logging.info(f"Imported extended symbol: {symbol_data['name']}")
+                
+            except Exception as e:
+                errors.append(f"Error importing {symbol_data['name']}: {str(e)}")
+                logging.error(f"Error importing {symbol_data['name']}: {e}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "imported_count": len(processed_symbols),
+            "total_requested": len(symbols_to_import),
+            "imported_symbols": processed_symbols[:5],
+            "errors": errors[:5],
+            "error_count": len(errors),
+            "next_start_index": start_index + batch_size,
+            "remaining": max(0, len(import_data['symbols']) - (start_index + batch_size))
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in import_extended_symbols: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Extended import failed", "details": str(e)}
+        )
+
+@app.post("/api/symbols/import-aac-generated")
+async def import_aac_generated_symbols(
+    request_data: dict,
+    admin_user: Annotated[Dict[str, str], Depends(verify_admin_user)]
+):
+    """Import Gemini-generated AAC symbols directly into the database"""
+    logging.info(f"POST /api/symbols/import-aac-generated request for admin user {admin_user.get('email')}")
+    
+    try:
+        import uuid
+        from datetime import datetime
+        
+        symbols_data = request_data.get("symbols", [])
+        batch_size = request_data.get("batch_size", 10)
+        
+        if not symbols_data:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "No symbols provided for import"}
+            )
+        
+        processed_symbols = []
+        errors = []
+        
+        for symbol_data in symbols_data[:batch_size]:
+            try:
+                # Create AAC symbol document
+                symbol_doc = {
+                    'symbol_id': str(uuid.uuid4()),
+                    'name': symbol_data['name'],
+                    'name_lower': symbol_data['name'].lower(),
+                    'description': symbol_data['description'],
+                    'tags': symbol_data.get('tags', []),
+                    'categories': symbol_data.get('categories', ['descriptors']),
+                    'primary_category': symbol_data.get('categories', ['descriptors'])[0],
+                    'age_groups': symbol_data.get('age_groups', ['all']),
+                    'difficulty_level': symbol_data.get('difficulty_level', 'simple'),
+                    'search_weight': symbol_data.get('search_weight', 2),
+                    'filename': f"{symbol_data['name']}.png",
+                    'source': 'gemini_generated_aac',
+                    'image_url': symbol_data.get('image_url', ''),
+                    'thumbnail_url': symbol_data.get('image_url', ''),  # Use same as main image for now
+                    'alt_text': f"AAC symbol showing {symbol_data['name']}",
+                    'usage_contexts': ["General communication", "Descriptive words"],
+                    'usage_frequency': 0,
+                    'last_used': None,
+                    'created_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow(),
+                    'processing_status': 'processed_with_ai',
+                    
+                    # Additional AAC-specific metadata
+                    'source_id': f"gemini_aac_{int(datetime.utcnow().timestamp())}",
+                    'filename_tags': [symbol_data['name']],
+                    'filename_analysis': {
+                        'word_count': 1,
+                        'difficulty': symbol_data.get('difficulty_level', 'simple'),
+                        'categories': symbol_data.get('categories', ['descriptors']),
+                        'tags': symbol_data.get('tags', []),
+                        'description': symbol_data['description'],
+                        'generation_source': 'gemini_aac_generator'
+                    }
+                }
+                
+                # Save to Firestore
+                symbols_ref = firestore_db.collection("aac_images")
+                doc_ref = symbols_ref.document(symbol_doc['symbol_id'])
+                doc_ref.set(symbol_doc)
+                
+                processed_symbols.append({
+                    'symbol_id': symbol_doc['symbol_id'],
+                    'name': symbol_data['name'],
+                    'tags': symbol_doc['tags'],
+                    'categories': symbol_doc['categories']
+                })
+                
+                logging.info(f"Imported AAC symbol: {symbol_data['name']}")
+                
+            except Exception as e:
+                errors.append(f"Error importing {symbol_data.get('name', 'unknown')}: {str(e)}")
+                logging.error(f"Error importing AAC symbol {symbol_data.get('name', 'unknown')}: {e}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "imported_count": len(processed_symbols),
+            "total_requested": len(symbols_data),
+            "imported_symbols": processed_symbols,
+            "errors": errors,
+            "error_count": len(errors),
+            "message": f"Successfully imported {len(processed_symbols)} AAC symbols to database"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in import_aac_generated_symbols: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "AAC symbol import failed", "details": str(e)}
+        )
+
 @app.get("/api/symbols/search")
 async def search_symbols(
     q: str = "",
@@ -8999,7 +10244,7 @@ async def search_symbols(
 ):
     """Search for AAC symbols - PUBLIC ENDPOINT"""
     try:
-        symbols_ref = firestore_db.collection("aac_symbols")
+        symbols_ref = firestore_db.collection("aac_images")
         
         # Build query with filters - simplified to avoid ordering issues
         if category:
@@ -9096,7 +10341,7 @@ async def get_symbol_categories():
     """Get available symbol categories - PUBLIC ENDPOINT"""
     try:
         # Query Firestore efficiently using aggregation
-        symbols_ref = firestore_db.collection("aac_symbols")
+        symbols_ref = firestore_db.collection("aac_images")
         
         # Sample a subset of symbols to get categories (more efficient than all)
         sample_docs = symbols_ref.limit(1000).stream()
@@ -9164,7 +10409,7 @@ async def get_symbol_stats():
     """Get symbol collection statistics - PUBLIC ENDPOINT"""
     try:
         # Get basic count efficiently without loading all documents
-        symbols_ref = firestore_db.collection("aac_symbols")
+        symbols_ref = firestore_db.collection("aac_images")
         
         # Use a more efficient approach for counting
         try:
@@ -9230,7 +10475,7 @@ async def clear_duplicate_symbols(admin_user: Annotated[Dict[str, str], Depends(
     logging.info(f"POST /api/symbols/clear-duplicates request for admin user {admin_user.get('email')}")
     
     try:
-        symbols_ref = firestore_db.collection("aac_symbols")
+        symbols_ref = firestore_db.collection("aac_images")
         docs = list(symbols_ref.limit(1000).stream())  # Process in batches to avoid timeout
         
         # Group by filename to find duplicates
@@ -9272,11 +10517,13 @@ async def clear_duplicate_symbols(admin_user: Annotated[Dict[str, str], Depends(
 @app.get("/api/symbols/button-search")
 async def button_symbol_search(
     q: str = "",
+    keywords: str = "",
     limit: int = 5
 ):
     """
     Fast AAC button symbol search with keyword matching and AI fallback.
     Uses optimized Firestore queries for speed, with semantic matching as backup.
+    Supports both text queries and keyword arrays for LLM-generated content.
     """
     try:
         if not q:
@@ -9288,6 +10535,28 @@ async def button_symbol_search(
             })
         
         query_lower = q.lower().strip()
+        
+        # Process keywords if provided (for LLM-generated content)
+        keyword_list = []
+        if keywords:
+            try:
+                # Keywords come as JSON array string from frontend
+                import json
+                parsed_keywords = json.loads(keywords)
+                if isinstance(parsed_keywords, list):
+                    keyword_list = [kw.strip().lower() for kw in parsed_keywords if isinstance(kw, str) and kw.strip()]
+                else:
+                    # Fallback for comma-separated format
+                    keyword_list = [kw.strip().lower() for kw in keywords.split(',') if kw.strip()]
+            except Exception as e:
+                logging.debug(f"Failed to parse keywords '{keywords}': {e}")
+                # Fallback for comma-separated format
+                try:
+                    keyword_list = [kw.strip().lower() for kw in keywords.split(',') if kw.strip()]
+                except:
+                    pass
+        
+        logging.info(f"Symbol search: query='{query_lower}', keywords={keyword_list}")
         
         # Semantic mapping for common AAC terms
         semantic_mappings = {
@@ -9314,7 +10583,149 @@ async def button_symbol_search(
         }
         
         matched_symbols = []
-        symbols_ref = firestore_db.collection("aac_symbols")
+        
+        # Search both collections - prioritize aac_images (BravoImages)
+        symbols_ref = firestore_db.collection("aac_images")
+        images_ref = firestore_db.collection("aac_images")
+        
+        # Phase -1: Search BravoImages (aac_images) collection first - these are prioritized
+        search_terms_for_images = []
+        if query_lower:
+            search_terms_for_images.append(query_lower)
+        search_terms_for_images.extend(keyword_list[:3])  # Add up to 3 keywords
+        search_terms_for_images = list(dict.fromkeys(search_terms_for_images))  # Remove duplicates
+        
+        for i, term in enumerate(search_terms_for_images[:3]):  # Check up to 3 terms for images
+            try:
+                # Search bravo_images in aac_images collection using multiple case variations like the imagecreator endpoint
+                term_variations = [
+                    term,                    # Original case
+                    term.lower(),            # All lowercase  
+                    term.capitalize()        # First letter capitalized
+                ]
+                
+                # Remove duplicates while preserving order
+                seen = set()
+                unique_variations = []
+                for variation in term_variations:
+                    if variation not in seen:
+                        seen.add(variation)
+                        unique_variations.append(variation)
+                
+                # Try each variation until we find results (prioritize exact match first)
+                image_docs = []
+                for variation in unique_variations:
+                    try:
+                        variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(max(20, limit * 5))
+                        variation_docs = list(variation_query.stream())
+                        image_docs.extend(variation_docs)
+                        
+                        # Don't stop at first match - collect from all variations for better scoring
+                    except Exception as e:
+                        logging.debug(f"Query failed for variation '{variation}': {e}")
+                        continue
+                # Process all collected docs
+                weight = 1.0 if i == 0 else 0.8
+                for doc in image_docs:
+                    image = doc.to_dict()
+                    image_id = doc.id
+                    
+                    # Avoid duplicates
+                    if not any(s['id'] == image_id for s in matched_symbols):
+                        image['id'] = image_id
+                        
+                        # Calculate tag position bonus - first tag gets highest score
+                        tags = image.get('tags', [])
+                        tag_position_bonus = 0
+                        for pos, tag in enumerate(tags):
+                            if tag.lower() == term.lower():
+                                if pos == 0:
+                                    tag_position_bonus = 20  # First tag gets big bonus for BravoImages
+                                elif pos == 1:
+                                    tag_position_bonus = 10  # Second tag gets medium bonus
+                                elif pos <= 3:
+                                    tag_position_bonus = 5   # Early tags get small bonus
+                                break
+                        
+                        # BravoImages get higher base scores than symbols
+                        base_score = 50 * weight  # Higher than symbol scores
+                        image['match_score'] = base_score + tag_position_bonus
+                        image['matched_term'] = term
+                        image['search_phase'] = "bravo_image_match"
+                        
+                        # Convert image format to symbol format for compatibility
+                        symbol_data = {
+                            'id': image_id,
+                            'image_url': image.get('image_url'),
+                            'name': image.get('subconcept', image.get('concept', 'BravoImage')),
+                            'description': f"Bravo Image: {image.get('subconcept', '')}",
+                            'tags': tags,
+                            'match_score': image['match_score'],
+                            'matched_term': term,
+                            'search_phase': "bravo_image_match",
+                            'source': 'bravo_images'
+                        }
+                        matched_symbols.append(symbol_data)
+            except Exception as e:
+                logging.debug(f"BravoImages search failed for term '{term}': {e}")
+        
+        logging.info(f"Found {len(matched_symbols)} BravoImages matches")
+        
+        # Phase 0: Enhanced keyword array matching for LLM-generated content (when keywords are provided)
+        if keyword_list:
+            try:
+                # Combine keywords with individual words from the query for better coverage
+                query_words = [word.strip().lower() for word in query_lower.split() if len(word.strip()) > 2]
+                search_terms = list(set(keyword_list + query_words))  # Remove duplicates
+                
+                logging.info(f"Search terms: keywords={keyword_list}, query_words={query_words}, combined={search_terms}")
+                
+                # Use array-contains-any query for efficient keyword matching
+                keyword_query = symbols_ref.where("tags", "array_contains_any", search_terms[:10]).limit(limit * 2)
+                keyword_results = keyword_query.stream()
+                
+                for doc in keyword_results:
+                    symbol = doc.to_dict()
+                    symbol['id'] = doc.id
+                    
+                    # Score based on how many terms match (keywords get higher weight)
+                    symbol_tags = symbol.get('tags', [])
+                    symbol_tags_lower = [tag.lower() for tag in symbol_tags]
+                    matched_keywords = [kw for kw in keyword_list if kw in symbol_tags_lower]
+                    matched_words = [word for word in query_words if word in symbol_tags_lower]
+                    
+                    # Weight keywords more heavily than query words
+                    keyword_score = len(matched_keywords) * 2
+                    word_score = len(matched_words) * 1
+                    total_possible = len(keyword_list) * 2 + len(query_words) * 1
+                    
+                    # Add tag position bonus for first-tag matches
+                    tag_position_bonus = 0
+                    all_search_terms = search_terms[:3]  # Check top search terms
+                    for term in all_search_terms:
+                        for pos, tag in enumerate(symbol_tags):
+                            if tag.lower() == term.lower():
+                                if pos == 0:
+                                    tag_position_bonus += 8  # First tag gets bonus
+                                elif pos == 1:
+                                    tag_position_bonus += 4  # Second tag gets smaller bonus
+                                break
+                    
+                    if total_possible > 0:
+                        match_ratio = (keyword_score + word_score) / total_possible
+                        base_score = 30 + (match_ratio * 20)  # 30-50 points based on match ratio
+                        symbol['match_score'] = base_score + tag_position_bonus
+                    else:
+                        symbol['match_score'] = 35 + tag_position_bonus
+                    
+                    matched_terms = matched_keywords + matched_words
+                    symbol['matched_term'] = ', '.join(matched_terms) if matched_terms else 'keyword_match'
+                    symbol['search_phase'] = "keyword_array_match"
+                    matched_symbols.append(symbol)
+                    
+                logging.info(f"Found {len(matched_symbols)} symbols via enhanced keyword array matching")
+            except Exception as e:
+                logging.debug(f"Keyword array query failed: {e}")
         
         # Phase 1: Fast exact name matches using Firestore queries
         try:
@@ -9332,9 +10743,15 @@ async def button_symbol_search(
             logging.debug(f"Exact match query failed: {e}")
         
         # Phase 2: Fast tag-based searches for all relevant terms (no early return)
-        search_terms = [query_lower]
-        if query_lower in semantic_mappings:
-            search_terms.extend(semantic_mappings[query_lower])
+        search_terms = []
+        if query_lower:
+            search_terms.append(query_lower)
+            if query_lower in semantic_mappings:
+                search_terms.extend(semantic_mappings[query_lower])
+        
+        # Add keywords to search terms if provided
+        search_terms.extend(keyword_list[:3])  # Add up to 3 keywords
+        search_terms = list(dict.fromkeys(search_terms))  # Remove duplicates while preserving order
         
         for i, term in enumerate(search_terms[:5]):  # Check up to 5 terms
             try:
@@ -9349,7 +10766,22 @@ async def button_symbol_search(
                     # Avoid duplicates
                     if not any(s['id'] == symbol_id for s in matched_symbols):
                         symbol['id'] = symbol_id
-                        symbol['match_score'] = 15 * weight
+                        
+                        # Calculate tag position bonus - first tag gets highest score
+                        tags = symbol.get('tags', [])
+                        tag_position_bonus = 0
+                        for pos, tag in enumerate(tags):
+                            if tag.lower() == term.lower():
+                                if pos == 0:
+                                    tag_position_bonus = 10  # First tag gets big bonus
+                                elif pos == 1:
+                                    tag_position_bonus = 5   # Second tag gets medium bonus
+                                elif pos <= 3:
+                                    tag_position_bonus = 2   # Early tags get small bonus
+                                break
+                        
+                        base_score = 15 * weight
+                        symbol['match_score'] = base_score + tag_position_bonus
                         symbol['matched_term'] = term
                         symbol['search_phase'] = "tag_match"
                         matched_symbols.append(symbol)
@@ -9428,7 +10860,12 @@ async def button_symbol_search(
                 if field in symbol and symbol[field]:
                     symbol[field] = symbol[field].isoformat() if hasattr(symbol[field], 'isoformat') else str(symbol[field])
         
-        search_type = "semantic_fast" if query_lower in semantic_mappings else "keyword_fast"
+        search_type = "keyword_array_fast" if keyword_list else ("semantic_fast" if query_lower in semantic_mappings else "keyword_fast")
+        
+        # Log missing images when no symbols are found
+        # Use the processed query_lower which is the canonical search term
+        if len(matched_symbols) == 0:
+            await log_missing_image(query_lower)
         
         return JSONResponse(content={
             "symbols": matched_symbols[:limit],
@@ -9443,6 +10880,556 @@ async def button_symbol_search(
             status_code=500,
             content={"error": "Button search failed", "details": str(e)}
         )
+
+# --- SIMPLIFIED IMAGE GENERATOR ENDPOINTS ---
+import tempfile
+import uuid
+from datetime import datetime
+from typing import Annotated
+
+@app.post("/api/generate-simple-image")
+async def generate_simple_image(request: Request, token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+    """Simplified endpoint to generate a single image for a word"""
+    try:
+        data = await request.json()
+        word = data.get('word')
+        original_prompt = data.get('prompt', word)  # Use word as default if no prompt provided
+        
+        if not word:
+            raise HTTPException(status_code=400, detail="Word is required")
+        
+        print(f"Generating image for word: {word}")
+        print(f"Original prompt from frontend: {original_prompt}")
+        
+        # Generate the image using just the word (ignore the frontend's complex prompt)
+        try:
+            # Use the word directly with our simple AAC prompt generation
+            image_bytes = await generate_image_with_gemini(word)
+            
+            # Create a unique filename
+            temp_filename = f"{word}_{uuid.uuid4().hex[:8]}.png"
+            
+            # Upload to storage and get public URL
+            storage_url = await upload_image_to_storage(image_bytes, temp_filename)
+            
+            # Create the same simplified prompt that was used internally for display purposes
+            enhanced_prompt_for_display = f'Create an image based on the word "{word}". The image will be used for AAC. Therefore, it is essential that the image fully represents the meaning of the word so that the AAC user will have a good understanding of the word. The image should capture the definition of "{word}" well enough for the user to understand that the image represents the word "{word}". Consider the core meaning of the word and common and contemporary uses and expressions of the word to determine what to include in the image. Use a simple, expressive, cartoon sticker style with a transparent background.'
+            
+            return JSONResponse(content={
+                "success": True,
+                "imageUrl": storage_url,
+                "word": word,
+                "filename": temp_filename,
+                "originalPrompt": original_prompt,
+                "enhancedPrompt": enhanced_prompt_for_display
+            })
+            
+        except Exception as e:
+            print(f"Error generating image: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to generate image: {str(e)}")
+            
+    except Exception as e:
+        print(f"Error in generate_simple_image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analyze-image-tags")
+async def analyze_image_tags(request: Request, token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+    """Analyze an image and generate tags for it"""
+    try:
+        data = await request.json()
+        image_url = data.get('imageUrl')
+        word = data.get('word')
+        
+        if not image_url or not word:
+            raise HTTPException(status_code=400, detail="Image URL and word are required")
+        
+        print(f"Analyzing image tags for: {word}")
+        
+        # Use Gemini to analyze the image and generate tags
+        try:
+            import google.generativeai as genai
+            
+            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            
+            # Analyze the image
+            analysis_prompt = f"""
+            Analyze this image for the word "{word}" and generate relevant tags.
+            
+            Please provide:
+            1. 5-10 descriptive tags that would help someone find this image
+            2. Tags should be single words or short phrases
+            3. Include the emotional tone, visual style, and subject matter
+            
+            Return the tags as a JSON array of strings.
+            """
+            
+            # For now, generate some basic tags
+            # In a real implementation, you'd analyze the actual image
+            basic_tags = [
+                word.lower(),
+                "aac-symbol",
+                "communication",
+                "colorful",
+                "simple",
+                "descriptive"
+            ]
+            
+            return JSONResponse(content={
+                "success": True,
+                "tags": basic_tags,
+                "word": word
+            })
+            
+        except Exception as e:
+            print(f"Error analyzing image: {e}")
+            # Return basic tags as fallback
+            return JSONResponse(content={
+                "success": True,
+                "tags": [word.lower(), "aac-symbol", "communication"],
+                "word": word
+            })
+            
+    except Exception as e:
+        print(f"Error in analyze_image_tags: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/generate-simple-image-public")
+async def generate_simple_image_public(request: Request):
+    """Public endpoint to generate a single image for a word (no authentication required)"""
+    try:
+        data = await request.json()
+        word = data.get('word')
+        original_prompt = data.get('prompt', word)  # Use word as default if no prompt provided
+        
+        if not word:
+            raise HTTPException(status_code=400, detail="Word is required")
+        
+        print(f"Generating image for word (public): {word}")
+        print(f"Original prompt from frontend: {original_prompt}")
+        
+        # Generate the image using just the word (ignore the frontend's complex prompt)
+        try:
+            # Use the word directly with our simple AAC prompt generation
+            image_bytes = await generate_image_with_gemini(word)
+            
+            # Create a unique filename
+            temp_filename = f"{word}_{uuid.uuid4().hex[:8]}.png"
+            
+            # Upload to storage and get public URL
+            storage_url = await upload_image_to_storage(image_bytes, temp_filename)
+            
+            # Create the same enhanced prompt that was used internally for display purposes  
+            enhanced_prompt_for_display = f'''Create an extremely simple, **flat vector icon** for the AAC symbol representing "{word}".
+The style must be:
+- **Bold, thick, black outlines.**
+- **Solid, flat colors, no gradients, no shading, no textures.**
+- **Minimalist and abstract**, focusing *only* on the core essence of the word.
+- **Highly iconic and universally recognizable**, like a simple sticker or a universally understood pictogram.
+- **Clean lines, no fussy details.**
+- **Transparent background.**
+
+Ensure the image is **immediately understandable** and directly represents the meaning of "{word}" in a clear, primary way.
+Avoid: any form of realism, photorealism, intricate details, complex scenes, depth, shading, gradients, or non-essential elements.
+
+Example stylistic keywords: pictogram, simple sticker, flat vector art, basic icon.'''
+            
+            return JSONResponse(content={
+                "success": True,
+                "imageUrl": storage_url,
+                "word": word,
+                "filename": temp_filename,
+                "originalPrompt": original_prompt,
+                "enhancedPrompt": enhanced_prompt_for_display
+            })
+            
+        except Exception as e:
+            print(f"Error generating image: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to generate image: {str(e)}")
+            
+    except Exception as e:
+        print(f"Error in generate_simple_image_public: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/save-image-to-firestore")
+async def save_image_to_firestore(request: Request, token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+    """Save an accepted image to Firestore database"""
+    global firestore_db
+    try:
+        data = await request.json()
+        word = data.get('word')
+        image_url = data.get('imageUrl')
+        local_path = data.get('localPath')
+        prompt = data.get('prompt')
+        tags = data.get('tags', [])
+        category = data.get('category', 'descriptors')
+        
+        if not word or not image_url:
+            raise HTTPException(status_code=400, detail="Word and image URL are required")
+        
+        print(f"Saving image to Firestore for: {word}")
+        
+        # Create the symbol document
+        symbol_data = {
+            "word": word,
+            "image_url": image_url,
+            "prompt": prompt,
+            "tags": tags,
+            "category": category,
+            "created_at": datetime.utcnow(),
+            "source": "simple-generator",
+            "approved": True
+        }
+        
+        # Save to Firestore
+        try:
+            doc_ref = firestore_db.collection('symbols').add(symbol_data)
+            doc_id = doc_ref[1].id
+            
+            print(f"Saved symbol {word} to Firestore with ID: {doc_id}")
+            
+            return JSONResponse(content={
+                "success": True,
+                "id": doc_id,
+                "word": word,
+                "message": f"Successfully saved {word} to database"
+            })
+            
+        except Exception as e:
+            print(f"Error saving to Firestore: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to save to database: {str(e)}")
+            
+    except Exception as e:
+        print(f"Error in save_image_to_firestore: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- MP3 Audio File Endpoints ---
+
+@app.post("/api/admin/upload-button-audio")
+async def upload_button_audio(
+    file: UploadFile,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Upload MP3 file for button custom audio"""
+    try:
+        logging.info(f"[AUDIO UPLOAD] Starting upload for file: {file.filename}, content_type: {file.content_type}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
+        
+        # Check if storage functionality is available
+        try:
+            from google.cloud import storage
+            logging.info("[AUDIO UPLOAD] Storage import successful")
+        except ImportError as e:
+            logging.error(f"[AUDIO UPLOAD] Storage import failed: {e}")
+            raise HTTPException(status_code=503, detail="Storage functionality not available")
+            
+        # Import required modules
+        from datetime import datetime
+        import uuid
+        logging.info("[AUDIO UPLOAD] Required modules imported")
+        
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('audio/'):
+            logging.warning(f"[AUDIO UPLOAD] Invalid file type: {file.content_type}")
+            raise HTTPException(status_code=400, detail="File must be an audio file")
+        
+        # Validate file extension
+        if not file.filename or not file.filename.lower().endswith(('.mp3', '.wav', '.m4a')):
+            raise HTTPException(status_code=400, detail="File must be .mp3, .wav, or .m4a format")
+        
+        # Read file content
+        try:
+            file_content = await file.read()
+            logging.info(f"[AUDIO UPLOAD] File read successfully, size: {len(file_content)} bytes")
+        except Exception as e:
+            logging.error(f"[AUDIO UPLOAD] Failed to read file: {e}")
+            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+            
+        if len(file_content) > 10 * 1024 * 1024:  # 10MB limit
+            logging.warning(f"[AUDIO UPLOAD] File too large: {len(file_content)} bytes")
+            raise HTTPException(status_code=400, detail="File size must be less than 10MB")
+        
+        # Generate unique filename
+        account_id = current_ids["account_id"]
+        user_id = current_ids["aac_user_id"]  # Fix: correct key name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_extension = file.filename.split('.')[-1].lower()
+        unique_filename = f"button_audio_{timestamp}_{uuid.uuid4().hex[:8]}.{file_extension}"
+        
+        # Convert to base64 data URL (same approach as images)
+        import base64
+        file_base64 = base64.b64encode(file_content).decode()
+        
+        # Determine MIME type for data URL
+        if file_extension == 'mp3':
+            mime_type = 'audio/mpeg'
+        elif file_extension == 'wav':
+            mime_type = 'audio/wav'
+        elif file_extension == 'm4a':
+            mime_type = 'audio/mp4'
+        else:
+            mime_type = 'audio/mpeg'  # default
+        
+        # Create data URL (same format as images in Firestore)
+        audio_url = f"data:{mime_type};base64,{file_base64}"
+        logging.info(f"[AUDIO UPLOAD] Created data URL, size: {len(audio_url)} characters")
+        
+        logging.info(f"Uploaded button audio: {audio_url}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "audio_url": audio_url,
+            "filename": unique_filename
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error uploading button audio: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+# Missing Images Management API Endpoints
+@app.get("/api/missing-images")
+async def get_missing_images(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    status: str = "all",  # all, missing, in_progress, resolved
+    priority: str = "all",  # all, low, medium, high
+    limit: int = 100
+):
+    """Get list of missing images for review (accessible to all authenticated users)"""
+    try:
+        # Any authenticated user can view missing images
+        # No admin restriction - this helps all users contribute to image creation
+        
+        # Build query
+        query = firestore_db.collection("missing_images")
+        
+        if status != "all":
+            query = query.where("status", "==", status)
+        
+        if priority != "all":
+            query = query.where("priority", "==", priority)
+        
+        # Simple limit without ordering for now to avoid issues with empty collection
+        query = query.limit(limit)
+        
+        docs = await asyncio.to_thread(query.get)
+        
+        missing_images = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            
+            # Convert timestamps to ISO format for JSON
+            for field in ["first_searched", "last_searched", "created_at"]:
+                if field in data and hasattr(data[field], "isoformat"):
+                    data[field] = data[field].isoformat()
+            
+            missing_images.append(data)
+        
+        return JSONResponse(content={
+            "missing_images": missing_images,
+            "total_count": len(missing_images),
+            "filters": {"status": status, "priority": priority}
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting missing images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/missing-images/test")
+async def test_missing_image_logging():
+    """Test endpoint to manually trigger missing image logging"""
+    try:
+        import time
+        from datetime import datetime
+        
+        # Test the logging function directly
+        test_term = "test_missing_image_" + str(int(time.time()))
+        logging.info(f"🧪 Testing missing image logging with term: {test_term}")
+        
+        await log_missing_image(test_term, {
+            "test": True,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        return JSONResponse(content={
+            "success": True,
+            "test_term": test_term,
+            "message": "Test missing image logged successfully"
+        })
+        
+    except Exception as e:
+        logging.error(f"❌ Test missing image logging failed: {e}")
+        return JSONResponse(content={
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+@app.post("/api/missing-images/scan")
+async def scan_missing_images(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    limit_per_term: int = 1
+):
+    """Scan saved pages/buttons for the current AAC user and trigger missing-image logging.
+    This calls the internal image search for each unique button label which will create/update
+    entries in the `missing_images` collection when no results are found.
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+
+        # Load all pages for this user
+        pages = await load_pages_from_file(account_id, aac_user_id)
+
+        # Collect unique button labels (text/speechPhrase/display)
+        terms = set()
+        for page in pages:
+            for button in page.get("buttons", []) if isinstance(page.get("buttons", []), list) else []:
+                # Prefer 'speechPhrase' then 'text' then 'display'
+                text_candidates = []
+                if isinstance(button, dict):
+                    if button.get("speechPhrase"):
+                        text_candidates.append(button.get("speechPhrase"))
+                    if button.get("text"):
+                        text_candidates.append(button.get("text"))
+                    if button.get("display"):
+                        text_candidates.append(button.get("display"))
+                # pick first non-empty candidate
+                for t in text_candidates:
+                    if t and isinstance(t, str):
+                        terms.add(t.strip())
+                        break
+
+        scanned = []
+        missing_count = 0
+
+        # Call the public image search for each term to let server-side logger run
+        for term in sorted(list(terms)):
+            try:
+                # Call the existing public search function which includes logging when 0 results
+                result = await public_bravo_images_search(tag=term, limit=limit_per_term)
+                total_found = result.get("total_found", 0)
+                scanned.append({"term": term, "found": total_found})
+                if total_found == 0:
+                    missing_count += 1
+            except Exception as e:
+                logging.warning(f"Error scanning term '{term}': {e}")
+                scanned.append({"term": term, "found": None, "error": str(e)})
+
+        return JSONResponse(content={
+            "scanned_terms": len(terms),
+            "missing_terms": missing_count,
+            "details": scanned
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error scanning missing images for {account_id}/{aac_user_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/missing-images/{image_id}/update")
+async def update_missing_image(
+    image_id: str,
+    update_data: dict,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Update missing image record (status, priority, notes) - accessible to all authenticated users"""
+    try:
+        # Any authenticated user can update missing image records
+        # This allows collaborative management of missing images
+        
+        # Validate update data
+        allowed_fields = ["status", "priority", "notes"]
+        valid_updates = {k: v for k, v in update_data.items() if k in allowed_fields}
+        
+        if not valid_updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+        # Add timestamp
+        from datetime import datetime
+        valid_updates["updated_at"] = datetime.now()
+        
+        # Update document
+        missing_image_ref = firestore_db.collection("missing_images").document(image_id)
+        await asyncio.to_thread(missing_image_ref.update, valid_updates)
+        
+        return JSONResponse(content={"success": True, "updated_fields": list(valid_updates.keys())})
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating missing image {image_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/missing-images/export")
+async def export_missing_images(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    format: str = "json",  # json, csv
+    status: str = "missing"  # all, missing, in_progress, resolved
+):
+    """Export missing images list for external processing - accessible to all authenticated users"""
+    try:
+        # Any authenticated user can export missing images list
+        # This enables broader collaboration on image creation tasks
+        
+        # Get data
+        query = firestore_db.collection("missing_images")
+        if status != "all":
+            query = query.where("status", "==", status)
+        docs = await asyncio.to_thread(query.get)
+        
+        missing_images = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            
+            # Convert timestamps for export
+            for field in ["first_searched", "last_searched", "created_at"]:
+                if field in data and hasattr(data[field], "isoformat"):
+                    data[field] = data[field].isoformat()
+            
+            missing_images.append(data)
+        
+        if format == "csv":
+            import csv
+            import io
+            
+            output = io.StringIO()
+            fieldnames = ["search_term", "search_count", "status", "priority", "first_searched", "last_searched", "notes"]
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            
+            for item in missing_images:
+                row = {field: item.get(field, "") for field in fieldnames}
+                writer.writerow(row)
+            
+            csv_content = output.getvalue()
+            output.close()
+            
+            return Response(
+                content=csv_content,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=missing_images_{status}.csv"}
+            )
+        else:
+            # JSON format
+            from datetime import datetime
+            return JSONResponse(content={
+                "missing_images": missing_images,
+                "export_date": datetime.now().isoformat(),
+                "status_filter": status,
+                "total_count": len(missing_images)
+            })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error exporting missing images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
