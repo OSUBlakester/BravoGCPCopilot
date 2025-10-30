@@ -556,6 +556,14 @@
             initializeGamesPage();
         });
 
+        // Add keyboard event listener for spacebar (same as gridpage)
+        document.addEventListener('keydown', function(event) {
+            if (event.code === 'Space' && scanningSystem.isScanning) {
+                event.preventDefault();
+                selectCurrentScannedButton();
+            }
+        });
+
         // Initialize the games page
         async function initializeGamesPage() {
             try {
@@ -834,9 +842,8 @@
         function selectCurrentScannedButton() {
             if (!scanningSystem.isScanning || scanningSystem.buttons.length === 0) return;
             
-            // Get the currently scanning button (previous index since we increment after highlighting)
-            const currentIndex = (scanningSystem.currentIndex - 1 + scanningSystem.buttons.length) % scanningSystem.buttons.length;
-            const currentButton = scanningSystem.buttons[currentIndex];
+            // Get the currently highlighted button
+            const currentButton = scanningSystem.buttons.find(btn => btn.classList.contains('scanning'));
             
             if (currentButton) {
                 stopScanning();
@@ -853,21 +860,102 @@
             document.getElementById('listeningIndicator').classList.add('hidden');
         }
 
-        // Announce text using speech synthesis
-        function announce(text) {
-            console.log('Announcing:', text);
-            
-            if ('speechSynthesis' in window) {
-                // Cancel any ongoing speech
-                speechSynthesis.cancel();
-                
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 0.9;
-                utterance.pitch = 1.0;
-                utterance.volume = 1.0;
-                
-                speechSynthesis.speak(utterance);
+        // Announcement queue and processing (same as gridpage.js)
+        let announcementQueue = [];
+        let isAnnouncingNow = false;
+
+        // Base64 to ArrayBuffer conversion
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
             }
+            return bytes.buffer;
+        }
+
+        // Play audio to device (simplified version of gridpage)
+        async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const audioBuffer = await audioContext.decodeAudioData(audioDataBuffer);
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+                
+                return new Promise((resolve, reject) => {
+                    source.onended = resolve;
+                    source.onerror = reject;
+                    source.start(0);
+                });
+            } catch (error) {
+                console.error('Error playing audio:', error);
+                throw error;
+            }
+        }
+
+        // Process announcement queue (same pattern as gridpage.js)
+        async function processAnnouncementQueue() {
+            if (isAnnouncingNow || announcementQueue.length === 0) {
+                return;
+            }
+
+            isAnnouncingNow = true;
+            const { textToAnnounce, announcementType, resolve, reject } = announcementQueue.shift();
+
+            console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
+
+            try {
+                // Fetch audio data from server using authenticatedFetch (same as gridpage)
+                const response = await authenticatedFetch(`/play-audio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => response.text());
+                    throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+                }
+
+                const jsonResponse = await response.json();
+                const audioData = jsonResponse.audio_data;
+                const sampleRate = jsonResponse.sample_rate;
+
+                if (!audioData) {
+                    throw new Error("No audio data received from server.");
+                }
+
+                const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
+                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+
+                resolve(); // Resolve the promise for this announcement
+            } catch (error) {
+                console.error('Error in announcement:', error);
+                reject(error);
+            } finally {
+                isAnnouncingNow = false;
+                // Process next announcement in queue
+                processAnnouncementQueue();
+            }
+        }
+
+        // Announce text using same system as gridpage.js
+        async function announce(textToAnnounce, announcementType = "system") {
+            console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
+            
+            return new Promise((resolve, reject) => {
+                announcementQueue.push({
+                    textToAnnounce,
+                    announcementType,
+                    resolve,
+                    reject
+                });
+
+                // Trigger the queue processing
+                processAnnouncementQueue();
+            });
         }
 
         // Start 20 Questions game
@@ -1431,6 +1519,11 @@
         function showActionButtons() {
             document.getElementById('actionButtons').classList.remove('hidden');
             document.getElementById('statusText').textContent = 'What would you like to do next?';
+            
+            // Start scanning for action buttons (no listening - user taps/uses switch)
+            setTimeout(() => {
+                startScanning('actionButtons');
+            }, 500);
         }
 
         // Ask another question
