@@ -7890,6 +7890,7 @@ async def generate_game_questions(
         # Load user settings for LLMOptions
         settings = await load_settings_from_file(account_id, aac_user_id)
         llm_options = settings.get("LLMOptions", 10)
+        logging.info(f"Games questions: Using LLMOptions={llm_options} for user {aac_user_id}")
         
         # Build context of previous questions
         previous_qa_context = ""
@@ -7974,6 +7975,7 @@ async def generate_game_guesses(
         # Load user settings for LLMOptions
         settings = await load_settings_from_file(account_id, aac_user_id)
         llm_options = settings.get("LLMOptions", 10)
+        logging.info(f"Games guesses: Using LLMOptions={llm_options} for user {aac_user_id}")
         
         # Build context from all Q&A pairs
         qa_context = []
@@ -8054,6 +8056,7 @@ async def generate_game_options(
         # Load user settings for LLMOptions
         settings = await load_settings_from_file(account_id, aac_user_id)
         llm_options = settings.get("LLMOptions", 10)
+        logging.info(f"Games options: Using LLMOptions={llm_options} for user {aac_user_id}")
         
         # Different prompt based on request_different flag
         variety_instruction = ""
@@ -8090,22 +8093,56 @@ Provide exactly {llm_options} options:"""
         full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
         response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
         
-        # Parse options from response
+        # Parse options from response (handle JSON or plain text)
         options = []
-        for line in response_text.strip().split('\n'):
-            line = line.strip()
-            if line:
-                # Remove numbering/bullets if present
-                clean_option = line
-                if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
-                    clean_option = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
-                    clean_option = clean_option.lstrip('- •').strip()
+        response_text = response_text.strip()
+        
+        # Check if response is JSON format
+        if response_text.startswith('```json') or response_text.startswith('[') or response_text.startswith('{'):
+            try:
+                # Clean JSON markers if present
+                clean_text = response_text
+                if clean_text.startswith('```json'):
+                    clean_text = clean_text.replace('```json', '').replace('```', '')
                 
-                # Remove quotes if present
-                clean_option = clean_option.strip('"\'')
+                # Try to parse as JSON
+                import json
+                parsed_json = json.loads(clean_text)
                 
-                if clean_option:
-                    options.append(clean_option)
+                if isinstance(parsed_json, list):
+                    for item in parsed_json:
+                        if isinstance(item, dict):
+                            # Extract option field from JSON object
+                            option_text = item.get('option', item.get('name', str(item)))
+                            # Clean up "Person: "Mickey Mouse"" format
+                            if ': "' in option_text:
+                                option_text = option_text.split(': "')[1].rstrip('"')
+                            options.append(option_text)
+                        else:
+                            options.append(str(item))
+                else:
+                    logging.warning(f"Unexpected JSON structure: {parsed_json}")
+                    
+            except Exception as json_error:
+                logging.warning(f"Failed to parse JSON response: {json_error}")
+                # Fall back to text parsing
+        
+        # If no options parsed yet, try text parsing
+        if not options:
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if line and not line.startswith('```') and not line.startswith('{') and not line.startswith('['):
+                    # Remove numbering/bullets if present
+                    clean_option = line
+                    if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
+                        clean_option = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
+                        clean_option = clean_option.lstrip('- •').strip()
+                    
+                    # Remove quotes if present
+                    clean_option = clean_option.strip('"\'')
+                    
+                    if clean_option:
+                        options.append(clean_option)
         
         # Ensure we have enough options with fallbacks
         if len(options) < llm_options:
