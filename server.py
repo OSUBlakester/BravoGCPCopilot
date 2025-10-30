@@ -7854,6 +7854,326 @@ async def set_mood(
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
+# --- Games API Models ---
+class GameQuestionRequest(BaseModel):
+    game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
+    category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
+    asked_questions: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Previously asked questions and answers")
+    question_count: Optional[int] = Field(default=0, description="Number of questions asked so far")
+
+class GameGuessRequest(BaseModel):
+    game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
+    category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
+    asked_questions: List[Dict[str, str]] = Field(..., description="All asked questions and answers")
+    guess_count: Optional[int] = Field(default=0, description="Number of guesses made so far")
+
+class GameOptionsRequest(BaseModel):
+    game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
+    category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
+    request_different: Optional[bool] = Field(default=False, description="Request different options from previous")
+
+class GameAnswerRequest(BaseModel):
+    game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
+    selected_item: str = Field(..., description="The person, place, or thing selected by user")
+    player_question: str = Field(..., description="The yes/no question asked by the player")
+
+@app.post("/api/games/questions")
+async def generate_game_questions(
+    request: GameQuestionRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate yes/no questions for 20 Questions game"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 10)
+        
+        # Build context of previous questions
+        previous_qa_context = ""
+        if request.asked_questions:
+            qa_pairs = []
+            for qa in request.asked_questions:
+                qa_pairs.append(f"Q: {qa.get('question', '')} A: {qa.get('answer', '')}")
+            previous_qa_context = f"\n\nPreviously asked questions and answers:\n" + "\n".join(qa_pairs)
+        
+        # Create category-specific prompt
+        category_hints = {
+            "person": "Focus on questions about age, profession, fame, gender, nationality, physical appearance, or historical significance.",
+            "place": "Focus on questions about size, location, indoor/outdoor, natural/man-made, climate, population, or geographical features.",
+            "thing": "Focus on questions about size, material, usage, color, shape, living/non-living, or where it's typically found."
+        }
+        
+        category_hint = category_hints.get(request.category.lower(), "")
+        
+        llm_query = f"""Generate exactly {llm_options} different yes/no questions for a 20 Questions game where the user is trying to guess a {request.category}.
+
+{category_hint}
+
+The questions should:
+1. Be simple, clear yes/no questions
+2. Help narrow down possibilities effectively
+3. Be appropriate for someone using AAC communication
+4. Avoid repeating information from previous questions
+5. Progress logically from general to more specific
+
+{previous_qa_context}
+
+Format each question as a complete sentence ending with a question mark. Make them varied in approach and difficulty."""
+
+        # Generate response using the same pattern as /llm endpoint
+        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
+        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        
+        # Parse questions from response
+        questions = []
+        for line in response_text.strip().split('\n'):
+            line = line.strip()
+            if line and '?' in line:
+                # Remove numbering/bullets if present
+                clean_question = line
+                if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
+                    clean_question = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
+                    clean_question = clean_question.lstrip('- •').strip()
+                
+                if clean_question and clean_question.endswith('?'):
+                    questions.append(clean_question)
+        
+        # Ensure we have at least some questions
+        if not questions:
+            questions = [
+                "Is it alive?",
+                "Is it bigger than a person?",
+                "Can you hold it in your hand?",
+                "Is it man-made?",
+                "Is it commonly found indoors?"
+            ][:llm_options]
+        
+        return JSONResponse(content={
+            "success": True,
+            "questions": questions[:llm_options],
+            "question_count": request.question_count
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating game questions: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/games/guesses")
+async def generate_game_guesses(
+    request: GameGuessRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate guess options for 20 Questions game based on Q&A history"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 10)
+        
+        # Build context from all Q&A pairs
+        qa_context = []
+        for qa in request.asked_questions:
+            qa_context.append(f"Q: {qa.get('question', '')} A: {qa.get('answer', '')}")
+        
+        qa_summary = "\n".join(qa_context)
+        
+        llm_query = f"""Based on the following 20 Questions game Q&A session, generate exactly {llm_options} specific {request.category} guesses that match ALL the given answers.
+
+Question and Answer History:
+{qa_summary}
+
+Generate {llm_options} specific {request.category} options that are consistent with ALL the yes/no answers above. Each guess should be:
+1. A specific {request.category} (not generic categories)
+2. Completely consistent with all the Q&A answers
+3. Realistic and well-known
+4. Different from each other
+5. Formatted as just the name/title (no extra text)
+
+Examples of good format:
+- For person: "Albert Einstein", "Taylor Swift", "Abraham Lincoln"
+- For place: "New York City", "The Grand Canyon", "McDonald's"
+- For thing: "Smartphone", "Baseball", "Coffee Mug"
+
+List only the {request.category} names, one per line."""
+
+        # Generate response using the same pattern as /llm endpoint
+        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
+        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        
+        # Parse guesses from response
+        guesses = []
+        for line in response_text.strip().split('\n'):
+            line = line.strip()
+            if line:
+                # Remove numbering/bullets if present
+                clean_guess = line
+                if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
+                    clean_guess = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
+                    clean_guess = clean_guess.lstrip('- •').strip()
+                
+                # Remove quotes if present
+                clean_guess = clean_guess.strip('"\'')
+                
+                if clean_guess:
+                    guesses.append(clean_guess)
+        
+        # Fallback guesses if parsing failed
+        if not guesses:
+            fallback_guesses = {
+                "person": ["A famous actor", "A historical figure", "A musician", "A sports player", "A world leader"],
+                "place": ["A famous city", "A landmark", "A restaurant", "A park", "A building"],
+                "thing": ["An electronic device", "A toy", "A food item", "A tool", "A piece of furniture"]
+            }
+            guesses = fallback_guesses.get(request.category.lower(), ["Something common", "Something specific"])
+        
+        return JSONResponse(content={
+            "success": True,
+            "guesses": guesses[:llm_options],
+            "guess_count": request.guess_count
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating game guesses: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/games/options")
+async def generate_game_options(
+    request: GameOptionsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate person/place/thing options for games"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 10)
+        
+        # Different prompt based on request_different flag
+        variety_instruction = ""
+        if request.request_different:
+            variety_instruction = " Generate completely different options from what might have been shown before. Be creative and varied."
+        
+        category_descriptions = {
+            "person": "famous people, historical figures, fictional characters, or well-known individuals",
+            "place": "locations, landmarks, cities, buildings, or geographical features", 
+            "thing": "objects, animals, foods, tools, or items that can be identified"
+        }
+        
+        category_desc = category_descriptions.get(request.category.lower(), "items")
+        
+        llm_query = f"""Generate exactly {llm_options} different {request.category} options for a 20 Questions guessing game.
+
+Focus on {category_desc} that are:
+1. Well-known and recognizable
+2. Varied in type and characteristics  
+3. Appropriate for all ages
+4. Specific (not generic categories)
+5. Fun and engaging for games
+
+{variety_instruction}
+
+Format as just the name/title, one per line. Examples:
+- Person: "Albert Einstein", "Wonder Woman", "Michael Jordan"
+- Place: "Statue of Liberty", "Amazon Rainforest", "Pizza Hut"  
+- Thing: "Guitar", "Birthday Cake", "Fire Truck"
+
+Provide exactly {llm_options} options:"""
+
+        # Generate response using the same pattern as /llm endpoint
+        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
+        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        
+        # Parse options from response
+        options = []
+        for line in response_text.strip().split('\n'):
+            line = line.strip()
+            if line:
+                # Remove numbering/bullets if present
+                clean_option = line
+                if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
+                    clean_option = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
+                    clean_option = clean_option.lstrip('- •').strip()
+                
+                # Remove quotes if present
+                clean_option = clean_option.strip('"\'')
+                
+                if clean_option:
+                    options.append(clean_option)
+        
+        # Ensure we have enough options with fallbacks
+        if len(options) < llm_options:
+            fallback_options = {
+                "person": ["Albert Einstein", "Taylor Swift", "Spider-Man", "Abraham Lincoln", "Oprah Winfrey"],
+                "place": ["New York City", "Grand Canyon", "McDonald's", "Paris", "Beach"],
+                "thing": ["Phone", "Car", "Pizza", "Dog", "Book"]
+            }
+            
+            fallbacks = fallback_options.get(request.category.lower(), ["Option A", "Option B"])
+            options.extend(fallbacks[:llm_options - len(options)])
+        
+        return JSONResponse(content={
+            "success": True,
+            "options": options[:llm_options],
+            "category": request.category
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating game options: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/api/games/answer")
+async def answer_game_question(
+    request: GameAnswerRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Answer a yes/no question about the selected item"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        llm_query = f"""You are playing 20 Questions. The selected item is: "{request.selected_item}"
+
+The player asked: "{request.player_question}"
+
+Answer with ONLY "Yes" or "No" based on whether the question is true about "{request.selected_item}".
+
+Be accurate and consistent. If the question is ambiguous, answer based on the most common interpretation.
+
+Answer:"""
+
+        # Generate response using the same pattern as /llm endpoint
+        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
+        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        
+        # Extract yes/no answer
+        answer = response_text.strip().lower()
+        if "yes" in answer:
+            final_answer = "Yes"
+        elif "no" in answer:
+            final_answer = "No"
+        else:
+            # Default fallback - analyze the question more carefully
+            final_answer = "Yes" if len(response_text.strip()) < 5 else "No"
+        
+        return JSONResponse(content={
+            "success": True,
+            "answer": final_answer,
+            "selected_item": request.selected_item,
+            "question": request.player_question
+        })
+        
+    except Exception as e:
+        logging.error(f"Error answering game question: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
 class FreestyleCategoryWordsRequest(BaseModel):
     category: str = Field(..., min_length=1, description="Category name for word generation")
     build_space_content: Optional[str] = Field("", description="Current build space content for context")
