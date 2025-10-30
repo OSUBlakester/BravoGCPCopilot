@@ -665,8 +665,9 @@
         function handleSpeechResult(transcript) {
             hideListening();
             
-            // Check for wake word during scanning
+            // Check for wake word during scanning ONLY in voice response phases
             if (scanningSystem.isScanning && 
+                (gameState.currentPhase === 'playing' || gameState.currentPhase === 'guessing') &&
                 (transcript.includes(gameState.wakeWord.replace(' ', '')) || 
                  transcript.includes(gameState.wakeWord))) {
                 selectCurrentScannedButton();
@@ -896,16 +897,18 @@
             
             announce("Let's play 20 questions!");
             
-            // Start scanning for role selection
+            // Start scanning for role selection (no listening - user taps/uses switch)
             setTimeout(() => {
                 startScanning('roleSelection');
-                startListening(); // Listen for wake word
             }, 2000);
         }
 
         // Select game role
         function selectRole(role) {
             gameState.role = role;
+            
+            // Stop scanning when role is selected
+            stopScanning();
             
             // Hide role selection
             document.getElementById('roleSelection').classList.add('hidden');
@@ -923,13 +926,15 @@
                 }, 2000);
                 
             } else {
-                // User will answer questions - show category selection with scanning
+                // User will answer questions - show category selection with scanning (no listening)
                 gameState.currentPhase = 'category';
                 document.getElementById('statusText').textContent = 'What type of thing are you thinking of?';
                 document.getElementById('categorySelection').classList.remove('hidden');
                 
-                // Start scanning for category selection
-                startScanning('categorySelection');
+                // Start scanning for category selection (no listening - user taps/uses switch)
+                setTimeout(() => {
+                    startScanning('categorySelection');
+                }, 500);
             }
         }
 
@@ -1001,10 +1006,9 @@
                 hideLoading();
                 displayOptions(data.options, 'select');
                 
-                // Start scanning for selection
+                // Start scanning for selection (no listening - user taps/uses switch)
                 setTimeout(() => {
                     startScanning('optionsSelection');
-                    startListening(); // Also listen for wake word
                 }, 500);
                 
             } catch (error) {
@@ -1133,10 +1137,14 @@
                 document.getElementById('statusText').textContent = `Choose your ${gameState.category}:`;
             }
             
-            // Start scanning and listening after options are displayed
+            // Start scanning after options are displayed (listening depends on context)
             setTimeout(() => {
                 startScanning('optionsSelection');
-                startListening(); // Listen for wake word to select
+                
+                // Only start listening if we're in a voice response phase
+                if (gameState.currentPhase === 'playing' || gameState.currentPhase === 'guessing') {
+                    startListening(); // Listen for wake word to select
+                }
             }, 500);
         }
 
@@ -1548,10 +1556,9 @@
             
             announce("Let's play another round of 20 questions!");
             
-            // Start scanning for role selection
+            // Start scanning for role selection (no listening - user taps/uses switch)
             setTimeout(() => {
                 startScanning('roleSelection');
-                startListening(); // Listen for wake word
             }, 2000);
         }
 
