@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Interface - Bravo AAC</title>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 10px;
+            gap: 10px;
+        }
+
+        .top-bar {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .top-bar h1 {
+            color: #333;
+            font-size: 1.5em;
+            font-weight: 600;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .speech-output {
+            background: #4CAF50;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 500;
+            min-width: 200px;
+            text-align: center;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .speech-output:hover {
+            background: #45a049;
+        }
+
+        .clear-btn {
+            background: #ff6b6b;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s;
+        }
+
+        .clear-btn:hover {
+            background: #ff5252;
+        }
+
+        .main-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 9fr;
+            grid-template-rows: 2fr 3fr;
+            gap: 10px;
+            min-height: 0;
+        }
+
+        .categories-column {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            grid-row: 1 / -1;
+        }
+
+        .category-button {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 15px;
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px 15px;
+        }
+
+        .category-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .category-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: scale(1.02);
+        }
+
+        .options-grid-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .llm-static-options {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 8px;
+            min-height: 0;
+            flex: 2;
+        }
+
+        .freestyle-options {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 8px;
+            min-height: 0;
+            flex: 3;
+        }
+
+        .option-button {
+            background: rgba(255, 255, 255, 0.95);
+            border: none;
+            border-radius: 12px;
+            font-size: 1em;
+            font-weight: 500;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 8px;
+            position: relative;
+            min-height: 60px;
+        }
+
+        .option-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            background: rgba(255, 255, 255, 1);
+        }
+
+        .option-button:active {
+            transform: scale(0.98);
+        }
+
+        .option-button img {
+            width: 24px;
+            height: 24px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+        }
+
+        .freestyle-button {
+            background: rgba(255, 240, 200, 0.9);
+            border: 2px dashed #ddd;
+            font-style: italic;
+            color: #666;
+        }
+
+        .freestyle-button:hover {
+            background: rgba(255, 240, 200, 1);
+            border-color: #ccc;
+        }
+
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 16px;
+            height: 16px;
+            margin-top: -8px;
+            margin-left: -8px;
+            border: 2px solid #ccc;
+            border-top: 2px solid #666;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-style: italic;
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 5px;
+                gap: 5px;
+            }
+            
+            .main-grid {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 1fr;
+            }
+            
+            .categories-column {
+                flex-direction: row;
+                grid-row: 1;
+                overflow-x: auto;
+            }
+            
+            .category-button {
+                min-width: 120px;
+                padding: 10px;
+            }
+            
+            .options-grid-container {
+                grid-column: 1;
+                grid-row: 2;
+            }
+            
+            .llm-static-options,
+            .freestyle-options {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        /* Authentication overlay */
+        .auth-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .auth-card {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .auth-card h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .auth-card p {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .login-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body>
+    <!-- Authentication Overlay -->
+    <div id="authOverlay" class="auth-overlay">
+        <div class="auth-card">
+            <h2>Welcome to Tap Interface</h2>
+            <p>Please sign in to access your personalized communication board.</p>
+            <button id="loginBtn" class="login-btn">Sign In with Google</button>
+        </div>
+    </div>
+
+    <!-- Main Application -->
+    <div class="container" id="mainApp" style="display: none;">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <h1>Tap Interface</h1>
+            <div class="user-info">
+                <button id="speechOutput" class="speech-output">Ready to speak...</button>
+                <button id="clearBtn" class="clear-btn">Clear</button>
+                <span id="userEmail"></span>
+            </div>
+        </div>
+
+        <!-- Main Grid Layout -->
+        <div class="main-grid">
+            <!-- Categories Column -->
+            <div class="categories-column" id="categoriesColumn">
+                <!-- Categories will be loaded dynamically -->
+            </div>
+
+            <!-- Options Grid Container -->
+            <div class="options-grid-container">
+                <!-- LLM/Static Options (Top 2 rows) -->
+                <div class="llm-static-options" id="llmStaticOptions">
+                    <!-- Generated options will appear here -->
+                </div>
+
+                <!-- Freestyle Options (Bottom 3 rows) -->
+                <div class="freestyle-options" id="freestyleOptions">
+                    <!-- Freestyle options will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Firebase Configuration (match your existing config)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBNl7Ap5OFnLgTDBKY9xOXCAF4-2lup_TA",
+            authDomain: "bravo-aac.firebaseapp.com",
+            projectId: "bravo-aac",
+            storageBucket: "bravo-aac.appspot.com",
+            messagingSenderId: "214743407904",
+            appId: "1:214743407904:web:9051e6b7490a8b81a006c6"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Global state
+        let currentUser = null;
+        let accountId = null;
+        let aacUserId = null;
+        let tapConfig = null;
+        let speechQueue = [];
+        let currentCategory = null;
+
+        // DOM Elements
+        const authOverlay = document.getElementById('authOverlay');
+        const mainApp = document.getElementById('mainApp');
+        const loginBtn = document.getElementById('loginBtn');
+        const userEmail = document.getElementById('userEmail');
+        const speechOutput = document.getElementById('speechOutput');
+        const clearBtn = document.getElementById('clearBtn');
+        const categoriesColumn = document.getElementById('categoriesColumn');
+        const llmStaticOptions = document.getElementById('llmStaticOptions');
+        const freestyleOptions = document.getElementById('freestyleOptions');
+
+        // Authentication
+        auth.onAuthStateChanged(async (user) => {
+            if (user) {
+                currentUser = user;
+                userEmail.textContent = user.email;
+                await initializeUserData();
+                showMainApp();
+            } else {
+                showAuthOverlay();
+            }
+        });
+
+        loginBtn.addEventListener('click', () => {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            auth.signInWithPopup(provider).catch(console.error);
+        });
+
+        function showAuthOverlay() {
+            authOverlay.style.display = 'flex';
+            mainApp.style.display = 'none';
+        }
+
+        function showMainApp() {
+            authOverlay.style.display = 'none';
+            mainApp.style.display = 'flex';
+        }
+
+        async function initializeUserData() {
+            try {
+                // Get user account and AAC user info
+                const response = await fetch('/api/current-user', {
+                    headers: {
+                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                    }
+                });
+
+                if (response.ok) {
+                    const userData = await response.json();
+                    accountId = userData.account_id;
+                    aacUserId = userData.aac_user_id;
+                    
+                    // Load tap interface configuration
+                    await loadTapConfig();
+                    renderInterface();
+                } else {
+                    console.error('Failed to get user data');
+                }
+            } catch (error) {
+                console.error('Error initializing user data:', error);
+            }
+        }
+
+        async function loadTapConfig() {
+            try {
+                const response = await fetch(`/api/tap-interface/config?account_id=${accountId}&aac_user_id=${aacUserId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                    }
+                });
+
+                if (response.ok) {
+                    tapConfig = await response.json();
+                } else {
+                    console.error('Failed to load tap configuration');
+                    tapConfig = { buttons: [] };
+                }
+            } catch (error) {
+                console.error('Error loading tap config:', error);
+                tapConfig = { buttons: [] };
+            }
+        }
+
+        function renderInterface() {
+            renderCategories();
+            renderFreestyleOptions();
+        }
+
+        function renderCategories() {
+            categoriesColumn.innerHTML = '';
+            
+            if (!tapConfig.buttons || tapConfig.buttons.length === 0) {
+                categoriesColumn.innerHTML = '<div class="empty-state">No categories configured</div>';
+                return;
+            }
+
+            tapConfig.buttons.forEach(button => {
+                const categoryBtn = document.createElement('button');
+                categoryBtn.className = 'category-button';
+                categoryBtn.textContent = button.label;
+                categoryBtn.style.backgroundColor = button.background_color || '#FFFFFF';
+                categoryBtn.style.color = button.text_color || '#000000';
+                
+                categoryBtn.addEventListener('click', () => selectCategory(button));
+                categoriesColumn.appendChild(categoryBtn);
+            });
+        }
+
+        async function selectCategory(category) {
+            // Update active state
+            document.querySelectorAll('.category-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            currentCategory = category;
+            
+            // Clear existing options
+            llmStaticOptions.innerHTML = '';
+            
+            // Show loading state
+            for (let i = 0; i < 18; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'option-button loading';
+                llmStaticOptions.appendChild(btn);
+            }
+
+            try {
+                let options = [];
+                
+                if (category.static_options) {
+                    // Use static options
+                    options = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                } else if (category.llm_prompt) {
+                    // Generate options using LLM
+                    options = await generateLLMOptions(category.llm_prompt);
+                } else if (category.children && category.children.length > 0) {
+                    // Use predefined children
+                    options = category.children.map(child => child.label);
+                }
+
+                renderCategoryOptions(options);
+            } catch (error) {
+                console.error('Error loading category options:', error);
+                renderCategoryOptions([]);
+            }
+        }
+
+        async function generateLLMOptions(prompt) {
+            try {
+                const response = await fetch('/api/generate-options', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        count: 18
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    return data.options || [];
+                } else {
+                    throw new Error('Failed to generate options');
+                }
+            } catch (error) {
+                console.error('Error generating LLM options:', error);
+                return [];
+            }
+        }
+
+        function renderCategoryOptions(options) {
+            llmStaticOptions.innerHTML = '';
+            
+            // Fill up to 18 slots (2 rows × 9 columns)
+            for (let i = 0; i < 18; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'option-button';
+                
+                if (i < options.length) {
+                    btn.textContent = options[i];
+                    btn.addEventListener('click', () => addToSpeech(options[i]));
+                } else {
+                    btn.classList.add('empty-state');
+                    btn.textContent = '—';
+                }
+                
+                llmStaticOptions.appendChild(btn);
+            }
+        }
+
+        function renderFreestyleOptions() {
+            freestyleOptions.innerHTML = '';
+            
+            // Create 27 freestyle slots (3 rows × 9 columns)
+            for (let i = 0; i < 27; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'option-button freestyle-button';
+                btn.textContent = 'Tap to add word';
+                btn.addEventListener('click', () => promptForFreestyleWord());
+                freestyleOptions.appendChild(btn);
+            }
+        }
+
+        function promptForFreestyleWord() {
+            const word = prompt('Enter a word or phrase:');
+            if (word && word.trim()) {
+                addToSpeech(word.trim());
+            }
+        }
+
+        function addToSpeech(text) {
+            speechQueue.push(text);
+            updateSpeechDisplay();
+        }
+
+        function updateSpeechDisplay() {
+            if (speechQueue.length > 0) {
+                speechOutput.textContent = speechQueue.join(' ');
+                speechOutput.style.backgroundColor = '#4CAF50';
+            } else {
+                speechOutput.textContent = 'Ready to speak...';
+                speechOutput.style.backgroundColor = '#6c757d';
+            }
+        }
+
+        // Speech synthesis
+        speechOutput.addEventListener('click', () => {
+            if (speechQueue.length > 0) {
+                const text = speechQueue.join(' ');
+                const utterance = new SpeechSynthesisUtterance(text);
+                speechSynthesis.speak(utterance);
+            }
+        });
+
+        clearBtn.addEventListener('click', () => {
+            speechQueue = [];
+            updateSpeechDisplay();
+        });
+
+        // Initialize
+        updateSpeechDisplay();
+    </script>
+</body>
+</html>
