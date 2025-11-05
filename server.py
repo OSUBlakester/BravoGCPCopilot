@@ -688,6 +688,11 @@ async def symbol_admin():
     """Serve the symbol administration page"""
     return FileResponse(os.path.join(static_file_path, "symbol_admin.html"))
 
+@app.get("/tap-interface-admin")
+async def tap_interface_admin():
+    """Serve the fixed tap interface navigation administration page"""
+    return FileResponse(os.path.join(static_file_path, "tap_interface_admin_fixed.html"))
+
 class AvatarVariationRequest(BaseModel):
     baseConfig: Dict[str, Any] = Field(..., description="Base avatar configuration")
     variations: List[Dict[str, Any]] = Field(..., description="List of emotional variations")
@@ -7866,6 +7871,7 @@ class GameGuessRequest(BaseModel):
     category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
     asked_questions: List[Dict[str, str]] = Field(..., description="All asked questions and answers")
     guess_count: Optional[int] = Field(default=0, description="Number of guesses made so far")
+    previous_guesses: Optional[List[str]] = Field(default_factory=list, description="Previously guessed items that were wrong")
 
 class GameOptionsRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
@@ -7900,57 +7906,204 @@ async def generate_game_questions(
                 qa_pairs.append(f"Q: {qa.get('question', '')} A: {qa.get('answer', '')}")
             previous_qa_context = f"\n\nPreviously asked questions and answers:\n" + "\n".join(qa_pairs)
         
-        # Create category-specific prompt
-        category_hints = {
-            "person": "Focus on questions about age, profession, fame, gender, nationality, physical appearance, or historical significance.",
-            "place": "Focus on questions about size, location, indoor/outdoor, natural/man-made, climate, population, or geographical features.",
-            "thing": "Focus on questions about size, material, usage, color, shape, living/non-living, or where it's typically found."
-        }
+        # Determine if this is the initial round (no previous questions) or we need category-determining questions
+        is_initial_round = not request.asked_questions or len(request.asked_questions) == 0
         
-        category_hint = category_hints.get(request.category.lower(), "")
+        # Check if we already know the category from previous answers
+        category_determined = False
+        if request.asked_questions:
+            for qa in request.asked_questions:
+                question = qa.get('question', '').lower()
+                answer = qa.get('answer', '').lower()
+                if ('person' in question or 'people' in question) and answer in ['yes', 'y']:
+                    category_determined = True
+                    break
+                elif ('place' in question or 'location' in question) and answer in ['yes', 'y']:
+                    category_determined = True
+                    break
+                elif ('thing' in question or 'object' in question) and answer in ['yes', 'y']:
+                    category_determined = True
+                    break
         
-        llm_query = f"""Generate exactly {llm_options} different yes/no questions for a 20 Questions game where the user is trying to guess a {request.category}.
+        if is_initial_round or not category_determined:
+            # Generate initial category-determining questions
+            llm_query = f"""Generate exactly {llm_options} different yes/no questions for a 20 Questions game where the player needs to determine what the answer is (person, place, or thing).
 
-{category_hint}
+The first few questions should help determine the main category:
+- Is it a person?
+- Is it a place? 
+- Is it a thing/object?
+- Is it alive?
+- Is it man-made?
 
-The questions should:
-1. Be simple, clear yes/no questions
-2. Help narrow down possibilities effectively
-3. Be appropriate for someone using AAC communication
-4. Avoid repeating information from previous questions
-5. Progress logically from general to more specific
+Then include broader questions that work across categories:
+- Is it bigger than a person?
+- Can you hold it in your hand?
+- Is it commonly found indoors?
+- Is it something you can eat?
+- Is it something you use every day?
 
 {previous_qa_context}
 
-Format each question as a complete sentence ending with a question mark. Make them varied in approach and difficulty."""
+The questions should:
+1. Be simple, clear yes/no questions
+2. Start with category-determining questions if this is the beginning
+3. Help narrow down possibilities effectively
+4. Be appropriate for someone using AAC communication
+5. Avoid repeating information from previous questions
+6. Progress logically from general to more specific
+
+Return your response as a simple JSON array of strings. Each question should be a complete sentence ending with a question mark. Example format:
+[
+  "Is it a person?",
+  "Is it a place?",
+  "Is it a thing?"
+]
+
+Make them varied in approach and difficulty."""
+        else:
+            # Category is determined, generate category-specific questions
+            category_hints = {
+                "person": "Focus on questions about age, profession, fame, gender, nationality, physical appearance, or historical significance.",
+                "place": "Focus on questions about size, location, indoor/outdoor, natural/man-made, climate, population, or geographical features.",
+                "thing": "Focus on questions about size, material, usage, color, shape, living/non-living, or where it's typically found."
+            }
+            
+            category_hint = category_hints.get(request.category.lower(), "")
+            
+            llm_query = f"""Generate exactly {llm_options} different yes/no questions for a 20 Questions game where the user is trying to guess a {request.category}.
+
+{category_hint}
+
+IMPORTANT: Use the previous answers as ESTABLISHED FACTS about the target {request.category}. Build upon what we already know to ask more specific, targeted questions that will help narrow down the exact answer.
+
+{previous_qa_context}
+
+STRATEGIC LOGIC RULES:
+- If something is NOT found indoors, don't ask if it's found outdoors (it must be)
+- If something IS found indoors, don't ask if it's found outdoors unless it could be both
+- If someone is NOT alive, don't ask about their current activities or age
+- If something is NOT bigger than a person, focus on smaller size questions
+- If something CAN'T be held in hand, don't ask about pocket-sized questions
+- Build a logical tree of deduction - each question should eliminate possibilities
+
+The questions should:
+1. Be simple, clear yes/no questions
+2. MUST consider the previous answers as confirmed facts about the target
+3. Build logically on what we already know to get more specific
+4. AVOID asking redundant questions that contradict established facts
+5. Use strategic deduction - if A is false, don't ask about things that require A to be true
+6. Help narrow down possibilities effectively based on established information
+7. Be appropriate for someone using AAC communication
+8. Progress from the current knowledge level to more specific details
+
+For example, if we know "It is a person" and "It is NOT alive", the next questions should be:
+- "Is this person from history?"
+- "Is this person fictional?"
+- "Is this person famous?"
+
+NOT: "How old is this person?" (they're not alive)
+
+Return your response as a simple JSON array of strings. Each question should be a complete sentence ending with a question mark. Example format:
+[
+  "Is it a man?",
+  "Is this person famous?",
+  "Is this person still alive?"
+]
+
+Make them build strategically on the established facts using logical deduction."""
 
         # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        try:
+            full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
+            logging.info(f"Games questions prompt built successfully, length: {len(full_prompt)}")
+            response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+            logging.info(f"Games questions LLM response received, length: {len(response_text)}")
+            
+            # DEBUG: Log the LLM response
+            logging.info(f"Games questions LLM response: {response_text[:500]}...")
+        except Exception as llm_error:
+            logging.error(f"Error generating LLM response for games questions: {llm_error}", exc_info=True)
+            response_text = ""
         
         # Parse questions from response
         questions = []
-        for line in response_text.strip().split('\n'):
-            line = line.strip()
-            if line and '?' in line:
-                # Remove numbering/bullets if present
-                clean_question = line
-                if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
-                    clean_question = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
-                    clean_question = clean_question.lstrip('- •').strip()
+        
+        # First try to parse as JSON in case LLM returned structured data
+        try:
+            import json
+            
+            # Handle markdown-wrapped JSON (```json ... ```)
+            json_text = response_text.strip()
+            if json_text.startswith('```json'):
+                # Extract JSON from markdown code block
+                lines = json_text.split('\n')
+                # Remove first line (```json) and find closing ```
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if line.strip() == '```json':
+                        in_json = True
+                        continue
+                    elif line.strip() == '```' and in_json:
+                        break
+                    elif in_json:
+                        json_lines.append(line)
                 
-                if clean_question and clean_question.endswith('?'):
-                    questions.append(clean_question)
+                json_text = '\n'.join(json_lines)
+                logging.info(f"Extracted JSON from markdown: {json_text[:200]}...")
+            
+            parsed_json = json.loads(json_text)
+            if isinstance(parsed_json, list):
+                questions = [q for q in parsed_json if isinstance(q, str) and q.endswith('?')]
+                logging.info(f"Successfully parsed {len(questions)} questions from JSON format")
+            elif isinstance(parsed_json, dict) and 'questions' in parsed_json:
+                questions = [q for q in parsed_json['questions'] if isinstance(q, str) and q.endswith('?')]
+                logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
+        except (json.JSONDecodeError, TypeError) as e:
+            logging.info(f"JSON parsing failed: {e}, trying text parsing")
+        
+        # If JSON parsing didn't work, try text parsing
+        if not questions:
+            for line in response_text.strip().split('\n'):
+                line = line.strip()
+                logging.debug(f"Processing line: '{line}'")
+                if line and '?' in line:
+                    # Remove numbering/bullets if present
+                    clean_question = line
+                    if line and (line[0].isdigit() or line.startswith('-') or line.startswith('•')):
+                        clean_question = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
+                        clean_question = clean_question.lstrip('- •').strip()
+                    
+                    logging.debug(f"Cleaned question: '{clean_question}'")
+                    if clean_question and clean_question.endswith('?'):
+                        questions.append(clean_question)
+                        logging.info(f"Added question: '{clean_question}'")
+        
+        logging.info(f"Total questions parsed: {len(questions)}")
+        logging.info(f"Questions list: {questions}")
         
         # Ensure we have at least some questions
         if not questions:
-            questions = [
-                "Is it alive?",
-                "Is it bigger than a person?",
-                "Can you hold it in your hand?",
-                "Is it man-made?",
-                "Is it commonly found indoors?"
-            ][:llm_options]
+            logging.warning(f"No questions parsed from LLM response, using fallback questions. Response was: {response_text[:200]}...")
+            if is_initial_round or not category_determined:
+                # Use category-determining fallback questions for initial round
+                questions = [
+                    "Is it a person?",
+                    "Is it a place?",
+                    "Is it a thing?",
+                    "Is it alive?",
+                    "Is it man-made?"
+                ][:llm_options]
+            else:
+                # Use generic fallback questions for later rounds
+                questions = [
+                    "Is it bigger than a person?",
+                    "Can you hold it in your hand?",
+                    "Is it commonly found indoors?",
+                    "Is it something you use every day?",
+                    "Is it made of metal?"
+                ][:llm_options]
         
         return JSONResponse(content={
             "success": True,
@@ -7984,10 +8137,16 @@ async def generate_game_guesses(
         
         qa_summary = "\n".join(qa_context)
         
+        # Build exclusion context for previous guesses
+        exclusion_context = ""
+        if request.previous_guesses and len(request.previous_guesses) > 0:
+            exclusion_list = ", ".join(f'"{guess}"' for guess in request.previous_guesses)
+            exclusion_context = f"\n\nIMPORTANT: Do NOT include these previously guessed (wrong) options: {exclusion_list}\nThese have already been tried and were incorrect."
+        
         llm_query = f"""Based on the following 20 Questions game Q&A session, generate exactly {llm_options} specific {request.category} guesses that match ALL the given answers.
 
 Question and Answer History:
-{qa_summary}
+{qa_summary}{exclusion_context}
 
 Generate {llm_options} specific {request.category} options that are consistent with ALL the yes/no answers above. Each guess should be:
 1. A specific {request.category} (not generic categories)
@@ -7995,34 +8154,91 @@ Generate {llm_options} specific {request.category} options that are consistent w
 3. Realistic and well-known
 4. Different from each other
 5. Formatted as just the name/title (no extra text)
+6. MUST NOT be any of the previously guessed wrong answers listed above
 
 Examples of good format:
 - For person: "Albert Einstein", "Taylor Swift", "Abraham Lincoln"
 - For place: "New York City", "The Grand Canyon", "McDonald's"
 - For thing: "Smartphone", "Baseball", "Coffee Mug"
 
-List only the {request.category} names, one per line."""
+Return your response as a simple JSON array of strings. Each guess should be just the name. Example format:
+[
+  "Albert Einstein",
+  "Taylor Swift", 
+  "Abraham Lincoln"
+]
+
+Do NOT use objects with "option" or "summary" fields. Just return a simple array of {request.category} names."""
 
         # Generate response using the same pattern as /llm endpoint
         full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
         response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
         
+        logging.info(f"Games guesses LLM response: {response_text[:500]}...")
+        
         # Parse guesses from response
         guesses = []
-        for line in response_text.strip().split('\n'):
-            line = line.strip()
-            if line:
-                # Remove numbering/bullets if present
-                clean_guess = line
-                if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
-                    clean_guess = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
-                    clean_guess = clean_guess.lstrip('- •').strip()
+        
+        # First try to parse as JSON in case LLM returned structured data
+        try:
+            # Handle markdown-wrapped JSON (```json ... ```)
+            json_text = response_text.strip()
+            if json_text.startswith('```json'):
+                # Extract JSON from markdown code block
+                lines = json_text.split('\n')
+                # Remove first line (```json) and find closing ```
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if line.strip() == '```json':
+                        in_json = True
+                        continue
+                    elif line.strip() == '```' and in_json:
+                        break
+                    elif in_json:
+                        json_lines.append(line)
                 
-                # Remove quotes if present
-                clean_guess = clean_guess.strip('"\'')
-                
-                if clean_guess:
-                    guesses.append(clean_guess)
+                json_text = '\n'.join(json_lines)
+                logging.info(f"Extracted JSON from markdown: {json_text[:200]}...")
+            
+            parsed_json = json.loads(json_text)
+            if isinstance(parsed_json, list):
+                # Handle both string arrays and object arrays with "option" field
+                for item in parsed_json:
+                    if isinstance(item, str) and item.strip():
+                        guesses.append(item.strip())
+                    elif isinstance(item, dict) and 'option' in item:
+                        if isinstance(item['option'], str) and item['option'].strip():
+                            guesses.append(item['option'].strip())
+                logging.info(f"Successfully parsed {len(guesses)} guesses from JSON array format")
+            elif isinstance(parsed_json, dict) and 'guesses' in parsed_json:
+                # Handle nested guesses structure
+                for item in parsed_json['guesses']:
+                    if isinstance(item, str) and item.strip():
+                        guesses.append(item.strip())
+                    elif isinstance(item, dict) and 'option' in item:
+                        if isinstance(item['option'], str) and item['option'].strip():
+                            guesses.append(item['option'].strip())
+                logging.info(f"Successfully parsed {len(guesses)} guesses from JSON object format")
+        except (json.JSONDecodeError, TypeError) as e:
+            logging.info(f"JSON parsing failed: {e}, trying text parsing")
+        
+        # If JSON parsing didn't work, try text parsing
+        if not guesses:
+            for line in response_text.strip().split('\n'):
+                line = line.strip()
+                if line:
+                    # Remove numbering/bullets if present
+                    clean_guess = line
+                    if line[0].isdigit() or line.startswith('-') or line.startswith('•'):
+                        clean_guess = line.split('.', 1)[-1].strip() if '.' in line else line[1:].strip()
+                        clean_guess = clean_guess.lstrip('- •').strip()
+                    
+                    # Remove quotes if present
+                    clean_guess = clean_guess.strip('"\'')
+                    
+                    if clean_guess:
+                        guesses.append(clean_guess)
         
         # Fallback guesses if parsing failed
         if not guesses:
@@ -11786,6 +12002,361 @@ async def export_missing_images(
         raise
     except Exception as e:
         logging.error(f"Error exporting missing images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# TAP INTERFACE NAVIGATION SYSTEM API
+# =============================================================================
+
+from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field
+
+class TapNavigationButton(BaseModel):
+    """Individual button in the tap interface"""
+    id: str = Field(..., description="Unique identifier for this button")
+    label: str = Field(..., description="Display text on the button")
+    speech_text: Optional[str] = Field(None, description="Text to speak (if different from label)")
+    image_url: Optional[str] = Field(None, description="URL to pictogram/image")
+    background_color: Optional[str] = Field("#FFFFFF", description="Hex color code for button background")
+    text_color: Optional[str] = Field("#000000", description="Hex color code for button text")
+    llm_prompt: Optional[str] = Field(None, description="LLM query for generating child options")
+    static_options: Optional[str] = Field(None, description="Comma-separated list of static options (alternative to LLM prompt)")
+    children: List["TapNavigationButton"] = Field(default_factory=list, description="Child buttons for submenus")
+
+class TapNavigationConfig(BaseModel):
+    """Complete tap interface navigation configuration for a user"""
+    id: str = Field(..., description="Configuration ID - always 'user_config'")
+    name: str = Field(..., description="Configuration name")
+    description: Optional[str] = Field(None, description="Configuration description")
+    is_active: bool = Field(True, description="Whether this configuration is active")
+    created_at: str = Field(..., description="ISO timestamp of creation")
+    updated_at: str = Field(..., description="ISO timestamp of last update")
+    buttons: List[TapNavigationButton] = Field(default_factory=list, description="Top-level navigation buttons")
+
+# Update forward references
+TapNavigationButton.model_rebuild()
+
+# --- Helper Functions ---
+async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
+    """Load tap navigation configuration from Firestore"""
+    global firestore_db
+    if not firestore_db:
+        return None
+    
+    try:
+        # Always load the single user configuration
+        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
+        doc = await asyncio.to_thread(doc_ref.get)
+        if doc.exists:
+            return doc.to_dict()
+        
+        return None
+    except Exception as e:
+        logging.error(f"Error loading tap navigation config: {e}")
+        return None
+
+async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Dict) -> bool:
+    """Save tap navigation configuration to Firestore"""
+    global firestore_db
+    if not firestore_db:
+        return False
+    
+    try:
+        # Always save to the single user configuration document
+        config_data['updated_at'] = dt.now().isoformat()
+        if 'created_at' not in config_data:
+            config_data['created_at'] = config_data['updated_at']
+        
+        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
+        await asyncio.to_thread(doc_ref.set, config_data)
+        return True
+    except Exception as e:
+        logging.error(f"Error saving tap navigation config: {e}")
+        return False
+
+def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
+    """Create a default tap navigation configuration"""
+    from datetime import datetime
+    
+    return {
+        "id": "user_config",
+        "name": "My Navigation",
+        "description": "Default tap interface navigation configuration",
+        "is_active": True,
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "buttons": [
+            {
+                "id": "greetings",
+                "label": "Greetings",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": None,
+                "children": [
+                    {
+                        "id": "generic_greetings",
+                        "label": "Generic Greetings",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate common greeting phrases and expressions for everyday social interactions",
+                        "children": []
+                    },
+                    {
+                        "id": "current_location",
+                        "label": "Current Location",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate location-based greetings and conversation starters",
+                        "children": []
+                    },
+                    {
+                        "id": "jokes",
+                        "label": "Jokes",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate simple, appropriate jokes and funny conversation starters",
+                        "children": []
+                    }
+                ]
+            },
+            {
+                "id": "about_me",
+                "label": "About Me",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": None,
+                "children": [
+                    {
+                        "id": "personal_info",
+                        "label": "Personal Info",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate phrases for sharing personal information and basic details about myself",
+                        "children": []
+                    },
+                    {
+                        "id": "family",
+                        "label": "Family",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate phrases for talking about family members and relationships",
+                        "children": []
+                    },
+                    {
+                        "id": "interests",
+                        "label": "Interests",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate phrases for discussing hobbies, interests, and favorite activities",
+                        "children": []
+                    },
+                    {
+                        "id": "medical_info",
+                        "label": "Medical Info",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate phrases for communicating medical needs and health information",
+                        "children": []
+                    }
+                ]
+            },
+            {
+                "id": "help",
+                "label": "Help",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": None,
+                "children": [
+                    {
+                        "id": "need_assistance",
+                        "label": "Need Assistance",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate phrases for requesting help and assistance",
+                        "children": []
+                    },
+                    {
+                        "id": "emergency",
+                        "label": "Emergency",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate emergency communication phrases and urgent requests",
+                        "children": []
+                    },
+                    {
+                        "id": "questions",
+                        "label": "Questions",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate question words and phrases for asking about things",
+                        "children": []
+                    },
+                    {
+                        "id": "support",
+                        "label": "Support",
+                        "speech_text": None,
+                        "image_url": None,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "llm_prompt": "Generate phrases for requesting support and guidance",
+                        "children": []
+                    }
+                ]
+            },
+            {
+                "id": "feelings",
+                "label": "Feelings",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate words and phrases for expressing feelings and emotions",
+                "children": []
+            },
+            {
+                "id": "activities",
+                "label": "Activities",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate words and phrases about activities and things to do",
+                "children": []
+            },
+            {
+                "id": "requests",
+                "label": "Requests",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate phrases for making requests and asking for things",
+                "children": []
+            },
+            {
+                "id": "people",
+                "label": "People",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate words about people, family, relationships, and social connections",
+                "children": []
+            },
+            {
+                "id": "places",
+                "label": "Places",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate words about locations, places, and destinations",
+                "children": []
+            },
+            {
+                "id": "actions",
+                "label": "Actions",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate action words and verbs for describing what to do",
+                "children": []
+            },
+            {
+                "id": "things",
+                "label": "Things",
+                "speech_text": None,
+                "image_url": None,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "llm_prompt": "Generate words about objects, items, and things",
+                "children": []
+            }
+        ]
+    }
+
+# --- API Endpoints ---
+
+@app.get("/api/tap-interface/config")
+async def get_tap_interface_config(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get tap interface navigation configuration for the user"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        
+        if not config_data:
+            # Create and save default configuration
+            config_data = create_default_tap_config(account_id, aac_user_id)
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+        
+        return JSONResponse(content=config_data)
+    except Exception as e:
+        logging.error(f"Error getting tap interface config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/tap-interface/config")
+async def save_tap_interface_config(
+    config_data: TapNavigationConfig,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save tap interface navigation configuration"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Convert Pydantic model to dict
+        config_dict = config_data.model_dump()
+        # Always use 'user_config' as ID for single configuration per user
+        config_dict['id'] = 'user_config'
+        config_dict['updated_at'] = dt.now().isoformat()
+        
+        success = await save_tap_nav_config(account_id, aac_user_id, config_dict)
+        
+        if success:
+            return JSONResponse(content={"success": True, "message": "Configuration saved successfully"})
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save configuration")
+    except Exception as e:
+        logging.error(f"Error saving tap interface config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Note: Single configuration per user - no need for list, activate, or delete endpoints
+        
+        return JSONResponse(content={"success": True, "message": f"Configuration {config_id} deleted"})
+    except Exception as e:
+        logging.error(f"Error deleting tap interface config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
