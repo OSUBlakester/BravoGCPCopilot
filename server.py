@@ -12096,7 +12096,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "text_color": "#000000",
                 "llm_prompt": None,
                 "static_options": None,
-                "static_options": None,
                 "children": [
                     {
                         "id": "generic_greetings",
@@ -12106,7 +12105,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "background_color": "#FFFFFF",
                         "text_color": "#000000",
                         "llm_prompt": "Generate common greeting phrases and expressions for everyday social interactions",
-                        "static_options": None,
                         "static_options": None,
                         "children": []
                     },
@@ -12118,7 +12116,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "background_color": "#FFFFFF",
                         "text_color": "#000000",
                         "llm_prompt": "Generate location-based greetings and conversation starters",
-                        "static_options": None,
                         "static_options": None,
                         "children": []
                     },
@@ -12143,7 +12140,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "text_color": "#000000",
                 "llm_prompt": None,
                 "static_options": None,
-                "static_options": None,
                 "children": [
                     {
                         "id": "personal_info",
@@ -12153,7 +12149,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "background_color": "#FFFFFF",
                         "text_color": "#000000",
                         "llm_prompt": "Generate phrases for sharing personal information and basic details about myself",
-                        "static_options": None,
                         "static_options": None,
                         "children": []
                     },
@@ -12165,7 +12160,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "background_color": "#FFFFFF",
                         "text_color": "#000000",
                         "llm_prompt": "Generate phrases for talking about family members and relationships",
-                        "static_options": None,
                         "static_options": None,
                         "children": []
                     },
@@ -12188,7 +12182,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "text_color": "#000000",
                         "llm_prompt": "Generate phrases for communicating medical needs and health information",
                         "static_options": None,
-                        "static_options": None,
                         "children": []
                     }
                 ]
@@ -12202,7 +12195,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "text_color": "#000000",
                 "llm_prompt": None,
                 "static_options": None,
-                "static_options": None,
                 "children": [
                     {
                         "id": "need_assistance",
@@ -12212,7 +12204,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "background_color": "#FFFFFF",
                         "text_color": "#000000",
                         "llm_prompt": "Generate phrases for requesting help and assistance",
-                        "static_options": None,
                         "static_options": None,
                         "children": []
                     },
@@ -12225,7 +12216,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "text_color": "#000000",
                         "llm_prompt": "Generate emergency communication phrases and urgent requests",
                         "static_options": None,
-                        "static_options": None,
                         "children": []
                     },
                     {
@@ -12237,7 +12227,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "text_color": "#000000",
                         "llm_prompt": "Generate question words and phrases for asking about things",
                         "static_options": None,
-                        "static_options": None,
                         "children": []
                     },
                     {
@@ -12248,7 +12237,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                         "background_color": "#FFFFFF",
                         "text_color": "#000000",
                         "llm_prompt": "Generate phrases for requesting support and guidance",
-                        "static_options": None,
                         "static_options": None,
                         "children": []
                     }
@@ -12263,7 +12251,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "text_color": "#000000",
                 "llm_prompt": "Generate words and phrases for expressing feelings and emotions",
                 "static_options": None,
-                "static_options": None,
                 "children": []
             },
             {
@@ -12275,7 +12262,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "text_color": "#000000",
                 "llm_prompt": "Generate words and phrases about activities and things to do",
                 "static_options": None,
-                "static_options": None,
                 "children": []
             },
             {
@@ -12286,7 +12272,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "llm_prompt": "Generate phrases for making requests and asking for things",
-                "static_options": None,
                 "static_options": None,
                 "children": []
             },
@@ -12318,7 +12303,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "llm_prompt": "Generate action words and verbs for describing what to do",
-                "static_options": None,
                 "static_options": None,
                 "children": []
             },
