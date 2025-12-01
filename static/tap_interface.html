@@ -1380,6 +1380,11 @@
             }
             
             console.log('Found', tapConfig.buttons.length, 'category buttons');
+            
+            // Debug: Show which buttons have audio files configured
+            tapConfig.buttons.forEach((button, index) => {
+                console.log(`[AUDIO DEBUG] Button ${index}: "${button.label}" - Audio: ${button.custom_audio_file ? '✓ ' + button.custom_audio_file : '✗ None'}`);
+            });
 
             tapConfig.buttons.forEach(button => {
                 const categoryBtn = document.createElement('button');
