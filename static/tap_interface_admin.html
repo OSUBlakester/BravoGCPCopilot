@@ -462,7 +462,10 @@
 
                         <div class="form-group">
                             <label for="customAudioFile">Custom Audio File (Optional)</label>
-                            <input type="file" id="customAudioFile" accept="audio/*" style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem;">
+                            <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+                                <input type="file" id="customAudioFile" accept="audio/*" style="flex: 1; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem;">
+                                <button type="button" id="clearAudioBtn" style="padding: 0.75rem 1rem; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;">Clear</button>
+                            </div>
                             <input type="hidden" id="customAudioFileUrl" value="">
                             <p style="font-size: 0.8rem; color: #7f8c8d; margin-top: 0.5rem;">Upload MP3, WAV, or M4A file to play after speech text. Max 10MB.</p>
                             <div id="audioUploadStatus" style="font-size: 0.8rem; margin-top: 0.5rem; display: none;"></div>
@@ -518,6 +521,8 @@
         let originalConfig = null;  // Store original for cancel functionality
         let selectedButton = null;
         let hasUnsavedChanges = false;
+        let firebaseIdToken = null;
+        let currentAacUserId = null;
 
         // Initialize on page load - wait for Firebase to be ready
         document.addEventListener('DOMContentLoaded', function() {
@@ -566,21 +571,25 @@
             
             firebase.auth().onAuthStateChanged(async (user) => {
                 if (user) {
-                    const currentAacUserId = sessionStorage.getItem("currentAacUserId");
+                    const aacUserId = sessionStorage.getItem("currentAacUserId");
                     const tokenFromUser = await user.getIdToken();
                     sessionStorage.setItem("firebaseIdToken", tokenFromUser);
 
-                    if (!currentAacUserId) {
+                    if (!aacUserId) {
                         console.warn("No AAC User ID found in session. Redirecting to auth page for user selection.");
                         window.location.href = 'auth.html';
                         return;
                     }
 
                     // Set up global variables for authentication
-                    window.currentAacUserId = currentAacUserId;
+                    window.currentAacUserId = aacUserId;
                     window.authToken = tokenFromUser;
                     
-                    console.log('Authentication successful, user ID:', currentAacUserId);
+                    // Set local variables for audio upload
+                    firebaseIdToken = tokenFromUser;
+                    currentAacUserId = aacUserId;
+                    
+                    console.log('Authentication successful, user ID:', aacUserId);
                     
                     // Load configuration after authentication
                     loadConfiguration();
@@ -815,6 +824,87 @@
             inputs.forEach(id => {
                 document.getElementById(id).addEventListener('input', updateButtonFromForm);
             });
+
+            // Setup custom audio file upload listener
+            document.getElementById('customAudioFile').addEventListener('change', handleAudioFileUpload);
+            
+            // Setup clear audio file button listener
+            document.getElementById('clearAudioBtn').addEventListener('click', clearAudioFile);
+        }
+
+        // Handle custom audio file upload
+        async function handleAudioFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Validate file type
+            if (!file.type.startsWith('audio/')) {
+                showError('Please select an audio file (MP3, WAV, M4A, etc.)');
+                event.target.value = '';
+                return;
+            }
+
+            // Validate file size (10MB max)
+            if (file.size > 10 * 1024 * 1024) {
+                showError('Audio file must be less than 10MB');
+                event.target.value = '';
+                return;
+            }
+
+            const statusElement = document.getElementById('audioUploadStatus');
+            statusElement.style.display = 'block';
+            statusElement.style.color = '#3498db';
+            statusElement.textContent = 'Uploading audio file...';
+
+            try {
+                const formData = new FormData();
+                formData.append('audio_file', file);
+
+                const response = await fetch('/api/admin/upload-button-audio', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${firebaseIdToken}`,
+                        'X-User-ID': currentAacUserId
+                    },
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    document.getElementById('customAudioFileUrl').value = result.audio_url;
+                    statusElement.style.color = '#27ae60';
+                    statusElement.textContent = `✓ Audio uploaded: ${file.name}`;
+                    
+                    // Update the button with the new audio URL
+                    updateButtonFromForm();
+                } else {
+                    const errorText = await response.text();
+                    throw new Error(`Upload failed: ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Audio upload error:', error);
+                statusElement.style.color = '#e74c3c';
+                statusElement.textContent = `✗ Upload failed: ${error.message}`;
+                event.target.value = '';
+            }
+        }
+
+        // Clear custom audio file
+        function clearAudioFile() {
+            if (!selectedButton) return;
+
+            // Clear the form fields
+            document.getElementById('customAudioFile').value = '';
+            document.getElementById('customAudioFileUrl').value = '';
+            
+            // Update status display
+            const statusElement = document.getElementById('audioUploadStatus');
+            statusElement.style.color = '#7f8c8d';
+            statusElement.textContent = 'No audio file assigned';
+            statusElement.style.display = 'block';
+            
+            // Update the button data
+            updateButtonFromForm();
         }
 
         // Update button from form values
@@ -1238,11 +1328,18 @@
             const audioUploadStatus = document.getElementById('audioUploadStatus');
             if (button.custom_audio_file) {
                 audioUploadStatus.style.color = '#27ae60';
-                audioUploadStatus.textContent = 'Audio file assigned';
+                // Extract filename from URL for display
+                const fileName = button.custom_audio_file.split('/').pop();
+                audioUploadStatus.textContent = `✓ Audio file: ${fileName}`;
                 audioUploadStatus.style.display = 'block';
             } else {
-                audioUploadStatus.style.display = 'none';
+                audioUploadStatus.style.color = '#7f8c8d';
+                audioUploadStatus.textContent = 'No audio file assigned';
+                audioUploadStatus.style.display = 'block';
             }
+            
+            // Clear the file input to show it's ready for new uploads
+            document.getElementById('customAudioFile').value = '';
         }
 
         function cancelEdit() {
