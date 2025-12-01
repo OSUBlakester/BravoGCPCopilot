@@ -40,7 +40,7 @@ const SPECIAL_PAGES = [
 
 // --- Constants ---
 const GRID_ROWS = 10;
-const GRID_COLS = 10;
+const GRID_COLS = 15; // Increased to accommodate more buttons
 
 const DEFAULT_PAGE_BUTTON_STRUCTURE = {
     text: "",
@@ -238,13 +238,107 @@ function setupEventListeners() {
 }
 
 // --- Visual Button Grid Functions ---
+function getMaxGridDimensions() {
+    if (!currentPageData || !currentPageData.buttons) {
+        return { maxRow: GRID_ROWS - 1, maxCol: GRID_COLS - 1 };
+    }
+    
+    let maxRow = GRID_ROWS - 1;
+    let maxCol = GRID_COLS - 1;
+    
+    currentPageData.buttons.forEach(button => {
+        if (button.row !== undefined && button.row > maxRow) {
+            maxRow = button.row;
+        }
+        if (button.col !== undefined && button.col > maxCol) {
+            maxCol = button.col;
+        }
+    });
+    
+    return { maxRow, maxCol };
+}
+
+function checkForOutOfBoundsButtons() {
+    if (!currentPageData || !currentPageData.buttons) return;
+    
+    const outOfBounds = currentPageData.buttons.filter(button => 
+        button.row >= GRID_ROWS || button.col >= GRID_COLS
+    );
+    
+    if (outOfBounds.length > 0) {
+        const message = `Warning: Found ${outOfBounds.length} button(s) positioned outside the default grid area:\n` +
+            outOfBounds.map(btn => `"${btn.text}" at row ${btn.row + 1}, column ${btn.col + 1}`).join('\n') +
+            '\n\nThe grid has been automatically expanded to show all buttons.';
+        
+        console.warn('Out of bounds buttons detected:', outOfBounds);
+        // Show a less intrusive warning - you could replace this with a toast notification
+        if (outOfBounds.length <= 3) { // Only show alert for small numbers
+            setTimeout(() => {
+                if (confirm(message + '\n\nWould you like to automatically reposition these buttons to fit within the standard grid?')) {
+                    repositionOutOfBoundsButtons();
+                }
+            }, 500);
+        }
+    }
+}
+
+function repositionOutOfBoundsButtons() {
+    if (!currentPageData || !currentPageData.buttons) return;
+    
+    // Find available positions within the standard grid
+    const occupiedPositions = new Set();
+    currentPageData.buttons.forEach(btn => {
+        if (btn.row < GRID_ROWS && btn.col < GRID_COLS) {
+            occupiedPositions.add(`${btn.row}-${btn.col}`);
+        }
+    });
+    
+    // Find buttons that need repositioning
+    const outOfBounds = currentPageData.buttons.filter(button => 
+        button.row >= GRID_ROWS || button.col >= GRID_COLS
+    );
+    
+    // Reposition each out-of-bounds button
+    let repositioned = 0;
+    for (const button of outOfBounds) {
+        // Find first available position
+        let found = false;
+        for (let row = 0; row < GRID_ROWS && !found; row++) {
+            for (let col = 0; col < GRID_COLS && !found; col++) {
+                const posKey = `${row}-${col}`;
+                if (!occupiedPositions.has(posKey)) {
+                    console.log(`Repositioning "${button.text}" from ${button.row},${button.col} to ${row},${col}`);
+                    button.row = row;
+                    button.col = col;
+                    occupiedPositions.add(posKey);
+                    repositioned++;
+                    found = true;
+                }
+            }
+        }
+    }
+    
+    if (repositioned > 0) {
+        renderButtonGrid();
+        alert(`Successfully repositioned ${repositioned} button(s). Please save the page to persist these changes.`);
+    }
+}
+
 function renderButtonGrid() {
     if (!currentPageData || !buttonGrid) return;
     
     buttonGrid.innerHTML = '';
     
-    for (let row = 0; row < GRID_ROWS; row++) {
-        for (let col = 0; col < GRID_COLS; col++) {
+    // Get dynamic grid dimensions
+    const { maxRow, maxCol } = getMaxGridDimensions();
+    const actualRows = Math.max(GRID_ROWS, maxRow + 1);
+    const actualCols = Math.max(GRID_COLS, maxCol + 1);
+    
+    // Update CSS grid template
+    buttonGrid.style.gridTemplateColumns = `repeat(${actualCols}, 1fr)`;
+    
+    for (let row = 0; row < actualRows; row++) {
+        for (let col = 0; col < actualCols; col++) {
             const button = createVisualButton(row, col);
             buttonGrid.appendChild(button);
         }
@@ -936,6 +1030,10 @@ function handlePageSelected() {
     if (currentPageData) {
         newPageDisplayNameInput.value = currentPageData.displayName || currentPageData.name;
         initialPageDataString = JSON.stringify(currentPageData);
+        
+        // Check for buttons outside normal grid bounds
+        checkForOutOfBoundsButtons();
+        
         renderButtonGrid();
     }
 }

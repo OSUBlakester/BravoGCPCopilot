@@ -48,8 +48,25 @@
             z-index: 10;
             background: white;
             border-bottom: 1px solid #e5e7eb;
-            padding: 1rem;
-            margin: -1rem -1rem 1rem -1rem;
+        }
+        .tag-item {
+            transition: all 0.2s ease;
+        }
+        .tag-item:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .tag-row {
+            transition: all 0.2s ease;
+        }
+        .tag-row:hover {
+            background-color: #f9fafb;
+        }
+        .tag-input {
+            transition: all 0.2s ease;
+        }
+        .tag-input:focus {
+            transform: scale(1.02);
         }
         .search-filters {
             background: #f9fafb;
@@ -214,6 +231,59 @@
             </div>
             <div id="preview-content">
                 <!-- Preview content will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Tag Editor Modal -->
+    <div id="tag-editor-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg max-w-lg w-full mx-4 max-h-[80vh] flex flex-col">
+            <!-- Modal Header (Fixed) -->
+            <div class="flex justify-between items-center p-4 border-b">
+                <h3 class="text-lg font-semibold text-gray-900">Edit Image Tags</h3>
+                <button id="close-tag-editor" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- Modal Content (Scrollable) -->
+            <div class="flex-1 overflow-y-auto p-4">
+                <div class="mb-4">
+                    <img id="tag-editor-image" class="w-24 h-24 object-cover rounded-lg mx-auto mb-2" />
+                    <div class="text-center">
+                        <p class="text-sm text-gray-600" id="tag-editor-concept"></p>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Current Tags (click to edit):</label>
+                    <div id="current-tags" class="space-y-2 mb-4 min-h-[40px] max-h-[240px] overflow-y-auto p-2 border rounded-lg bg-gray-50">
+                        <!-- Current tags will be displayed here -->
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Add New Tag:</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="new-tag-input" 
+                               class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                               placeholder="Enter a new tag..."
+                               onkeypress="if(event.key==='Enter') addTag()">
+                        <button onclick="addTag()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+                            <i class="fas fa-plus"></i> Add
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal Footer (Fixed) -->
+            <div class="flex justify-end space-x-3 p-4 border-t bg-gray-50">
+                <button onclick="closeTagEditor()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
+                    Cancel
+                </button>
+                <button onclick="saveImageTags()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                    <i class="fas fa-save"></i> Save Tags
+                </button>
             </div>
         </div>
     </div>
@@ -588,10 +658,14 @@
                         <p class="text-gray-600 text-xs break-all">${image.image_url}</p>
                     </div>
                     
-                    <div class="flex justify-center space-x-4 pt-4">
+                    <div class="flex justify-center space-x-3 pt-4">
                         <button onclick="toggleImageSelection('${image.id}', !selectedImages.has('${image.id}')); updateSelectionUI();" 
                                 class="px-4 py-2 ${selectedImages.has(image.id) ? 'bg-gray-500 text-white' : 'bg-red-600 text-white'} rounded-lg hover:opacity-80">
                             ${selectedImages.has(image.id) ? 'Remove from Selection' : 'Select for Deletion'}
+                        </button>
+                        <button onclick="openTagEditor('${image.id}')" 
+                                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            Edit Tags
                         </button>
                         <button onclick="deleteImage('${image.id}')" 
                                 class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
@@ -773,6 +847,220 @@
         function showError(message) {
             alert(message); // Replace with better error handling if needed
         }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Tag editing functions
+        let currentEditingImage = null;
+
+        function openTagEditor(imageId) {
+            currentEditingImage = allImages.find(img => img.id === imageId);
+            if (!currentEditingImage) return;
+
+            // Populate the modal
+            document.getElementById('tag-editor-image').src = currentEditingImage.image_url;
+            document.getElementById('tag-editor-concept').textContent = `${currentEditingImage.concept} - ${currentEditingImage.subconcept}`;
+            
+            // Display current tags
+            displayCurrentTags();
+            
+            // Clear new tag input
+            document.getElementById('new-tag-input').value = '';
+            
+            // Show modal
+            const modal = document.getElementById('tag-editor-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function displayCurrentTags() {
+            const tagsContainer = document.getElementById('current-tags');
+            const tags = currentEditingImage.tags || [];
+            
+            tagsContainer.innerHTML = '';
+            
+            if (tags.length === 0) {
+                const emptyMessage = document.createElement('div');
+                emptyMessage.className = 'text-gray-500 italic text-center py-2';
+                emptyMessage.textContent = 'No tags assigned';
+                tagsContainer.appendChild(emptyMessage);
+                return;
+            }
+            
+            tags.forEach((tag, index) => {
+                const tagRow = document.createElement('div');
+                tagRow.className = 'flex items-center gap-2 p-2 bg-white rounded border hover:bg-gray-50 tag-row';
+                tagRow.innerHTML = `
+                    <span class="text-sm font-medium text-gray-600 min-w-[60px]">Tag ${index}:</span>
+                    <input type="text" id="tag-input-${index}" value="${escapeHtml(tag)}" 
+                           class="flex-1 px-2 py-1 text-sm border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 tag-input"
+                           onchange="updateTagAtPosition(${index}, this.value)"
+                           onkeypress="if(event.key==='Enter') this.blur()">
+                    <button onclick="removeTagAtPosition(${index})" class="text-red-600 hover:text-red-800 p-1" title="Remove tag">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                `;
+                tagsContainer.appendChild(tagRow);
+            });
+        }
+
+        function addTag() {
+            const input = document.getElementById('new-tag-input');
+            const newTag = input.value.trim();
+            
+            if (!newTag) {
+                showError('Please enter a tag name');
+                return;
+            }
+            
+            // Initialize tags array if it doesn't exist
+            if (!currentEditingImage.tags) {
+                currentEditingImage.tags = [];
+            }
+            
+            // Check if tag already exists
+            if (currentEditingImage.tags.includes(newTag)) {
+                showError('This tag already exists');
+                input.focus();
+                return;
+            }
+            
+            // Add tag to current image
+            currentEditingImage.tags.push(newTag);
+            
+            // Update display
+            displayCurrentTags();
+            input.value = '';
+            input.focus();
+            
+            updateStatus(`Added tag: "${newTag}"`);
+        }
+        
+        function updateTagAtPosition(position, newValue) {
+            const trimmedValue = newValue.trim();
+            
+            if (!trimmedValue) {
+                showError('Tag cannot be empty');
+                displayCurrentTags(); // Reset the display
+                return;
+            }
+            
+            if (!currentEditingImage.tags) {
+                currentEditingImage.tags = [];
+            }
+            
+            // Check if the new value already exists at a different position
+            const existingIndex = currentEditingImage.tags.indexOf(trimmedValue);
+            if (existingIndex !== -1 && existingIndex !== position) {
+                showError('This tag already exists at another position');
+                displayCurrentTags(); // Reset the display
+                return;
+            }
+            
+            // Update the tag at the specified position
+            const oldValue = currentEditingImage.tags[position];
+            currentEditingImage.tags[position] = trimmedValue;
+            
+            updateStatus(`Updated Tag ${position}: "${oldValue}" → "${trimmedValue}"`);
+        }
+        
+        function removeTagAtPosition(position) {
+            if (!currentEditingImage.tags || position >= currentEditingImage.tags.length) {
+                return;
+            }
+            
+            const removedTag = currentEditingImage.tags[position];
+            currentEditingImage.tags.splice(position, 1);
+            
+            displayCurrentTags();
+            updateStatus(`Removed Tag ${position}: "${removedTag}"`);
+        }
+
+        function removeTag(tagToRemove) {
+            if (!currentEditingImage.tags) return;
+            
+            const position = currentEditingImage.tags.indexOf(tagToRemove);
+            if (position !== -1) {
+                removeTagAtPosition(position);
+            }
+        }
+
+        async function saveImageTags() {
+            if (!currentEditingImage) return;
+            
+            try {
+                updateStatus("Saving tags...");
+                
+                const response = await authenticatedFetch(`/api/imagecreator/images/${currentEditingImage.id}/tags`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(currentEditingImage.tags || [])
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to update tags: ${response.status}`);
+                }
+                
+                // Update the image in allImages array
+                const imageIndex = allImages.findIndex(img => img.id === currentEditingImage.id);
+                if (imageIndex !== -1) {
+                    allImages[imageIndex].tags = [...(currentEditingImage.tags || [])];
+                }
+                
+                updateStatus("Tags updated successfully");
+                closeTagEditor();
+                
+                // Refresh the display to show updated tags
+                applyFiltersAndSort();
+                
+            } catch (error) {
+                console.error("Error updating tags:", error);
+                showError("Failed to update tags. Please try again.");
+                updateStatus("Error updating tags");
+            }
+        }
+
+        function closeTagEditor() {
+            const modal = document.getElementById('tag-editor-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            currentEditingImage = null;
+        }
+
+        // Event listeners for tag editor modal
+        document.getElementById('close-tag-editor').addEventListener('click', closeTagEditor);
+        
+        // Close modal when clicking outside
+        document.getElementById('tag-editor-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeTagEditor();
+            }
+        });
+
+        // Close modals with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                // Close tag editor if open
+                const tagModal = document.getElementById('tag-editor-modal');
+                if (!tagModal.classList.contains('hidden')) {
+                    closeTagEditor();
+                    return;
+                }
+                
+                // Close preview modal if open
+                const previewModal = document.getElementById('preview-modal');
+                if (!previewModal.classList.contains('hidden')) {
+                    previewModal.classList.add('hidden');
+                    previewModal.classList.remove('flex');
+                }
+            }
+        });
     </script>
 </body>
 </html>

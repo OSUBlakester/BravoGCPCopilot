@@ -96,13 +96,34 @@
     margin-bottom: 0.25rem;
 }
 
-/* Avatar-specific styles for mood selection */
+/* Image-specific styles for mood selection (replaces avatar styles) */
+.mood-image-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    min-height: 5rem; /* Maintain same height as avatars */
+}
+
+.mood-image {
+    width: 96px;
+    height: 96px;
+    border-radius: 8px;
+    border: 2px solid #e2e8f0;
+    object-fit: cover;
+}
+
+.mood-button:hover .mood-image {
+    transform: scale(1.1);
+}
+
+/* Keep avatar styles for backward compatibility */
 .mood-avatar-container {
     display: flex;
     justify-content: center;
     align-items: center;
     margin-bottom: 0.5rem;
-    min-height: 5rem; /* Increased height for larger avatars */
+    min-height: 5rem;
 }
 
 .mood-avatar {

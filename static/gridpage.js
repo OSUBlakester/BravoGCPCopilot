@@ -257,7 +257,54 @@ function getPictogramForText(text) {
 }
 
 /**
- * Intelligently extracts search terms for image matching by removing question words
+ * Extracts compound terms and specific phrases that should be preserved
+ * @param {string} text - The full text to analyze
+ * @returns {string|null} - A compound term if found, null otherwise
+ */
+function extractCompoundTerm(text) {
+    const lowerText = text.toLowerCase();
+    
+    // Specific patterns to look for (brand names, compound nouns, etc.)
+    const compoundPatterns = [
+        // Sports teams (prioritize these highly)
+        /\b(denver\s+broncos?|dallas\s+cowboys?|green\s+bay\s+packers?|new\s+england\s+patriots?)\b/g,
+        /\b(los\s+angeles\s+lakers?|boston\s+celtics?|chicago\s+bulls?|miami\s+heat)\b/g,
+        
+        // Movie studios and franchises  
+        /\b(marvel\s+(?:movie|film|comic)|disney\s+(?:movie|film)|pixar\s+(?:movie|film))\b/g,
+        /\b(star\s+wars|harry\s+potter|lord\s+of\s+the\s+rings)\b/g,
+        
+        // Food types
+        /\b(chinese\s+food|italian\s+food|mexican\s+food|fast\s+food|ice\s+cream)\b/g,
+        
+        // Technology
+        /\b(video\s+game|board\s+game|card\s+game)\b/g,
+        /\b(social\s+media|text\s+message|phone\s+call)\b/g,
+        
+        // Activities
+        /\b(rock\s+climbing|mountain\s+biking|horse\s+riding)\b/g,
+        
+        // General two-word nouns (but be selective)
+        /\b([a-z]+)\s+(movie|film|game|show|book|music|song|album)\b/g,
+        /\b([a-z]+)\s+(team|player|coach|stadium)\b/g,
+        /\b([a-z]+)\s+(restaurant|store|shop|place)\b/g
+    ];
+    
+    for (const pattern of compoundPatterns) {
+        const matches = lowerText.match(pattern);
+        if (matches && matches.length > 0) {
+            // Return the first match, cleaned up
+            const match = matches[0].trim();
+            console.log(`🔧 DEBUG: Found compound term: "${match}"`);
+            return match;
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Intelligently extracts search terms for image matching by prioritizing subjects/objects over action verbs
  * @param {string} summary - The summary text that may start with question words
  * @param {Array<string>} keywords - Array of semantic keywords
  * @returns {string} - Optimized search term for image matching
@@ -267,8 +314,24 @@ function getOptimizedSearchTerm(summary, keywords = null) {
     
     console.log(`🔧 DEBUG: Processing "${summary}" with keywords:`, keywords);
     
+    // First, check for compound terms that should be preserved as complete phrases
+    const compoundTerm = extractCompoundTerm(summary);
+    if (compoundTerm) {
+        console.log(`🔧 DEBUG: Using compound term: "${compoundTerm}"`);
+        return compoundTerm;
+    }
+    
     const questionWords = ['what', 'who', 'where', 'when', 'why', 'how'];
     const words = summary.toLowerCase().trim().split(/\s+/);
+    
+    // Common action verbs that should be deprioritized in favor of objects/subjects
+    const commonActionVerbs = [
+        'watch', 'see', 'look', 'view', 'observe', 'listen', 'hear', 'play', 'do', 'make', 'get', 'go', 'come',
+        'eat', 'drink', 'read', 'write', 'talk', 'speak', 'say', 'tell', 'ask', 'answer', 'call', 'walk',
+        'run', 'sit', 'stand', 'work', 'study', 'learn', 'teach', 'help', 'use', 'try', 'want', 'need',
+        'like', 'love', 'hate', 'think', 'know', 'understand', 'feel', 'take', 'give', 'put', 'find',
+        'buy', 'sell', 'pay', 'spend', 'save', 'open', 'close', 'start', 'stop', 'finish', 'continue'
+    ];
     
     // Remove question words from the beginning
     let meaningfulWords = [...words];
@@ -283,12 +346,27 @@ function getOptimizedSearchTerm(summary, keywords = null) {
         .map(word => word.replace(/[?!.,;:]/g, ''))  // Remove punctuation
         .filter(word => word.length > 0);  // Remove empty strings
     
-    // If we have keywords, prioritize them (but skip question words and generic terms)
+    // Enhanced keyword processing - prioritize specific nouns over action verbs
     if (keywords && Array.isArray(keywords) && keywords.length > 0) {
-        // Find the first keyword that isn't a question word, filler word, or generic term
         const questionAndFillerWords = [...questionWords, ...fillerWords, 'question', 'curiosity', 'that', 'this'];
         const genericTerms = ['color', 'thing', 'object', 'item', 'stuff', 'shape', 'size'];
         
+        // First, look for specific nouns that aren't action verbs
+        const specificNounKeyword = keywords.find(keyword => {
+            const cleanKeyword = keyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
+            return cleanKeyword.length > 2 && 
+                   !questionAndFillerWords.includes(cleanKeyword) &&
+                   !genericTerms.includes(cleanKeyword) &&
+                   !commonActionVerbs.includes(cleanKeyword);
+        });
+        
+        if (specificNounKeyword) {
+            const cleanKeyword = specificNounKeyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
+            console.log(`🔧 DEBUG: Using specific noun keyword: "${cleanKeyword}"`);
+            return cleanKeyword;
+        }
+        
+        // If no specific nouns found, fall back to any meaningful keyword
         const meaningfulKeyword = keywords.find(keyword => {
             const cleanKeyword = keyword.toLowerCase().trim().replace(/[?!.,;:]/g, '');
             return cleanKeyword.length > 2 && 
@@ -303,9 +381,9 @@ function getOptimizedSearchTerm(summary, keywords = null) {
         }
     }
     
-    // Use the most meaningful word from the remaining words
+    // Enhanced word analysis - prioritize subjects/objects over action verbs
     if (meaningfulWords.length > 0) {
-        // For single word inputs that are specific (like colors, objects), prefer the original case
+        // For single word inputs that are specific, prefer the original case
         const originalWordLower = summary.toLowerCase().trim();
         const originalWord = summary.trim(); // Preserve original case
         if (meaningfulWords.includes(originalWordLower) && originalWordLower.length > 2) {
@@ -313,19 +391,44 @@ function getOptimizedSearchTerm(summary, keywords = null) {
             return originalWord;
         }
         
-        // Otherwise, prioritize nouns and verbs (longer words are more likely to be meaningful)
-        // Find the corresponding original case word
+        // Separate words into action verbs vs potential subjects/objects
+        const originalWords = summary.trim().split(/\s+/);
+        const nonActionWords = [];
+        const actionWords = [];
+        
+        meaningfulWords.forEach(word => {
+            if (commonActionVerbs.includes(word)) {
+                actionWords.push(word);
+            } else {
+                nonActionWords.push(word);
+            }
+        });
+        
+        // Prioritize non-action words (subjects/objects) - use the longest/most specific one
+        if (nonActionWords.length > 0) {
+            const sortedNonActionWords = nonActionWords.sort((a, b) => b.length - a.length);
+            const selectedWord = sortedNonActionWords[0];
+            
+            // Find the original case version
+            const originalCaseWord = originalWords.find(word => 
+                word.toLowerCase().replace(/[?!.,;:]/g, '') === selectedWord
+            );
+            
+            const finalWord = originalCaseWord || selectedWord;
+            console.log(`🔧 DEBUG: Using prioritized subject/object: "${finalWord}" (avoided action verbs: ${actionWords})`);
+            return finalWord;
+        }
+        
+        // If only action words remain, use the longest one (but log this for debugging)
         const sortedWords = meaningfulWords.sort((a, b) => b.length - a.length);
         const selectedLowerWord = sortedWords[0];
         
-        // Try to find the original case version of the selected word
-        const originalWords = summary.trim().split(/\s+/);
         const originalCaseWord = originalWords.find(word => 
             word.toLowerCase().replace(/[?!.,;:]/g, '') === selectedLowerWord
         );
         
         const finalWord = originalCaseWord || selectedLowerWord;
-        console.log(`🔧 DEBUG: Meaningful words found:`, meaningfulWords, `→ Selected: "${finalWord}"`);
+        console.log(`🔧 DEBUG: Only action verbs available, using: "${finalWord}" from ${meaningfulWords}`);
         return finalWord;
     }
     
@@ -385,16 +488,21 @@ function getWordVariants(word) {
 }
 
 /**
- * Fetches symbol image from the AAC symbol database with retry logic and caching
+ * Fetches symbol image from the AAC symbol database (optimized like tap interface)
  * @param {string} text - The button text to find a symbol for
  * @param {Array<string>} keywords - Optional semantic keywords for LLM-generated content  
  * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
  */
 async function getSymbolImageForText(text, keywords = null) {
-    if (!text || text.trim() === '') return null;
+    console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
+    if (!text || text.trim() === '') {
+        console.log(`❌ Empty text provided to getSymbolImageForText`);
+        return null;
+    }
     
     // Check if pictograms/images are enabled
     if (!enablePictograms) {
+        console.log(`❌ Pictograms disabled, skipping image load for "${text}"`);
         return null;
     }
     
@@ -409,7 +517,7 @@ async function getSymbolImageForText(text, keywords = null) {
         window.symbolImageCache = new Map();
     }
     
-    const cacheKey = `v2_${text.trim().toLowerCase()}`; // v2 cache key for tag position prioritization fix
+    const cacheKey = `grid_${text.trim().toLowerCase()}`;
     if (window.symbolImageCache.has(cacheKey)) {
         const cached = window.symbolImageCache.get(cacheKey);
         if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
@@ -417,113 +525,58 @@ async function getSymbolImageForText(text, keywords = null) {
         }
     }
     
-    const maxRetries = 2;
-    let lastError = null;
-    
-    // Get word variants (original, singular, plural) to try
-    const wordVariants = getWordVariants(text.trim());
-    console.log(`🔧 DEBUG: Trying word variants for "${text}":`, wordVariants);
-    
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            // Add a small delay for retries to avoid overwhelming the server
-            if (attempt > 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-            }
-            
-            let bestMatch = null;
-            let bestScore = -1;
-            let bestSource = '';
-            
-            // Try each word variant until we find a match
-            for (const variant of wordVariants) {
-                if (bestMatch) break; // Stop if we found a good match
-                
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds for BravoImages priority search
-                
-                // Use unified button-search that searches both collections with proper prioritization
-                const symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(variant)}&limit=1`;
-                const symbolsUrlWithKeywords = keywords && Array.isArray(keywords) && keywords.length > 0 ? 
-                    `${symbolsUrl}&keywords=${encodeURIComponent(JSON.stringify(keywords))}` : symbolsUrl;
-                
-                // Single unified search call
-                const [symbolsResponse] = await Promise.allSettled([
-                    fetch(symbolsUrlWithKeywords, { signal: controller.signal })
-                ]);
-                
-                clearTimeout(timeoutId);
-                
-                // Process unified button-search response (handles both collections with proper prioritization)
-                if (symbolsResponse.status === 'fulfilled' && symbolsResponse.value.ok) {
-                    try {
-                        const symbolsData = await symbolsResponse.value.json();
-                        if (symbolsData.symbols && symbolsData.symbols.length > 0) {
-                            const symbol = symbolsData.symbols[0];
-                            const symbolScore = symbol.match_score || 5;
-                            
-                            bestMatch = {
-                                image_url: symbol.image_url,
-                                name: symbol.name || symbol.subconcept || 'Image',
-                                match_score: symbolScore,
-                                source: symbol.source || 'unified_search'
-                            };
-                            bestScore = symbolScore;
-                            bestSource = symbol.source === 'bravo_images' ? 'BravoImages' : 'Symbols';
-                            
-                            console.log(`Found ${bestSource} for "${text}" using variant "${variant}": ${symbol.name || symbol.subconcept} (score: ${symbolScore})`);
-                            break; // Found a match, stop trying variants
-                        }
-                    } catch (e) {
-                        if (e.name !== 'AbortError') {
-                            console.warn('Error parsing unified search response:', e);
-                        }
-                    }
-                }
-            }
-            
-            if (bestMatch) {
-                // Cache successful result
-                window.symbolImageCache.set(cacheKey, {
-                    imageUrl: bestMatch.image_url,
-                    timestamp: Date.now()
-                });
-                
-                return bestMatch.image_url;
-            } else {
-                // Cache null result to avoid repeated requests
-                window.symbolImageCache.set(cacheKey, {
-                    imageUrl: null,
-                    timestamp: Date.now()
-                });
-                
-                // If both searches failed, continue to retry logic
-                if (attempt === maxRetries) {
-                    console.warn(`No symbols or images found for "${text}" after ${maxRetries} attempts`);
-                    // Note: Missing image logging happens automatically in the server-side
-                    // public_bravo_images_search endpoint when it returns zero results
-                    return null;
-                }
-                continue; // Try again
-            }
-        } catch (error) {
-            lastError = error;
-            if (error.name === 'AbortError') {
-                // Don't retry on timeout - likely server overload
-                console.warn(`Symbol search timeout for "${text}" - skipping retries`);
-                return null;
-            } else {
-                console.warn(`Error fetching symbol for "${text}" (attempt ${attempt}/${maxRetries}):`, error.message);
-            }
-            
-            if (attempt === maxRetries) {
-                break;
-            }
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.warn(`⏰ Timeout reached for symbol search: "${text}"`);
+            controller.abort();
+        }, 10000); // 10 second timeout
+        
+        // Use unified button-search that searches Firestore collections with keywords support (same as tap interface)
+        let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`;
+        if (keywords && keywords.length > 0) {
+            symbolsUrl += `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
         }
+        
+        const response = await authenticatedFetch(symbolsUrl, {
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            console.warn(`Symbol search failed for "${text}": ${response.status}`);
+            return null;
+        }
+        
+        const data = await response.json();
+        
+        if (data && data.symbols && Array.isArray(data.symbols) && data.symbols.length > 0) {
+            const symbolUrl = data.symbols[0].url;
+            // Cache the result
+            window.symbolImageCache.set(cacheKey, {
+                imageUrl: symbolUrl,
+                timestamp: Date.now()
+            });
+            console.log(`✅ Found Firestore image for "${text}": ${symbolUrl}`);
+            return symbolUrl;
+        } else {
+            // Cache null result to avoid repeated failed requests
+            window.symbolImageCache.set(cacheKey, {
+                imageUrl: null,
+                timestamp: Date.now()
+            });
+            console.log(`❌ No Firestore image found for "${text}"`);
+            return null;
+        }
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.warn(`🚫 Request aborted for symbol "${text}" - likely due to timeout`);
+        } else {
+            console.error(`Error fetching symbol for "${text}":`, error);
+        }
+        return null;
     }
-    
-    console.warn(`All symbol search attempts failed for "${text}", falling back to pictogram`);
-    return null;
 }
 
 
@@ -541,12 +594,23 @@ function base64ToArrayBuffer(base64) {
 // --- Core Fetch Wrapper (NEW) ---
 // This function will wrap all your fetch calls to automatically add auth headers
 async function authenticatedFetch(url, options = {}) {
+    // Always refresh tokens from session storage (in case they were updated)
+    firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+    currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+    
     if (!firebaseIdToken || !currentAacUserId) {
-        console.error("Authentication: Firebase ID Token or AAC User ID not found. Redirecting to login.");
-        // Clear any stale session data and redirect
+        console.error("Authentication: Firebase ID Token or AAC User ID not found.");
+        localStorage.setItem('debug_auth_missing', `Missing tokens at ${new Date().toISOString()}: token=${!!firebaseIdToken}, userId=${!!currentAacUserId}`);
+        
+        // For chat history, don't redirect - just fail gracefully
+        if (url.includes('/record_chat_history')) {
+            throw new Error("Authentication tokens missing for chat history");
+        }
+        
+        // For other requests, redirect to login
         sessionStorage.clear();
         window.location.href = 'auth.html';
-        throw new Error("Authentication required."); // Stop execution
+        throw new Error("Authentication required.");
     }
 
     const headers = options.headers || {};
@@ -561,13 +625,23 @@ async function authenticatedFetch(url, options = {}) {
     
     options.headers = headers;
 
-    // Add a check for 401/403 responses to trigger re-authentication
+    // Make the request
     const response = await fetch(url, options);
+    
+    // Handle authentication failures
     if (response.status === 401 || response.status === 403) {
-        console.warn(`Authentication failed (${response.status}) for ${url}. Attempting re-authentication or redirecting to login.`);
-        // Invalidate token/user ID and redirect to login
+        const errorText = await response.text();
+        console.warn(`Authentication failed (${response.status}) for ${url}:`, errorText);
+        localStorage.setItem('debug_auth_expired', `Auth failed at ${new Date().toISOString()}: ${response.status} - ${errorText}`);
+        
+        // For chat history, fail gracefully without redirecting
+        if (url.includes('/record_chat_history')) {
+            throw new Error(`Authentication expired while recording chat history: ${response.status} - ${errorText}`);
+        }
+        
+        // For other critical requests, redirect to login
         sessionStorage.clear();
-        alert('Your session has expired or is invalid. Please log in again.');
+        alert('Your session has expired. Please log in again.');
         window.location.href = 'auth.html';
         throw new Error("Session expired or invalid.");
     }
@@ -849,6 +923,17 @@ async function showMoodSelectionIfNeeded() {
 
 // --- DOMContentLoaded Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
+    // Debug viewer for persistent localStorage messages
+    if (window.location.search.includes('debug=1')) {
+        console.log('🔍 DEBUG MODE ENABLED - localStorage debug messages:');
+        console.log('LLM Selection:', localStorage.getItem('debug_llm_selection'));
+        console.log('LLM Success:', localStorage.getItem('debug_llm_success'));
+        console.log('LLM Error:', localStorage.getItem('debug_llm_error'));
+        console.log('Auth State:', localStorage.getItem('debug_auth_state'));
+        console.log('Server Error:', localStorage.getItem('debug_server_error'));
+        console.log('Fetch Error:', localStorage.getItem('debug_fetch_error'));
+    }
+
     const userReady = await initializeUserContext();
     if (!userReady) {
         // Redirection already handled by initializeUserContext
@@ -1008,19 +1093,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         logoutButton.addEventListener('click', handleLogout);
     }
 
-    // --- Avatar Manager Button ---
-    const avatarManagerButton = document.getElementById('avatar-manager-button');
-    
-    function handleAvatarManager() {
-        console.log("Opening Avatar Manager");
-        showAvatarManager().catch(error => {
-            console.error("Error opening avatar manager:", error);
-        });
-    }
-
-    if (avatarManagerButton) {
-        avatarManagerButton.addEventListener('click', handleAvatarManager);
-    }
+    // Avatar manager button removed
 
     // --- PIN Protection for Admin Toolbar ---
     const lockButton = document.getElementById('lock-icon');
@@ -1284,16 +1357,9 @@ async function generateGrid(page, container) {
             imageElement.style.height = '100%';
             imageElement.style.objectFit = 'cover';
             imageElement.onerror = () => {
-                // If image fails to load, fall back to pictogram
-                const pictogram = getPictogramForText(buttonData.text);
-                if (pictogram) {
-                    const pictogramSpan = document.createElement('span');
-                    pictogramSpan.textContent = pictogram;
-                    pictogramSpan.style.fontSize = '3em';
-                    pictogramSpan.style.lineHeight = '1';
-                    pictogramSpan.style.color = '#666';
-                    imageContainer.replaceChild(pictogramSpan, imageElement);
-                }
+                console.warn(`Failed to load image for "${buttonData.text}" - using text-only display`);
+                // No emoji fallback - just hide the broken image
+                imageElement.style.display = 'none';
             };
             
             // Text footer (edge to edge, no margins)
@@ -1334,32 +1400,8 @@ async function generateGrid(page, container) {
             buttonContent.appendChild(textFooter);
             button.appendChild(buttonContent);
         } else {
-            // Fall back to pictogram if no symbol image found
-            const pictogram = getPictogramForText(buttonData.text);
-            if (pictogram) {
-                // Create container for pictogram and text
-                const buttonContent = document.createElement('div');
-                buttonContent.style.display = 'flex';
-                buttonContent.style.flexDirection = 'column';
-                buttonContent.style.alignItems = 'center';
-                buttonContent.style.gap = '4px';
-                
-                const pictogramSpan = document.createElement('span');
-                pictogramSpan.textContent = pictogram;
-                pictogramSpan.style.fontSize = '1.5em';
-                pictogramSpan.style.lineHeight = '1';
-                
-                const textSpan = document.createElement('span');
-                textSpan.textContent = buttonData.text;
-                textSpan.style.fontSize = '0.9em';
-                textSpan.style.lineHeight = '1.2';
-                
-                buttonContent.appendChild(pictogramSpan);
-                buttonContent.appendChild(textSpan);
-                button.appendChild(buttonContent);
-            } else {
-                button.textContent = buttonData.text;
-            }
+            // No image found - use text-only display (no emoji fallback)
+            button.textContent = buttonData.text;
             }
         }
         
@@ -1419,13 +1461,48 @@ async function handleButtonClick(buttonData) {
     const speechPhrase = buttonData.speechPhrase || '';
     const customAudioFile = buttonData.customAudioFile || null;
 
+    console.log('🎯 GRIDPAGE Button clicked:', { 
+        text: buttonData.text || buttonData.option, 
+        queryType: localQueryType, 
+        llmQuery: llmQuery ? 'present' : 'none',
+        speechPhrase: speechPhrase ? speechPhrase : 'none',
+        isLLMGenerated: buttonData.isLLMGenerated 
+    });
+
     const buttonLabel = buttonData.option || buttonData.text || '';
     const buttonSummary = buttonData.summary || buttonLabel;
 
     let contextForLog;
     if (buttonData.isLLMGenerated) {
+        console.log('🎯 GRIDPAGE ENTERING LLM CHAT HISTORY PATH for:', buttonLabel);
         contextForLog = buttonData.originalPrompt;
+        // Record chat history for LLM-generated selection (await to ensure completion before page refresh)
+        localStorage.setItem('debug_llm_selection', `Attempting to record: "${buttonLabel}" at ${new Date().toISOString()}`);
+        console.log('🎯 GRIDPAGE Recording LLM-generated selection:', buttonLabel);
+        try {
+            // Refresh authentication context before recording
+            firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+            currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+            
+            console.log('🔐 GRIDPAGE Auth tokens before chat history:', { 
+                tokenPresent: !!firebaseIdToken, 
+                userIdPresent: !!currentAacUserId 
+            });
+            
+            if (!firebaseIdToken || !currentAacUserId) {
+                throw new Error('Authentication tokens missing when recording LLM selection');
+            }
+            
+            console.log('🎯 GRIDPAGE Calling recordChatHistory for LLM selection...');
+            await recordChatHistory("", buttonLabel);
+            localStorage.setItem('debug_llm_success', `Successfully recorded: "${buttonLabel}" at ${new Date().toISOString()}`);
+            console.log('✅ GRIDPAGE LLM chat history recorded before page action');
+        } catch (error) {
+            localStorage.setItem('debug_llm_error', `Error recording "${buttonLabel}": ${error.message} at ${new Date().toISOString()}`);
+            console.error('❌ Failed to record chat history for LLM selection:', error);
+        }
     } else if (llmQuery) {
+        console.log('🎯 GRIDPAGE NOT LLM generated, checking other paths. llmQuery present:', !!llmQuery);
         contextForLog = llmQuery;
     } else {
         activeOriginatingButtonText = null;
@@ -1472,6 +1549,12 @@ async function handleButtonClick(buttonData) {
                 await announce(speechPhrase, "system"); // Announce while speech bubble is clear.
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                
+                // Record chat history for user speech selection
+                console.log('🎯 GRIDPAGE Recording speech selection:', speechPhrase);
+                recordChatHistory("", speechPhrase).catch(error => {
+                    console.error('Failed to record chat history for gridpage speech:', error);
+                });
             }
             
             // Play custom MP3 audio file if assigned
@@ -1507,6 +1590,9 @@ async function handleButtonClick(buttonData) {
             const options = await getLLMResponse(promptForLLM);
             const tLLM1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: getLLMResponse took ${(tLLM1-tLLM0).toFixed(2)} ms`);
+            
+            // LLM options generated - no chat history recorded here
+            
             const tGen0 = performance.now();
             await generateLlmButtons(options); // This function will restart scanning.
             const tGen1 = performance.now();
@@ -1585,6 +1671,12 @@ async function handleButtonClick(buttonData) {
                 await announce(speechPhrase, "system");
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (nav) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                
+                // Record chat history for user speech selection
+                console.log('🎯 GRIDPAGE Recording navigation speech:', speechPhrase);
+                recordChatHistory("", speechPhrase).catch(error => {
+                    console.error('Failed to record chat history for gridpage navigation speech:', error);
+                });
             }
             
             // Play custom MP3 audio file if assigned
@@ -1647,6 +1739,12 @@ async function handleButtonClick(buttonData) {
                 await announce(speechPhrase, "system");
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (speak only) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                
+                // Record chat history for user speech selection
+                console.log('🎯 GRIDPAGE Recording speak-only:', speechPhrase);
+                recordChatHistory("", speechPhrase).catch(error => {
+                    console.error('Failed to record chat history for gridpage speak-only:', error);
+                });
             }
             
             // Play custom MP3 audio file if assigned
@@ -1694,8 +1792,16 @@ async function handleButtonClick(buttonData) {
     }
 }
 
-// --- Chat History (MODIFIED to use authenticatedFetch) ---
+// --- Chat History with fallback to local storage ---
 async function recordChatHistory(question, response) {
+    console.log('🎯 GRIDPAGE recordChatHistory called with:', { question, response });
+    
+    // Check authentication state before making request
+    const tokenPresent = !!sessionStorage.getItem('firebaseIdToken');
+    const userIdPresent = !!sessionStorage.getItem('currentAacUserId');
+    console.log('🔐 Auth check - Token present:', tokenPresent, 'UserID present:', userIdPresent);
+    localStorage.setItem('debug_auth_state', `Token: ${tokenPresent}, UserID: ${userIdPresent} at ${new Date().toISOString()}`);
+    
     try {
         const recorded = await authenticatedFetch('/record_chat_history', {
             method: 'POST',
@@ -1703,11 +1809,33 @@ async function recordChatHistory(question, response) {
             body: JSON.stringify({ question, response })
         });
         if (!recorded.ok) {
-            throw new Error(`HTTP error! status: ${recorded.status}`);
+            const errorText = await recorded.text();
+            console.error('❌ Chat history server error:', recorded.status, errorText);
+            localStorage.setItem('debug_server_error', `${recorded.status}: ${errorText} at ${new Date().toISOString()}`);
+            throw new Error(`HTTP error! status: ${recorded.status} - ${errorText}`);
         }
-        console.log("Chat history recorded successfully.");
+        const responseData = await recorded.json();
+        console.log('✅ GRIDPAGE Chat history recorded successfully:', responseData);
+        localStorage.setItem('debug_chat_success', `Recorded "${response}" at ${new Date().toISOString()}`);
     } catch (error) {
-        console.error("Error recording chat history:", error);
+        console.error('❌ GRIDPAGE Error recording chat history:', error);
+        localStorage.setItem('debug_fetch_error', `${error.message} at ${new Date().toISOString()}`);
+        
+        // Fallback: Store in local storage for later sync
+        if (error.message.includes('Authentication') || error.message.includes('expired')) {
+            const pendingEntry = {
+                question: question || "",
+                response: response || "",
+                timestamp: new Date().toISOString(),
+                id: `pending_${Date.now()}`
+            };
+            
+            const pending = JSON.parse(localStorage.getItem('pending_chat_history') || '[]');
+            pending.push(pendingEntry);
+            localStorage.setItem('pending_chat_history', JSON.stringify(pending));
+            console.log('💾 Stored chat history locally for later sync:', pendingEntry);
+            localStorage.setItem('debug_local_store', `Stored locally: "${response}" at ${new Date().toISOString()}`);
+        }
     }
 }
 
@@ -2555,9 +2683,8 @@ async function speakAndHighlight(button) {
     button.classList.add('scanning');
     try {
         const textToSpeak = button.textContent;
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        // Use backend TTS instead of browser speech synthesis
+        await announce(textToSpeak, "system", false);
     } catch (e) { console.error("Speech synthesis error:", e); }
 }
 
@@ -2565,7 +2692,8 @@ function stopAuditoryScanning() {
     console.log("Stopping auditory scanning.");
     clearInterval(scanningInterval); scanningInterval = null;
     if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); currentlyScannedButton = null; }
-    currentButtonIndex = -1; window.speechSynthesis.cancel();
+    currentButtonIndex = -1;
+    // Note: No need to cancel speech here as backend TTS handles its own queue
 }
 
 // Function to resume scanning from first option with cycle reset
@@ -2666,16 +2794,9 @@ async function generateLlmButtons(options) {
             imageElement.style.height = '100%';
             imageElement.style.objectFit = 'cover';
             imageElement.onerror = () => {
-                // If image fails to load, fall back to pictogram
-                const pictogram = getPictogramForText(optionData.summary);
-                if (pictogram) {
-                    const pictogramSpan = document.createElement('span');
-                    pictogramSpan.textContent = pictogram;
-                    pictogramSpan.style.fontSize = '3em';
-                    pictogramSpan.style.lineHeight = '1';
-                    pictogramSpan.style.color = '#666';
-                    imageContainer.replaceChild(pictogramSpan, imageElement);
-                }
+                console.warn(`Failed to load image for "${optionData.summary}" - using text-only display`);
+                // No emoji fallback - just hide the broken image
+                imageElement.style.display = 'none';
             };
             
             // Text footer (edge to edge, no margins)
@@ -2714,32 +2835,8 @@ async function generateLlmButtons(options) {
             buttonContent.appendChild(textFooter);
             button.appendChild(buttonContent);
         } else {
-            // Fall back to pictogram if no symbol image found
-            const pictogram = getPictogramForText(optionData.summary);
-            if (pictogram) {
-                // Create container for pictogram and text
-                const buttonContent = document.createElement('div');
-                buttonContent.style.display = 'flex';
-                buttonContent.style.flexDirection = 'column';
-                buttonContent.style.alignItems = 'center';
-                buttonContent.style.gap = '4px';
-                
-                const pictogramSpan = document.createElement('span');
-                pictogramSpan.textContent = pictogram;
-                pictogramSpan.style.fontSize = '1.5em';
-                pictogramSpan.style.lineHeight = '1';
-                
-                const textSpan = document.createElement('span');
-                textSpan.textContent = optionData.summary;
-                textSpan.style.fontSize = '0.9em';
-                textSpan.style.lineHeight = '1.2';
-                
-                buttonContent.appendChild(pictogramSpan);
-                buttonContent.appendChild(textSpan);
-                button.appendChild(buttonContent);
-            } else {
-                button.textContent = optionData.summary;
-            }
+            // No image found - use text-only display (no emoji fallback)
+            button.textContent = optionData.summary;
         }
         
         button.dataset.option = optionData.option;
@@ -2796,6 +2893,25 @@ async function generateLlmButtons(options) {
                 console.error("Error sending LLM button click log:", auditError);
             }
             // --- End Audit Logging ---
+            
+            // --- Record Chat History for LLM Selection ---
+            const isWakeWordQuestion = currentQuestion && currentQuestion.trim();
+            console.log('🎯 GRIDPAGE Recording LLM selection (in LLM click handler):', optionData.option);
+            console.log('🎯 GRIDPAGE Wake word question context:', { currentQuestion, isWakeWordQuestion });
+            localStorage.setItem('debug_wake_word', `Question: "${currentQuestion}", Option: "${optionData.option}" at ${new Date().toISOString()}`);
+            
+            try {
+                // For wake word questions, record both question and response
+                const questionToRecord = isWakeWordQuestion ? currentQuestion : "";
+                await recordChatHistory(questionToRecord, optionData.option);
+                localStorage.setItem('debug_wake_success', `Recorded Q:"${questionToRecord}" A:"${optionData.option}" at ${new Date().toISOString()}`);
+                console.log('✅ GRIDPAGE LLM chat history recorded successfully');
+            } catch (chatError) {
+                localStorage.setItem('debug_wake_error', `Error: ${chatError.message} at ${new Date().toISOString()}`);
+                console.error('❌ Failed to record LLM chat history:', chatError);
+            }
+            // --- End Chat History Recording ---
+            
             try {
                 // Announce the selected option (using the full option text for clarity)
                 await announce(optionData.option, "system"); // Use optionData.option directly

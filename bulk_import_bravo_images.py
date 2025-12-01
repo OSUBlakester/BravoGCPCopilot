@@ -106,7 +106,7 @@ class BravoImageImporter:
             if not batch_folder.is_dir():
                 continue
                 
-            logger.info(f"📁 Processing {batch_folder.name}")
+            logger.info(f"📁 Processing batch folder: {batch_folder.name}")
             
             # First, check for images directly in batch folder (like Alaska)
             direct_images = list(batch_folder.glob("*.png"))
@@ -158,6 +158,32 @@ class BravoImageImporter:
                         subconcept = stem_parts[0]
                     
                     images.append((str(image_file), concept, subconcept))
+        
+        # Handle non-batch folders (like Bravo_Bear_001)
+        for folder in base_path.iterdir():
+            if not folder.is_dir() or folder.name.startswith('batch_') or folder.name.startswith('.'):
+                continue
+                
+            logger.info(f"📁 Processing non-batch folder: {folder.name}")
+            
+            # Look for Categories subfolder (Bravo_Bear_001 structure)
+            categories_folder = folder / 'Categories'
+            if categories_folder.exists() and categories_folder.is_dir():
+                logger.info(f"  📄 Found Categories folder in {folder.name}")
+                for image_file in categories_folder.glob("*.png"):
+                    concept = folder.name
+                    subconcept = image_file.stem  # Use filename without extension as subconcept
+                    images.append((str(image_file), concept, subconcept))
+                    
+            # Also check for images directly in the folder
+            else:
+                direct_images = list(folder.glob("*.png"))
+                if direct_images:
+                    logger.info(f"  📄 Found {len(direct_images)} images directly in {folder.name}")
+                    for image_file in direct_images:
+                        concept = folder.name
+                        subconcept = image_file.stem
+                        images.append((str(image_file), concept, subconcept))
         
         logger.info(f"🎯 Found {len(images)} images to process")
         return images

@@ -198,6 +198,11 @@ async function loadScanSettings() {
             gridColumns = settings.gridColumns || 10;
             scanLoopLimit = settings.scanLoopLimit || 0;
             
+            // Update sight word service with new settings
+            if (window.updateSightWordSettings) {
+                window.updateSightWordSettings(settings);
+            }
+            
             // Update grid layout
             updateGridLayout();
         }
@@ -957,9 +962,7 @@ function generateThreadButtons(options) {
                 // Pause scanning - user needs to manually resume with switch
                 console.log('User selected an option. Scanning paused until manual resume.');
                 try {
-                    const utterance = new SpeechSynthesisUtterance("Scanning paused. Use your switch to resume scanning.");
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(utterance);
+                    await announce("Scanning paused. Use your switch to resume scanning.", "system", false);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -1331,7 +1334,7 @@ function startAuditoryScanning() {
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
 
-    const scanStep = () => {
+    const scanStep = async () => {
         if (currentlyScannedButton) {
             currentlyScannedButton.classList.remove('scanning');
         }
@@ -1347,9 +1350,7 @@ function startAuditoryScanning() {
                 stopAuditoryScanning();
                 
                 try {
-                    const utterance = new SpeechSynthesisUtterance("Scanning paused. Use your switch to resume scanning.");
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(utterance);
+                    await announce("Scanning paused. Use your switch to resume scanning.", "system", false);
                 } catch (e) {
                     console.error("Speech synthesis error:", e);
                 }
@@ -1378,7 +1379,7 @@ function startAuditoryScanning() {
     scanningInterval = setInterval(scanStep, defaultDelay);
 }
 
-function speakAndHighlight(button) {
+async function speakAndHighlight(button) {
     console.log("Thread speakAndHighlight called for button:", button.textContent);
     
     document.querySelectorAll('#gridContainer button.scanning').forEach(btn => {
@@ -1389,10 +1390,9 @@ function speakAndHighlight(button) {
     try {
         const textToSpeak = button.textContent;
         console.log("Thread attempting to speak:", textToSpeak);
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
-        console.log("Thread speechSynthesis.speak() called successfully");
+        // Use backend TTS instead of browser speech synthesis
+        await announce(textToSpeak, "system", false);
+        console.log("Thread announce() called successfully");
     } catch (e) {
         console.error("Thread speech synthesis error:", e);
     }
@@ -1407,7 +1407,7 @@ function stopAuditoryScanning() {
         currentlyScannedButton = null;
     }
     currentButtonIndex = -1;
-    window.speechSynthesis.cancel();
+    // Note: No need to cancel speech here as backend TTS handles its own queue
 }
 
 // --- Input Handling ---

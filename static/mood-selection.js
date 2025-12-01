@@ -259,56 +259,49 @@ class MoodSelection {
         const moodGrid = document.createElement('div');
         moodGrid.className = 'mood-grid';
 
-        // Add mood buttons with avatar integration
+        // Add mood buttons with image matching (same as tap/grid pages)
         for (const mood of MOOD_OPTIONS) {
             const button = document.createElement('button');
             button.className = 'mood-button';
             button.setAttribute('data-mood', mood.name);
             
-            // Create avatar container
-            const avatarContainer = document.createElement('div');
-            avatarContainer.className = 'mood-avatar-container';
+            // Create image container
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'mood-image-container';
             
-            // Try to generate avatar first
-            if (this.useAvatars && mood.avatarEmotion) {
-                const avatarUrl = this.generateMoodAvatarURL(mood.avatarEmotion);
-                if (avatarUrl) {
-                    const avatarImg = document.createElement('img');
-                    avatarImg.className = 'mood-avatar';
-                    avatarImg.src = avatarUrl;
-                    avatarImg.alt = mood.name;
-                    
-                    // Fallback to emoji on avatar load error
-                    avatarImg.onerror = () => {
-                        console.warn(`Failed to load avatar for ${mood.name}, falling back to emoji`);
-                        avatarContainer.innerHTML = '';
-                        const emoji = document.createElement('div');
-                        emoji.className = 'mood-emoji';
-                        emoji.textContent = mood.emoji;
-                        avatarContainer.appendChild(emoji);
-                    };
-                    
-                    avatarContainer.appendChild(avatarImg);
-                } else {
-                    // Fallback to emoji if avatar URL generation failed
-                    const emoji = document.createElement('div');
-                    emoji.className = 'mood-emoji';
-                    emoji.textContent = mood.emoji;
-                    avatarContainer.appendChild(emoji);
-                }
-            } else {
-                // Use emoji if avatars disabled or no avatar emotion mapped
-                const emoji = document.createElement('div');
-                emoji.className = 'mood-emoji';
-                emoji.textContent = mood.emoji;
-                avatarContainer.appendChild(emoji);
+            // Try to get image using getSymbolImageForText (same as tap interface - no emoji fallbacks)
+            if (typeof getSymbolImageForText === 'function') {
+                getSymbolImageForText(mood.name).then(imageUrl => {
+                    console.log(`🎯 Image result for mood "${mood.name}": ${imageUrl ? 'Found' : 'Not found'}`);
+                    if (imageUrl) {
+                        // Clear any existing content and add image
+                        imageContainer.innerHTML = '';
+                        const imageElement = document.createElement('img');
+                        imageElement.className = 'mood-image';
+                        imageElement.src = imageUrl;
+                        imageElement.alt = mood.name;
+                        
+                        // No emoji fallback on image error - just hide broken image
+                        imageElement.onerror = () => {
+                            console.warn(`Failed to load image for ${mood.name} - using text-only display`);
+                            imageElement.style.display = 'none';
+                        };
+                        
+                        imageContainer.appendChild(imageElement);
+                    }
+                    // No fallback - if no image found, just show text
+                }).catch(error => {
+                    console.warn(`Error loading image for ${mood.name}:`, error);
+                    // No emoji fallback on error - just show text
+                });
             }
+            // No initial placeholder - clean start
             
             const name = document.createElement('div');
             name.className = 'mood-name';
             name.textContent = mood.name;
             
-            button.appendChild(avatarContainer);
+            button.appendChild(imageContainer);
             button.appendChild(name);
             
             button.addEventListener('click', () => this.selectMood(mood.name, button));
@@ -564,9 +557,105 @@ class MoodSelection {
     }
 
     /**
+     * Helper function to convert Base64 to ArrayBuffer
+     */
+    base64ToArrayBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    /**
+     * Backend TTS announce function for mood selection
+     */
+    async announce(textToAnnounce, announcementType = "system", recordHistory = false) {
+        try {
+            const fetchFunction = window.authenticatedFetch || fetch;
+            const response = await fetchFunction('/play-audio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => response.text());
+                throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+            }
+
+            const jsonResponse = await response.json();
+            const audioData = jsonResponse.audio_data;
+            const sampleRate = jsonResponse.sample_rate || 22050;
+
+            if (audioData) {
+                const audioDataArrayBuffer = this.base64ToArrayBuffer(audioData);
+                await this.playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+            }
+        } catch (error) {
+            console.error('Mood selection TTS error:', error);
+            // Fallback to browser speech synthesis if backend fails
+            this.fallbackToSpeechSynthesis(textToAnnounce);
+        }
+    }
+
+    /**
+     * Play audio using Web Audio API
+     */
+    async playAudioToDevice(audioDataBuffer, sampleRate, announcementType) {
+        let audioContext;
+        let source;
+
+        try {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            const audioBuffer = await audioContext.decodeAudioData(audioDataBuffer);
+            source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.start(0);
+
+            return new Promise((resolve) => {
+                source.onended = () => {
+                    if (audioContext && audioContext.state !== 'closed') {
+                        audioContext.close();
+                    }
+                    resolve();
+                };
+            });
+        } catch (error) {
+            console.error('Audio playback error in mood selection:', error);
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close();
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Fallback to browser speech synthesis
+     */
+    fallbackToSpeechSynthesis(text) {
+        if ('speechSynthesis' in window && text) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.8;
+            utterance.pitch = 1;
+            utterance.volume = 0.8;
+            window.speechSynthesis.speak(utterance);
+        }
+    }
+
+    /**
      * Speak button text for auditory feedback
      */
-    speakAndHighlight(button) {
+    async speakAndHighlight(button) {
         if (!button) return;
 
         let textToSpeak;
@@ -579,38 +668,28 @@ class MoodSelection {
             textToSpeak = button.textContent || button.innerText;
         }
 
-        // Use speech synthesis if available
-        if ('speechSynthesis' in window && textToSpeak) {
-            // Cancel any ongoing speech
-            window.speechSynthesis.cancel();
-            
-            const utterance = new SpeechSynthesisUtterance(textToSpeak);
-            utterance.rate = 0.8;
-            utterance.pitch = 1;
-            utterance.volume = 0.8;
-            
-            window.speechSynthesis.speak(utterance);
+        // Use backend TTS instead of browser speech synthesis
+        try {
+            await this.announce(textToSpeak, "system", false);
+        } catch (error) {
+            console.error('Error using backend TTS for mood scanning:', error);
         }
 
         console.log('Scanning:', textToSpeak);
     }
 
     /**
-     * Speak text using speech synthesis
+     * Speak text using backend TTS
      */
-    speakText(text) {
-        if ('speechSynthesis' in window && text) {
-            // Cancel any ongoing speech
-            window.speechSynthesis.cancel();
-            
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 0.8;
-            utterance.pitch = 1;
-            utterance.volume = 0.8;
-            
-            window.speechSynthesis.speak(utterance);
-        }
+    async speakText(text) {
         console.log('Speaking:', text);
+        try {
+            await this.announce(text, "system", false);
+        } catch (error) {
+            console.error('Error using backend TTS:', error);
+            // Fallback to browser speech synthesis
+            this.fallbackToSpeechSynthesis(text);
+        }
     }
 
     /**

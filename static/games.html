@@ -146,6 +146,13 @@
             animation: pulse 1s infinite;
         }
 
+        /* Make sure action buttons in actionButtons container also get scanning styles */
+        #actionButtons .game-button.scanning {
+            border-color: #fbbf24;
+            background-color: #fef3c7;
+            animation: pulse 1s infinite;
+        }
+
         .game-button i {
             display: block;
             font-size: 2rem;
@@ -194,6 +201,16 @@
             margin-bottom: 1rem;
         }
 
+        #qaList {
+            max-height: 150px;
+            height: 150px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            border: 1px solid #eee;
+            border-radius: 0.5rem;
+            background-color: #fafafa;
+        }
+
         .qa-item {
             padding: 0.5rem 0;
             border-bottom: 1px solid #eee;
@@ -213,48 +230,7 @@
             font-weight: bold;
         }
 
-        /* --- Action Buttons --- */
-        .action-buttons {
-            display: flex;
-            gap: 1rem;
-            margin: 2rem 0;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-
-        .action-button {
-            background: #FB4F14;
-            color: white;
-            border: none;
-            border-radius: 0.5rem;
-            padding: 1rem 2rem;
-            font-size: 1.1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .action-button:hover {
-            background: #dc2626;
-            transform: translateY(-2px);
-        }
-
-        .action-button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .action-button.secondary {
-            background: white;
-            color: #002244;
-            border: 2px solid #002244;
-        }
-
-        .action-button.secondary:hover {
-            background: #002244;
-            color: white;
-        }
+        /* --- Action Buttons now use game-button styling --- */
 
         /* --- Back Button --- */
         .back-button {
@@ -449,11 +425,15 @@
             </div>
 
             <!-- Action Buttons -->
-            <div id="actionButtons" class="action-buttons hidden">
-                <button id="askAnotherBtn" class="action-button" onclick="askAnother()">Ask Another Question</button>
-                <button id="makeGuessBtn" class="action-button" onclick="makeGuess()">Make a Guess</button>
-                <button id="newGameBtn" class="action-button secondary" onclick="newGame()">New Game</button>
-                <button id="exitGameBtn" class="action-button secondary" onclick="exitGame()">Exit Game</button>
+            <div id="actionButtons" class="game-grid hidden">
+                <div id="askAnotherBtn" class="game-button" onclick="askAnother()">
+                    <i class="fas fa-question-circle"></i>
+                    Ask Another Question
+                </div>
+                <div id="makeGuessBtn" class="game-button" onclick="makeGuess()">
+                    <i class="fas fa-lightbulb"></i>
+                    Make a Guess
+                </div>
             </div>
         </div>
     </div>
@@ -482,11 +462,13 @@
             askedQuestions: [], // Array of {question, answer} objects
             questionCount: 0,
             guessCount: 0,
+            previousGuesses: [], // Array of wrong guesses to exclude
             maxQuestions: 20,
             maxGuesses: 3,
             wakeWord: 'bravo', // Will be loaded from settings
             isListening: false,
-            currentPhase: 'menu' // 'menu', 'role', 'category', 'ready', 'playing', 'guessing', 'finished'
+            currentPhase: 'menu', // 'menu', 'role', 'category', 'ready', 'playing', 'guessing', 'finished'
+            scanDelay: 3500 // Will be loaded from settings
         };
 
         // Speech recognition setup
@@ -500,7 +482,6 @@
             currentIndex: 0,
             buttons: [],
             interval: null,
-            scanDelay: 2000, // 2 seconds per button
             restartDelay: 500
         };
 
@@ -597,11 +578,20 @@
                     const settings = await response.json();
                     gameState.wakeWord = (settings.wakeWordInterjection + ' ' + settings.wakeWordName).toLowerCase();
                     console.log('Wake word loaded:', gameState.wakeWord);
+                    
+                    // Load scan delay setting (same as gridpage)
+                    if (settings && typeof settings.scanDelay === 'number' && !isNaN(settings.scanDelay)) {
+                        gameState.scanDelay = Math.max(100, parseInt(settings.scanDelay));
+                        console.log(`Games scan delay loaded: ${gameState.scanDelay}ms`);
+                    } else {
+                        gameState.scanDelay = 3500; // Default
+                    }
                 }
             } catch (error) {
                 console.error('Error loading user settings:', error);
-                // Use default wake word
+                // Use defaults
                 gameState.wakeWord = 'hey bravo';
+                gameState.scanDelay = 3500;
             }
         }
 
@@ -651,17 +641,22 @@
                     hideListening();
                     isRecognitionActive = false;
                     
-                    // Auto-restart for certain phases
+                    // Auto-restart for certain phases, but wait longer if an announcement is playing
                     if (gameState.currentPhase === 'ready' || 
                         gameState.currentPhase === 'awaiting_wake_word' ||
                         gameState.currentPhase === 'awaiting_answer') {
+                        
+                        // If an announcement is currently playing, wait longer to avoid interference
+                        const delay = isAnnouncingNow ? 4000 : 1000;
+                        console.log(`Recognition onend: Restarting in ${delay}ms (announcing: ${isAnnouncingNow})`);
+                        
                         setTimeout(() => {
                             if (gameState.currentPhase === 'ready' || 
                                 gameState.currentPhase === 'awaiting_wake_word' ||
                                 gameState.currentPhase === 'awaiting_answer') {
                                 startListening();
                             }
-                        }, 1000);
+                        }, delay);
                     }
                 };
             } else {
@@ -687,8 +682,8 @@
                 if (transcript.includes('ready')) {
                     proceedAfterReady();
                 } else {
+                    // Announce waiting message - onend handler will restart listening after proper delay
                     announce("I'm waiting for you to say 'ready'");
-                    // Don't restart here - let the onend handler do it
                 }
             } else if (gameState.currentPhase === 'awaiting_answer') {
                 // Waiting for yes/no answer
@@ -759,6 +754,14 @@
 
         // Start listening for speech
         function startListening() {
+            console.log(`LISTENING: startListening() called in phase: ${gameState.currentPhase}`);
+            
+            // Completely prevent listening during action selection phase
+            if (gameState.currentPhase === 'action_selection') {
+                console.log('LISTENING: Blocked during action_selection phase');
+                return;
+            }
+            
             if (recognition && !isRecognitionActive) {
                 try {
                     recognition.start();
@@ -777,17 +780,52 @@
             }
         }
 
+        // Stop listening for speech
+        function stopListening() {
+            if (recognition && isRecognitionActive) {
+                try {
+                    recognition.stop();
+                    isRecognitionActive = false;
+                    hideListening();
+                } catch (error) {
+                    console.log('Recognition already stopped or error stopping:', error);
+                }
+            }
+        }
+
         // Scanning System Functions
         function startScanning(containerId) {
+            console.log(`SCANNING: Starting scan for container: ${containerId}`);
+            
+            // Stop any existing scanning first
+            stopScanning();
+            
             const container = document.getElementById(containerId);
-            if (!container) return;
+            if (!container) {
+                console.error(`SCANNING: Container ${containerId} not found`);
+                return;
+            }
+            
+            console.log(`SCANNING: Container found:`, container);
+            console.log(`SCANNING: Container classes:`, container.className);
+            console.log(`SCANNING: Container hidden?`, container.classList.contains('hidden'));
             
             scanningSystem.currentContainer = container;
+            // Look for game-button classes (action buttons now use game-button class)
             scanningSystem.buttons = Array.from(container.querySelectorAll('.game-button'));
             scanningSystem.currentIndex = 0;
             scanningSystem.isScanning = true;
             
-            if (scanningSystem.buttons.length === 0) return;
+            console.log(`SCANNING: Found ${scanningSystem.buttons.length} buttons`);
+            scanningSystem.buttons.forEach((btn, i) => {
+                console.log(`SCANNING: Button ${i}: "${btn.textContent}" classes: ${btn.className}`);
+            });
+            console.log(`SCANNING: scanDelay is ${gameState.scanDelay}ms`);
+            
+            if (scanningSystem.buttons.length === 0) {
+                console.error('SCANNING: No buttons found');
+                return;
+            }
             
             // Start scanning cycle
             scanNextButton();
@@ -795,6 +833,8 @@
 
         function scanNextButton() {
             if (!scanningSystem.isScanning || scanningSystem.buttons.length === 0) return;
+            
+            console.log(`SCANNING: Index ${scanningSystem.currentIndex}, Delay: ${gameState.scanDelay}ms`);
             
             // Remove scanning class from all buttons
             scanningSystem.buttons.forEach(btn => {
@@ -806,22 +846,30 @@
             if (currentButton) {
                 currentButton.classList.add('scanning');
                 
-                // Get button text for speech synthesis (like gridpage)
+                // Get button text for speech synthesis (like gridpage - use speechSynthesis, not announce)
                 let buttonText = currentButton.textContent || currentButton.innerText || '';
                 // Clean up the text (remove extra whitespace)
                 buttonText = buttonText.trim().replace(/\s+/g, ' ');
                 
-                // Announce the button text
-                if (buttonText && buttonText !== 'Something Else' && buttonText !== 'Exit Game') {
-                    announce(buttonText);
+                console.log(`SCANNING: Speaking "${buttonText}"`);
+                
+                // Use speechSynthesis for scanning (personal speaker/voice, like gridpage)
+                try {
+                    const utterance = new SpeechSynthesisUtterance(buttonText);
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(utterance);
+                    console.log('SCANNING: Speech synthesis called successfully');
+                } catch (e) {
+                    console.error("Speech synthesis error:", e);
                 }
             }
             
             // Move to next button
             scanningSystem.currentIndex = (scanningSystem.currentIndex + 1) % scanningSystem.buttons.length;
             
-            // Schedule next scan
-            scanningSystem.interval = setTimeout(scanNextButton, scanningSystem.scanDelay);
+            // Schedule next scan using user's scan delay setting
+            console.log(`SCANNING: Next scan in ${gameState.scanDelay}ms`);
+            scanningSystem.interval = setTimeout(scanNextButton, gameState.scanDelay);
         }
 
         function stopScanning() {
@@ -906,6 +954,20 @@
 
             console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
+            // Show speech bubble if enabled (same as gridpage.js)
+            if (typeof showSplashScreen === 'function') {
+                showSplashScreen(textToAnnounce);
+            }
+
+            // Stop speech recognition during announcements to prevent interference
+            if (recognition && isRecognitionActive) {
+                try {
+                    recognition.stop();
+                } catch (e) {
+                    console.log('Recognition already stopped');
+                }
+            }
+
             try {
                 // Fetch audio data from server using authenticatedFetch (same as gridpage)
                 const response = await authenticatedFetch(`/play-audio`, {
@@ -971,6 +1033,7 @@
                 maxQuestions: 20,
                 maxGuesses: 3,
                 wakeWord: gameState.wakeWord,
+                scanDelay: gameState.scanDelay || 3500, // Preserve or default scan delay
                 isListening: false,
                 currentPhase: 'role'
             };
@@ -1156,7 +1219,8 @@
                         game_type: '20_questions',
                         category: gameState.category,
                         asked_questions: gameState.askedQuestions,
-                        guess_count: gameState.guessCount
+                        guess_count: gameState.guessCount,
+                        previous_guesses: gameState.previousGuesses
                     })
                 });
                 
@@ -1192,7 +1256,7 @@
                 if (type === 'question') {
                     button.innerHTML = `<i class="fas fa-question"></i>${option}`;
                 } else if (type === 'guess') {
-                    button.innerHTML = `<i class="fas fa-lightbulb"></i>${option}`;
+                    button.innerHTML = `<i class="fas fa-lightbulb"></i>Is it ${option}?`;
                 } else if (type === 'select') {
                     button.innerHTML = `<i class="fas fa-star"></i>${option}`;
                 }
@@ -1225,14 +1289,9 @@
                 document.getElementById('statusText').textContent = `Choose your ${gameState.category}:`;
             }
             
-            // Start scanning after options are displayed (listening depends on context)
+            // Start scanning after options are displayed (no listening - user should scan/select)
             setTimeout(() => {
                 startScanning('optionsSelection');
-                
-                // Only start listening if we're in a voice response phase
-                if (gameState.currentPhase === 'playing' || gameState.currentPhase === 'guessing') {
-                    startListening(); // Listen for wake word to select
-                }
             }, 500);
         }
 
@@ -1318,9 +1377,12 @@
             gameState.currentPhase = 'listening_for_intent';
             announce("I'm listening. Do you have a question or guess?");
             
+            // Wait for the announcement to finish playing, then start listening for intent
             setTimeout(() => {
-                startListening();
-            }, 2000);
+                if (gameState.currentPhase === 'listening_for_intent') {
+                    startListening();
+                }
+            }, 4000); // Increased to 4 seconds to give time for TTS and user response
         }
 
         // Handle player intent (question or guess)
@@ -1464,6 +1526,9 @@
 
         // Handle yes/no answer
         function handleAnswer(answer) {
+            // Stop listening since we got an answer
+            stopListening();
+            
             // Add to question history
             const lastQuestion = gameState.askedQuestions.length > 0 ? 
                 gameState.askedQuestions[gameState.askedQuestions.length - 1].question : 'Unknown';
@@ -1517,6 +1582,13 @@
 
         // Show action buttons
         function showActionButtons() {
+            // Ensure listening is stopped before showing action buttons
+            stopListening();
+            hideListening();
+            
+            // Set phase to action_selection to prevent wake word detection during scanning
+            gameState.currentPhase = 'action_selection';
+            
             document.getElementById('actionButtons').classList.remove('hidden');
             document.getElementById('statusText').textContent = 'What would you like to do next?';
             
@@ -1544,12 +1616,13 @@
         function makeGuessAttempt(guess) {
             gameState.guessCount++;
             gameState.currentPhase = 'awaiting_result';
+            gameState.currentGuess = guess; // Store current guess for potential addition to previousGuesses
             
             // Hide options
             document.getElementById('optionsSelection').classList.add('hidden');
             
-            // Announce the guess
-            announce(guess);
+            // Announce the guess as a proper question
+            announce(`Is it ${guess}?`);
             
             // Start listening for right/wrong after announcement
             setTimeout(() => {
@@ -1565,6 +1638,13 @@
                     goBackToMenu();
                 }, 3000);
             } else {
+                // Add wrong guess to previousGuesses to avoid repeating it
+                if (gameState.currentGuess && !gameState.previousGuesses.includes(gameState.currentGuess)) {
+                    gameState.previousGuesses.push(gameState.currentGuess);
+                    console.log(`Added wrong guess to previousGuesses: ${gameState.currentGuess}`);
+                    console.log(`Previous guesses now: ${JSON.stringify(gameState.previousGuesses)}`);
+                }
+                
                 if (gameState.guessCount >= gameState.maxGuesses) {
                     announce("That was tough! I hope I do better next time!");
                     setTimeout(() => {
@@ -1598,7 +1678,9 @@
                 historyContainer.classList.remove('hidden');
                 
                 qaList.innerHTML = '';
-                gameState.askedQuestions.forEach(qa => {
+                // Show most recent questions first by iterating in reverse
+                for (let i = gameState.askedQuestions.length - 1; i >= 0; i--) {
+                    const qa = gameState.askedQuestions[i];
                     const item = document.createElement('div');
                     item.className = 'qa-item';
                     item.innerHTML = `
@@ -1606,7 +1688,7 @@
                         <div class="qa-answer">A: ${qa.answer}</div>
                     `;
                     qaList.appendChild(item);
-                });
+                }
             }
         }
 

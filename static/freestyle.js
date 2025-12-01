@@ -2174,10 +2174,10 @@ function stopScanning() {
     }
     
     currentButtonIndex = -1;
-    window.speechSynthesis.cancel(); // Cancel any ongoing speech
+    // Note: No need to cancel speech here as backend TTS handles its own queue
 }
 
-function speakAndHighlight(button) {
+async function speakAndHighlight(button) {
     // Remove scanning class from all buttons
     document.querySelectorAll('.scanning-highlight').forEach(btn => {
         btn.classList.remove('scanning-highlight');
@@ -2199,10 +2199,8 @@ function speakAndHighlight(button) {
             textToSpeak = currentSpellingWord.trim();
         }
         
-        // Use speech synthesis for scanning (personal speaker, not announced)
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        // Use backend TTS instead of browser speech synthesis
+        await announce(textToSpeak, "system", false);
     } catch (e) {
         console.error("Speech synthesis error:", e);
     }

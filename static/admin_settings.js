@@ -2,6 +2,40 @@
 let isAuthContextReady = false;
 let isDomContentLoaded = false;
 
+// Volume Slider Handler
+function volumeSliderHandler() {
+    console.log('Volume slider moved to:', this.value);
+    const display = document.getElementById('volumeDisplay');
+    if (display) {
+        display.textContent = `${this.value}/10`;
+        console.log('Volume display updated to:', display.textContent);
+    } else {
+        console.error('Volume display element not found during slider change');
+    }
+}
+
+// Setup volume slider function
+function setupVolumeSliderNow() {
+    console.log('Setting up volume slider...');
+    const slider = document.getElementById('applicationVolume');
+    const display = document.getElementById('volumeDisplay');
+    
+    if (slider && display) {
+        slider.addEventListener('input', function() {
+            display.textContent = `${this.value}/10`;
+            console.log('Volume changed to:', this.value);
+        });
+        console.log('Volume slider setup complete');
+        return true;
+    } else {
+        console.error('Volume slider elements not found');
+        return false;
+    }
+}
+
+// Try setup immediately
+setupVolumeSliderNow();
+
 // --- DOM Elements ---
 // Settings elements
 let scanDelayInput = null; 
@@ -18,7 +52,9 @@ const autoCleanInput = document.getElementById('autoClean');
 const displaySplashInput = document.getElementById('displaySplash');
 const displaySplashTimeInput = document.getElementById('displaySplashTime');
 const enableMoodSelectionInput = document.getElementById('enableMoodSelection');
+const useTapInterfaceInput = document.getElementById('useTapInterface');
 const enablePictogramsInput = document.getElementById('enablePictograms');
+const enableSightWordsInput = document.getElementById('enableSightWords');
 const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
 const testTtsVoiceButton = document.getElementById('testTtsVoiceButton');
@@ -27,6 +63,26 @@ const toolbarPINInput = document.getElementById('toolbarPIN');
 // Grid slider elements will be assigned in initializePage when DOM is ready
 let gridColumnsSlider = null;
 let gridColumnsValue = null;
+// Volume slider elements
+let applicationVolumeSlider = null;
+let volumeDisplay = null;
+
+// Backup volume slider initialization
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOMContentLoaded - Setting up volume slider as backup...');
+    const slider = document.getElementById('applicationVolume');
+    const display = document.getElementById('volumeDisplay');
+    
+    if (slider && display) {
+        console.log('DOMContentLoaded found volume elements, adding listener...');
+        slider.addEventListener('input', function() {
+            display.textContent = `${this.value}/10`;
+            console.log('DOMContentLoaded listener - Volume updated to:', this.value);
+        });
+    } else {
+        console.error('DOMContentLoaded - Volume elements still not found!');
+    }
+});
 
 const llmProviderSelect = document.getElementById('llmProvider'); // Updated for provider selection
 
@@ -107,6 +163,27 @@ async function loadSettings() {
         if (wakeWordNameInput) { wakeWordNameInput.value = currentSettings.wakeWordName || ''; }
         if (CountryCodeInput) { CountryCodeInput.value = currentSettings.CountryCode || ''; }
         if (speechRateInput) { speechRateInput.value = currentSettings.speech_rate || 180; } // Populate speech rate
+        
+        // Initialize volume slider elements
+        if (!applicationVolumeSlider) {
+            applicationVolumeSlider = document.getElementById('applicationVolume');
+            volumeDisplay = document.getElementById('volumeDisplay');
+            
+            if (applicationVolumeSlider && volumeDisplay) {
+                applicationVolumeSlider.addEventListener('input', function() {
+                    volumeDisplay.textContent = `${this.value}/10`;
+                    console.log('Volume slider updated to:', this.value);
+                });
+                console.log('Volume slider event listener added');
+            }
+        }
+        
+        if (applicationVolumeSlider && volumeDisplay) {
+            const volume = currentSettings.applicationVolume !== undefined ? currentSettings.applicationVolume : 8;
+            applicationVolumeSlider.value = volume;
+            volumeDisplay.textContent = `${volume}/10`;
+            console.log('Application volume set to:', volume);
+        }
         if (LLMOptionsInput) { LLMOptionsInput.value = currentSettings.LLMOptions || ''; }
         if (FreestyleOptionsInput) { 
             console.log('DEBUG FreestyleOptions - Element found:', !!FreestyleOptionsInput);
@@ -120,7 +197,9 @@ async function loadSettings() {
         if (displaySplashInput) { displaySplashInput.checked = currentSettings.displaySplash || false; }
         if (displaySplashTimeInput) { displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000; }
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
+        if (useTapInterfaceInput) { useTapInterfaceInput.checked = currentSettings.useTapInterface || false; }
         if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms || false; }
+        if (enableSightWordsInput) { enableSightWordsInput.checked = currentSettings.enableSightWords !== false; }
         if (sightWordGradeLevelInput) { sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k'; }
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
             ttsVoiceSelect.value = currentSettings.selected_tts_voice_name;
@@ -163,6 +242,7 @@ async function saveSettings() {
     const newName = wakeWordNameInput.value.trim();
     const newCountryCode = CountryCodeInput.value.trim();
     const newSpeechRate = speechRateInput.value; // Get speech rate value
+    const newApplicationVolume = applicationVolumeSlider ? parseInt(applicationVolumeSlider.value) : 8;
     const newLLMOptions = LLMOptionsInput.value; 
     const newFreestyleOptions = FreestyleOptionsInput.value;
     console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
@@ -173,7 +253,9 @@ async function saveSettings() {
     const newDisplaySplash = displaySplashInput.checked;
     const newDisplaySplashTime = displaySplashTimeInput.value ? parseInt(displaySplashTimeInput.value) : 3000;
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
+    const newUseTapInterface = useTapInterfaceInput.checked;
     const newEnablePictograms = enablePictogramsInput.checked;
+    const newEnableSightWords = enableSightWordsInput.checked;
     const newSightWordGradeLevel = sightWordGradeLevelInput.value;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
     const newGridColumns = gridColumnsSlider ? parseInt(gridColumnsSlider.value) : 6;
@@ -243,6 +325,7 @@ async function saveSettings() {
         wakeWordName: newName,
         CountryCode: newCountryCode,
         speech_rate: parseInt(newSpeechRate),
+        applicationVolume: newApplicationVolume,
         LLMOptions: parseInt(newLLMOptions),
         FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
@@ -252,7 +335,9 @@ async function saveSettings() {
         displaySplash: newDisplaySplash,
         displaySplashTime: newDisplaySplashTime,
         enableMoodSelection: newEnableMoodSelection,
+        useTapInterface: newUseTapInterface,
         enablePictograms: newEnablePictograms,
+        enableSightWords: newEnableSightWords,
         sightWordGradeLevel: newSightWordGradeLevel,
         selected_tts_voice_name: newSelectedTtsVoice,
         llm_provider: newLlmProvider, // Updated to use provider instead of specific model
@@ -279,6 +364,11 @@ async function saveSettings() {
         if (wakeWordNameInput) wakeWordNameInput.value = currentSettings.wakeWordName || '';
         if (CountryCodeInput) CountryCodeInput.value = currentSettings.CountryCode || '';
         if (speechRateInput) speechRateInput.value = currentSettings.speech_rate || 180;
+        if (applicationVolumeSlider && volumeDisplay) {
+            const volume = currentSettings.applicationVolume !== undefined ? currentSettings.applicationVolume : 8;
+            applicationVolumeSlider.value = volume;
+            volumeDisplay.textContent = `${volume}/10`;
+        }
         if (LLMOptionsInput) LLMOptionsInput.value = currentSettings.LLMOptions || '';
         if (FreestyleOptionsInput) {
             console.log('DEBUG FreestyleOptions - Reload value:', currentSettings.FreestyleOptions);
@@ -290,6 +380,11 @@ async function saveSettings() {
         if (autoCleanInput) autoCleanInput.checked = currentSettings.autoClean || false;
         if (displaySplashInput) displaySplashInput.checked = currentSettings.displaySplash || false;
         if (displaySplashTimeInput) displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000;
+        if (enableMoodSelectionInput) enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false;
+        if (useTapInterfaceInput) useTapInterfaceInput.checked = currentSettings.useTapInterface || false;
+        if (enablePictogramsInput) enablePictogramsInput.checked = currentSettings.enablePictograms || false;
+        if (enableSightWordsInput) enableSightWordsInput.checked = currentSettings.enableSightWords !== false;
+        if (sightWordGradeLevelInput) sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k';
         if (ttsVoiceSelect) ttsVoiceSelect.value = currentSettings.selected_tts_voice_name || '';
         // Update gridColumns slider after save
         if (gridColumnsSlider && currentSettings.gridColumns !== undefined) {
