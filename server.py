@@ -90,7 +90,7 @@ except ImportError:
     print(f"   Debug Mode: {DEBUG}")
 
 
-from fastapi import FastAPI, Request, HTTPException, Body, Path, Response, Header, Depends, UploadFile
+from fastapi import FastAPI, Request, HTTPException, Body, Path, Response, Header, Depends, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -395,6 +395,12 @@ async def verify_firebase_token_only(
         logging.error(f"Error during token-only verification: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Authentication error during token verification: {e}")
 
+# Admin verification dependency
+async def verify_admin_user(token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]) -> Dict[str, str]:
+    """Verify that the authenticated user is admin@talkwithbravo.com"""
+    if token_info.get("email") != "admin@talkwithbravo.com":
+        raise HTTPException(status_code=403, detail="Access denied. Admin privileges required.")
+    return token_info
 
 
 async def get_current_account_and_user_ids(
@@ -1181,6 +1187,8 @@ class FreestyleWordOptionsRequest(BaseModel):
     single_words_only: Optional[bool] = Field(default=True, description="Whether to return only single words")
     request_different_options: bool = Field(default=False, description="Request alternative/different options")
     originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
+    current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
+    max_options: Optional[int] = Field(None, description="Override the user's FreestyleOptions setting for this request", ge=1, le=50)
 
 @app.post("/api/generate-llm-prompt")
 async def generate_llm_prompt(payload: GeneratePromptRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
@@ -1232,6 +1240,190 @@ Generate ONLY the prompt text, nothing else:"""
         return {"success": True, "prompt": fallback_prompt}
 
 
+class InterviewResponse(BaseModel):
+    questionId: str
+    question: str
+    answer: str
+    timestamp: str
+    type: str
+
+class GenerateNarrativeRequest(BaseModel):
+    prompt: str
+    responses: List[InterviewResponse]
+
+@app.post("/api/interview/generate-narrative")
+async def generate_interview_narrative(payload: GenerateNarrativeRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate a comprehensive user profile narrative from interview responses"""
+    
+    try:
+        # Build the interview summary
+        interview_summary = "\n\n".join([
+            f"Q: {response.question}\nA: {response.answer}"
+            for response in payload.responses
+        ])
+        
+        # Enhanced prompt for generating a comprehensive narrative story about the user
+        narrative_prompt = f"""Based on these interview questions and answers, write a comprehensive narrative story about this person - like a detailed essay or profile that captures who they are as a complete individual.
+
+INTERVIEW DATA:
+{interview_summary}
+
+IMPORTANT: Write ONLY a flowing narrative story in paragraph form. Do NOT include any JSON, lists, bullet points, or structured data at the end.
+
+Write a flowing, engaging narrative in third person that tells the story of this person. Organize it like an essay with clear paragraphs that naturally flow from one topic to the next. Include:
+
+• Their basic identity, personality, and what makes them unique
+• Their interests, hobbies, and what they're passionate about  
+• How they communicate and express themselves
+• Their relationships with family and friends
+• Their daily life, routines, and preferences
+• Any challenges they face and how they handle them
+• Their entertainment preferences and favorite activities
+• What's important to them and what brings them joy
+
+Make this narrative feel like a complete portrait of who they are - something that would help anyone understand their personality, needs, and authentic voice. Write it as a cohesive story, not just a list of facts. Use connecting words and transitions to make it flow naturally from paragraph to paragraph.
+
+RESPONSE FORMAT: Return only the narrative text - no JSON, no lists, no additional formatting. Just the story about this person."""
+
+        # Generate the narrative using the same infrastructure as the /llm endpoint
+        full_prompt = await build_full_prompt_for_non_cached_llm(current_ids["account_id"], current_ids["aac_user_id"], narrative_prompt)
+        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, current_ids["account_id"], current_ids["aac_user_id"])
+        
+        if response_text:
+            narrative = response_text.strip()
+            
+            # Clean up any unwanted JSON or structured data at the end
+            # Look for JSON array pattern and remove everything from the first [ onwards
+            json_start = narrative.find('\n[')
+            if json_start > 0:
+                narrative = narrative[:json_start].strip()
+                logging.info("Removed JSON appendix from narrative")
+            
+            # Also check for other structured patterns
+            patterns_to_remove = [
+                '\n```json',
+                '\n```',
+                '\n{',
+                '\n•',
+                '\n-',
+                '\n*'
+            ]
+            
+            for pattern in patterns_to_remove:
+                pattern_pos = narrative.find(pattern)
+                if pattern_pos > 100:  # Only remove if it's not near the beginning
+                    narrative = narrative[:pattern_pos].strip()
+                    logging.info(f"Removed structured content starting with '{pattern}'")
+                    break
+            
+        else:
+            # Fallback: create a basic narrative from responses
+            narrative = _create_basic_narrative_from_responses(payload.responses)
+        
+        # Save the generated narrative to user profile (preserve existing fields like name)
+        try:
+            # Load existing user data to preserve name and other fields
+            existing_data = await load_firestore_document(
+                account_id=current_ids["account_id"],
+                aac_user_id=current_ids["aac_user_id"],
+                doc_subpath="info/user_narrative",
+                default_data={}
+            )
+            # Merge with new narrative data
+            existing_data.update({
+                "narrative": narrative, 
+                "generated_at": dt.now().isoformat(), 
+                "source": "comprehensive_interview"
+            })
+            
+            await save_firestore_document(
+                account_id=current_ids["account_id"],
+                aac_user_id=current_ids["aac_user_id"], 
+                doc_subpath="info/user_narrative",
+                data_to_save=existing_data
+            )
+            logging.info(f"Saved user narrative for account {current_ids['account_id']}, user {current_ids['aac_user_id']}")
+        except Exception as save_error:
+            logging.error(f"Failed to save narrative to Firestore: {save_error}")
+            # Don't fail the whole request if save fails
+        
+        return JSONResponse(content={"narrative": narrative})
+            
+    except Exception as e:
+        logging.error(f"Error generating interview narrative: {e}", exc_info=True)
+        return JSONResponse(content={"error": "Failed to generate narrative"}, status_code=500)
+
+@app.get("/api/user-narrative")
+async def get_user_narrative(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Retrieve the saved user narrative"""
+    
+    try:
+        narrative_data = await load_firestore_document(
+            account_id=current_ids["account_id"],
+            aac_user_id=current_ids["aac_user_id"],
+            doc_subpath="info/user_narrative",
+            default_data={}
+        )
+        
+        if narrative_data and "narrative" in narrative_data:
+            return JSONResponse(content={
+                "narrative": narrative_data["narrative"],
+                "generated_at": narrative_data.get("generated_at"),
+                "source": narrative_data.get("source", "unknown")
+            })
+        else:
+            return JSONResponse(content={"narrative": None}, status_code=404)
+            
+    except Exception as e:
+        logging.error(f"Error retrieving user narrative: {e}", exc_info=True)
+        return JSONResponse(content={"error": "Failed to retrieve narrative"}, status_code=500)
+
+def _create_basic_narrative_from_responses(responses: List[InterviewResponse]) -> str:
+    """Create a basic narrative when LLM generation fails"""
+    
+    user_name = "The user"
+    narrative_parts = []
+    
+    # Extract user name from first response if available
+    for response in responses:
+        if 'name' in response.question.lower() and 'using' in response.question.lower():
+            user_name = response.answer.strip()
+            break
+    
+    narrative_parts.append(f"This profile is for {user_name}.")
+    
+    # Organize responses by type
+    basic_info = []
+    preferences = []
+    activities = []
+    other_info = []
+    
+    for response in responses:
+        answer = response.answer.strip()
+        if not answer:
+            continue
+            
+        if response.type in ['user_basic']:
+            basic_info.append(f"{response.question.replace('{userName}', user_name)}: {answer}")
+        elif response.type in ['preferences', 'interests']:
+            preferences.append(f"{response.question.replace('{userName}', user_name)}: {answer}")
+        elif response.type in ['activities', 'entertainment']:
+            activities.append(f"{response.question.replace('{userName}', user_name)}: {answer}")
+        else:
+            other_info.append(f"{response.question.replace('{userName}', user_name)}: {answer}")
+    
+    if basic_info:
+        narrative_parts.append("Basic Information: " + "; ".join(basic_info))
+    if preferences:
+        narrative_parts.append("Preferences and Interests: " + "; ".join(preferences))
+    if activities:
+        narrative_parts.append("Activities: " + "; ".join(activities))
+    if other_info:
+        narrative_parts.append("Additional Information: " + "; ".join(other_info))
+    
+    return "\n\n".join(narrative_parts)
+
+
 # --- Configuration ---
 SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embeddings
 
@@ -1267,7 +1459,8 @@ DEFAULT_WAKE_WORD_NAME = "Friend" # Default name
 
 DEFAULT_USER_INFO = {
     "narrative": "Welcome to Bravo! This is your personal communication assistant. As you use the app, this section will contain information about you, your interests, communication preferences, and important personal details that help customize your experience. You can update this information anytime through the user info settings to make your communication more personalized and effective.",
-    "currentMood": None
+    "currentMood": None,
+    "name": ""
 }
 DEFAULT_USER_CURRENT = {"location": "Unknown", "people": "None", "activity": "Idle", "loaded_at": None, "favorite_name": None, "saved_at": None}
 DEFAULT_COLUMNS = 10 # Default number of columns in the grid
@@ -1297,7 +1490,10 @@ DEFAULT_SETTINGS = {
     "displaySplashTime": 3000,  # Default splash screen duration (3 seconds)
     "enableMoodSelection": True,  # Default mood selection enabled
     "enablePictograms": False,  # Default AAC pictograms disabled
-    "sightWordGradeLevel": "pre_k"  # Default sight word grade level
+    "enableSightWords": True,  # Default sight word logic enabled
+    "sightWordGradeLevel": "pre_k",  # Default sight word grade level
+    "useTapInterface": False,  # Default to gridpage interface
+    "applicationVolume": 8  # Default application volume (80%)
 }
 
 
@@ -3225,11 +3421,25 @@ async def update_user_info_endpoint(payload: UserInfoNarrative, current_ids: Ann
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     narrative = payload.narrative
+    
+    # Load existing user data to preserve name and other fields
+    existing_data = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data={}
+    )
+    # Merge with new narrative data
+    existing_data.update({
+        "narrative": narrative,
+        "updated_at": dt.now().isoformat()
+    })
+    
     success = await save_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="info/user_narrative",
-        data_to_save={"narrative": narrative} 
+        data_to_save=existing_data
     )
     
     # Cache invalidation for user info changes
@@ -5366,7 +5576,10 @@ class SettingsModel(BaseModel):
     displaySplashTime: Optional[int] = Field(None, description="Duration in milliseconds to display splash screen.", ge=500, le=10000)
     enableMoodSelection: Optional[bool] = Field(None, description="Enable/disable mood selection at session start.")
     enablePictograms: Optional[bool] = Field(None, description="Enable/disable AAC pictogram display on buttons.")
+    enableSightWords: Optional[bool] = Field(None, description="Enable/disable sight word logic for text-only display")
     sightWordGradeLevel: Optional[str] = Field(None, description="Dolch sight word grade level for text-only buttons (pre_k, kindergarten, first_grade, second_grade, third_grade, third_grade_with_nouns)")
+    useTapInterface: Optional[bool] = Field(None, description="Use tap interface as main interface instead of gridpage")
+    applicationVolume: Optional[int] = Field(None, description="Application volume level 0-10", ge=0, le=10)
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -5408,6 +5621,31 @@ async def load_settings_from_file(account_id: str, aac_user_id: str) -> Dict:
         doc_subpath="settings/app_settings",
         default_data=DEFAULT_SETTINGS.copy()
     )
+
+
+@app.get("/api/interface-preference")
+async def get_interface_preference(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """
+    Get the user's preferred interface (gridpage or tap interface)
+    Returns the useTapInterface setting value
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_tap_interface = settings.get("useTapInterface", False)
+        
+        return {
+            "useTapInterface": use_tap_interface,
+            "preferredInterface": "tap_interface.html" if use_tap_interface else "gridpage.html"
+        }
+    except Exception as e:
+        logging.error(f"Error getting interface preference for account {account_id}, user {aac_user_id}: {e}")
+        return {
+            "useTapInterface": False,
+            "preferredInterface": "gridpage.html"
+        }
 
 
 async def save_settings_to_file(account_id: str, aac_user_id: str, settings_data_to_save: Dict) -> bool:
@@ -6173,8 +6411,8 @@ class ChatEntry(BaseModel):
     id: str # UUID generated by backend
 
 class ChatHistoryPayload(BaseModel): # For receiving data from gridpage.js
-     question: str
-     response: str
+     question: Optional[str] = ""
+     response: Optional[str] = ""
 
 
 
@@ -6592,6 +6830,44 @@ async def manage_relationships(request: RelationshipManagementRequest, current_i
         raise HTTPException(status_code=400, detail="Invalid action. Use 'add' or 'remove'.")
 
 
+@app.post("/api/save-family-friends-interview")
+async def save_family_friends_interview(interview_data: dict, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save family & friends interview data for logging and potential future use."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    logging.info(f"POST /api/save-family-friends-interview request received for account {account_id} and user {aac_user_id}")
+    
+    try:
+        # Create a document in Firestore to store the interview data
+        doc_subpath = f"interviews/family_friends_{interview_data.get('sessionId', 'unknown')}"
+        
+        interview_record = {
+            "sessionId": interview_data.get("sessionId"),
+            "responses": interview_data.get("responses", []),
+            "extractedPeople": interview_data.get("extractedPeople", []),
+            "completedAt": interview_data.get("completedAt"),
+            "savedAt": dt.now().isoformat(),
+            "type": "family_friends_interview"
+        }
+        
+        success = await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath=doc_subpath,
+            data_to_save=interview_record
+        )
+        
+        if success:
+            logging.info(f"Successfully saved family/friends interview data for account {account_id} and user {aac_user_id}")
+            return JSONResponse(content={"success": True, "message": "Interview data saved successfully"})
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save interview data")
+            
+    except Exception as e:
+        logging.error(f"Error saving family/friends interview data for account {account_id} and user {aac_user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save interview data")
+
+
 # /api/user-info
 @app.get("/api/user-info")
 async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
@@ -6607,9 +6883,13 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
     )
     response_data = {
         "userInfo": user_info_content_dict.get("narrative", ""),
-        "currentMood": user_info_content_dict.get("currentMood")
+        "currentMood": user_info_content_dict.get("currentMood"),
+        "name": user_info_content_dict.get("name", ""),
+        "profileImageUrl": user_info_content_dict.get("profileImageUrl")
     }
     
+    # Debug: log what name we are returning
+    logging.info(f"🔍 BACKEND LOAD DEBUG - Name from Firestore: {user_info_content_dict.get("name", "")}, returning: {response_data["name"]}")
     # Include avatar config if it exists
     if "avatarConfig" in user_info_content_dict:
         response_data["avatarConfig"] = user_info_content_dict["avatarConfig"]
@@ -6674,25 +6954,52 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     user_info = request.get("narrative", request.get("userInfo", ""))
     current_mood = request.get("currentMood")
     avatar_config = request.get("avatarConfig")  # Add support for avatar configuration
+    user_name = request.get("name", "")  # Add support for user name
+    profile_image_url = request.get("profileImageUrl")  # Add support for profile image URL
     
-    logging.info(f"🔄 POST /api/user-info request - account {account_id}, user {aac_user_id}")
-    logging.info(f"📝 Narrative length: {len(user_info) if user_info else 0} chars")
-    logging.info(f"😊 Current mood: {current_mood}")
-    logging.info(f"👤 Avatar config: {avatar_config}")
+    # Debug: log what name we received and extracted
+    logging.warning(f"🔍 BACKEND SAVE DEBUG - Name received in request: '{request.get('name', 'NOT_FOUND')}', extracted name: '{user_name}'")
+    
+    logging.warning(f"🔄 POST /api/user-info request - account {account_id}, user {aac_user_id}")
+    logging.warning(f"📝 Narrative length: {len(user_info) if user_info else 0} chars")
+    logging.warning(f"😊 Current mood: {current_mood}")
+    logging.warning(f"👤 Avatar config: {avatar_config}")
+    logging.warning(f"👤 User name: {user_name}")
+    logging.warning(f"🖼️ Profile image URL: {profile_image_url}")
     
     # Log the raw request for debugging
-    logging.info(f"🔍 Raw request data: {request}")
+    logging.warning(f"🔍 Raw request data: {request}")
     
-    # Prepare data to save - include avatar config if provided
-    data_to_save = {"narrative": user_info, "currentMood": current_mood}
+    # Load existing user data to preserve all fields
+    existing_data = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data={}
+    )
+    
+    # Update with new data - preserve existing fields and update only provided ones
+    if user_info:
+        existing_data["narrative"] = user_info
+    if current_mood is not None:  # Allow empty string to clear mood
+        existing_data["currentMood"] = current_mood
+    if user_name:
+        existing_data["name"] = user_name
     if avatar_config:
-        data_to_save["avatarConfig"] = avatar_config
+        existing_data["avatarConfig"] = avatar_config
+    if profile_image_url:
+        existing_data["profileImageUrl"] = profile_image_url
+    
+    existing_data["updated_at"] = dt.now().isoformat()
+    
+    # Debug: log what we're about to save to Firestore
+    logging.warning(f"🔍 BACKEND SAVE DEBUG - Data being saved to Firestore: {existing_data}")
     
     success = await save_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="info/user_narrative",
-        data_to_save=data_to_save
+        data_to_save=existing_data
     )
     
     if success:
@@ -6710,13 +7017,574 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         except Exception as cache_error:
             logging.error(f"❌ Failed to invalidate cache for account {account_id} and user {aac_user_id}: {cache_error}", exc_info=True)
         
-        response_data = {"narrative": user_info, "currentMood": current_mood}
+        response_data = {"narrative": user_info, "currentMood": current_mood, "name": user_name}
         if avatar_config:
             response_data["avatarConfig"] = avatar_config
         
         return JSONResponse(content=response_data)
     else:
         raise HTTPException(status_code=500, detail="Failed to save user info.")
+
+
+# Custom Images API Endpoints
+@app.post("/api/upload_custom_image")
+async def upload_custom_image(
+    image: UploadFile = File(...),
+    concept: str = Form(...),
+    subconcept: str = Form(...),
+    tags: str = Form(default=""),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Upload a custom image for a specific user profile with concept/subconcept/tags
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        logging.info(f"Uploading custom image for {account_id}/{aac_user_id}: {concept}/{subconcept}")
+        
+        # Check if storage client is available
+        if not VERTEX_AI_AVAILABLE or storage_client is None:
+            raise HTTPException(status_code=503, detail="Storage service not available")
+        
+        # Validate file type - be more permissive for mobile uploads
+        is_valid_image = False
+        
+        # Check content type if available
+        if image.content_type and image.content_type.startswith('image/'):
+            is_valid_image = True
+        
+        # Also check file extension for mobile compatibility (iOS HEIC, etc.)
+        if image.filename:
+            file_extension = image.filename.lower()
+            if any(file_extension.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']):
+                is_valid_image = True
+        
+        if not is_valid_image:
+            logging.warning(f"Invalid image upload attempt - Content-Type: {image.content_type}, Filename: {image.filename}")
+            raise HTTPException(status_code=400, detail="File must be an image (jpg, jpeg, png, gif, webp, heic, heif)")
+        
+        logging.info(f"✅ Valid image detected - Content-Type: {image.content_type}, Filename: {image.filename}")
+        
+        # Read image data
+        image_data = await image.read()
+        
+        # Generate unique filename
+        import uuid
+        file_extension = image.filename.split('.')[-1] if '.' in image.filename else 'png'
+        unique_filename = f"custom_{account_id}_{aac_user_id}_{uuid.uuid4().hex}.{file_extension}"
+        storage_path = f"custom_images/{account_id}/{aac_user_id}/{unique_filename}"
+        
+        # Upload to Google Cloud Storage
+        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        blob = bucket.blob(storage_path)
+        
+        # Upload with proper content type
+        blob.upload_from_string(
+            image_data,
+            content_type=image.content_type
+        )
+        
+        # Construct public URL
+        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
+        
+        # Create Firestore document
+        doc_data = {
+            "concept": concept,
+            "subconcept": subconcept,
+            "tags": [tag.strip() for tag in tags.split(',') if tag.strip()] if tags else [],
+            "image_url": image_url,
+            "original_filename": image.filename,
+            "storage_path": storage_path,
+            "account_id": account_id,
+            "aac_user_id": aac_user_id,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+            "active": True
+        }
+        
+        # Store in Firestore with hierarchical structure: accounts/{account_id}/profiles/{aac_user_id}/custom_images/{image_id}
+        doc_ref = firestore_db.collection("accounts").document(account_id)\
+                            .collection("profiles").document(aac_user_id)\
+                            .collection("custom_images").document()
+        doc_ref.set(doc_data)
+        doc_data["id"] = doc_ref.id
+        
+        # Convert timestamps to ISO format for JSON serialization
+        if "created_at" in doc_data:
+            doc_data["created_at"] = doc_data["created_at"].isoformat()
+        if "updated_at" in doc_data:
+            doc_data["updated_at"] = doc_data["updated_at"].isoformat()
+        
+        logging.info(f"Custom image uploaded successfully: {doc_ref.id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "image_data": doc_data,
+            "message": "Image uploaded successfully"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error uploading custom image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
+@app.get("/api/get_custom_images")
+async def get_custom_images(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Get all custom images for a specific user profile
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        logging.info(f"Getting custom images for {account_id}/{aac_user_id}")
+        
+        # Query Firestore for custom images using hierarchical structure
+        images_ref = firestore_db.collection("accounts").document(account_id)\
+                                 .collection("profiles").document(aac_user_id)\
+                                 .collection("custom_images")
+        query = images_ref.where("active", "==", True)
+        
+        docs = query.stream()
+        
+        images = []
+        for doc in docs:
+            image_data = doc.to_dict()
+            image_data["id"] = doc.id
+            # Note: Profile images are included for both UI display and button matching
+            # Convert timestamps to ISO format for JSON serialization
+            if "created_at" in image_data:
+                image_data["created_at"] = image_data["created_at"].isoformat()
+            if "updated_at" in image_data:
+                image_data["updated_at"] = image_data["updated_at"].isoformat()
+            images.append(image_data)
+        
+        # Sort by created_at in Python (newest first) to avoid needing composite index
+        images.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        
+        logging.info(f"Found {len(images)} custom images for user")
+        
+        return JSONResponse(content={
+            "success": True,
+            "images": images
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting custom images: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get custom images: {str(e)}")
+
+@app.put("/api/update_custom_image")
+async def update_custom_image(
+    request: Dict,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Update custom image metadata (concept, subconcept, tags)
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        image_id = request.get("image_id")
+        concept = request.get("concept")
+        subconcept = request.get("subconcept")
+        tags = request.get("tags", [])
+        
+        if not image_id or not concept or not subconcept:
+            raise HTTPException(status_code=400, detail="Missing required fields: image_id, concept, subconcept")
+        
+        logging.info(f"Updating custom image {image_id} for {account_id}/{aac_user_id}")
+        
+        # Get the document and verify ownership (using hierarchical structure)
+        doc_ref = firestore_db.collection("accounts").document(account_id)\
+                             .collection("profiles").document(aac_user_id)\
+                             .collection("custom_images").document(image_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        doc_data = doc.to_dict()
+        
+        # Verify ownership
+        if doc_data.get("account_id") != account_id or doc_data.get("aac_user_id") != aac_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Update the document
+        update_data = {
+            "concept": concept,
+            "subconcept": subconcept,
+            "tags": tags if isinstance(tags, list) else [tag.strip() for tag in str(tags).split(',') if tag.strip()],
+            "updated_at": datetime.now(timezone.utc)
+        }
+        
+        doc_ref.update(update_data)
+        
+        # Return updated data
+        updated_doc = doc_ref.get().to_dict()
+        updated_doc["id"] = image_id
+        
+        # Convert timestamps for JSON serialization
+        if "created_at" in updated_doc:
+            updated_doc["created_at"] = updated_doc["created_at"].isoformat()
+        if "updated_at" in updated_doc:
+            updated_doc["updated_at"] = updated_doc["updated_at"].isoformat()
+        
+        logging.info(f"Custom image {image_id} updated successfully")
+        
+        return JSONResponse(content={
+            "success": True,
+            "image_data": updated_doc,
+            "message": "Image updated successfully"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating custom image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to update image: {str(e)}")
+
+@app.delete("/api/delete_custom_image/{image_id}")
+async def delete_custom_image(
+    image_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Delete a custom image (soft delete by setting active=False)
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        logging.info(f"Deleting custom image {image_id} for {account_id}/{aac_user_id}")
+        
+        # Get the document and verify ownership (using hierarchical structure)
+        doc_ref = firestore_db.collection("accounts").document(account_id)\
+                             .collection("profiles").document(aac_user_id)\
+                             .collection("custom_images").document(image_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+        
+        doc_data = doc.to_dict()
+        
+        # Verify ownership
+        if doc_data.get("account_id") != account_id or doc_data.get("aac_user_id") != aac_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Soft delete by setting active=False
+        doc_ref.update({
+            "active": False,
+            "updated_at": datetime.now(timezone.utc)
+        })
+        
+        logging.info(f"Custom image {image_id} deleted successfully")
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Image deleted successfully"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting custom image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(e)}")
+
+@app.post("/api/upload_user_profile_image")
+async def upload_user_profile_image(
+    image: UploadFile = File(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Upload a user profile image with automatic tagging using user's name and personal pronouns
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        logging.info(f"Uploading user profile image for {account_id}/{aac_user_id}")
+        
+        # Check if storage client is available
+        if not VERTEX_AI_AVAILABLE or storage_client is None:
+            raise HTTPException(status_code=503, detail="Storage service not available")
+        
+        # Get user's name from profile
+        user_info_dict = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        
+        user_name = user_info_dict.get("name", "").strip()
+        if not user_name:
+            raise HTTPException(status_code=400, detail="Please set your name in User Information before uploading a profile picture")
+        
+        # Validate file type - be more permissive for mobile uploads
+        is_valid_image = False
+        
+        # Check content type if available
+        if image.content_type and image.content_type.startswith('image/'):
+            is_valid_image = True
+        
+        # Also check file extension for mobile compatibility (iOS HEIC, etc.)
+        if image.filename:
+            file_extension = image.filename.lower()
+            if any(file_extension.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']):
+                is_valid_image = True
+        
+        if not is_valid_image:
+            logging.warning(f"Invalid image upload attempt - Content-Type: {image.content_type}, Filename: {image.filename}")
+            raise HTTPException(status_code=400, detail="File must be an image (jpg, jpeg, png, gif, webp, heic, heif)")
+        
+        logging.info(f"✅ Valid profile image detected - Content-Type: {image.content_type}, Filename: {image.filename}")
+        
+        # Read image data
+        image_data = await image.read()
+        
+        # Generate unique filename
+        import uuid
+        file_extension = image.filename.split('.')[-1] if '.' in image.filename else 'png'
+        unique_filename = f"profile_{account_id}_{aac_user_id}_{uuid.uuid4().hex}.{file_extension}"
+        storage_path = f"custom_images/{account_id}/{aac_user_id}/{unique_filename}"
+        
+        # Upload to Google Cloud Storage
+        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        blob = bucket.blob(storage_path)
+        
+        # Upload with proper content type
+        blob.upload_from_string(
+            image_data,
+            content_type=image.content_type
+        )
+        
+        # Construct public URL
+        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
+        
+        # Automatically tag with user name and personal pronouns
+        # Include both proper case and lowercase for better matching
+        personal_pronouns = ["I", "me", "myself", "my", "mine"]
+        tags = [user_name, user_name.lower()] + personal_pronouns + ["profile picture"]
+        # Remove duplicates while preserving order
+        tags = list(dict.fromkeys(tags))
+        
+        # First, deactivate any existing profile images to avoid conflicts
+        try:
+            custom_images_ref = firestore_db.collection("accounts").document(account_id)\
+                                          .collection("profiles").document(aac_user_id)\
+                                          .collection("custom_images")
+            existing_profile_query = custom_images_ref.where("is_profile_image", "==", True).where("active", "==", True)
+            existing_profile_docs = list(existing_profile_query.stream())
+            
+            for existing_doc in existing_profile_docs:
+                existing_doc.reference.update({
+                    "active": False, 
+                    "updated_at": datetime.now(timezone.utc),
+                    "deactivated_reason": "replaced_by_new_profile_image"
+                })
+                logging.info(f"Deactivated existing profile image: {existing_doc.id}")
+                
+        except Exception as e:
+            logging.warning(f"Error deactivating existing profile images: {e}")
+            # Continue anyway - don't fail the upload due to cleanup issues
+
+        # Create Firestore document for new profile image
+        doc_data = {
+            "concept": user_name,  # Set concept to user name for better matching
+            "subconcept": user_name,  # Set subconcept to user name for better matching  
+            "tags": tags,
+            "image_url": image_url,
+            "original_filename": image.filename,
+            "storage_path": storage_path,
+            "account_id": account_id,
+            "aac_user_id": aac_user_id,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+            "active": True,
+            "is_profile_image": True,  # Flag to identify profile images
+            "user_name": user_name  # Store the name used for tagging
+        }
+        
+        # Store in hierarchical structure: accounts/{account_id}/profiles/{aac_user_id}/profile_image/current
+        profile_doc_ref = firestore_db.collection("accounts").document(account_id)\
+                                    .collection("profiles").document(aac_user_id)\
+                                    .collection("profile_image").document("current")
+        
+        # Store simplified profile image data in dedicated collection
+        profile_image_data = {
+            "image_url": image_url,
+            "original_filename": image.filename,
+            "storage_path": storage_path,
+            "user_name": user_name,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        profile_doc_ref.set(profile_image_data)
+        
+        # Also store in custom_images with hierarchical structure for symbol lookup
+        custom_image_ref = firestore_db.collection("accounts").document(account_id)\
+                                     .collection("profiles").document(aac_user_id)\
+                                     .collection("custom_images").document()
+        custom_image_ref.set(doc_data)
+        doc_data["id"] = custom_image_ref.id
+        
+        # Also save the profile image URL to user info for easy access
+        user_info_dict["profileImageUrl"] = image_url
+        await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            data_to_save=user_info_dict
+        )
+        
+        # Convert timestamps to ISO format for JSON serialization
+        if "created_at" in doc_data:
+            doc_data["created_at"] = doc_data["created_at"].isoformat()
+        if "updated_at" in doc_data:
+            doc_data["updated_at"] = doc_data["updated_at"].isoformat()
+        
+        logging.info(f"User profile image uploaded successfully: {custom_image_ref.id} for user {user_name}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "image_data": doc_data,
+            "profileImageUrl": image_url,
+            "message": f"Profile image uploaded successfully and tagged with '{user_name}' and personal pronouns. Image will now appear when using words like 'I', 'me', 'myself', or '{user_name}'."
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error uploading user profile image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upload profile image: {str(e)}")
+
+@app.get("/api/get_profile_image")
+async def get_profile_image(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Get the user's profile image if it exists
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        logging.info(f"Getting profile image for {account_id}/{aac_user_id}")
+        
+        # Get profile image from hierarchical structure
+        profile_doc_ref = firestore_db.collection("accounts").document(account_id)\
+                                    .collection("profiles").document(aac_user_id)\
+                                    .collection("profile_image").document("current")
+        
+        profile_doc = profile_doc_ref.get()
+        
+        if not profile_doc.exists:
+            raise HTTPException(status_code=404, detail="No profile image found")
+        
+        profile_image = profile_doc.to_dict()
+        profile_image["id"] = profile_doc.id
+        
+        # Convert timestamps to ISO format for JSON serialization
+        if "created_at" in profile_image:
+            profile_image["created_at"] = profile_image["created_at"].isoformat()
+        if "updated_at" in profile_image:
+            profile_image["updated_at"] = profile_image["updated_at"].isoformat()
+        
+        return JSONResponse(content={
+            "success": True,
+            "profile_image": profile_image
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting profile image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get profile image: {str(e)}")
+
+@app.delete("/api/remove_profile_image")
+async def remove_profile_image(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Remove the user's profile image
+    """
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        logging.info(f"Removing profile image for {account_id}/{aac_user_id}")
+        
+        # Get profile image from hierarchical structure
+        profile_doc_ref = firestore_db.collection("accounts").document(account_id)\
+                                    .collection("profiles").document(aac_user_id)\
+                                    .collection("profile_image").document("current")
+        
+        profile_doc = profile_doc_ref.get()
+        
+        if not profile_doc.exists:
+            raise HTTPException(status_code=404, detail="No profile image found to remove")
+        
+        profile_image = profile_doc.to_dict()
+        
+        # Delete from Cloud Storage
+        if storage_client and profile_image.get("storage_path"):
+            try:
+                bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+                blob = bucket.blob(profile_image["storage_path"])
+                blob.delete()
+                logging.info(f"Deleted profile image from storage: {profile_image['storage_path']}")
+            except Exception as storage_error:
+                logging.warning(f"Failed to delete from storage (continuing anyway): {storage_error}")
+        
+        # Delete the profile image document
+        profile_doc_ref.delete()
+        logging.info(f"Deleted profile image document from Firestore")
+        
+        # Also remove the corresponding custom image entry
+        custom_images_ref = firestore_db.collection("accounts").document(account_id)\
+                                      .collection("profiles").document(aac_user_id)\
+                                      .collection("custom_images")
+        custom_query = custom_images_ref.where("is_profile_image", "==", True).where("active", "==", True)
+        custom_docs = list(custom_query.stream())
+        
+        for custom_doc in custom_docs:
+            custom_doc.reference.update({"active": False, "updated_at": datetime.now(timezone.utc)})
+            logging.info(f"Marked custom image profile entry as inactive: {custom_doc.id}")
+        
+        # Also remove the profile image URL from user info
+        user_info_dict = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        
+        if "profileImageUrl" in user_info_dict:
+            user_info_dict["profileImageUrl"] = None
+            await save_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                data_to_save=user_info_dict
+            )
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Profile image removed successfully"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error removing profile image: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to remove profile image: {str(e)}")
 
 
 # /api/diary-entries
@@ -6805,22 +7673,21 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
     try:
         aac_user_id = current_ids["aac_user_id"]
         account_id = current_ids["account_id"]
-        question = payload.question
-        response = payload.response
-        if not question or not response: raise HTTPException(status_code=400, detail="Missing question or response.")
+        question = payload.question or ""
+        response = payload.response or ""
+        if not question.strip() and not response.strip(): raise HTTPException(status_code=400, detail="Either question or response must be provided.")
         timestamp = dt.now().isoformat()
         log_entry = {"timestamp": timestamp, "question": question, "response": response, "id": uuid.uuid4().hex}
-        history = load_chat_history(account_id, aac_user_id) # Pass user_id
+        history = await load_chat_history(account_id, aac_user_id) # Pass user_id
         history.append(log_entry)
         if len(history) > MAX_CHAT_HISTORY: history = history[-MAX_CHAT_HISTORY:]
-        if save_chat_history(account_id, aac_user_id, history): # Pass user_id
-            logging.info(f"Chat history updated successfully for account {account_id} and user {aac_user_id}.")
-            
-            # Invalidate the cache since chat history has changed
-            await cache_manager.invalidate_cache(account_id, aac_user_id)
-            
-            return JSONResponse(content={"message": "Chat history saved successfully"})
-        else: raise HTTPException(status_code=500, detail="Failed to save chat history.")
+        await save_chat_history(account_id, aac_user_id, history) # Pass user_id
+        logging.info(f"Chat history updated successfully for account {account_id} and user {aac_user_id}.")
+        
+        # Invalidate the cache since chat history has changed
+        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        
+        return JSONResponse(content={"message": "Chat history saved successfully"})
     except HTTPException as http_exc: raise http_exc
     except Exception as e:
         logging.error(f"Error recording chat history for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
@@ -7336,14 +8203,23 @@ async def _initialize_new_aac_user_profile(account_id: str, aac_user_id: str, di
         data_to_save=json.loads(template_user_data_paths["birthdays.json"])
     )
 
-    # Initial user info narrative:
+    # Initial user info narrative (preserve any existing data):
     user_info_content = template_user_data_paths["user_info.txt"]
-    await save_firestore_document(
+    existing_user_data = await load_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="info/user_narrative",
-        data_to_save={"narrative": user_info_content}
+        default_data={}
     )
+    # Only set narrative if it doesn't exist, preserve other fields like name
+    if not existing_user_data.get("narrative"):
+        existing_user_data["narrative"] = user_info_content
+        await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            data_to_save=existing_user_data
+        )
 
     # Initial user current state:
     user_current_str = template_user_data_paths["user_current.txt"]
@@ -7481,12 +8357,13 @@ async def get_freestyle_word_options(
     account_id = current_ids["account_id"]
     
     # DEBUG: Log what we received
-    logging.warning(f"DEBUG Freestyle API - Received request: context='{request.context}', source_page='{request.source_page}', is_llm_generated={request.is_llm_generated}, originating_button='{request.originating_button_text}', build_space='{request.build_space_text}'")
+    logging.warning(f"DEBUG Freestyle API - Received request: context='{request.context}', source_page='{request.source_page}', is_llm_generated={request.is_llm_generated}, originating_button='{request.originating_button_text}', build_space='{request.build_space_text}', max_options='{request.max_options}'")
     
     try:
         # Load user settings to get FreestyleOptions
         settings = await load_settings_from_file(account_id, aac_user_id)
-        freestyle_options = settings.get("FreestyleOptions", 20)  # Default to 20 if not set
+        # Use max_options from request if provided, otherwise use user's FreestyleOptions setting
+        freestyle_options = request.max_options if request.max_options else settings.get("FreestyleOptions", 20)
         
         # Load user context
         user_info = await load_firestore_document(
@@ -7536,28 +8413,42 @@ async def get_freestyle_word_options(
         elif request.originating_button_text:
             contextual_info += f" | Coming from button: {request.originating_button_text}"
         
+        # Add mood context if available
+        if request.current_mood and request.current_mood != 'none':
+            contextual_info += f" | User is feeling {request.current_mood}"
+        
         if build_space_text.strip():
             # If there's text in build space, provide contextual continuations
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
+            # Add mood context to build space continuation
+            mood_instruction = ""
+            if request.current_mood and request.current_mood != 'none':
+                mood_instruction = f"\n- Consider that the user is feeling {request.current_mood} - suggest words that would be appropriate for this emotional state"
+
             prompt = f"""The user is building a communication phrase and has already written: "{build_space_text}"
 
 Provide exactly {freestyle_options} {variation_text} word options that could logically continue or complete this phrase for AAC communication.
 
 Requirements:
-- Provide words or short phrases (1-3 words) that naturally continue the existing phrase
-- Each option should make grammatical sense when added to "{build_space_text}"
-- Think about what would make a complete, meaningful sentence
-- Focus on common AAC communication continuations: verbs, prepositions, objects, descriptors
+- Provide ONLY the incremental words/phrases that would be ADDED to the existing phrase "{build_space_text}"
+- DO NOT repeat any words already in "{build_space_text}" - only provide the new continuation
+- Each option should be the NEXT part that makes grammatical sense after "{build_space_text}"
+- Think: if the user already has "{build_space_text}", what single words or short phrases (1-3 words) would naturally come next?
+- Focus on common AAC communication continuations: verbs, prepositions, objects, descriptors{mood_instruction}
 - For each continuation, provide a related keyword for image searching
-- Format: "continuation|keyword" (e.g., "to play|playground", "for fun|smile", "please|polite")
+- Format: "continuation|keyword" (e.g., "with friends|friendship", "games|games", "outside|outdoors")
 - The keyword should help find relevant images that represent the continuation concept
 - Make each option distinct and useful for completing communication
 - Consider natural sentence flow and common AAC patterns
 
-Examples for "{build_space_text}":
-- If the phrase is about movement, suggest destinations or purposes
-- If the phrase is about wants/needs, suggest objects or actions
-- If the phrase is about feelings, suggest intensifiers or reasons
+CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
+- If build_space_text is "Who is here to play", provide options like "with friends|friendship", "games|games", "outside|outdoors"
+- If build_space_text is "I want to", provide options like "eat|food", "go|arrow", "play|games"
+- If build_space_text is "Where", provide options like "is|location", "are you|person", "do you|action", "can I|direction"
+- If build_space_text is "Where is", provide options like "the|object", "my|possession", "mom|person", "the bathroom|bathroom"
+- If build_space_text is "What", provide options like "is|question", "are you|person", "do you|action", "time is|clock"
+- If build_space_text is "When", provide options like "is|time", "are we|schedule", "do you|timing", "will you|future"
+- Never repeat words already in the build space text
 
 Context (use only for word relevance): {contextual_info}"""
         else:
@@ -7578,9 +8469,14 @@ Context (use only for word relevance): {contextual_info}"""
             else:
                 context_hint = "Focus on core AAC communication words that can start any conversation."
             
+            # Add mood context
+            mood_instruction = ""
+            if request.current_mood and request.current_mood != 'none':
+                mood_instruction = f"\n\nIMPORTANT: The user is currently feeling {request.current_mood}. Include words that would be relevant for someone in this emotional state. For example, if angry: frustrated, upset, mad, annoyed; if happy: excited, joyful, pleased, great; if sad: down, hurt, disappointed, blue."
+            
             prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
 
-{context_hint}
+{context_hint}{mood_instruction}
 
 Requirements:
 - ONLY provide single words (no phrases or sentences)
@@ -7857,6 +8753,113 @@ async def set_mood(
     except Exception as e:
         logging.error(f"Error setting mood for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/mood/upload-image")
+async def upload_mood_image(
+    image: UploadFile = File(...),
+    mood_name: str = Form(...),
+    collection: str = Form(default="mood_images"),
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """
+    Upload mood mascot images and create mood_images collection documents
+    """
+    try:
+        logging.info(f"Uploading mood image for {mood_name}")
+        
+        # Check if storage client is available
+        if not VERTEX_AI_AVAILABLE or storage_client is None:
+            raise HTTPException(status_code=503, detail="Storage service not available")
+        
+        # Validate file type
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        # Read image data
+        image_data = await image.read()
+        
+        # Generate storage path
+        filename = f"mood_mascot_{mood_name.lower()}_{image.filename}"
+        storage_path = f"mood_mascot_images/{filename}"
+        
+        # Upload to Google Cloud Storage
+        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        blob = bucket.blob(storage_path)
+        
+        # Upload with proper content type
+        blob.upload_from_string(
+            image_data,
+            content_type=image.content_type
+        )
+        
+        # For uniform bucket-level access, construct public URL directly
+        # Don't use make_public() as it conflicts with uniform bucket-level access
+        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
+        
+        # Create Firestore document
+        doc_id = mood_name.lower()
+        doc_data = {
+            "mood_name": mood_name,
+            "image_url": image_url,
+            "image_filename": image.filename,
+            "storage_path": storage_path,
+            "image_type": "mood_mascot",
+            "created_at": datetime.now(timezone.utc),
+            "created_by": "admin_setup",
+            "active": True
+        }
+        
+        # Store in Firestore
+        doc_ref = firestore_db.collection(collection).document(doc_id)
+        doc_ref.set(doc_data)
+        
+        logging.info(f"Successfully uploaded mood image for {mood_name}: {image_url}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "mood_name": mood_name,
+            "image_url": image_url,
+            "document_id": doc_id
+        })
+        
+    except Exception as e:
+        logging.error(f"Error uploading mood image for {mood_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/mood/image/{mood_name}")
+async def get_mood_image(mood_name: str):
+    """
+    Get mood image URL for a specific mood name
+    Public endpoint - no authentication required
+    """
+    try:
+        # Query the mood_images collection
+        doc_id = mood_name.lower()
+        doc_ref = firestore_db.collection("mood_images").document(doc_id)
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            doc_data = doc.to_dict()
+            return JSONResponse(content={
+                "success": True,
+                "mood_name": doc_data.get("mood_name"),
+                "image_url": doc_data.get("image_url"),
+                "image_type": doc_data.get("image_type", "mood_mascot")
+            })
+        else:
+            return JSONResponse(
+                content={"success": False, "error": "Mood image not found"}, 
+                status_code=404
+            )
+            
+    except Exception as e:
+        logging.error(f"Error fetching mood image for {mood_name}: {e}", exc_info=True)
+        return JSONResponse(
+            content={"success": False, "error": str(e)}, 
+            status_code=500
+        )
 
 
 # --- Games API Models ---
@@ -8431,6 +9434,7 @@ class FreestyleCategoryWordsRequest(BaseModel):
     category: str = Field(..., min_length=1, description="Category name for word generation")
     build_space_content: Optional[str] = Field("", description="Current build space content for context")
     exclude_words: Optional[List[str]] = Field(default_factory=list, description="Words to exclude from generation")
+    current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
 
 @app.post("/api/freestyle/category-words")
 async def generate_category_words(
@@ -8487,8 +9491,13 @@ async def generate_category_words(
             
         user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
         
+        # Add mood context if available
+        mood_context = ""
+        if request.current_mood and request.current_mood != 'none':
+            mood_context = f" The user is currently feeling {request.current_mood}, so consider words that would be appropriate for someone in this emotional state."
+        
         # Create the prompt for word generation with enhanced context
-        prompt = f"""Given the user context: '{user_context}' and category '{request.category}', generate {freestyle_options} single words for this category.{context_clause}{exclude_clause}
+        prompt = f"""Given the user context: '{user_context}' and category '{request.category}', generate {freestyle_options} words or short phrases for this category.{mood_context}{context_clause}{exclude_clause}
 
 IMPORTANT: Use the user context to provide personalized, relevant words. For example:
 - If category is "People" and user context mentions specific people, prioritize those names
@@ -8496,7 +9505,8 @@ IMPORTANT: Use the user context to provide personalized, relevant words. For exa
 - If category is "Activities" and user has a current activity, include related activities
 
 Requirements:
-- Provide exactly {freestyle_options} single words (no phrases)
+- Provide exactly {freestyle_options} words or short phrases (1-3 words each)
+- Allow proper nouns and place names (e.g., "Disney World", "Broncos stadium", "talker group")
 - Words should be relevant to "{request.category}"
 - Prioritize words from user context when applicable
 - Words should be commonly used and appropriate for AAC communication
@@ -8526,7 +9536,7 @@ Category: {request.category}"""
                     word = parts[0].strip()
                     keyword = parts[1].strip() if len(parts) > 1 else word
                     
-                    if word and len(word.split()) == 1:  # Ensure single words only
+                    if word and len(word.split()) <= 3:  # Allow words and short phrases (1-3 words)
                         words.append({
                             "text": word,
                             "keywords": [keyword] if keyword != word else []
@@ -8534,7 +9544,7 @@ Category: {request.category}"""
                 else:
                     # Fallback for lines without keyword format
                     word = clean_line
-                    if word and len(word.split()) == 1:  # Ensure single words only
+                    if word and len(word.split()) <= 3:  # Allow words and short phrases (1-3 words)
                         words.append({
                             "text": word,
                             "keywords": []
@@ -8544,22 +9554,35 @@ Category: {request.category}"""
         if len(words) < freestyle_options:
             # If we don't have enough, pad with generic words for the category
             generic_words = get_generic_category_words(request.category)
-            existing_word_texts = [w.get("text", w) if isinstance(w, dict) else w for w in words]
+            existing_word_texts_lower = [w.get("text", w).lower() if isinstance(w, dict) else w.lower() for w in words]
             
             for generic_word in generic_words:
-                if generic_word not in existing_word_texts and generic_word not in request.exclude_words:
+                # Case-insensitive check to prevent duplicates
+                if (generic_word.lower() not in existing_word_texts_lower and 
+                    generic_word.lower() not in [w.lower() for w in request.exclude_words]):
                     words.append({
                         "text": generic_word,
                         "keywords": []
                     })
+                    existing_word_texts_lower.append(generic_word.lower())  # Update the tracking set
                     if len(words) >= freestyle_options:
                         break
         
-        # Trim to exact number requested
-        words = words[:freestyle_options]
+        # Deduplicate words (case-insensitive) to prevent "Please"/"please" duplicates
+        deduplicated_words = []
+        seen_words = set()
+        for word_obj in words:
+            word_text = word_obj.get("text", "").strip()
+            word_lower = word_text.lower()
+            if word_lower not in seen_words:
+                seen_words.add(word_lower)
+                deduplicated_words.append(word_obj)
         
-        logging.info(f"Generated {len(words)} words for category '{request.category}' for account {account_id}, user {aac_user_id}")
-        return JSONResponse(content={"words": words})
+        # Trim to exact number requested
+        final_words = deduplicated_words[:freestyle_options]
+        
+        logging.info(f"Generated {len(words)} words (deduplicated to {len(final_words)}) for category '{request.category}' for account {account_id}, user {aac_user_id}")
+        return JSONResponse(content={"words": final_words})
         
     except Exception as e:
         logging.error(f"Error generating category words for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
@@ -8950,9 +9973,26 @@ try:
     # Initialize Secret Manager client
     secret_client = secretmanager.SecretManagerServiceClient()
     
+    async def get_secret(secret_name: str) -> str:
+        """Get secret from Google Secret Manager"""
+        try:
+            name = f"projects/{CONFIG['gcp_project_id']}/secrets/{secret_name}/versions/latest"
+            response = secret_client.access_secret_version(request={"name": name})
+            return response.payload.data.decode("UTF-8")
+        except Exception as e:
+            logging.error(f"Failed to get secret {secret_name}: {e}")
+            raise
+    
 except ImportError as e:
     logging.warning(f"Image generation dependencies not available: {e}")
     VERTEX_AI_AVAILABLE = False
+    storage_client = None
+    AAC_IMAGES_BUCKET_NAME = None
+    secret_client = None
+    
+    async def get_secret(secret_name: str) -> str:
+        """Fallback get_secret when Secret Manager is not available"""
+        raise Exception(f"Secret Manager not available, cannot get secret: {secret_name}")
 
 class ImageGenerationRequest(BaseModel):
     concept: str
@@ -8966,13 +10006,6 @@ class ImageTaggingRequest(BaseModel):
 
 class ImageStoreRequest(BaseModel):
     images: List[Dict[str, str]]  # List of {image_url, concept, subconcept}
-
-# Admin verification dependency
-async def verify_admin_user(token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]) -> Dict[str, str]:
-    """Verify that the authenticated user is admin@talkwithbravo.com"""
-    if token_info.get("email") != "admin@talkwithbravo.com":
-        raise HTTPException(status_code=403, detail="Access denied. Admin privileges required.")
-    return token_info
 
 async def get_gemini_api_key():
     """Get Gemini API key from Secret Manager or environment"""
@@ -9479,6 +10512,7 @@ async def api_get_images(
 async def public_bravo_images_search(
     tag: str = "",
     concept: str = "",
+    subconcept: str = "",
     limit: int = 12
 ):
     """
@@ -9488,21 +10522,21 @@ async def public_bravo_images_search(
     """
     try:
         # Create cache key with version for tag position prioritization fix
-        cache_key = f"bravo_images_v2:{tag.lower()}:{concept.lower()}:{limit}"
+        cache_key = f"bravo_images_v3:{tag.lower()}:{concept.lower()}:{subconcept.lower()}:{limit}"
         
         # Try Redis cache first
         if redis_client:
             try:
                 cached_result = redis_client.get(cache_key)
                 if cached_result:
-                    logging.debug(f"Cache HIT for search: {tag or concept}")
+                    logging.debug(f"Cache HIT for search: {tag or concept or subconcept}")
                     return json.loads(cached_result)
             except Exception as redis_error:
                 logging.warning(f"Redis cache read error: {redis_error}")
         
-        logging.debug(f"Cache MISS for search: {tag or concept} - querying Firestore")
+        logging.debug(f"Cache MISS for search: {tag or concept or subconcept} - querying Firestore")
         
-        if not tag and not concept:
+        if not tag and not concept and not subconcept:
             # Return random images if no search criteria
             query = firestore_db.collection("aac_images").where("source", "==", "bravo_images").limit(limit)
             docs = await asyncio.to_thread(query.get)
@@ -9514,38 +10548,69 @@ async def public_bravo_images_search(
             if concept:
                 base_query = base_query.where("concept", "==", concept)
             
+            if subconcept:
+                base_query = base_query.where("subconcept", "==", subconcept)
+            
             if tag:
-                # Try the most common case variations (optimized for speed)
-                tag_variations = [
-                    tag,                    # Original case
-                    tag.lower(),            # All lowercase (most common)
-                    tag.capitalize()        # First letter capitalized (common for proper nouns)
+                # PRIORITIZED SEARCH: Try exact matches first, then variations
+                found_docs = set()
+                
+                # Step 1: Try exact match searches (highest priority)
+                exact_variations = [
+                    tag,                      # Original case "Iron Man"
+                    tag.lower(),             # All lowercase "iron man" 
+                    tag.replace(' ', '_'),   # Underscore version "Iron_Man"
+                    tag.replace(' ', '_').lower(),  # Lowercase underscore "iron_man"
                 ]
                 
                 # Remove duplicates while preserving order
                 seen = set()
-                unique_variations = []
-                for variation in tag_variations:
+                unique_exact_variations = []
+                for variation in exact_variations:
                     if variation not in seen:
                         seen.add(variation)
-                        unique_variations.append(variation)
+                        unique_exact_variations.append(variation)
                 
-                # Search all variations to get comprehensive results for proper scoring
-                found_docs = set()  # Use set to avoid duplicates
-                for variation in unique_variations:
+                logging.debug(f"🎯 Searching for exact matches of '{tag}' with variations: {unique_exact_variations}")
+                
+                # Search exact variations first
+                for variation in unique_exact_variations:
                     try:
-                        query = base_query.where("tags", "array_contains", variation).limit(limit * 5)  # Get more docs for scoring
+                        query = base_query.where("tags", "array_contains", variation).limit(limit * 3)
                         docs = await asyncio.to_thread(query.get)
                         for doc in docs:
                             if doc.id not in found_docs:
                                 found_docs.add(doc.id)
                                 all_docs.append(doc)
                         
-                        # Continue to next variation to collect all possible matches
+                        logging.debug(f"  Found {len([d for d in docs])} docs for exact variation '{variation}'")
                         
                     except Exception as variation_error:
-                        logging.warning(f"Error searching for variation '{variation}': {variation_error}")
+                        logging.warning(f"Error searching for exact variation '{variation}': {variation_error}")
                         continue
+                
+                # Step 2: If we don't have enough results, try partial matches
+                if len(all_docs) < limit:
+                    logging.debug(f"🔍 Only found {len(all_docs)} exact matches, searching for partial matches...")
+                    
+                    # Split the tag into words for partial matching
+                    tag_words = tag.lower().split()
+                    
+                    for word in tag_words:
+                        if len(word) > 2:  # Only search meaningful words
+                            try:
+                                query = base_query.where("tags", "array_contains", word).limit(limit * 2)
+                                docs = await asyncio.to_thread(query.get)
+                                for doc in docs:
+                                    if doc.id not in found_docs:
+                                        found_docs.add(doc.id)
+                                        all_docs.append(doc)
+                                
+                                logging.debug(f"  Found {len([d for d in docs])} docs for partial word '{word}'")
+                                
+                            except Exception as word_error:
+                                logging.warning(f"Error searching for word '{word}': {word_error}")
+                                continue
             else:
                 # No tag filter, just concept filter
                 query = base_query.limit(limit)
@@ -9553,9 +10618,14 @@ async def public_bravo_images_search(
             
             docs = all_docs[:limit * 3]  # Get more docs for better scoring
         
-        # Score and sort images by tag position priority
+        # Enhanced scoring system with STRONG exact match prioritization
         scored_images = []
-        search_term = tag.lower() if tag else None
+        search_tag = tag.strip() if tag else None  # Keep original case for exact matching
+        search_tag_lower = tag.lower() if tag else None
+        search_concept = concept.lower() if concept else None  
+        search_subconcept = subconcept.lower() if subconcept else None
+        
+        logging.debug(f"🎯 Scoring {len(docs)} images for search_tag='{search_tag}', concept='{search_concept}', subconcept='{search_subconcept}'")
         
         for doc in docs:
             data = doc.to_dict()
@@ -9563,50 +10633,127 @@ async def public_bravo_images_search(
             if "created_at" in data and hasattr(data["created_at"], "isoformat"):
                 data["created_at"] = data["created_at"].isoformat()
             
-            # Calculate tag position bonus if we have a search term
-            match_score = 50  # Base score
-            if search_term:
+            # Enhanced scoring with EXTREME prioritization for exact matches
+            match_score = 1  # Base score (reduced to make exact matches stand out more)
+            match_details = []  # For debugging
+            
+            # SUPER HIGH PRIORITY: Exact tag match (1000+ points)
+            if search_tag:
                 tags = data.get('tags', [])
+                doc_subconcept = data.get('subconcept', '')
+                
+                # Check for EXACT matches first (case variations)
+                exact_match_found = False
                 for pos, tag_item in enumerate(tags):
-                    if tag_item.lower() == search_term:
+                    # Try various exact match formats
+                    if (tag_item == search_tag or 
+                        tag_item.lower() == search_tag_lower or
+                        tag_item == search_tag.replace(' ', '_') or
+                        tag_item == search_tag.replace(' ', '_').lower()):
+                        
+                        # MASSIVE score boost for exact matches, especially in position 0
                         if pos == 0:
-                            match_score += 20  # First tag gets big bonus
-                        elif pos == 1:
-                            match_score += 10  # Second tag gets medium bonus
-                        elif pos <= 3:
-                            match_score += 5   # Early tags get small bonus
+                            match_score += 1000  # Tag 0 exact match gets highest priority
+                            match_details.append(f"tag_0_exact_match(+1000)")
+                        else:
+                            match_score += 800 - (pos * 50)  # Still very high for other positions
+                            match_details.append(f"tag_{pos}_exact_match(+{800 - (pos * 50)})")
+                        exact_match_found = True
                         break
+                
+                # Also check subconcept for exact match
+                if (doc_subconcept == search_tag or 
+                    doc_subconcept.lower() == search_tag_lower or
+                    doc_subconcept == search_tag.replace(' ', '_') or
+                    doc_subconcept == search_tag.replace(' ', '_').lower()):
+                    
+                    match_score += 900  # Very high for subconcept exact match
+                    match_details.append(f"subconcept_exact_match(+900)")
+                    exact_match_found = True
+                
+                # Only do partial matching if no exact match found
+                if not exact_match_found:
+                    # MUCH LOWER PRIORITY: Partial tag matches (20-50 points max)
+                    search_words = search_tag_lower.split()
+                    for pos, tag_item in enumerate(tags):
+                        tag_lower = tag_item.lower()
+                        for word in search_words:
+                            if len(word) > 2 and word in tag_lower:
+                                partial_score = max(50 - (pos * 5) - len(search_words) * 5, 5)
+                                match_score += partial_score
+                                match_details.append(f"tag_{pos}_partial({word})(+{partial_score})")
+                                break  # Only count first match per tag
+            
+            # HIGH PRIORITY: Exact subconcept match (500 points) - only if not already matched above
+            if search_subconcept and not any('subconcept_exact_match' in detail for detail in match_details):
+                doc_subconcept = data.get('subconcept', '').lower()
+                if doc_subconcept == search_subconcept:
+                    match_score += 500
+                    match_details.append(f"subconcept_exact_match(+500)")
+            
+            # MEDIUM PRIORITY: Concept match (100 points)  
+            if search_concept:
+                doc_concept = data.get('concept', '').lower()
+                if doc_concept == search_concept:
+                    match_score += 100
+                    match_details.append(f"concept_match(+100)")
+            
+            # LOW PRIORITY: Partial subconcept match (10 points max)
+            if search_subconcept:
+                doc_subconcept = data.get('subconcept', '').lower()
+                if (search_subconcept in doc_subconcept or doc_subconcept in search_subconcept):
+                    if doc_subconcept != search_subconcept:  # Don't double-score exact matches
+                        match_score += 10
+                        match_details.append(f"subconcept_partial(+10)")
             
             data['match_score'] = match_score
+            data['match_details'] = match_details  # For debugging
             scored_images.append(data)
+            
+            # Log scoring details for high-scoring matches (exact matches)
+            if match_score > 800:
+                logging.debug(f"🔥 EXACT MATCH: {data.get('subconcept', 'unknown')} scored {match_score} - {match_details}")
+            elif match_score > 100:
+                logging.debug(f"⭐ GOOD MATCH: {data.get('subconcept', 'unknown')} scored {match_score} - {match_details}")
         
         # Sort by match score (highest first) 
         scored_images.sort(key=lambda x: x.get('match_score', 0), reverse=True)
         
-        # Take top results and remove match_score for clean response
+        # Log top results for debugging
+        if scored_images and (tag or concept or subconcept):
+            logging.debug(f"🏆 TOP MATCHES for '{tag or concept or subconcept}':")
+            for i, img in enumerate(scored_images[:5]):  # Show top 5
+                logging.debug(f"  {i+1}. '{img.get('subconcept', 'unknown')}' (score: {img.get('match_score', 0)})")
+                if img.get('match_details'):
+                    logging.debug(f"      {img['match_details']}")
+        
+        # Take top results and remove internal scoring fields for clean response
         images = []
         for data in scored_images[:limit]:
-            # Remove match_score from response (internal use only)
+            # Remove internal scoring fields from response
             if 'match_score' in data:
                 del data['match_score']
+            if 'match_details' in data:
+                del data['match_details']
             images.append(data)
         
         result = {
             "images": images,
             "total_found": len(images),
             "search_type": "bravo_images",
-            "query": tag or concept or "random"
+            "query": tag or concept or subconcept or "random"
         }
         
         # Log missing images for permanent tracking
-        if len(images) == 0 and (tag or concept):
+        if len(images) == 0 and (tag or concept or subconcept):
             from datetime import datetime
-            search_term = tag or concept
+            search_term = tag or concept or subconcept
             logging.info(f"🚨 MISSING IMAGE: No results found for '{search_term}' - logging to Firestore")
             try:
                 await log_missing_image(search_term, {
                     "tag": tag,
                     "concept": concept,
+                    "subconcept": subconcept,
                     "search_query": search_term,
                     "timestamp": datetime.now().isoformat()
                 })
@@ -9618,7 +10765,7 @@ async def public_bravo_images_search(
         if redis_client:
             try:
                 redis_client.setex(cache_key, 3600, json.dumps(result))
-                logging.debug(f"Cached search result for: {tag or concept}")
+                logging.debug(f"Cached search result for: {tag or concept or subconcept}")
             except Exception as redis_error:
                 logging.warning(f"Redis cache write error: {redis_error}")
         
@@ -11089,6 +12236,7 @@ async def clear_duplicate_symbols(admin_user: Annotated[Dict[str, str], Depends(
 
 @app.get("/api/symbols/button-search")
 async def button_symbol_search(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
     q: str = "",
     keywords: str = "",
     limit: int = 5
@@ -11229,7 +12377,7 @@ async def button_symbol_search(
                         # Convert image format to symbol format for compatibility
                         symbol_data = {
                             'id': image_id,
-                            'image_url': image.get('image_url'),
+                            'url': image.get('image_url'),
                             'name': image.get('subconcept', image.get('concept', 'BravoImage')),
                             'description': f"Bravo Image: {image.get('subconcept', '')}",
                             'tags': tags,
@@ -11243,6 +12391,130 @@ async def button_symbol_search(
                 logging.debug(f"BravoImages search failed for term '{term}': {e}")
         
         logging.info(f"Found {len(matched_symbols)} BravoImages matches")
+        
+        # Phase -0.5: Search user's custom images (including profile images)
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        
+        try:
+            # Search user's custom images collection
+            custom_images_ref = firestore_db.collection("accounts").document(account_id)\
+                                          .collection("profiles").document(aac_user_id)\
+                                          .collection("custom_images")
+            
+            # Search for active custom images (including profile images)
+            custom_query = custom_images_ref.where("active", "==", True).limit(limit * 3)
+            custom_docs = list(custom_query.stream())
+            
+            logging.info(f"Found {len(custom_docs)} active custom images for search matching")
+            
+            logging.info(f"Found {len(custom_docs)} active custom images for user")
+            
+            for doc in custom_docs:
+                custom_image = doc.to_dict()
+                custom_image_id = doc.id
+                
+                # Get all searchable fields
+                tags = custom_image.get('tags', [])
+                tags_lower = [tag.lower() for tag in tags]
+                concept = custom_image.get('concept', '').lower()
+                subconcept = custom_image.get('subconcept', '').lower()
+                
+                # Debug logging for each image
+                logging.info(f"Checking custom image {custom_image_id}: concept='{concept}', subconcept='{subconcept}', tags={tags}")
+                logging.info(f"Query term: '{query_lower}', looking for matches...")
+                
+                matched_term = None
+                match_score = 0
+                tag_position_bonus = 0
+                
+                # Check primary query against all fields
+                if query_lower == concept:
+                    matched_term = query_lower
+                    match_score = 70  # Highest for exact concept match
+                    logging.info(f"✅ EXACT CONCEPT MATCH: '{query_lower}' == '{concept}' (score: {match_score})")
+                elif query_lower == subconcept:
+                    matched_term = query_lower  
+                    match_score = 65  # High for exact subconcept match
+                    logging.info(f"✅ EXACT SUBCONCEPT MATCH: '{query_lower}' == '{subconcept}' (score: {match_score})")
+                elif query_lower in tags_lower:
+                    matched_term = query_lower
+                    # Find position of matching tag
+                    for pos, tag in enumerate(tags):
+                        if tag.lower() == query_lower:
+                            if pos == 0:
+                                tag_position_bonus = 25  # Custom images get highest bonus
+                            elif pos == 1:
+                                tag_position_bonus = 15
+                            elif pos <= 3:
+                                tag_position_bonus = 8
+                            break
+                    match_score = 60 + tag_position_bonus  # Higher than BravoImages
+                elif query_lower in concept:
+                    matched_term = query_lower
+                    match_score = 45  # Partial concept match
+                elif query_lower in subconcept:
+                    matched_term = query_lower
+                    match_score = 40  # Partial subconcept match
+                
+                # Check keyword list if no primary match
+                if not matched_term:
+                    for keyword in keyword_list:
+                        if keyword == concept:
+                            matched_term = keyword
+                            match_score = 65
+                            break
+                        elif keyword == subconcept:
+                            matched_term = keyword
+                            match_score = 60
+                            break
+                        elif keyword in tags_lower:
+                            matched_term = keyword
+                            for pos, tag in enumerate(tags):
+                                if tag.lower() == keyword:
+                                    if pos == 0:
+                                        tag_position_bonus = 20
+                                    elif pos == 1:
+                                        tag_position_bonus = 12
+                                    elif pos <= 3:
+                                        tag_position_bonus = 6
+                                    break
+                            match_score = 55 + tag_position_bonus
+                            break
+                        elif keyword in concept:
+                            matched_term = keyword
+                            match_score = 35
+                            break
+                        elif keyword in subconcept:
+                            matched_term = keyword
+                            match_score = 30
+                            break
+                
+                if matched_term:
+                    logging.info(f"✅ MATCHED custom image {custom_image_id} with term '{matched_term}' (score: {match_score})")
+                    # Avoid duplicates
+                    if not any(s['id'] == custom_image_id for s in matched_symbols):
+                        # Convert to symbol format for compatibility
+                        symbol_data = {
+                            'id': custom_image_id,
+                            'url': custom_image.get('image_url'),
+                            'name': custom_image.get('subconcept', custom_image.get('concept', 'Custom Image')),
+                            'description': f"Custom Image: {custom_image.get('subconcept', '')}",
+                            'tags': tags,
+                            'match_score': match_score,
+                            'matched_term': matched_term,
+                            'search_phase': "custom_image_match",
+                            'source': 'custom_images',
+                            'is_profile_image': custom_image.get('is_profile_image', False)
+                        }
+                        matched_symbols.append(symbol_data)
+                else:
+                    logging.info(f"❌ NO MATCH for custom image {custom_image_id}: concept='{concept}', subconcept='{subconcept}', tags={tags} - query was '{query_lower}'")
+                        
+            logging.info(f"Found {len([s for s in matched_symbols if s.get('source') == 'custom_images'])} custom images matches")
+            
+        except Exception as e:
+            logging.debug(f"Custom images search failed: {e}")
         
         # Phase 0: Enhanced keyword array matching for LLM-generated content (when keywords are provided)
         if keyword_list:
@@ -12020,8 +13292,10 @@ class TapNavigationButton(BaseModel):
     image_url: Optional[str] = Field(None, description="URL to pictogram/image")
     background_color: Optional[str] = Field("#FFFFFF", description="Hex color code for button background")
     text_color: Optional[str] = Field("#000000", description="Hex color code for button text")
-    llm_prompt: Optional[str] = Field(None, description="LLM query for generating child options")
+    llm_prompt: Optional[str] = Field(None, description="LLM query for generating phrase options")
+    words_prompt: Optional[str] = Field(None, description="LLM query for generating word options (e.g., 'I am hungry for')")
     static_options: Optional[str] = Field(None, description="Comma-separated list of static options (alternative to LLM prompt)")
+    custom_audio_file: Optional[str] = Field(None, description="URL to custom audio file to play after speech text")
     children: List["TapNavigationButton"] = Field(default_factory=list, description="Child buttons for submenus")
 
 class TapNavigationConfig(BaseModel):
@@ -12079,6 +13353,24 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     """Create a default tap navigation configuration"""
     from datetime import datetime
     
+    # Helper function to create button with all required fields
+    def create_button(button_id, label, speech_text=None, image_url=None, bg_color="#FFFFFF", 
+                     text_color="#000000", llm_prompt=None, words_prompt=None, static_options=None, 
+                     custom_audio_file=None, children=None):
+        return {
+            "id": button_id,
+            "label": label,
+            "speech_text": speech_text,
+            "image_url": image_url,
+            "background_color": bg_color,
+            "text_color": text_color,
+            "llm_prompt": llm_prompt,
+            "words_prompt": words_prompt,
+            "static_options": static_options,
+            "custom_audio_file": custom_audio_file,
+            "children": children or []
+        }
+    
     return {
         "id": "user_config",
         "name": "My Navigation",
@@ -12087,235 +13379,57 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
         "buttons": [
-            {
-                "id": "greetings",
-                "label": "Greetings",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": None,
-                "static_options": None,
-                "children": [
-                    {
-                        "id": "generic_greetings",
-                        "label": "Generic Greetings",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate common greeting phrases and expressions for everyday social interactions",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "current_location",
-                        "label": "Current Location",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate location-based greetings and conversation starters",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "jokes",
-                        "label": "Jokes",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate simple, appropriate jokes and funny conversation starters",
-                        "children": []
-                    }
-                ]
-            },
-            {
-                "id": "about_me",
-                "label": "About Me",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": None,
-                "static_options": None,
-                "children": [
-                    {
-                        "id": "personal_info",
-                        "label": "Personal Info",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate phrases for sharing personal information and basic details about myself",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "family",
-                        "label": "Family",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate phrases for talking about family members and relationships",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "interests",
-                        "label": "Interests",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate phrases for discussing hobbies, interests, and favorite activities",
-                        "children": []
-                    },
-                    {
-                        "id": "medical_info",
-                        "label": "Medical Info",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate phrases for communicating medical needs and health information",
-                        "static_options": None,
-                        "children": []
-                    }
-                ]
-            },
-            {
-                "id": "help",
-                "label": "Help",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": None,
-                "static_options": None,
-                "children": [
-                    {
-                        "id": "need_assistance",
-                        "label": "Need Assistance",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate phrases for requesting help and assistance",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "emergency",
-                        "label": "Emergency",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate emergency communication phrases and urgent requests",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "questions",
-                        "label": "Questions",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate question words and phrases for asking about things",
-                        "static_options": None,
-                        "children": []
-                    },
-                    {
-                        "id": "support",
-                        "label": "Support",
-                        "speech_text": None,
-                        "image_url": None,
-                        "background_color": "#FFFFFF",
-                        "text_color": "#000000",
-                        "llm_prompt": "Generate phrases for requesting support and guidance",
-                        "static_options": None,
-                        "children": []
-                    }
-                ]
-            },
-            {
-                "id": "feelings",
-                "label": "Feelings",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate words and phrases for expressing feelings and emotions",
-                "static_options": None,
-                "children": []
-            },
-            {
-                "id": "activities",
-                "label": "Activities",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate words and phrases about activities and things to do",
-                "static_options": None,
-                "children": []
-            },
-            {
-                "id": "requests",
-                "label": "Requests",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate phrases for making requests and asking for things",
-                "static_options": None,
-                "children": []
-            },
-            {
-                "id": "people",
-                "label": "People",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate words about people, family, relationships, and social connections",
-                "children": []
-            },
-            {
-                "id": "places",
-                "label": "Places",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate words about locations, places, and destinations",
-                "children": []
-            },
-            {
-                "id": "actions",
-                "label": "Actions",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate action words and verbs for describing what to do",
-                "static_options": None,
-                "children": []
-            },
-            {
-                "id": "things",
-                "label": "Things",
-                "speech_text": None,
-                "image_url": None,
-                "background_color": "#FFFFFF",
-                "text_color": "#000000",
-                "llm_prompt": "Generate words about objects, items, and things",
-                "children": []
-            }
+            create_button("greetings", "Greetings", children=[
+                create_button("generic_greetings", "Generic Greetings", 
+                            llm_prompt="Generate common greeting phrases and expressions for everyday social interactions",
+                            words_prompt="Hello, I want to"),
+                create_button("current_location", "Current Location",
+                            llm_prompt="Generate location-based greetings and conversation starters",
+                            words_prompt="I am at"),
+                create_button("jokes", "Jokes",
+                            llm_prompt="Generate simple, appropriate jokes and funny conversation starters")
+            ]),
+            create_button("about_me", "About Me", children=[
+                create_button("personal_info", "Personal Info",
+                            llm_prompt="Generate phrases for sharing personal information and basic details about myself",
+                            words_prompt="I am"),
+                create_button("family", "Family",
+                            llm_prompt="Generate phrases for talking about family members and relationships",
+                            words_prompt="My family"),
+                create_button("interests", "Interests",
+                            llm_prompt="Generate phrases for discussing hobbies, interests, and favorite activities",
+                            words_prompt="I like to"),
+                create_button("medical_info", "Medical Info",
+                            llm_prompt="Generate phrases for communicating medical needs and health information",
+                            words_prompt="I need medical")
+            ]),
+            create_button("help", "Help", children=[
+                create_button("need_assistance", "Need Assistance",
+                            llm_prompt="Generate phrases for requesting help and assistance",
+                            words_prompt="I need help with"),
+                create_button("emergency", "Emergency",
+                            llm_prompt="Generate emergency communication phrases and urgent requests",
+                            words_prompt="Emergency! I need"),
+                create_button("questions", "Questions",
+                            llm_prompt="Generate question words and phrases for asking about things",
+                            words_prompt="Can you tell me about"),
+                create_button("support", "Support",
+                            llm_prompt="Generate phrases for requesting support and guidance")
+            ]),
+            create_button("feelings", "Feelings",
+                        llm_prompt="Generate words and phrases for expressing feelings and emotions"),
+            create_button("activities", "Activities",
+                        llm_prompt="Generate words and phrases about activities and things to do"),
+            create_button("requests", "Requests",
+                        llm_prompt="Generate phrases for making requests and asking for things"),
+            create_button("people", "People",
+                        llm_prompt="Generate words about people, family, relationships, and social connections"),
+            create_button("places", "Places",
+                        llm_prompt="Generate words about locations, places, and destinations"),
+            create_button("actions", "Actions",
+                        llm_prompt="Generate action words and verbs for describing what to do"),
+            create_button("things", "Things",
+                        llm_prompt="Generate words about objects, items, and things")
         ]
     }
 
@@ -12383,33 +13497,95 @@ async def generate_options(
         if not prompt:
             raise HTTPException(status_code=400, detail="Prompt is required")
         
-        # Enhanced prompt for better results
-        enhanced_prompt = f"""
-        Generate {count} short, practical communication options for: {prompt}
+        # Check if this is a category-specific request
+        prompt_lower = prompt.lower()
+        is_category_request = any(category in prompt_lower for category in [
+            'things', 'people', 'places', 'actions', 'feelings', 'emotions', 
+            'questions', 'comments', 'food', 'drinks', 'activities', 'hobbies', 
+            'medical', 'health', 'times', 'dates'
+        ])
         
-        Requirements:
-        - Each option should be 1-4 words
-        - Options should be commonly used in everyday conversation
-        - Return only the options, one per line
-        - No numbering, bullets, or extra formatting
-        - Focus on practical, useful phrases
-        """
+        # Enhanced prompt for better category-specific results
+        if is_category_request:
+            enhanced_prompt = f"""
+            Generate exactly {count} specific words or short phrases that are clearly about: {prompt}
+            
+            CRITICAL REQUIREMENTS:
+            - ALL {count} options must be directly related to the category "{prompt}"
+            - DO NOT include generic communication words like "I", "want", "need", "like", "please", "thank you"
+            - Each option should be 1-3 words maximum
+            - Focus ONLY on words that belong specifically to this category
+            - Return exactly {count} options, one per line
+            - No numbering, bullets, or extra formatting
+            - Be creative and comprehensive within the category
+            - Include both common and less common words from this category
+            
+            Examples for "things": book, phone, chair, table, computer, shoes, keys, bag, car, bicycle
+            Examples for "people": mom, dad, friend, teacher, doctor, baby, neighbor, cousin, brother, sister
+            Examples for "actions": run, walk, eat, sleep, play, read, write, jump, dance, swim
+            
+            Generate {count} options for: {prompt}
+            """
+        else:
+            enhanced_prompt = f"""
+            Generate {count} short, practical communication options for: {prompt}
+            
+            Requirements:
+            - Each option should be 1-4 words
+            - Options should be commonly used in everyday conversation
+            - Return only the options, one per line
+            - No numbering, bullets, or extra formatting
+            - Focus on practical, useful phrases
+            """
         
         # Use the existing LLM service
         account_id = current_user_info["account_id"]
         aac_user_id = current_user_info["aac_user_id"]
-        options_text = await _generate_gemini_content_with_fallback(enhanced_prompt, None, account_id, aac_user_id)
         
-        # Parse the response into individual options
-        options = []
-        for line in options_text.strip().split('\n'):
-            option = line.strip().strip('"-').strip("'-")
-            if option and len(options) < count:
-                options.append(option)
+        # Try multiple times for category-specific requests to get enough options
+        max_attempts = 3 if is_category_request else 1
+        all_options = []
+        seen_options = set()
         
-        # Ensure we have the requested number of options
-        while len(options) < count:
-            options.append(f"Option {len(options) + 1}")
+        for attempt in range(max_attempts):
+            try:
+                options_text = await _generate_gemini_content_with_fallback(enhanced_prompt, None, account_id, aac_user_id)
+                
+                # Parse the response into individual options with deduplication
+                for line in options_text.strip().split('\n'):
+                    option = line.strip().strip('"-').strip("'-")
+                    # Filter out common generic words for category requests
+                    if option and (not is_category_request or option.lower() not in {'i', 'want', 'need', 'like', 'please', 'thank', 'you', 'help', 'more', 'good', 'bad'}):
+                        option_lower = option.lower()
+                        if option_lower not in seen_options:
+                            all_options.append(option)
+                            seen_options.add(option_lower)
+                
+                # If we have enough options, break early
+                if len(all_options) >= count:
+                    break
+                    
+                # For subsequent attempts, modify the prompt to ask for different options
+                if attempt < max_attempts - 1:
+                    enhanced_prompt = enhanced_prompt.replace("Generate", f"Generate {count} DIFFERENT").replace("options for:", "options (different from previous attempts) for:")
+                    
+            except Exception as e:
+                logging.warning(f"Attempt {attempt + 1} failed for generate_options: {e}")
+                continue
+        
+        # Take only the requested number
+        options = all_options[:count]
+        
+        # Only use minimal fallbacks for non-category requests and only if really needed
+        if len(options) < count and not is_category_request:
+            generic_fallbacks = ["Yes", "No", "Help", "More", "Stop"]
+            fallback_index = 0
+            while len(options) < count and fallback_index < len(generic_fallbacks):
+                fallback = generic_fallbacks[fallback_index]
+                if fallback.lower() not in seen_options:
+                    options.append(fallback)
+                    seen_options.add(fallback.lower())
+                fallback_index += 1
         
         return JSONResponse(content={"options": options[:count]})
         
@@ -12418,12 +13594,6 @@ async def generate_options(
     except Exception as e:
         logging.error(f"Error generating options: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate options")
-
-        
-        return JSONResponse(content={"success": True, "message": f"Configuration {config_id} deleted"})
-    except Exception as e:
-        logging.error(f"Error deleting tap interface config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
