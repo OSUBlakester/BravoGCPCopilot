@@ -8,6 +8,7 @@ class SightWordService {
     constructor() {
         this.dolchWords = null;
         this.currentGradeLevel = 'pre_k';
+        this.enableSightWords = true; // Enable sight word logic by default
         this.isInitialized = false;
         this.sightWordSet = new Set();
         this.init();
@@ -55,10 +56,16 @@ class SightWordService {
             
             if (response.ok) {
                 const settings = await response.json();
+                this.enableSightWords = settings.enableSightWords !== false; // Default to true if not set
                 this.updateGradeLevel(settings.sightWordGradeLevel || 'pre_k');
+                console.log('Sight word settings loaded:', {
+                    enableSightWords: this.enableSightWords,
+                    gradeLevel: this.currentGradeLevel
+                });
             }
         } catch (error) {
             console.error('Failed to load sight word settings:', error);
+            this.enableSightWords = true; // Default fallback
             this.updateGradeLevel('pre_k'); // Default fallback
         }
     }
@@ -102,7 +109,7 @@ class SightWordService {
      * @returns {boolean} - True if text should be text-only (no pictograms)
      */
     isSightWord(text) {
-        if (!this.isInitialized || !text) return false;
+        if (!this.isInitialized || !text || !this.enableSightWords) return false;
 
         // Normalize the text for checking
         const normalizedText = text.trim();
@@ -130,10 +137,14 @@ class SightWordService {
     }
 
     /**
-     * Update settings when user changes sight word grade level
-     * @param {Object} settings - Settings object containing sightWordGradeLevel
+     * Update settings when user changes sight word grade level or enables/disables sight words
+     * @param {Object} settings - Settings object containing sightWordGradeLevel and enableSightWords
      */
     updateSettings(settings) {
+        if (settings.enableSightWords !== undefined) {
+            this.enableSightWords = settings.enableSightWords;
+            console.log('Sight words enabled:', this.enableSightWords);
+        }
         if (settings.sightWordGradeLevel !== undefined) {
             this.updateGradeLevel(settings.sightWordGradeLevel);
         }

@@ -717,7 +717,7 @@ function startAuditoryScanning() {
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
 
-    const scanStep = () => {
+    const scanStep = async () => {
         if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); }
         currentButtonIndex++;
         
@@ -734,9 +734,7 @@ function startAuditoryScanning() {
                 
                 // Announce that scanning is paused
                 try {
-                    const utterance = new SpeechSynthesisUtterance("Scanning paused");
-                    window.speechSynthesis.cancel();
-                    window.speechSynthesis.speak(utterance);
+                    await announce("Scanning paused", "system", false);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -770,9 +768,7 @@ async function speakAndHighlight(button) {
     button.classList.add('scanning');
     try {
         const textToSpeak = button.textContent;
-        const utterance = new SpeechSynthesisUtterance(textToSpeak);
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        await announce(textToSpeak, "system", false);
     } catch (e) { console.error("Speech synthesis error:", e); }
 }
 
@@ -784,7 +780,7 @@ function stopAuditoryScanning() {
 }
 
 // Function to resume scanning from first option with cycle reset
-function resumeAuditoryScanning() {
+async function resumeAuditoryScanning() {
     if (!isPausedFromScanLimit) {
         console.log("Scanning was not paused from scan limit, starting normally");
         startAuditoryScanning();
@@ -798,9 +794,7 @@ function resumeAuditoryScanning() {
     
     // Announce that scanning is resumed
     try {
-        const utterance = new SpeechSynthesisUtterance("Scanning resumed");
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(utterance);
+        await announce("Scanning resumed", "system", false);
     } catch (e) { 
         console.error("Speech synthesis error:", e); 
     }

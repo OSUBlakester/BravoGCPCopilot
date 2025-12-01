@@ -239,6 +239,12 @@ function setupAdminToolbarButtons() {
 
     function handleSwitchUser() {
         console.log("Switching user profile. Clearing session and redirecting to auth page for profile selection.");
+        
+        // Reset interview system for new user
+        if (window.audioInterviewSystem) {
+            window.audioInterviewSystem.resetForNewUser();
+        }
+        
         // Only set flag to prevent auto-proceed with default user - keep user authenticated
         localStorage.setItem('bravoSkipDefaultUser', 'true');
         console.log('Set bravoSkipDefaultUser flag for profile selection');
@@ -252,6 +258,11 @@ function setupAdminToolbarButtons() {
 
     function handleLogout() {
         console.log("Logging out. Clearing session and redirecting to auth page for login.");
+        // Reset interview system for logout
+        if (window.audioInterviewSystem) {
+            window.audioInterviewSystem.resetForNewUser();
+        }
+        
         // Set both flags to prevent automatic re-login and auto-profile selection
         localStorage.setItem('bravoIntentionalLogout', 'true');
         localStorage.setItem('bravoSkipDefaultUser', 'true');

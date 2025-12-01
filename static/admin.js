@@ -10,7 +10,16 @@ const wakeWordNameInput = document.getElementById('wakeWordName');
 const CountryCodeInput = document.getElementById('CountryCode');
 const StateCodeInput = document.getElementById('StateCode');
 const speechRateInput = document.getElementById('speechRate');
+const applicationVolumeSlider = document.getElementById('applicationVolume');
+const volumeDisplay = document.getElementById('volumeDisplay');
 const saveSettingsButton = document.getElementById('saveSettingsButton');
+
+// Update volume display when slider moves
+if (applicationVolumeSlider && volumeDisplay) {
+    applicationVolumeSlider.addEventListener('input', function() {
+        console.log('Volume slider changed to:', this.value);\n        volumeDisplay.textContent = `${this.value}/10`;\n        console.log('Volume display updated to:', volumeDisplay.textContent);
+    });
+}
 const settingsStatus = document.getElementById('settings-status');
 
 
@@ -51,6 +60,11 @@ async function loadSettings() {
         if (StateCodeInput) { StateCodeInput.value = currentSettings.StateCode || ''; }
         console.log("speech rate",speechRateInput.value)
         if (speechRateInput) { speechRateInput.value = currentSettings.speech_rate || 180; } // Populate speech rate
+        if (applicationVolumeSlider && volumeDisplay) {
+            const volume = currentSettings.applicationVolume || 8;
+            applicationVolumeSlider.value = volume;
+            volumeDisplay.textContent = `${volume}/10`;
+        }
 
          console.log("Settings loaded:", currentSettings);
          settingsStatus.textContent = 'Settings loaded.';
@@ -74,8 +88,9 @@ async function saveSettings() {
     const newCountryCode = CountryCodeInput.value.trim();
     const newStateCode = StateCodeInput.value.trim();
     const newSpeechRate = speechRateInput.value; // Get speech rate value
+    const newApplicationVolume = applicationVolumeSlider ? parseInt(applicationVolumeSlider.value) : 8;
 
-console.log("Saving settings:", { scanDelay: newDelay, wakeWordInterjection: newInterjection, wakeWordName: newName, CountryCode: newCountryCode, StateCode: newStateCode, speechRate: newSpeechRate }); 
+console.log("Saving settings:", { scanDelay: newDelay, wakeWordInterjection: newInterjection, wakeWordName: newName, CountryCode: newCountryCode, StateCode: newStateCode, speechRate: newSpeechRate, applicationVolume: newApplicationVolume }); 
 
     // Validation
     if (!newDelay || isNaN(parseInt(newDelay)) || parseInt(newDelay) < 100) {
@@ -109,7 +124,8 @@ console.log("Saving settings:", { scanDelay: newDelay, wakeWordInterjection: new
         wakeWordName: newName,
         CountryCode: newCountryCode,
         StateCode: newStateCode,
-        speech_rate: parseInt(newSpeechRate)
+        speech_rate: parseInt(newSpeechRate),
+        applicationVolume: newApplicationVolume
     };
 
     console.log("Saving settings:", settingsToSave);
@@ -130,6 +146,11 @@ console.log("Saving settings:", { scanDelay: newDelay, wakeWordInterjection: new
         CountryCodeInput.value = currentSettings.CountryCode || '';
         StateCodeInput.value = currentSettings.StateCode || '';
         speechRateInput.value = currentSettings.speech_rate || 180; // Update speech rate
+        if (applicationVolumeSlider && volumeDisplay) {
+            const volume = currentSettings.applicationVolume || 8;
+            applicationVolumeSlider.value = volume;
+            volumeDisplay.textContent = `${volume}/10`;
+        }
 
         settingsStatus.textContent = 'Settings saved successfully!'; settingsStatus.style.color = 'green';
         setTimeout(() => { settingsStatus.textContent = ''; }, 3000);

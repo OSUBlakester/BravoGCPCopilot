@@ -6,10 +6,18 @@
     <title>User Information & Friends & Family Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    
     <!-- Ensure mood-selection.js is loaded for mood options -->
     <script src="/static/interactive-guide.js"></script>
     <script src="/static/user-info-admin-guide.js"></script>
     <script src="/static/mood-selection.js" defer></script>
+    <script src="/static/interview-questions.js" defer></script>
+    <script src="/static/family-friends-interview-questions.js" defer></script>
+    <script src="/static/family-friends-interview-system.js" defer></script>
     <script src="/static/user_info_admin.js" defer></script>
     <style>
         /* Custom base styles */
@@ -46,6 +54,20 @@
         .button-link i, button i {
              @apply mr-2;
         }
+        /* Audio Interview Styles */
+        .interview-log-entry {
+            @apply mb-3 p-3 bg-white rounded border border-gray-200;
+        }
+        .interview-log-entry.question {
+            @apply border-l-4 border-l-blue-500;
+        }
+        .interview-log-entry.answer {
+            @apply border-l-4 border-l-green-500 ml-4;
+        }
+        .interview-log-entry.skipped {
+            @apply border-l-4 border-l-gray-400 ml-4;
+        }
+
         /* Table styling */
         table {
             @apply min-w-full divide-y divide-gray-200 mt-4;
@@ -276,6 +298,48 @@
             <form id="user-info-form">
                 <div class="space-y-6">
                     <div>
+                        <label for="userName" class="block text-lg font-medium text-gray-700 mb-2">User's Name</label>
+                        <input type="text" id="userName" name="userName" placeholder="Enter the user's preferred name" class="max-w-md">
+                        <p class="text-xs text-gray-500 mt-1">This name will be used for pronouns and possessive references (I, me, myself, mine).</p>
+                    </div>
+
+                    <!-- Profile Image Section -->
+                    <div>
+                        <label class="block text-lg font-medium text-gray-700 mb-2">
+                            <i class="fas fa-user-circle mr-2 text-blue-600"></i>Profile Picture
+                        </label>
+                        <p class="text-sm text-gray-600 mb-4">
+                            Upload a profile picture that will be used for the user's name and personal pronouns (I, me, myself, mine, etc.)
+                        </p>
+                        
+                        <!-- Current Profile Image Display -->
+                        <div id="currentProfileImageContainer" class="mb-4" style="display: none;">
+                            <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg border">
+                                <img id="currentProfileImage" src="" alt="Current Profile Picture" class="w-16 h-16 object-cover rounded-full border-2 border-gray-300">
+                                <div>
+                                    <p class="text-sm font-medium text-gray-700">Current Profile Picture</p>
+                                    <p class="text-xs text-gray-500">Used for personal pronouns and identity</p>
+                                </div>
+                                <button type="button" id="removeProfileImageBtn" class="button-danger px-3 py-1 text-xs ml-auto">
+                                    <i class="fas fa-trash mr-1"></i>Remove
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Upload New Profile Image -->
+                        <div id="uploadProfileImageContainer" class="space-y-3">
+                            <div>
+                                <input type="file" id="profileImageFile" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md">
+                            </div>
+                            <button type="button" id="uploadProfileImageBtn" class="button-success">
+                                <i class="fas fa-upload mr-2"></i>Upload Profile Picture
+                            </button>
+                        </div>
+                        
+                        <span id="profile-image-status" class="text-sm text-green-600 h-4 inline-block mt-2"></span>
+                    </div>
+
+                    <div>
                         <label for="user-info" class="block text-lg font-medium text-gray-700 mb-2">General Information & Interests</label>
                         <textarea id="user-info" name="user-info" rows="10" placeholder="Enter general details about the user, interests, preferences, etc. This helps personalize responses." class="w-full"></textarea>
                         <p class="text-xs text-gray-500 mt-1">Include as much relevant detail as possible.</p>
@@ -288,9 +352,12 @@
                     </div>
 
                 </div>
-                <div class="mt-8">
+                <div class="mt-8 flex gap-4">
+                    <button type="button" id="startInterviewButton" class="button-success">
+                         <i class="fas fa-microphone mr-2"></i> Start Audio Interview
+                    </button>
                     <button type="button" id="saveInfoButton" class="button-primary">
-                         <i class="fas fa-save mr-2"></i> Save User Info & Birthday
+                         <i class="fas fa-save mr-2"></i> Save User Name, Info & Birthday
                     </button>
                     <span id="info-save-status" class="text-sm text-green-600 ml-4 h-4 inline-block"></span>
                 </div>
@@ -302,6 +369,20 @@
                 <h2 class="text-2xl font-bold text-gray-800">Friends & Family</h2>
                 <button type="button" id="manageRelationshipsBtn" class="button-secondary">
                     <i class="fas fa-cog mr-2"></i> Manage Relationship Types
+                </button>
+            </div>
+
+            <!-- Add Person Interview -->
+            <div class="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h3 class="text-lg font-semibold text-blue-800 mb-2">
+                    <i class="fas fa-microphone mr-2"></i>Add Person with Interview
+                </h3>
+                <p class="text-sm text-blue-700 mb-3">
+                    Use our quick 4-question audio interview to tell us about one important person. 
+                    We'll automatically add them to your Friends & Family list.
+                </p>
+                <button type="button" id="startFamilyFriendsInterviewBtn" class="button-primary">
+                    <i class="fas fa-user-plus mr-2"></i>Add Person with Interview
                 </button>
             </div>
 
@@ -356,6 +437,82 @@
              </div>
         </div>
 
+    </div>
+
+    <!-- Custom Images Section -->
+    <div class="bg-white p-6 rounded-lg shadow-lg mt-6">
+        <div class="flex justify-between items-center mb-6 border-b pb-2">
+            <h2 class="text-2xl font-bold text-gray-800">Custom Images</h2>
+            <div class="flex space-x-2">
+                <button type="button" id="refreshCustomImagesBtn" class="button-secondary">
+                    <i class="fas fa-sync mr-2"></i> Refresh
+                </button>
+            </div>
+        </div>
+
+        <!-- Upload New Image -->
+        <div class="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
+            <h3 class="text-lg font-semibold text-green-800 mb-2">
+                <i class="fas fa-upload mr-2"></i>Upload Custom Image
+            </h3>
+            <p class="text-sm text-green-700 mb-4">
+                Upload a custom image for this profile. You can assign tags that will be used to match this image to buttons. 
+                For example, use a person's name from your Family & Friends list, or descriptive terms like "home", "school", or "favorite toy".
+            </p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Left Column: Upload -->
+                <div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Image File</label>
+                        <input type="file" id="customImageFile" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md">
+                        <p class="text-xs text-gray-500 mt-1">Supported: JPG, PNG, WebP (max 5MB)</p>
+                    </div>
+                </div>
+
+                <!-- Right Column: Tag and Upload -->
+                <div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Primary Tag</label>
+                        <input type="text" id="customImagePrimaryTag" placeholder="e.g., mom, dad, home, school" class="w-full p-2 border border-gray-300 rounded-md">
+                        <p class="text-xs text-gray-500 mt-1">Tag for matching to buttons (e.g., family member name)</p>
+                    </div>
+                    
+                    <button type="button" id="uploadCustomImageBtn" class="button-success w-full">
+                        <i class="fas fa-cloud-upload-alt mr-2"></i>Upload Image
+                    </button>
+                </div>
+            </div>
+
+            <!-- Upload Progress -->
+            <div id="uploadProgress" class="hidden mt-4">
+                <div class="flex items-center space-x-2">
+                    <div class="w-full bg-gray-200 rounded-full h-2">
+                        <div id="uploadProgressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <span id="uploadProgressText" class="text-sm text-gray-600">0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Images List -->
+        <div>
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Uploaded Custom Images</h3>
+            <div id="customImagesList" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                <!-- Custom images will be loaded here -->
+                <div class="text-center text-gray-500 col-span-full">
+                    <i class="fas fa-images text-4xl mb-2"></i>
+                    <p>No custom images uploaded yet</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Save Status -->
+        <div class="mt-6">
+            <span id="custom-images-status" class="text-sm text-green-600 h-4 inline-block"></span>
+        </div>
+    </div>
+
     </div> 
 
     <!-- Relationship Management Modal -->
@@ -392,6 +549,130 @@
             </div>
         </div>
     </div>
+
+    <!-- Audio Interview Modal -->
+    <div id="audioInterviewModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-4xl max-h-[90vh] mx-2 relative flex flex-col">
+            <button id="closeInterviewModal" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Interview">&times;</button>
+            
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">Audio User Interview</h2>
+                <div class="flex items-center space-x-4">
+                    <span id="interviewProgress" class="text-sm text-gray-600">Question 0 of 0</span>
+                    <button id="pauseResumeBtn" class="button-secondary hidden">
+                        <i class="fas fa-pause"></i> Pause
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Interview Status -->
+            <div class="bg-gray-100 p-4 rounded-lg mb-6">
+                <div class="flex items-center space-x-3 mb-2">
+                    <div id="interviewStatus" class="flex items-center space-x-2">
+                        <i class="fas fa-microphone text-blue-600"></i>
+                        <span class="text-sm font-medium text-gray-700">Ready to start interview</span>
+                    </div>
+                </div>
+                <div id="currentQuestion" class="text-lg font-medium text-gray-800 mb-3">
+                    Welcome! I'll ask you some questions to learn about this user. Click "Start Interview" when you're ready.
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="startInterviewBtn" class="button-success">
+                        <i class="fas fa-play"></i> Start Interview
+                    </button>
+                    <button id="skipQuestionBtn" class="button-secondary hidden">
+                        <i class="fas fa-forward"></i> Skip Question
+                    </button>
+                    <button id="repeatQuestionBtn" class="button-secondary hidden">
+                        <i class="fas fa-redo"></i> Repeat Question
+                    </button>
+                </div>
+            </div>
+
+            <!-- Voice Recognition Feedback -->
+            <div id="voiceRecognitionFeedback" class="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-6 hidden">
+                <div class="flex items-center space-x-2 mb-2">
+                    <i class="fas fa-microphone-alt text-blue-600"></i>
+                    <span class="text-sm font-medium text-blue-800">Listening for your response...</span>
+                </div>
+                <div id="recognizedText" class="text-gray-700 italic min-h-[60px] p-2 bg-white rounded border">
+                    (Your speech will appear here as you talk)
+                </div>
+                <div class="mt-3 flex space-x-3">
+                    <button id="confirmResponseBtn" class="button-primary hidden">
+                        <i class="fas fa-check"></i> Confirm Response
+                    </button>
+                    <button id="retryResponseBtn" class="button-secondary hidden">
+                        <i class="fas fa-microphone"></i> Try Again
+                    </button>
+                </div>
+            </div>
+
+            <!-- Interview Progress -->
+            <div class="flex-1 overflow-y-auto bg-gray-50 p-4 rounded-lg">
+                <h3 class="text-lg font-semibold text-gray-800 mb-3">Interview Progress</h3>
+                <div id="interviewLog" class="space-y-3">
+                    <p class="text-gray-600 italic">Questions and answers will appear here as we progress through the interview.</p>
+                </div>
+            </div>
+
+            <!-- Interview Controls -->
+            <div class="mt-6 flex justify-between items-center">
+                <div class="flex space-x-3">
+                    <button id="saveInterviewProgressBtn" class="button-secondary">
+                        <i class="fas fa-save"></i> Save Progress
+                    </button>
+                    <button id="restartInterviewBtn" class="button-danger">
+                        <i class="fas fa-redo"></i> Restart Interview
+                    </button>
+                </div>
+                <div class="flex space-x-3">
+                    <button id="generateNarrativeBtn" class="button-success hidden">
+                        <i class="fas fa-file-text"></i> Generate User Profile
+                    </button>
+                    <button id="closeInterviewBtn" class="button-secondary">
+                        Close Interview
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Image Management Modal -->
+    <div id="customImageModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+        <div class="relative top-20 mx-auto p-5 border w-[600px] shadow-lg rounded-md bg-white">
+            <div class="mt-3">
+                <h3 class="text-lg font-medium text-gray-900 text-center mb-4">Manage Custom Image</h3>
+                
+                <!-- Image Preview -->
+                <div class="mb-4 text-center">
+                    <img id="modalImagePreview" src="" alt="Custom Image" class="max-w-full max-h-48 mx-auto rounded-lg border">
+                </div>
+
+                <!-- Edit Form -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Primary Tag</label>
+                    <input type="text" id="modalPrimaryTag" placeholder="e.g., mom, dad, home, school" class="w-full p-2 border border-gray-300 rounded-md">
+                    <p class="text-xs text-gray-500 mt-1">Tag used for matching to buttons</p>
+                </div>
+
+                <!-- Modal buttons -->
+                <div class="flex justify-between space-x-2 mt-6">
+                    <button type="button" id="deleteCustomImageBtn" class="button-danger">
+                        <i class="fas fa-trash mr-2"></i>Delete Image
+                    </button>
+                    <div class="flex space-x-2">
+                        <button type="button" id="closeCustomImageModalBtn" class="button-secondary">
+                            Cancel
+                        </button>
+                        <button type="button" id="saveCustomImageBtn" class="button-primary">
+                            <i class="fas fa-save mr-2"></i>Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     
     <script>
         // Update page title when admin context is ready
@@ -400,7 +681,110 @@
                 await window.updatePageTitleWithProfile('User Info & Birthdays Administration');
             }
         });
+
+        // Firebase Authentication Setup
+        let firebaseApp = null;
+        let authInitialized = false;
+
+        // Initialize Firebase and authentication
+        async function initializeFirebaseAndAuth() {
+            try {
+                console.log('Initializing Firebase...');
+                
+                // 1. Fetch Firebase config dynamically
+                let firebaseConfig;
+                try {
+                    const configResponse = await fetch('/api/frontend-config');
+                    const configData = await configResponse.json();
+                    firebaseConfig = configData.firebase_config || configData;
+                    if (!firebaseConfig || !firebaseConfig.apiKey) throw new Error('Invalid config from server.');
+                } catch (error) {
+                    console.error('Failed to fetch Firebase config from server:', error);
+                    alert('Failed to load Firebase configuration.');
+                    return;
+                }
+
+                // 2. Initialize Firebase
+                firebaseApp = firebase.initializeApp(firebaseConfig);
+                console.log(`Firebase initialized for project: ${firebaseConfig.projectId}`);
+                
+                // 3. Now check authentication
+                checkAuthentication();
+            } catch (error) {
+                console.error('Firebase initialization failed:', error);
+                alert('Firebase initialization failed: ' + error.message);
+            }
+        }
+
+        // Check if user is authenticated
+        function checkAuthentication() {
+            console.log('Checking authentication...');
+            
+            firebase.auth().onAuthStateChanged(async (user) => {
+                if (user) {
+                    const currentAacUserId = sessionStorage.getItem("currentAacUserId");
+                    const tokenFromUser = await user.getIdToken();
+                    sessionStorage.setItem("firebaseIdToken", tokenFromUser);
+
+                    if (!currentAacUserId) {
+                        console.warn("No AAC User ID found in session. Redirecting to auth page for user selection.");
+                        window.location.href = '/auth.html';
+                        return;
+                    }
+
+                    // Set up global variables for authentication
+                    window.currentAacUserId = currentAacUserId;
+                    window.authToken = tokenFromUser;
+                    
+                    console.log('Authentication successful, user ID:', currentAacUserId);
+                    
+                    // Set up authenticated fetch function
+                    window.authenticatedFetch = function(url, options = {}) {
+                        const headers = {
+                            'Content-Type': 'application/json',
+                            ...options.headers
+                        };
+                        
+                        if (window.authToken) {
+                            headers['Authorization'] = `Bearer ${window.authToken}`;
+                        }
+                        
+                        if (window.currentAacUserId) {
+                            headers['X-User-ID'] = window.currentAacUserId;
+                        }
+                        
+                        // Handle admin context if present
+                        const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+                        if (adminTargetAccountId) {
+                            headers['X-Admin-Target-Account'] = adminTargetAccountId;
+                        }
+                        
+                        return fetch(url, {
+                            ...options,
+                            headers: headers
+                        });
+                    };
+                    
+                    authInitialized = true;
+                    
+                    // Trigger event that auth context is ready
+                    document.dispatchEvent(new CustomEvent('adminUserContextReady'));
+                    
+                } else {
+                    console.log("User not logged in, redirecting to auth page");
+                    window.location.href = '/auth.html?redirect=' + encodeURIComponent(window.location.pathname);
+                }
+            });
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeFirebaseAndAuth();
+        });
     </script>
+
+    <!-- Audio Interview System -->
+    <script src="/static/audio-interview-system.js"></script>
 
 </body>
 </html>

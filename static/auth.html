@@ -549,6 +549,87 @@
 
         const auth = firebase.auth();
 
+        // Function to check mood selection and interface preference, then redirect appropriately
+        async function redirectToPreferredInterface() {
+            try {
+                const token = sessionStorage.getItem('firebaseIdToken');
+                
+                // First check if mood selection is enabled
+                const settingsResponse = await fetch('/api/settings', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                let shouldShowMood = false;
+                if (settingsResponse.ok) {
+                    const settings = await settingsResponse.json();
+                    shouldShowMood = settings.enableMoodSelection === true;
+                    console.log('Mood selection enabled:', shouldShowMood);
+                }
+                
+                // If mood selection is enabled, show it first
+                if (shouldShowMood && typeof MoodSelection !== 'undefined') {
+                    console.log('Showing mood selection before interface redirect...');
+                    const moodSelection = new MoodSelection();
+                    
+                    // Set up completion callback to redirect after mood selection
+                    moodSelection.onComplete = async () => {
+                        console.log('Mood selection completed, now checking interface preference...');
+                        await proceedToInterface();
+                    };
+                    
+                    moodSelection.show();
+                    return; // Don't proceed to interface until mood is selected
+                }
+                
+                // If mood selection not enabled, go directly to interface
+                await proceedToInterface();
+                
+            } catch (error) {
+                console.error('Error in redirectToPreferredInterface:', error);
+                window.location.href = 'gridpage.html?page=home';
+            }
+        }
+        
+        // Helper function to check interface preference and redirect
+        async function proceedToInterface() {
+            try {
+                const token = sessionStorage.getItem('firebaseIdToken');
+                const currentAacUserId = sessionStorage.getItem('currentAacUserId');
+                
+                if (!currentAacUserId) {
+                    console.warn('No AAC User ID found, defaulting to gridpage');
+                    window.location.href = 'gridpage.html?page=home';
+                    return;
+                }
+                
+                const response = await fetch('/api/interface-preference', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'X-User-ID': currentAacUserId,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    const targetInterface = data.useTapInterface ? 'tap_interface.html' : 'gridpage.html';
+                    console.log(`Redirecting to preferred interface: ${targetInterface} (useTapInterface: ${data.useTapInterface})`);
+                    window.location.href = `${targetInterface}?page=home`;
+                } else {
+                    console.warn('Failed to get interface preference, defaulting to gridpage');
+                    window.location.href = 'gridpage.html?page=home';
+                }
+            } catch (error) {
+                console.error('Error checking interface preference:', error);
+                window.location.href = 'gridpage.html?page=home';
+            }
+        }
+
         // DOM Elements
         const loginSection = document.getElementById('login-section');
         const registerSection = document.getElementById('register-section');
@@ -667,11 +748,11 @@
                     if (defaultUser) {
                         console.log('Auto-proceeding with default user:', defaultUser.display_name);
                         
-                        // Automatically proceed to gridpage with default user
+                        // Automatically proceed to preferred interface with default user
                         sessionStorage.setItem('firebaseIdToken', idToken);
                         sessionStorage.setItem('currentAacUserId', defaultUserId);
                         sessionStorage.setItem('selectedDisplayName', defaultUser.display_name);
-                        window.location.href = 'gridpage.html?page=home';
+                        await redirectToPreferredInterface();
                         return;
                     }
                 }
@@ -1054,7 +1135,7 @@
             sessionStorage.setItem('firebaseIdToken', window.currentIdToken);
             sessionStorage.setItem('currentAacUserId', selectedUserId);
             sessionStorage.setItem('selectedDisplayName', displayName);
-            window.location.href = 'gridpage.html?page=home';
+            await redirectToPreferredInterface();
         }
 
         async function handleUserSelection() {
@@ -1097,8 +1178,8 @@
             });
             
             // Small delay to ensure session storage is written
-            setTimeout(() => {
-                window.location.href = 'gridpage.html?page=home';
+            setTimeout(async () => {
+                await redirectToPreferredInterface();
             }, 100);
         }
 
@@ -1690,7 +1771,7 @@ registerForm.addEventListener('submit', async (e) => {
         sessionStorage.setItem('selectedDisplayName', `${account_name}'s Device 1`); // Use provided account_name
 
         alert('Account setup complete! Redirecting to your grid.');
-        window.location.href = `gridpage.html?page=home`;
+        await redirectToPreferredInterface();
 
     } catch (error) {
         console.error('Overall registration/backend error:', error);
@@ -1782,7 +1863,7 @@ registerForm.addEventListener('submit', async (e) => {
                             sessionStorage.setItem('firebaseIdToken', idToken);
                             sessionStorage.setItem('currentAacUserId', defaultUserId);
                             sessionStorage.setItem('selectedDisplayName', defaultUser.display_name);
-                            window.location.href = 'gridpage.html?page=home';
+                            await redirectToPreferredInterface();
                             return;
                         }
                     }

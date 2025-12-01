@@ -24,16 +24,48 @@ let relationshipsList = null;
 let newRelationshipInput = null;
 let addRelationshipBtn = null;
 
+// Interview related elements
+let startInterviewButton = null;
+let startFamilyFriendsInterviewButton = null;
+
+// Custom Images related elements
+let customImageFile = null;
+let customImagePrimaryTag = null;
+let uploadCustomImageBtn = null;
+let refreshCustomImagesBtn = null;
+let customImagesList = null;
+let customImagesStatus = null;
+let customImageModal = null;
+let modalImagePreview = null;
+let modalPrimaryTag = null;
+let saveCustomImageBtn = null;
+let deleteCustomImageBtn = null;
+let closeCustomImageModalBtn = null;
+
+// Profile Image related elements
+let userName = null;
+let profileImageFile = null;
+let uploadProfileImageBtn = null;
+let removeProfileImageBtn = null;
+let currentProfileImageContainer = null;
+let currentProfileImage = null;
+let profileImageStatus = null;
 
 // --- State Variables ---
 let currentUserInfo = '';
+let currentUserName = '';
 let currentUserBirthdate = null;
 let currentMood = '';
+let currentProfileImageData = null;
+let initialDataLoaded = false;
 
 // Global state
 let currentFriendsFamily = { friends_family: [] };
 let editingPersonIndex = null;
 let editingGroupIndex = null;
+
+// Make currentFriendsFamily available globally for interview system
+window.currentFriendsFamily = currentFriendsFamily;
 
 
 // --- Initialization Function ---
@@ -68,6 +100,35 @@ async function initializePage() {
         relationshipsList = document.getElementById('relationshipsList');
         newRelationshipInput = document.getElementById('newRelationship');
         addRelationshipBtn = document.getElementById('addRelationshipBtn');
+        
+        // Interview Elements
+        startInterviewButton = document.getElementById('startInterviewButton');
+        startFamilyFriendsInterviewButton = document.getElementById('startFamilyFriendsInterviewBtn');
+
+        // Custom Images Elements
+        customImageFile = document.getElementById('customImageFile');
+        customImagePrimaryTag = document.getElementById('customImagePrimaryTag');
+        uploadCustomImageBtn = document.getElementById('uploadCustomImageBtn');
+        refreshCustomImagesBtn = document.getElementById('refreshCustomImagesBtn');
+        customImagesList = document.getElementById('customImagesList');
+        customImagesStatus = document.getElementById('custom-images-status');
+        
+        // Custom Image Modal Elements
+        customImageModal = document.getElementById('customImageModal');
+        modalImagePreview = document.getElementById('modalImagePreview');
+        modalPrimaryTag = document.getElementById('modalPrimaryTag');
+        saveCustomImageBtn = document.getElementById('saveCustomImageBtn');
+        deleteCustomImageBtn = document.getElementById('deleteCustomImageBtn');
+        closeCustomImageModalBtn = document.getElementById('closeCustomImageModalBtn');
+        
+        // Profile Image Elements
+        userName = document.getElementById('userName');
+        profileImageFile = document.getElementById('profileImageFile');
+        uploadProfileImageBtn = document.getElementById('uploadProfileImageBtn');
+        removeProfileImageBtn = document.getElementById('removeProfileImageBtn');
+        currentProfileImageContainer = document.getElementById('currentProfileImageContainer');
+        currentProfileImage = document.getElementById('currentProfileImage');
+        profileImageStatus = document.getElementById('profile-image-status');
 
         // Event Listeners - Thread Groups functionality removed
 
@@ -81,6 +142,11 @@ async function initializePage() {
             return;
         }
 
+        // Interview button is optional - it may not exist in all setups
+        if (!startInterviewButton) {
+            console.log("Note: Interview button not found - interview functionality may not be available");
+        }
+
         // Add Event Listeners
         saveInfoButton.addEventListener('click', saveUserInfoAndBirthday);
         saveMoodBtn.addEventListener('click', saveMood);
@@ -90,6 +156,49 @@ async function initializePage() {
         manageRelationshipsBtn.addEventListener('click', openRelationshipModal);
         closeModalBtn.addEventListener('click', closeRelationshipModal);
         addRelationshipBtn.addEventListener('click', addRelationship);
+        
+        // Interview button event listeners
+        if (startInterviewButton) {
+            startInterviewButton.addEventListener('click', startInterview);
+        }
+        
+        if (startFamilyFriendsInterviewButton) {
+            startFamilyFriendsInterviewButton.addEventListener('click', startFamilyFriendsInterview);
+        }
+
+        // Custom Images event listeners
+        if (uploadCustomImageBtn) {
+            uploadCustomImageBtn.addEventListener('click', uploadCustomImage);
+        }
+        if (refreshCustomImagesBtn) {
+            refreshCustomImagesBtn.addEventListener('click', loadCustomImages);
+        }
+        if (saveCustomImageBtn) {
+            saveCustomImageBtn.addEventListener('click', saveCustomImageChanges);
+        }
+        if (deleteCustomImageBtn) {
+            deleteCustomImageBtn.addEventListener('click', deleteCustomImage);
+        }
+        if (closeCustomImageModalBtn) {
+            closeCustomImageModalBtn.addEventListener('click', closeCustomImageModal);
+        }
+        
+        // Profile Image event listeners
+        if (uploadProfileImageBtn) {
+            uploadProfileImageBtn.addEventListener('click', uploadProfileImage);
+        }
+        if (removeProfileImageBtn) {
+            removeProfileImageBtn.addEventListener('click', removeProfileImage);
+        }
+
+        // Close custom image modal when clicking outside
+        if (customImageModal) {
+            customImageModal.addEventListener('click', (e) => {
+                if (e.target === customImageModal) {
+                    closeCustomImageModal();
+                }
+            });
+        }
 
         console.log("Event listeners added successfully");
         console.log("Save Mood Button:", saveMoodBtn);
@@ -103,11 +212,36 @@ async function initializePage() {
             }
         });
 
-        // Load initial data
+        // Load initial data - but only if auth is ready and not already loaded
+        if (window.authenticatedFetch && !initialDataLoaded) {
+            console.log("Loading initial data from initializePage...");
+            await loadInitialData();
+        } else {
+            console.log("Waiting for authentication before loading data...");
+        }
+    }
+}
+
+// --- Initial Data Loading ---
+async function loadInitialData() {
+    if (initialDataLoaded) {
+        console.log("Initial data already loaded, skipping...");
+        return;
+    }
+    
+    console.log("Loading initial data...");
+    initialDataLoaded = true;
+    
+    try {
         await loadUserInfo();
         await loadFriendsFamily();
         await loadMoodOptions();
         await loadCurrentMood();
+        await loadCustomImages();
+        console.log("All initial data loaded successfully");
+    } catch (error) {
+        console.error("Error loading initial data:", error);
+        initialDataLoaded = false; // Reset flag so it can be retried
     }
 }
 
@@ -289,7 +423,11 @@ async function loadUserInfo() {
         }
         const userInfoData = await userInfoResponse.json();
         currentUserInfo = userInfoData.userInfo || '';
+        currentUserName = userInfoData.name || '';
         userInfoTextarea.value = currentUserInfo;
+        if (userName) {
+            userName.value = currentUserName;
+        }
 
         // Load birthdate
         const birthdayResponse = await window.authenticatedFetch('/api/birthdays', {
@@ -306,8 +444,16 @@ async function loadUserInfo() {
             userBirthdateInput.value = currentUserBirthdate || '';
         }
 
-        console.log("User info and birthday loaded.");
+        // Load profile image
+        await loadProfileImage();
+
+        console.log("User info, birthday, and profile image loaded.");
         showStatus(infoSaveStatus, "Loaded.", false, 1500);
+        
+        // Refresh interview data for the current user
+        if (window.refreshInterviewForUser) {
+            window.refreshInterviewForUser();
+        }
 
     } catch (error) {
         console.error("Error loading user info:", error);
@@ -326,6 +472,7 @@ async function saveUserInfoAndBirthday() {
     showStatus(infoSaveStatus, "Saving...", false, 0);
 
     const userInfo = userInfoTextarea.value;
+    const userNameValue = userName ? userName.value : '';
     const userBday = userBirthdateInput ? userBirthdateInput.value : null;
 
     if (userBday && !/^\d{4}-\d{2}-\d{2}$/.test(userBday)) {
@@ -339,7 +486,10 @@ async function saveUserInfoAndBirthday() {
         const userInfoResponse = await window.authenticatedFetch('/api/user-info', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ userInfo: userInfo })
+            body: JSON.stringify({ 
+                userInfo: userInfo,
+                name: userNameValue
+            })
         });
         if (!userInfoResponse.ok) {
              const errorText = await userInfoResponse.text();
@@ -361,8 +511,9 @@ async function saveUserInfoAndBirthday() {
         }
 
         currentUserInfo = userInfo;
+        currentUserName = userNameValue;
         currentUserBirthdate = userBday;
-        console.log("User info and birthday saved successfully.");
+        console.log("User info, name, and birthday saved successfully.");
         showStatus(infoSaveStatus, "Saved successfully!", false);
 
     } catch (error) {
@@ -548,6 +699,9 @@ async function loadFriendsFamily() {
             friends_family: Array.isArray(data.friends_family) ? data.friends_family : [],
             available_relationships: Array.isArray(data.available_relationships) ? data.available_relationships : []
         };
+        
+        // Update window reference for interview system
+        window.currentFriendsFamily = currentFriendsFamily;
 
         renderRelationshipsList();
         renderFriendsFamilyTable();
@@ -558,6 +712,8 @@ async function loadFriendsFamily() {
         console.error("Error loading friends & family:", error);
         showStatus(friendsFamilySaveStatus, `Error loading: ${error.message}`, true, 5000);
         currentFriendsFamily = { friends_family: [], available_relationships: [] };
+        // Update window reference for interview system
+        window.currentFriendsFamily = currentFriendsFamily;
         renderRelationshipsList();
         renderFriendsFamilyTable();
     }
@@ -567,10 +723,9 @@ async function saveFriendsFamily() {
     console.log("Saving friends & family...");
     showStatus(friendsFamilySaveStatus, "Saving...", false, 0);
 
-    // Filter out incomplete entries
+    // Filter out incomplete entries - only name is required
     const validEntries = currentFriendsFamily.friends_family.filter(person => 
-        person.name && person.name.trim() !== '' && 
-        person.relationship && person.relationship.trim() !== ''
+        person.name && person.name.trim() !== ''
     );
 
     const dataToSave = {
@@ -588,7 +743,9 @@ async function saveFriendsFamily() {
              const errorText = await response.text();
              throw new Error(`Save failed: ${response.status} ${errorText}`);
         }
-        currentFriendsFamily = await response.json();
+        const serverResponse = await response.json();
+        console.log("Server returned after save:", serverResponse);
+        currentFriendsFamily = serverResponse;
         renderFriendsFamilyTable();
 
         console.log("Friends & family saved successfully.");
@@ -629,6 +786,8 @@ async function addRelationship() {
 
         const data = await response.json();
         currentFriendsFamily.available_relationships = data.available_relationships;
+        // Update window reference for interview system
+        window.currentFriendsFamily = currentFriendsFamily;
         newRelationshipInput.value = '';
         renderRelationshipsList();
         renderFriendsFamilyTable(); // Re-render to update dropdowns
@@ -662,12 +821,43 @@ async function removeRelationship(index) {
 
         const data = await response.json();
         currentFriendsFamily.available_relationships = data.available_relationships;
+        // Update window reference for interview system
+        window.currentFriendsFamily = currentFriendsFamily;
         renderRelationshipsList();
         renderFriendsFamilyTable(); // Re-render to update dropdowns
 
     } catch (error) {
         console.error("Error removing relationship:", error);
         alert(`Error removing relationship: ${error.message}`);
+    }
+}
+
+// --- Interview Functions ---
+function startInterview() {
+    console.log("Starting comprehensive user interview...");
+    
+    // Check if the AudioInterviewSystem is available
+    if (typeof AudioInterviewSystem === 'undefined') {
+        console.error("AudioInterviewSystem not available");
+        alert("Interview system is not available. Please refresh the page and try again.");
+        return;
+    }
+    
+    // Initialize and start the interview system
+    try {
+        // Use existing interview system instance or create one
+        const interviewSystem = window.audioInterviewSystem || window.interviewSystem;
+        if (!interviewSystem) {
+            window.interviewSystem = new AudioInterviewSystem();
+        }
+        
+        // Open the interview modal using the correct method name
+        const systemToUse = window.audioInterviewSystem || window.interviewSystem;
+        systemToUse.openInterviewModal();
+        
+    } catch (error) {
+        console.error("Error starting interview:", error);
+        alert("There was an error starting the interview. Please try again.");
     }
 }
 
@@ -686,6 +876,12 @@ function setupAdminToolbarButtons() {
 
     function handleSwitchUser() {
         console.log("Switching user profile. Clearing session and redirecting to auth page for profile selection.");
+        
+        // Reset interview system for new user
+        if (window.audioInterviewSystem) {
+            window.audioInterviewSystem.resetForNewUser();
+        }
+        
         // Only set flag to prevent auto-proceed with default user - keep user authenticated
         localStorage.setItem('bravoSkipDefaultUser', 'true');
         console.log('Set bravoSkipDefaultUser flag for profile selection');
@@ -699,6 +895,12 @@ function setupAdminToolbarButtons() {
 
     function handleLogout() {
         console.log("Logging out. Clearing session and redirecting to auth page for login.");
+        
+        // Reset interview system for logout
+        if (window.audioInterviewSystem) {
+            window.audioInterviewSystem.resetForNewUser();
+        }
+        
         // Set both flags to prevent automatic re-login and auto-profile selection
         localStorage.setItem('bravoIntentionalLogout', 'true');
         localStorage.setItem('bravoSkipDefaultUser', 'true');
@@ -732,9 +934,350 @@ if (window.adminContextInitializedByInlineScript === true) {
     authContextIsReady();
 }
 
+// --- Custom Images Functions ---
+async function uploadCustomImage() {
+    console.log("Uploading custom image...");
+    
+    if (!customImageFile.files[0]) {
+        showStatus(customImagesStatus, "Please select an image file", true, 3000);
+        return;
+    }
+    
+    if (!customImagePrimaryTag.value.trim()) {
+        showStatus(customImagesStatus, "Please enter a primary tag", true, 3000);
+        return;
+    }
+    
+    try {
+        showStatus(customImagesStatus, "Uploading...", false, 0);
+        
+        const formData = new FormData();
+        formData.append('image', customImageFile.files[0]);
+        formData.append('concept', 'custom'); // Simple concept for custom images
+        formData.append('subconcept', customImagePrimaryTag.value.trim());
+        formData.append('tags', ''); // No additional tags in simplified version
+        
+        const response = await window.authenticatedFetch('/api/upload_custom_image', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Upload failed: ${response.status} ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log("Upload successful:", result);
+        
+        // Clear form
+        customImageFile.value = '';
+        customImagePrimaryTag.value = '';
+        
+        showStatus(customImagesStatus, "Image uploaded successfully!", false, 3000);
+        
+        // Reload images list
+        await loadCustomImages();
+        
+    } catch (error) {
+        console.error("Error uploading image:", error);
+        showStatus(customImagesStatus, `Upload failed: ${error.message}`, true, 5000);
+    }
+}
+
+async function loadCustomImages() {
+    console.log("Loading custom images...");
+    
+    try {
+        const response = await window.authenticatedFetch('/api/get_custom_images', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to load images: ${response.status} ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log("Custom images loaded:", result);
+        
+        displayCustomImages(result.images || []);
+        
+    } catch (error) {
+        console.error("Error loading custom images:", error);
+        showStatus(customImagesStatus, `Failed to load images: ${error.message}`, true, 3000);
+    }
+}
+
+function displayCustomImages(images) {
+    if (!customImagesList) return;
+    
+    if (images.length === 0) {
+        customImagesList.innerHTML = `
+            <div class="text-center text-gray-500 col-span-full">
+                <i class="fas fa-images text-4xl mb-2"></i>
+                <p>No custom images uploaded yet</p>
+            </div>
+        `;
+        return;
+    }
+    
+    customImagesList.innerHTML = images.map(image => `
+        <div class="relative group cursor-pointer" onclick="editCustomImage('${image.id}', '${image.image_url}', '${image.subconcept}')">
+            <img src="${image.image_url}" alt="${image.subconcept}" class="w-full h-24 object-cover rounded border hover:shadow-lg transition-shadow">
+            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 rounded flex items-center justify-center transition-all">
+                <i class="fas fa-edit text-white opacity-0 group-hover:opacity-100 transition-opacity"></i>
+            </div>
+            <p class="text-xs text-center mt-1 truncate">${image.subconcept}</p>
+        </div>
+    `).join('');
+}
+
+function editCustomImage(imageId, imageUrl, primaryTag) {
+    if (!customImageModal) return;
+    
+    // Store current image id for saving/deleting
+    customImageModal.dataset.imageId = imageId;
+    
+    // Set modal content
+    modalImagePreview.src = imageUrl;
+    modalPrimaryTag.value = primaryTag;
+    
+    // Show modal
+    customImageModal.classList.remove('hidden');
+}
+
+async function saveCustomImageChanges() {
+    console.log("Saving custom image changes...");
+    
+    const imageId = customImageModal.dataset.imageId;
+    const primaryTag = modalPrimaryTag.value.trim();
+    
+    if (!primaryTag) {
+        alert("Please enter a primary tag");
+        return;
+    }
+    
+    try {
+        const response = await window.authenticatedFetch('/api/update_custom_image', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_id: imageId,
+                concept: 'custom',
+                subconcept: primaryTag,
+                tags: []
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Update failed: ${response.status} ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log("Image updated successfully:", result);
+        
+        // Close modal and refresh
+        closeCustomImageModal();
+        await loadCustomImages();
+        
+        showStatus(customImagesStatus, "Image updated successfully!", false, 3000);
+        
+    } catch (error) {
+        console.error("Error updating image:", error);
+        alert(`Failed to update image: ${error.message}`);
+    }
+}
+
+async function deleteCustomImage() {
+    const imageId = customImageModal.dataset.imageId;
+    
+    if (!confirm("Are you sure you want to delete this image? This action cannot be undone.")) {
+        return;
+    }
+    
+    console.log("Deleting custom image...");
+    
+    try {
+        const response = await window.authenticatedFetch(`/api/delete_custom_image/${imageId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Delete failed: ${response.status} ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log("Image deleted successfully:", result);
+        
+        // Close modal and refresh
+        closeCustomImageModal();
+        await loadCustomImages();
+        
+        showStatus(customImagesStatus, "Image deleted successfully!", false, 3000);
+        
+    } catch (error) {
+        console.error("Error deleting image:", error);
+        alert(`Failed to delete image: ${error.message}`);
+    }
+}
+
+function closeCustomImageModal() {
+    if (customImageModal) {
+        customImageModal.classList.add('hidden');
+        customImageModal.dataset.imageId = '';
+        modalImagePreview.src = '';
+        modalPrimaryTag.value = '';
+    }
+}
+
+// --- Profile Image Functions ---
+async function loadProfileImage() {
+    console.log("Loading profile image...");
+    
+    try {
+        const response = await window.authenticatedFetch('/api/get_profile_image', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            currentProfileImageData = result.profile_image;
+            
+            if (currentProfileImageData && currentProfileImageData.image_url) {
+                // Show current profile image
+                if (currentProfileImage && currentProfileImageContainer) {
+                    currentProfileImage.src = currentProfileImageData.image_url;
+                    currentProfileImageContainer.style.display = 'block';
+                }
+                console.log("Profile image loaded:", currentProfileImageData.image_url);
+            } else {
+                // No profile image set
+                if (currentProfileImageContainer) {
+                    currentProfileImageContainer.style.display = 'none';
+                }
+                currentProfileImageData = null;
+                console.log("No profile image set");
+            }
+        } else if (response.status === 404) {
+            // No profile image found - this is normal
+            if (currentProfileImageContainer) {
+                currentProfileImageContainer.style.display = 'none';
+            }
+            currentProfileImageData = null;
+        } else {
+            const errorText = await response.text();
+            console.error("Error loading profile image:", response.status, errorText);
+        }
+        
+    } catch (error) {
+        console.error("Error loading profile image:", error);
+    }
+}
+
+async function uploadProfileImage() {
+    console.log("Uploading profile image...");
+    
+    if (!profileImageFile || !profileImageFile.files[0]) {
+        showStatus(profileImageStatus, "Please select an image file", true, 3000);
+        return;
+    }
+    
+    if (!userName || !userName.value.trim()) {
+        showStatus(profileImageStatus, "Please enter a user name first", true, 3000);
+        return;
+    }
+    
+    try {
+        showStatus(profileImageStatus, "Uploading...", false, 0);
+        
+        const formData = new FormData();
+        formData.append('image', profileImageFile.files[0]);
+        
+        const response = await window.authenticatedFetch('/api/upload_user_profile_image', {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Upload failed: ${response.status} ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log("Profile image upload successful:", result);
+        
+        // Clear form
+        profileImageFile.value = '';
+        
+        showStatus(profileImageStatus, "Profile image uploaded successfully!", false, 3000);
+        
+        // Reload profile image
+        await loadProfileImage();
+        
+    } catch (error) {
+        console.error("Error uploading profile image:", error);
+        showStatus(profileImageStatus, `Upload failed: ${error.message}`, true, 5000);
+    }
+}
+
+async function removeProfileImage() {
+    console.log("Removing profile image...");
+    
+    if (!currentProfileImageData) {
+        showStatus(profileImageStatus, "No profile image to remove", true, 3000);
+        return;
+    }
+    
+    try {
+        showStatus(profileImageStatus, "Removing...", false, 0);
+        
+        const response = await window.authenticatedFetch('/api/remove_profile_image', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Remove failed: ${response.status} ${errorText}`);
+        }
+        
+        console.log("Profile image removed successfully");
+        
+        showStatus(profileImageStatus, "Profile image removed successfully!", false, 3000);
+        
+        // Hide current image display
+        if (currentProfileImageContainer) {
+            currentProfileImageContainer.style.display = 'none';
+        }
+        currentProfileImageData = null;
+        
+    } catch (error) {
+        console.error("Error removing profile image:", error);
+        showStatus(profileImageStatus, `Remove failed: ${error.message}`, true, 5000);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log("user_info_admin.js: DOMContentLoaded event.");
     isDomContentLoaded = true;
     initializePage();
     setupAdminToolbarButtons(); // Add toolbar button functionality
+});
+
+// Listen for authentication context ready event
+document.addEventListener('adminUserContextReady', async () => {
+    console.log("user_info_admin.js: Authentication context ready.");
+    isAuthContextReady = true;
+    
+    // Load data now that auth is ready
+    if (isDomContentLoaded && window.authenticatedFetch && !initialDataLoaded) {
+        console.log("Loading user data after auth ready...");
+        await loadInitialData();
+    }
 });
