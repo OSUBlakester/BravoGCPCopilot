@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tap Interface - Bravo AAC</title>
     
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <!-- Authentication handled via session storage (set by auth.html) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="/static/mood-selection.css">
 
     <style>
         * {
@@ -17,11 +16,43 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            height: 100vh;
+        }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             height: 100vh;
             overflow: hidden;
+        }
+
+        /* --- Admin Toolbar Styles --- */
+        .admin-toolbar {
+            background-color: #ffffff;
+            padding: 0.25rem 0.5rem;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+        /* --- Page Banner Styles --- */
+        .page-banner {
+            background-color: #002244;
+            color: #FB4F14;
+            padding: 0.75em 1.5em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .page-banner h1 {
+            margin: 0;
+            font-size: 1.75em;
+            font-weight: 500;
+            text-align: left;
         }
 
         .container {
@@ -32,44 +63,7 @@
             gap: 10px;
         }
 
-        .top-bar {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 15px;
-            padding: 15px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .top-bar h1 {
-            color: #333;
-            font-size: 1.5em;
-            font-weight: 600;
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .speech-output {
-            background: #4CAF50;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-weight: 500;
-            min-width: 200px;
-            text-align: center;
-            border: none;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-
-        .speech-output:hover {
-            background: #45a049;
-        }
+        /* Removed top-bar styles as we removed the top bar */
 
         .clear-btn {
             background: #ff6b6b;
@@ -86,13 +80,167 @@
             background: #ff5252;
         }
 
+        /* Speech History Section */
+        .speech-history-container {
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .speech-history-container label {
+            font-weight: 600;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        .speech-history-row {
+            display: flex;
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .build-space-textarea {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 12px;
+            font-size: 1.2em;
+            resize: none;
+            background-color: #f9f9f9;
+            transition: border-color 0.3s ease;
+            min-height: 54px;
+        }
+
+        .build-space-textarea:focus {
+            outline: none;
+            border-color: #4CAF50;
+            background-color: white;
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .control-btn {
+            padding: 15px 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            border: 2px solid #002244;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 54px;
+        }
+
+        .speak-btn {
+            background-color: #10B981;
+            color: white;
+            border-color: #10B981;
+        }
+
+        .speak-btn:hover {
+            background-color: #059669;
+            border-color: #059669;
+        }
+
+        .clear-build-btn {
+            background-color: #ff6b6b;
+            color: white;
+            border-color: #ff6b6b;
+        }
+
+        .clear-build-btn:hover {
+            background-color: #ff5252;
+            border-color: #ff5252;
+        }
+
+        /* Modal styles for category navigation */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            max-width: 80vw;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 15px;
+        }
+
+        .modal-title {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .modal-close {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            cursor: pointer;
+            font-size: 1.2em;
+        }
+
+        .modal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .modal-option {
+            background: rgba(102, 126, 234, 0.1);
+            border: 2px solid #667eea;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .modal-option:hover {
+            background: rgba(102, 126, 234, 0.2);
+            transform: translateY(-2px);
+        }
+
         .main-grid {
             flex: 1;
             display: grid;
             grid-template-columns: 1fr 9fr;
-            grid-template-rows: 2fr 3fr;
             gap: 10px;
             min-height: 0;
+            height: 100%;
         }
 
         .categories-column {
@@ -100,6 +248,9 @@
             flex-direction: column;
             gap: 10px;
             grid-row: 1 / -1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            max-height: 100%;
         }
 
         .category-button {
@@ -117,7 +268,7 @@
             align-items: center;
             justify-content: center;
             text-align: center;
-            padding: 20px 15px;
+            padding: 10px 8px;
         }
 
         .category-button:hover {
@@ -134,32 +285,89 @@
         .options-grid-container {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 0px;
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 5px;
+            scrollbar-width: thin;
+            scrollbar-color: #ccc #f0f0f0;
+            height: 100%;
         }
 
         .llm-static-options {
             display: grid;
             grid-template-columns: repeat(9, 1fr);
-            grid-template-rows: repeat(2, 1fr);
+            grid-template-rows: repeat(3, 1fr);
             gap: 8px;
-            min-height: 0;
-            flex: 2;
+            min-height: 200px;
+            flex: 1;
+            height: 100%;
+            margin: 0;
+            padding: 0;
         }
 
         .freestyle-options {
             display: grid;
             grid-template-columns: repeat(9, 1fr);
-            grid-template-rows: repeat(3, 1fr);
+            grid-template-rows: repeat(4, 1fr);
             gap: 8px;
-            min-height: 0;
+            min-height: 300px;
+            flex: 1;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Section Headers */
+        .section-header {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 6px 12px;
+            border-radius: 8px;
+            margin: 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .section-header h3 {
+            margin: 0;
+            font-size: 1.1em;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .section-header i {
+            margin-right: 8px;
+            color: #667eea;
+        }
+
+        /* Section Containers */
+        .phrases-section, .words-section {
+            display: flex;
+            flex-direction: column;
+            margin: 0;
+            padding: 0;
+        }
+
+        .phrases-section {
             flex: 3;
+            margin-bottom: 0;
+        }
+
+        .words-section {
+            flex: 4;
+            margin-top: -10px;  /* Force sections to overlap slightly to eliminate gap */
+        }
+
+        .categories-content {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
         .option-button {
             background: rgba(255, 255, 255, 0.95);
             border: none;
             border-radius: 12px;
-            font-size: 1em;
+            font-size: var(--tap-button-font-size, 0.675em);
             font-weight: 500;
             color: #333;
             cursor: pointer;
@@ -170,9 +378,10 @@
             align-items: center;
             justify-content: center;
             text-align: center;
-            padding: 8px;
+            padding: 4px;
             position: relative;
-            min-height: 60px;
+            aspect-ratio: 1 / 1;
+            min-height: 45px;
         }
 
         .option-button:hover {
@@ -186,22 +395,23 @@
         }
 
         .option-button img {
-            width: 24px;
-            height: 24px;
-            margin-bottom: 4px;
-            border-radius: 4px;
+            width: 9px;
+            height: 9px;
+            margin-bottom: 2px;
+            border-radius: 3px;
         }
 
         .freestyle-button {
             background: rgba(255, 240, 200, 0.9);
-            border: 2px dashed #ddd;
-            font-style: italic;
-            color: #666;
+            border: 2px solid #FFB84D;
+            color: #B8860B;
+            font-weight: 500;
         }
 
         .freestyle-button:hover {
             background: rgba(255, 240, 200, 1);
-            border-color: #ccc;
+            border-color: #FF8C00;
+            transform: translateY(-1px);
         }
 
         .loading {
@@ -222,6 +432,77 @@
             border-top: 2px solid #666;
             border-radius: 50%;
             animation: spin 1s linear infinite;
+        }
+
+        /* Status Message */
+        .status-message {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 8px 15px;
+            border-radius: 15px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            z-index: 1000;
+            max-width: 80%;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Options Grid Container - Full Height */
+        .options-grid-container {
+            height: 100%;
+            overflow-y: auto;
+            padding: 10px;
+            scrollbar-width: thin;
+            scrollbar-color: #ccc #f0f0f0;
+        }
+
+        .options-grid-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .options-grid-container::-webkit-scrollbar-track {
+            background: #f0f0f0;
+            border-radius: 3px;
+        }
+
+        .options-grid-container::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 3px;
+        }
+
+        .options-grid-container::-webkit-scrollbar-thumb:hover {
+            background: #999;
+        }
+
+        .options-grid-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .options-grid-container::-webkit-scrollbar-track {
+            background: #f0f0f0;
+            border-radius: 3px;
+        }
+
+        .options-grid-container::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 3px;
+        }
+
+        /* Listening highlight for wake word functionality */
+        .highlight-listening {
+            background-color: #e8f5e8 !important;
+            border-color: #4CAF50 !important;
+            animation: pulse-listening 1.5s infinite;
+        }
+
+        @keyframes pulse-listening {
+            0% { border-color: #4CAF50; }
+            50% { border-color: #8BC34A; }
+            100% { border-color: #4CAF50; }
         }
 
         @keyframes spin {
@@ -272,75 +553,145 @@
             }
         }
 
-        /* Authentication overlay */
-        .auth-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-
-        .auth-card {
-            background: white;
-            padding: 40px;
-            border-radius: 20px;
-            text-align: center;
-            max-width: 400px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-
-        .auth-card h2 {
-            margin-bottom: 20px;
-            color: #333;
-        }
-
-        .auth-card p {
-            color: #666;
-            margin-bottom: 30px;
-        }
-
-        .login-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 25px;
-            font-size: 1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .login-btn:hover {
-            transform: translateY(-1px);
-        }
+        /* Tailwind CSS utility classes for admin toolbar */
+        .h-8 { height: 2rem; }
+        .w-8 { width: 2rem; }
+        .flex { display: flex; }
+        .items-center { align-items: center; }
+        .justify-center { justify-content: center; }
+        .text-gray-600 { color: #4b5563; }
+        .bg-gray-100 { background-color: #f3f4f6; }
+        .rounded-full { border-radius: 9999px; }
+        .transition-colors { transition-property: color, background-color, border-color, fill, stroke; }
+        .duration-200 { transition-duration: 200ms; }
+        .text-sm { font-size: 0.875rem; }
+        .hover\\:bg-blue-100:hover { background-color: #dbeafe; }
+        .hover\\:text-blue-600:hover { color: #2563eb; }
+        .hover\\:bg-red-100:hover { background-color: #fee2e2; }
+        .hover\\:text-red-600:hover { color: #dc2626; }
+        .hover\\:bg-green-100:hover { background-color: #dcfce7; }
+        .hover\\:text-green-600:hover { color: #16a34a; }
+        .border-l { border-left-width: 1px; }
+        .border-gray-300 { border-color: #d1d5db; }
+        .h-6 { height: 1.5rem; }
+        .mx-1 { margin-left: 0.25rem; margin-right: 0.25rem; }
+        .ml-2 { margin-left: 0.5rem; }
+        .focus\\:outline-none:focus { outline: none; }
+        .focus\\:ring-2:focus { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
+        .focus\\:ring-green-500:focus { box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.5); }
+        .hidden { display: none; }
+        .fixed { position: fixed; }
+        .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+        .bg-black { background-color: #000; }
+        .bg-opacity-50 { background-color: rgba(0, 0, 0, 0.5); }
+        .z-50 { z-index: 50; }
+        .bg-white { background-color: #fff; }
+        .p-6 { padding: 1.5rem; }
+        .rounded-lg { border-radius: 0.5rem; }
+        .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+        .max-w-sm { max-width: 24rem; }
+        .w-full { width: 100%; }
+        .mx-4 { margin-left: 1rem; margin-right: 1rem; }
+        .text-lg { font-size: 1.125rem; }
+        .font-semibold { font-weight: 600; }
+        .text-gray-800 { color: #1f2937; }
+        .mb-4 { margin-bottom: 1rem; }
+        .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+        .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+        .border { border-width: 1px; }
+        .border-gray-300 { border-color: #d1d5db; }
+        .rounded-md { border-radius: 0.375rem; }
+        .focus\\:ring-blue-500:focus { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); }
+        .focus\\:border-blue-500:focus { border-color: #3b82f6; }
+        .justify-end { justify-content: flex-end; }
+        .space-x-3 > * + * { margin-left: 0.75rem; }
+        .mt-4 { margin-top: 1rem; }
+        .px-4 { padding-left: 1rem; padding-right: 1rem; }
+        .bg-gray-200 { background-color: #e5e7eb; }
+        .hover\\:bg-gray-300:hover { background-color: #d1d5db; }
+        .focus\\:ring-gray-500:focus { box-shadow: 0 0 0 2px rgba(107, 114, 128, 0.5); }
+        .text-white { color: #fff; }
+        .bg-blue-600 { background-color: #2563eb; }
+        .hover\\:bg-blue-700:hover { background-color: #1d4ed8; }
+        .text-red-500 { color: #ef4444; }
+        .mt-2 { margin-top: 0.5rem; }
     </style>
 </head>
 <body>
-    <!-- Authentication Overlay -->
-    <div id="authOverlay" class="auth-overlay">
-        <div class="auth-card">
-            <h2>Welcome to Tap Interface</h2>
-            <p>Please sign in to access your personalized communication board.</p>
-            <button id="loginBtn" class="login-btn">Sign In with Google</button>
+
+    <div class="page-banner">
+        <h1 id="dynamic-page-title">Tap Interface</h1>
+        <div class="admin-toolbar">
+            <!-- Always visible lock icon -->
+            <button id="lock-icon" title="Admin Toolbar" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600">
+                <i class="fas fa-lock"></i>
+            </button>
+            <!-- Admin toolbar icons - initially hidden -->
+            <div id="admin-icons" class="hidden flex items-center gap-0.4rem">
+                <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-red-100 hover:text-red-600"><i class="fas fa-lock"></i></button>
+                <span class="border-l border-gray-300 h-6 mx-1"></span>
+                <a href="tap_interface_admin.html" title="Tap Interface Admin" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-hand-pointer"></i></a>
+                <a href="admin_settings.html" title="Global Settings" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-cog"></i></a>
+                <a href="user_current_admin.html" title="User Current Location" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-map-marker-alt"></i></a>
+                <a href="user_info_admin.html" title="User Info & Birthdays" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-info-circle"></i></a>
+                <a href="user_diary_admin.html" title="User Diary" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-book-open"></i></a>
+                <a href="audio_admin.html" title="Audio Devices" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-volume-up"></i></a>
+                <a href="favorites_admin.html" title="Favorites Topics" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-star"></i></a>
+                <a href="admin_audit_report.html" title="Activity Reports" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-clipboard-list"></i></a>
+                <span class="border-l border-gray-300 h-6 mx-1"></span>
+                <button id="switch-user-button" title="Switch User Profile" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-users"></i></button>
+                <button id="logout-button" title="Logout" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+            <!-- Help icon, always visible, to the right of admin toolbar -->
+            <button id="help-icon" title="Help" aria-label="Help" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full ml-2 transition-colors duration-200 text-sm hover:bg-green-100 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500">
+                <i class="fas fa-question-circle"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- PIN Modal -->
+    <div id="pin-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">Enter Admin PIN</h3>
+            <input type="text" id="pin-input" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter PIN" maxlength="10">
+            <div class="flex justify-end space-x-3 mt-4">
+                <button id="pin-cancel" class="px-4 py-2 text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500">Cancel</button>
+                <button id="pin-submit" class="px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">Submit</button>
+            </div>
+            <p id="pin-error" class="text-red-500 text-sm mt-2 hidden">Incorrect PIN. Please try again.</p>
         </div>
     </div>
 
     <!-- Main Application -->
-    <div class="container" id="mainApp" style="display: none;">
-        <!-- Top Bar -->
-        <div class="top-bar">
-            <h1>Tap Interface</h1>
-            <div class="user-info">
-                <button id="speechOutput" class="speech-output">Ready to speak...</button>
-                <button id="clearBtn" class="clear-btn">Clear</button>
-                <span id="userEmail"></span>
+    <div class="container" id="mainApp">
+        <!-- Speech History Section -->
+        <div class="speech-history-container">
+            <label for="build-space">Speech History:</label>
+            <div class="speech-history-row">
+                <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
+                <div class="control-buttons">
+                    <button id="speak-build-btn" class="control-btn speak-btn">
+                        <i class="fas fa-volume-up"></i> Speak
+                    </button>
+                    <button id="clear-build-btn" class="control-btn clear-build-btn">
+                        <i class="fas fa-trash"></i> Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+
+
+
+        <!-- Category Navigation Modal -->
+        <div id="categoryModal" class="modal-overlay" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modalTitle" class="modal-title">Select Option</h2>
+                    <button id="modalClose" class="modal-close">&times;</button>
+                </div>
+                <div id="modalGrid" class="modal-grid">
+                    <!-- Options will be populated here -->
+                </div>
             </div>
         </div>
 
@@ -348,118 +699,633 @@
         <div class="main-grid">
             <!-- Categories Column -->
             <div class="categories-column" id="categoriesColumn">
-                <!-- Categories will be loaded dynamically -->
+                <div class="section-header">
+                    <h3><i class="fas fa-folder-open"></i> Categories</h3>
+                </div>
+                <div class="categories-content">
+                    <!-- Categories will be loaded dynamically -->
+                </div>
             </div>
 
             <!-- Options Grid Container -->
             <div class="options-grid-container">
-                <!-- LLM/Static Options (Top 2 rows) -->
-                <div class="llm-static-options" id="llmStaticOptions">
-                    <!-- Generated options will appear here -->
+                <!-- Phrases Section (Top 2 rows) -->
+                <div class="phrases-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-comment"></i> Phrases</h3>
+                    </div>
+                    <div class="llm-static-options" id="llmStaticOptions">
+                        <!-- Generated phrases will appear here -->
+                    </div>
                 </div>
 
-                <!-- Freestyle Options (Bottom 3 rows) -->
-                <div class="freestyle-options" id="freestyleOptions">
-                    <!-- Freestyle options will appear here -->
+                <!-- Words Section (Bottom 3 rows) -->
+                <div class="words-section">
+                    <div class="section-header">
+                        <h3><i class="fas fa-font"></i> Words</h3>
+                    </div>
+                    <div class="freestyle-options" id="freestyleOptions">
+                        <!-- Word options will appear here -->
+                    </div>
                 </div>
             </div>
         </div>
+        
+        <!-- Status Message -->
+        <div id="statusMessage" class="status-message">Ready</div>
     </div>
 
     <script>
-        // Firebase Configuration (match your existing config)
-        const firebaseConfig = {
-            apiKey: "AIzaSyBNl7Ap5OFnLgTDBKY9xOXCAF4-2lup_TA",
-            authDomain: "bravo-aac.firebaseapp.com",
-            projectId: "bravo-aac",
-            storageBucket: "bravo-aac.appspot.com",
-            messagingSenderId: "214743407904",
-            appId: "1:214743407904:web:9051e6b7490a8b81a006c6"
-        };
-
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+        // Authentication variables (same pattern as gridpage)
+        let currentAacUserId = null;
+        let firebaseIdToken = null;
+        const AAC_USER_ID_SESSION_KEY = "currentAacUserId";
+        const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
+        const SELECTED_DISPLAY_NAME_SESSION_KEY = "selectedDisplayName";
 
         // Global state
-        let currentUser = null;
-        let accountId = null;
-        let aacUserId = null;
         let tapConfig = null;
         let speechQueue = [];
         let currentCategory = null;
+        let currentQuestion = null;
+        let currentWordsPrompt = null; // Track current words prompt for sentence building
+        let currentPhrasePrompt = null; // Track current phrase prompt for regeneration
+        let currentPhraseContext = null; // Track current phrase context (category/subcategory)
+        let currentPhraseOptions = []; // Track current phrase options for exclusion
+        let currentWordOptions = []; // Track current word options for exclusion
+
+        // Wake Word Variables (from gridpage)
+        let wakeWordInterjection = "hey";
+        let wakeWordName = "friend";  // Default should match gridpage
+        let LLMOptions = 10; // Default number of phrase options to generate
+        let FreestyleWordOptions = 15; // Default number of word options to generate  
+        let gridColumns = 10; // Default number of grid columns for button sizing
+        const QUESTION_TEXTAREA_ID = 'question-display';
+        const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening';
+
+        // User Settings (loaded from server)
+        let SummaryOff = false; // Default summary state
+        let enablePictograms = false; // Global setting for pictogram display
+        let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
+        let currentSpeechRate = 180; // Default words-per-minute
+
+        // Note: Using Firestore image lookup instead of emoji pictograms
+
+        // Speech Recognition Variables
+        let recognition = null;
+        let questionRecognitionInstance = null;
+        let isSettingUpRecognition = false;
+        let listeningForQuestion = false;
+
+        // Announcement Queue System (from gridpage)
+        let announcementQueue = [];
+        let isAnnouncingNow = false;
+        let speechSynthesisEnabled = false;
+        let audioContextInitialized = false;
 
         // DOM Elements
         const authOverlay = document.getElementById('authOverlay');
         const mainApp = document.getElementById('mainApp');
         const loginBtn = document.getElementById('loginBtn');
-        const userEmail = document.getElementById('userEmail');
-        const speechOutput = document.getElementById('speechOutput');
-        const clearBtn = document.getElementById('clearBtn');
         const categoriesColumn = document.getElementById('categoriesColumn');
+        const categoriesContent = document.querySelector('.categories-content');
         const llmStaticOptions = document.getElementById('llmStaticOptions');
         const freestyleOptions = document.getElementById('freestyleOptions');
+        const buildSpace = document.getElementById('build-space');
+        const speakBuildBtn = document.getElementById('speak-build-btn');
+        const clearBuildBtn = document.getElementById('clear-build-btn');
+        const categoryModal = document.getElementById('categoryModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalGrid = document.getElementById('modalGrid');
+        const modalClose = document.getElementById('modalClose');
+        const questionDisplay = document.getElementById('question-display');
+        const statusMessage = document.getElementById('statusMessage');
 
-        // Authentication
-        auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                currentUser = user;
-                userEmail.textContent = user.email;
-                await initializeUserData();
-                showMainApp();
-            } else {
-                showAuthOverlay();
+        // Status message helper function
+        function updateStatusMessage(message) {
+            const statusMessageElement = document.getElementById('statusMessage');
+            if (statusMessageElement) {
+                statusMessageElement.textContent = message;
             }
-        });
-
-        loginBtn.addEventListener('click', () => {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            auth.signInWithPopup(provider).catch(console.error);
-        });
-
-        function showAuthOverlay() {
-            authOverlay.style.display = 'flex';
-            mainApp.style.display = 'none';
         }
 
-        function showMainApp() {
-            authOverlay.style.display = 'none';
-            mainApp.style.display = 'flex';
+        // Initialize page when DOM is loaded
+        document.addEventListener('DOMContentLoaded', async function() {
+            console.log('Tap Interface initializing...');
+            
+            const userReady = await initializeUserContext();
+            if (!userReady) {
+                // Redirection already handled by initializeUserContext
+                return;
+            }
+            
+            initializeTapInterface();
+        });
+
+        /**
+         * Fetches symbol image from the AAC symbol database (like gridpage)
+         * @param {string} text - The button text to find a symbol for
+         * @param {Array<string>} keywords - Optional semantic keywords for LLM-generated content  
+         * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
+         */
+        async function getSymbolImageForText(text, keywords = null) {
+            console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
+            if (!text || text.trim() === '') {
+                console.log(`❌ Empty text provided to getSymbolImageForText`);
+                return null;
+            }
+            
+            // Load images even if enablePictograms is false for debugging
+            // if (!enablePictograms) {
+            //     console.log(`❌ Pictograms disabled, skipping image load for "${text}"`);
+            //     return null;
+            // }
+            
+            // Simple in-memory cache to avoid repeated requests
+            if (!window.symbolImageCache) {
+                window.symbolImageCache = new Map();
+            }
+            
+            const cacheKey = `tap_${text.trim().toLowerCase()}`;
+            if (window.symbolImageCache.has(cacheKey)) {
+                const cached = window.symbolImageCache.get(cacheKey);
+                if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
+                    return cached.imageUrl;
+                }
+            }
+            
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => {
+                    console.warn(`⏰ Timeout reached for symbol search: "${text}"`);
+                    controller.abort();
+                }, 10000); // Increased to 10 second timeout
+                
+                // Use unified button-search that searches Firestore collections with keywords support
+                let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`;
+                if (keywords && keywords.length > 0) {
+                    symbolsUrl += `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
+                }
+                
+                const response = await authenticatedFetch(symbolsUrl, {
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    console.warn(`Symbol search failed for "${text}": ${response.status}`);
+                    return null;
+                }
+                
+                const data = await response.json();
+                
+                if (data && data.symbols && Array.isArray(data.symbols) && data.symbols.length > 0) {
+                    const symbolUrl = data.symbols[0].url;
+                    // Cache the result
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: symbolUrl,
+                        timestamp: Date.now()
+                    });
+                    console.log(`✅ Found Firestore image for "${text}": ${symbolUrl}`);
+                    return symbolUrl;
+                } else {
+                    // Cache null result to avoid repeated failed requests
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: null,
+                        timestamp: Date.now()
+                    });
+                    console.log(`❌ No Firestore image found for "${text}"`);
+                    return null;
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    console.warn(`🚫 Request aborted for symbol "${text}" - likely due to timeout`);
+                } else {
+                    console.error(`Error fetching symbol for "${text}":`, error);
+                }
+                return null;
+            }
+        }
+
+        // Load user settings from server (like gridpage loadScanSettings)
+        async function loadUserSettings() {
+            try {
+                console.log('Loading user settings...');
+                const response = await authenticatedFetch('/api/settings', {
+                    method: 'GET'
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`HTTP error loading settings! status: ${response.status} ${errorText}`);
+                    return;
+                }
+
+                const settings = await response.json();
+                console.log('Loaded settings:', settings);
+                
+                // Load Summary setting
+                SummaryOff = settings.SummaryOff === true;
+                console.log('SummaryOff setting:', SummaryOff);
+                
+                // Load Pictogram setting
+                enablePictograms = settings.enablePictograms === true;
+                console.log('enablePictograms setting:', enablePictograms, 'Raw value:', settings.enablePictograms);
+                
+                // Force enable for debugging
+                console.log('🔧 DEBUG: Forcing enablePictograms to true for testing');
+                enablePictograms = true;
+                
+                // Load TTS settings
+                if (settings && typeof settings.speech_rate === 'number' && !isNaN(settings.speech_rate)) {
+                    currentSpeechRate = parseInt(settings.speech_rate);
+                    console.log(`Speech Rate loaded: ${currentSpeechRate} WPM`);
+                }
+                
+                if (settings && typeof settings.selected_tts_voice_name === 'string' && settings.selected_tts_voice_name.trim()) {
+                    currentTtsVoiceName = settings.selected_tts_voice_name;
+                    console.log(`TTS Voice Name loaded: "${currentTtsVoiceName}"`);
+                }
+                
+                // Load Wake Word parts
+                if (settings && typeof settings.wakeWordInterjection === 'string' && settings.wakeWordInterjection.trim()) {
+                    wakeWordInterjection = settings.wakeWordInterjection.trim().toLowerCase();
+                    console.log(`Wake Word Interjection loaded: "${wakeWordInterjection}"`);
+                } else {
+                    wakeWordInterjection = "hey";
+                }
+                
+                if (settings && typeof settings.wakeWordName === 'string' && settings.wakeWordName.trim()) {
+                    wakeWordName = settings.wakeWordName.trim().toLowerCase();
+                    console.log(`Wake Word Name loaded: "${wakeWordName}"`);
+                } else {
+                    wakeWordName = "friend";
+                }
+                
+                // Load LLMOptions
+                if (settings && typeof settings.LLMOptions === 'number' && !isNaN(settings.LLMOptions)) {
+                    LLMOptions = Math.max(1, parseInt(settings.LLMOptions));
+                    console.log(`LLM Options loaded: ${LLMOptions}`);
+                } else {
+                    LLMOptions = 10;
+                }
+                
+                // Load FreestyleWordOptions
+                if (settings && typeof settings.FreestyleOptions === 'number' && !isNaN(settings.FreestyleOptions)) {
+                    FreestyleWordOptions = Math.max(1, parseInt(settings.FreestyleOptions));
+                    console.log(`Freestyle Word Options loaded: ${FreestyleWordOptions}`);
+                } else {
+                    FreestyleWordOptions = 15;
+                }
+                
+                // Load gridColumns
+                if (settings && typeof settings.gridColumns === 'number' && !isNaN(settings.gridColumns)) {
+                    gridColumns = Math.max(2, Math.min(18, parseInt(settings.gridColumns)));
+                    console.log(`Grid Columns loaded: ${gridColumns}`);
+                } else {
+                    gridColumns = 10; // Default value
+                }
+                
+            } catch (error) {
+                console.error('Error loading user settings:', error);
+                // Use defaults on error
+            }
+        }
+
+        // Apply dynamic grid layout based on gridColumns setting (like gridpage)
+        function applyGridLayout() {
+            const llmStaticOptions = document.getElementById('llmStaticOptions');
+            const freestyleOptions = document.getElementById('freestyleOptions');
+            
+            if (llmStaticOptions && freestyleOptions) {
+                // Use full gridColumns for both phrases and words sections (same sizing)
+                const phraseColumns = gridColumns;
+                const wordColumns = gridColumns;
+                
+                // Calculate rows based on options count and columns
+                const phraseRows = Math.max(2, Math.ceil(LLMOptions / phraseColumns));
+                const wordRows = Math.max(3, Math.ceil(FreestyleWordOptions / wordColumns));
+                
+                llmStaticOptions.style.gridTemplateColumns = `repeat(${phraseColumns}, 1fr)`;
+                llmStaticOptions.style.gridTemplateRows = `repeat(${phraseRows}, 1fr)`;
+                
+                freestyleOptions.style.gridTemplateColumns = `repeat(${wordColumns}, 1fr)`;
+                freestyleOptions.style.gridTemplateRows = `repeat(${wordRows}, 1fr)`;
+                
+                // Apply dynamic font sizing based on grid density (like gridpage)
+                const baseFontSize = 16;
+                const minFontSize = 8;
+                const maxFontSize = 18;
+                const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
+                
+                document.documentElement.style.setProperty('--tap-button-font-size', `${fontSize}px`);
+                
+                console.log(`Applied grid layout: Phrases ${phraseColumns}x${phraseRows}, Words ${wordColumns}x${wordRows}, Font: ${fontSize}px`);
+            }
+        }
+        
+        // Regenerate phrase options using stored context with exclusion
+        async function regeneratePhraseOptions() {
+            if (!currentPhrasePrompt) {
+                console.warn('No current phrase prompt stored for regeneration');
+                return;
+            }
+            
+            try {
+                console.log('🔄 Regenerating phrase options with prompt:', currentPhrasePrompt);
+                console.log('🔄 Excluding current options:', currentPhraseOptions);
+                
+                // Show loading state
+                llmStaticOptions.innerHTML = '';
+                for (let i = 0; i < LLMOptions; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'option-button loading';
+                    btn.textContent = '...';
+                    llmStaticOptions.appendChild(btn);
+                }
+                
+                // Create exclusion text from current options
+                const excludedOptionsText = currentPhraseOptions
+                    .map(opt => (typeof opt === 'object' && opt.option) ? opt.option : opt)
+                    .filter(text => typeof text === 'string' && text.trim() !== '')
+                    .join('; ');
+                
+                // Generate new options with exclusion
+                const options = await generateGridpageLLMOptionsWithExclusion(currentPhrasePrompt, LLMOptions, excludedOptionsText);
+                renderCategoryOptions(options);
+                
+            } catch (error) {
+                console.error('Error regenerating phrase options:', error);
+                updateStatusMessage('Error generating new phrases');
+            }
+        }
+        
+        // Regenerate word options using stored context with exclusion
+        async function regenerateWordOptions() {
+            if (!currentCategory) {
+                console.warn('No current category stored for regeneration');
+                return;
+            }
+            
+            try {
+                console.log('🔄 Regenerating word options for category:', currentCategory.label);
+                console.log('🔄 Excluding current words:', currentWordOptions);
+                
+                // Show loading state
+                freestyleOptions.innerHTML = '';
+                for (let i = 0; i < FreestyleWordOptions; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'option-button freestyle-button loading';
+                    btn.textContent = '...';
+                    freestyleOptions.appendChild(btn);
+                }
+                
+                // Create exclusion text from current word options
+                const excludedWords = currentWordOptions
+                    .map(opt => (typeof opt === 'object' && opt.text) ? opt.text : opt)
+                    .filter(text => typeof text === 'string' && text.trim() !== '');
+                
+                // Generate new options with exclusion using freestyle logic
+                const newFreestyleOptions = await generateFreestyleLLMOptionsWithExclusion(currentCategory.label, FreestyleWordOptions, currentWordsPrompt, excludedWords);
+                renderFreestyleOptions(newFreestyleOptions);
+                
+            } catch (error) {
+                console.error('Error regenerating word options:', error);
+                updateStatusMessage('Error generating new words');
+            }
+        }
+        
+        // Initialize the tap interface page
+        async function initializeTapInterface() {
+            try {
+                console.log('Initializing tap interface...');
+                updateStatusMessage('Loading...');
+                
+                // Setup event listeners for buttons
+                setupEventListeners();
+                
+                // Load user data and configuration
+                await initializeUserData();
+                
+                // Apply dynamic grid layout after settings are loaded
+                applyGridLayout();
+                
+                updateStatusMessage('Ready - Say Hey Bravo to start');
+                
+            } catch (error) {
+                console.error('Error initializing tap interface:', error);
+                updateStatusMessage('Error loading interface');
+            }
+        }
+
+        // Authenticated fetch function (same pattern as gridpage)
+        async function authenticatedFetch(url, options = {}) {
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.error("Authentication: Firebase ID Token or AAC User ID not found. Redirecting to login.");
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                throw new Error("Authentication required.");
+            }
+
+            const headers = options.headers || {};
+            headers['Authorization'] = `Bearer ${firebaseIdToken}`;
+            headers['X-User-ID'] = currentAacUserId;
+            
+            // Check for admin context and add target account header if needed
+            const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+            if (adminTargetAccountId) {
+                headers['X-Admin-Target-Account'] = adminTargetAccountId;
+            }
+            
+            options.headers = headers;
+
+            // Add a check for 401/403 responses to trigger re-authentication
+            const response = await fetch(url, options);
+            if (response.status === 401 || response.status === 403) {
+                console.warn(`Authentication failed (${response.status}) for ${url}. Redirecting to login.`);
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                throw new Error("Session expired or invalid.");
+            }
+            return response;
+        }
+
+        // Initialize user context (same pattern as gridpage)
+        async function initializeUserContext() {
+            console.log('initializeUserContext: Starting initialization...');
+            
+            firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+            currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.log("No Firebase ID Token or AAC User ID found in session. Redirecting to auth.html.");
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                return false;
+            }
+            
+            console.log(`User context initialized. AAC User ID: ${currentAacUserId}`);
+            return true;
+        }
+
+        function setupEventListeners() {
+            // Build space controls
+            speakBuildBtn.addEventListener('click', () => {
+                enableSpeechSynthesis(); // Enable on first user gesture
+                speakBuildSpace();
+            });
+            clearBuildBtn.addEventListener('click', clearBuildSpace);
+            
+            // Modal controls
+            modalClose.addEventListener('click', closeModal);
+            categoryModal.addEventListener('click', (e) => {
+                if (e.target === categoryModal) closeModal();
+            });
+            
+            // Add click listeners to enable speech synthesis on any user interaction
+            document.addEventListener('click', enableSpeechSynthesis, { once: true });
+            document.addEventListener('touchstart', enableSpeechSynthesis, { once: true });
+        }
+
+        // Generate word options with exclusion (like freestyle page)
+        async function generateFreestyleLLMOptionsWithExclusion(category, count, wordsPrompt, excludedWords) {
+            const wordsCount = count || FreestyleWordOptions;
+            console.log('generateFreestyleLLMOptionsWithExclusion called with category:', category, 'count:', wordsCount, 'wordsPrompt:', wordsPrompt, 'excluding:', excludedWords);
+            
+            try {
+                if (category && category !== 'general') {
+                    // Use category-words endpoint with exclusion
+                    const requestBody = {
+                        category: category,
+                        build_space_content: buildSpace.value || '',
+                        count: wordsCount,
+                        exclude_words: excludedWords,
+                        words_prompt: wordsPrompt
+                    };
+                    
+                    console.log('🟡 Sending exclusion request to /api/freestyle/category-words:', requestBody);
+                    
+                    const response = await authenticatedFetch('/api/freestyle/category-words', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('🟢 Category words exclusion response:', data);
+                        return data.words || [];
+                    }
+                }
+                
+                // Fallback to general word options with exclusion
+                const requestBody = {
+                    "speech_history": buildSpace.value || '',
+                    "count": wordsCount,
+                    "exclude_words": excludedWords
+                };
+                
+                console.log('🟡 Sending exclusion request to /api/freestyle/word-options:', requestBody);
+                
+                const response = await authenticatedFetch('/api/freestyle/word-options', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('🟢 Word options exclusion response:', data.word_options);
+                    return data.word_options || [];
+                } else {
+                    console.error('🔴 Word options exclusion API failed:', response.status);
+                    return [];
+                }
+                
+            } catch (error) {
+                console.error('Error in generateFreestyleLLMOptionsWithExclusion:', error);
+                return [];
+            }
+        }
+
+        // Generate word options with exclusion (like freestyle page)
+        async function generateFreestyleLLMOptionsWithExclusion(category, count, wordsPrompt, excludedWords) {
+            const wordsCount = count || FreestyleWordOptions;
+            console.log('generateFreestyleLLMOptionsWithExclusion called with category:', category, 'count:', wordsCount, 'wordsPrompt:', wordsPrompt, 'excluding:', excludedWords);
+            
+            try {
+                if (category && category !== 'general') {
+                    // Use category-words endpoint with exclusion
+                    const requestBody = {
+                        category: category,
+                        build_space_content: buildSpace.value || '',
+                        count: wordsCount,
+                        exclude_words: excludedWords,
+                        words_prompt: wordsPrompt
+                    };
+                    
+                    console.log('🟡 Sending exclusion request to /api/freestyle/category-words:', requestBody);
+                    
+                    const response = await authenticatedFetch('/api/freestyle/category-words', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('🟢 Category words exclusion response:', data);
+                        return data.words || [];
+                    }
+                }
+                
+                // Fallback to general word options with exclusion
+                const requestBody = {
+                    "speech_history": buildSpace.value || '',
+                    "count": wordsCount,
+                    "exclude_words": excludedWords
+                };
+                
+                console.log('🟡 Sending exclusion request to /api/freestyle/word-options:', requestBody);
+                
+                const response = await authenticatedFetch('/api/freestyle/word-options', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('🟢 Word options exclusion response:', data.word_options);
+                    return data.word_options || [];
+                } else {
+                    console.error('🔴 Word options exclusion API failed:', response.status);
+                    return [];
+                }
+                
+            } catch (error) {
+                console.error('Error in generateFreestyleLLMOptionsWithExclusion:', error);
+                return [];
+            }
         }
 
         async function initializeUserData() {
             try {
-                // Get user account and AAC user info
-                const response = await fetch('/api/current-user', {
-                    headers: {
-                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
-                    }
-                });
-
-                if (response.ok) {
-                    const userData = await response.json();
-                    accountId = userData.account_id;
-                    aacUserId = userData.aac_user_id;
-                    
-                    // Load tap interface configuration
-                    await loadTapConfig();
-                    renderInterface();
-                } else {
-                    console.error('Failed to get user data');
-                }
+                // Load user settings first (like gridpage)
+                await loadUserSettings();
+                // Load tap interface configuration
+                await loadTapConfig();
+                await renderInterface();
+                // Load initial freestyle options
+                await loadFreestyleOptions();
             } catch (error) {
-                console.error('Error initializing user data:', error);
+                console.error('Failed to initialize user data:', error);
             }
         }
 
         async function loadTapConfig() {
             try {
-                const response = await fetch(`/api/tap-interface/config?account_id=${accountId}&aac_user_id=${aacUserId}`, {
-                    headers: {
-                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
-                    }
-                });
+                const response = await authenticatedFetch('/api/tap-interface/config');
 
                 if (response.ok) {
                     tapConfig = await response.json();
@@ -473,47 +1339,169 @@
             }
         }
 
-        function renderInterface() {
+        async function renderInterface() {
             renderCategories();
-            renderFreestyleOptions();
+            // Load initial generic phrases and freestyle options
+            await loadInitialPhrases();
+            // Freestyle options are loaded separately in initializeUserData()
+        }
+
+        async function loadInitialPhrases() {
+            console.log('Loading initial generic phrases...');
+            try {
+                // Generate generic conversation starters and common phrases
+                const genericPrompt = "Generate general conversation starters and common communication phrases for everyday social interactions";
+                // Store the prompt for Something Else regeneration
+                currentPhrasePrompt = genericPrompt;
+                const options = await generateGridpageLLMOptions(genericPrompt, LLMOptions);
+                console.log('Generated initial phrases:', options);
+                renderCategoryOptions(options);
+            } catch (error) {
+                console.error('Error loading initial phrases:', error);
+                // Show empty state if loading fails
+                renderCategoryOptions([]);
+            }
         }
 
         function renderCategories() {
-            categoriesColumn.innerHTML = '';
+            console.log('Rendering categories, tapConfig:', tapConfig);
             
-            if (!tapConfig.buttons || tapConfig.buttons.length === 0) {
-                categoriesColumn.innerHTML = '<div class="empty-state">No categories configured</div>';
+            if (!categoriesContent) {
+                console.error('Categories content container not found');
                 return;
             }
+            
+            categoriesContent.innerHTML = '';
+            
+            if (!tapConfig || !tapConfig.buttons || tapConfig.buttons.length === 0) {
+                console.log('No tap config or buttons found');
+                categoriesContent.innerHTML = '<div class="empty-state">No categories configured</div>';
+                return;
+            }
+            
+            console.log('Found', tapConfig.buttons.length, 'category buttons');
 
             tapConfig.buttons.forEach(button => {
                 const categoryBtn = document.createElement('button');
                 categoryBtn.className = 'category-button';
-                categoryBtn.textContent = button.label;
                 categoryBtn.style.backgroundColor = button.background_color || '#FFFFFF';
                 categoryBtn.style.color = button.text_color || '#000000';
                 
-                categoryBtn.addEventListener('click', () => selectCategory(button));
-                categoriesColumn.appendChild(categoryBtn);
+                // Add Firestore image support for categories (like gridpage) - always attempt for debugging  
+                console.log(`🔍 Attempting image load for category: "${button.label}"`);
+                getSymbolImageForText(button.label).then(imageUrl => {
+                    console.log(`🎯 Image result for "${button.label}": ${imageUrl ? 'Found' : 'Not found'}`);
+                        if (imageUrl) {
+                            // Create image + text layout like gridpage
+                            categoryBtn.innerHTML = '';
+                            const buttonContent = document.createElement('div');
+                            buttonContent.style.position = 'relative';
+                            buttonContent.style.width = '100%';
+                            buttonContent.style.height = '100%';
+                            buttonContent.style.display = 'flex';
+                            buttonContent.style.flexDirection = 'column';
+                            
+                            const imageContainer = document.createElement('div');
+                            imageContainer.style.flex = '1';
+                            imageContainer.style.width = '100%';
+                            imageContainer.style.overflow = 'hidden';
+                            imageContainer.style.borderRadius = '8px 8px 0 0';
+                            imageContainer.style.display = 'flex';
+                            imageContainer.style.alignItems = 'center';
+                            imageContainer.style.justifyContent = 'center';
+                            
+                            const imageElement = document.createElement('img');
+                            imageElement.src = imageUrl;
+                            imageElement.alt = button.label;
+                            imageElement.style.width = '100%';
+                            imageElement.style.height = '100%';
+                            imageElement.style.objectFit = 'cover';
+                            
+                            const textFooter = document.createElement('div');
+                            textFooter.style.height = '18px';
+                            textFooter.style.width = '100%';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.color = 'white';
+                            textFooter.style.display = 'flex';
+                            textFooter.style.alignItems = 'center';
+                            textFooter.style.justifyContent = 'center';
+                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.position = 'absolute';
+                            textFooter.style.bottom = '0';
+                            textFooter.style.left = '0';
+                            textFooter.style.right = '0';
+                            
+                            const textSpan = document.createElement('span');
+                            textSpan.textContent = button.label;
+                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontWeight = 'bold';
+                            textSpan.style.textAlign = 'center';
+                            
+                            imageContainer.appendChild(imageElement);
+                            textFooter.appendChild(textSpan);
+                            buttonContent.appendChild(imageContainer);
+                            buttonContent.appendChild(textFooter);
+                            categoryBtn.appendChild(buttonContent);
+                        }
+                    }).catch(error => {
+                        console.error('Error loading image for category button:', error);
+                    });
+                
+                // Set initial text (will be replaced by image if found)
+                categoryBtn.textContent = button.label;
+                
+                categoryBtn.addEventListener('click', async (event) => {
+                    // Only announce if there is a speech_text value
+                    if (button.speech_text && button.speech_text.trim() !== '') {
+                        await announce(button.speech_text, "system", true);
+                    }
+                    
+                    // Play custom audio file if assigned
+                    if (button.custom_audio_file) {
+                        try {
+                            await playCustomButtonAudio(button.custom_audio_file);
+                        } catch (error) {
+                            console.error('Error playing button audio:', error);
+                        }
+                    }
+                    
+                    selectCategory(button, event);
+                });
+                categoriesContent.appendChild(categoryBtn);
             });
         }
 
-        async function selectCategory(category) {
+        async function selectCategory(category, event) {
+            console.log('Selecting category:', category);
+            
             // Update active state
             document.querySelectorAll('.category-button').forEach(btn => {
                 btn.classList.remove('active');
             });
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
             
             currentCategory = category;
+            
+            // If category has children, show modal (pass parent path so nested selection builds full path)
+            if (category.children && category.children.length > 0) {
+                console.log('Category has', category.children.length, 'children, showing modal');
+                console.log('Children:', category.children.map(c => c.label));
+                showCategoryModal(category, category.label);
+                return;
+            }
+            
+            console.log('Loading phrases for category:', category.label);
             
             // Clear existing options
             llmStaticOptions.innerHTML = '';
             
             // Show loading state
-            for (let i = 0; i < 18; i++) {
+            for (let i = 0; i < LLMOptions; i++) {
                 const btn = document.createElement('button');
                 btn.className = 'option-button loading';
+                btn.textContent = '...';
                 llmStaticOptions.appendChild(btn);
             }
 
@@ -521,60 +1509,571 @@
                 let options = [];
                 
                 if (category.static_options) {
-                    // Use static options
-                    options = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    console.log('Using static options:', category.static_options);
+                    // Use static options - format as structured options with full phrases
+                    const staticTexts = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    options = staticTexts.map(text => ({
+                        option: text,
+                        summary: text.length > 20 ? text.substring(0, 17) + '...' : text,
+                        keywords: []
+                    }));
                 } else if (category.llm_prompt) {
-                    // Generate options using LLM
-                    options = await generateLLMOptions(category.llm_prompt);
-                } else if (category.children && category.children.length > 0) {
-                    // Use predefined children
-                    options = category.children.map(child => child.label);
+                    console.log('Generating LLM options with prompt:', category.llm_prompt);
+                    // Generate full phrases using gridpage-style LLM
+                    options = await generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
+                    console.log('Generated options:', options);
+                } else {
+                    console.log('No static_options or llm_prompt found for category:', category);
                 }
 
+                console.log('Final options to render:', options);
                 renderCategoryOptions(options);
+                
+                // IMPORTANT: Also update freestyle options with the selected category context
+                console.log('Updating freestyle options for category:', category.label || category);
+                console.log('Category has words_prompt:', category.words_prompt);
+                // Store the words prompt globally for word selection
+                currentWordsPrompt = category.words_prompt || null;
+                await updateFreestyleOptionsWithContext(category.label || category, true, category.words_prompt);
             } catch (error) {
                 console.error('Error loading category options:', error);
                 renderCategoryOptions([]);
             }
         }
 
-        async function generateLLMOptions(prompt) {
+        // Show modal for a category, providing an optional parentPath for nested categories
+        function showCategoryModal(category, parentPath = null) {
+            console.log('showCategoryModal called for:', category.label, 'with', category.children.length, 'children');
+            console.log('Modal elements - modalTitle:', modalTitle, 'modalGrid:', modalGrid, 'categoryModal:', categoryModal);
+            
+            if (!categoryModal || !modalTitle || !modalGrid) {
+                console.error('Modal elements not found!');
+                return;
+            }
+            
+            modalTitle.textContent = category.label;
+            modalGrid.innerHTML = '';
+            const basePath = parentPath ? parentPath : category.label;
+
+            category.children.forEach(child => {
+                console.log('Adding child option:', child.label);
+                const categoryBtn = document.createElement('button');
+                categoryBtn.className = 'modal-option category-button';
+                categoryBtn.style.backgroundColor = child.background_color || '#FFFFFF';
+                categoryBtn.style.color = child.text_color || '#000000';
+                
+                // Add image support for child categories (same as main categories)
+                console.log(`🔍 Attempting image load for child category: "${child.label}"`);
+                getSymbolImageForText(child.label).then(imageUrl => {
+                    console.log(`🎯 Image result for "${child.label}": ${imageUrl ? 'Found' : 'Not found'}`);
+                    if (imageUrl) {
+                        // Create image + text layout like main categories
+                        categoryBtn.innerHTML = '';
+                        const buttonContent = document.createElement('div');
+                        buttonContent.style.position = 'relative';
+                        buttonContent.style.width = '100%';
+                        buttonContent.style.height = '100%';
+                        buttonContent.style.display = 'flex';
+                        buttonContent.style.flexDirection = 'column';
+                        
+                        const imageContainer = document.createElement('div');
+                        imageContainer.style.flex = '1';
+                        imageContainer.style.width = '100%';
+                        imageContainer.style.overflow = 'hidden';
+                        imageContainer.style.borderRadius = '8px 8px 0 0';
+                        imageContainer.style.display = 'flex';
+                        imageContainer.style.alignItems = 'center';
+                        imageContainer.style.justifyContent = 'center';
+                        
+                        const imageElement = document.createElement('img');
+                        imageElement.src = imageUrl;
+                        imageElement.alt = child.label;
+                        imageElement.style.width = '100%';
+                        imageElement.style.height = '100%';
+                        imageElement.style.objectFit = 'cover';
+                        
+                        const textFooter = document.createElement('div');
+                        textFooter.style.height = '18px';
+                        textFooter.style.width = '100%';
+                        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                        textFooter.style.color = 'white';
+                        textFooter.style.display = 'flex';
+                        textFooter.style.alignItems = 'center';
+                        textFooter.style.justifyContent = 'center';
+                        textFooter.style.padding = '1px 2px';
+                        textFooter.style.position = 'absolute';
+                        textFooter.style.bottom = '0';
+                        textFooter.style.left = '0';
+                        textFooter.style.right = '0';
+                        
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = child.label;
+                        textSpan.style.fontSize = '0.7em';
+                        textSpan.style.fontWeight = 'bold';
+                        textSpan.style.textAlign = 'center';
+                        
+                        imageContainer.appendChild(imageElement);
+                        textFooter.appendChild(textSpan);
+                        buttonContent.appendChild(imageContainer);
+                        buttonContent.appendChild(textFooter);
+                        categoryBtn.appendChild(buttonContent);
+                    }
+                }).catch(error => {
+                    console.error('Error loading image for child category button:', error);
+                });
+                
+                // Set initial text (will be replaced by image if found)
+                categoryBtn.textContent = child.label;
+                
+                categoryBtn.addEventListener('click', async () => {
+                    // Only announce if there is a speech_text value (same logic as main categories)
+                    if (child.speech_text && child.speech_text.trim() !== '') {
+                        await announce(child.speech_text, "system", true);
+                    }
+                    console.log('Subcategory clicked:', child.label);
+                    selectSubcategory(child, basePath);
+                });
+                
+                modalGrid.appendChild(categoryBtn);
+            });
+
+            categoryModal.style.display = 'flex';
+            console.log('Modal should now be visible');
+        }
+
+        async function selectSubcategory(subcategory, parentPath = '') {
+            // If subcategory has children, show another modal level with updated parent path
+            const fullParentPath = parentPath ? `${parentPath}, ${subcategory.label}` : subcategory.label;
+            if (subcategory.children && subcategory.children.length > 0) {
+                showCategoryModal(subcategory, fullParentPath);
+                return;
+            }
+
+            // Close modal and load options
+            closeModal();
+
+            // Clear existing options and show loading
+            llmStaticOptions.innerHTML = '';
+            for (let i = 0; i < LLMOptions; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'option-button loading';
+                llmStaticOptions.appendChild(btn);
+            }
+
             try {
-                const response = await fetch('/api/generate-options', {
+                let options = [];
+
+                if (subcategory.static_options) {
+                    // Use static options - format as structured options with full phrases
+                    const staticTexts = subcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    options = staticTexts.map(text => ({
+                        option: text,
+                        summary: text.length > 20 ? text.substring(0, 17) + '...' : text,
+                        keywords: []
+                    }));
+                    currentPhrasePrompt = null;
+                    currentPhraseContext = null;
+                } else if (subcategory.llm_prompt) {
+                    // Generate full phrases using gridpage-style LLM and store context for regeneration
+                    currentPhrasePrompt = subcategory.llm_prompt;
+                    currentPhraseContext = subcategory;
+                    options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
+                }
+
+                renderCategoryOptions(options);
+
+                // Also update freestyle options with the selected category context (use full path)
+                const fullPath = fullParentPath; // already includes parent and subcategory
+                // Set currentCategory to preserve context for future freestyle calls
+                currentCategory = { label: fullPath };
+                console.log('Subcategory has words_prompt:', subcategory.words_prompt);
+                // Store the words prompt globally for word selection
+                currentWordsPrompt = subcategory.words_prompt || null;
+                await updateFreestyleOptionsWithContext(fullPath, true, subcategory.words_prompt);
+            } catch (error) {
+                console.error('Error loading subcategory options:', error);
+                renderCategoryOptions([]);
+            }
+        }
+
+        function closeModal() {
+            categoryModal.style.display = 'none';
+        }
+
+        // Generate gridpage-style full phrase options using /llm endpoint
+        async function generateGridpageLLMOptions(prompt, count = null) {
+            // Use LLMOptions setting if count not specified
+            const optionsCount = count !== null ? count : LLMOptions;
+            console.log('generateGridpageLLMOptions called with prompt:', prompt, 'count:', optionsCount);
+            
+            try {
+                // Format prompt to request full phrases (similar to gridpage LLMQuery)
+                const enhancedPrompt = `Generate ${optionsCount} complete communication phrases for: ${prompt}
+                
+                Requirements:
+                - Each option should be a complete, natural sentence or phrase
+                - Phrases should be ready to speak as complete communication
+                - Use first person perspective as if the user is speaking
+                - Make each option distinct and useful for communication
+                - Focus on natural, conversational language
+                `;
+
+                console.log('Sending request to /llm endpoint with enhanced prompt:', enhancedPrompt);
+
+                const response = await authenticatedFetch('/llm', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${await currentUser.getIdToken()}`
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        prompt: prompt,
-                        count: 18
+                        prompt: enhancedPrompt
                     })
                 });
 
+                console.log('LLM response status:', response.status);
+                
                 if (response.ok) {
                     const data = await response.json();
-                    return data.options || [];
+                    console.log('LLM response data:', data);
+                    // Response format: [{option: "full phrase", summary: "short text", keywords: []}]
+                    return data || [];
                 } else {
-                    throw new Error('Failed to generate options');
+                    const errorText = await response.text();
+                    console.error('LLM request failed:', response.status, errorText);
+                    throw new Error(`Failed to generate LLM options: ${response.status} ${errorText}`);
                 }
             } catch (error) {
-                console.error('Error generating LLM options:', error);
+                console.error('Error generating gridpage LLM options:', error);
+                return [];
+            }
+        }
+
+        // Generate phrase options with exclusion (like gridpage)
+        async function generateGridpageLLMOptionsWithExclusion(prompt, count, excludedOptionsText) {
+            const optionsCount = count || LLMOptions;
+            console.log('generateGridpageLLMOptionsWithExclusion called with prompt:', prompt, 'count:', optionsCount, 'excluding:', excludedOptionsText);
+            
+            try {
+                const summaryInstruction = SummaryOff
+                    ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
+                    : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
+                
+                const enhancedPrompt = `For the request "${prompt}", provide ${optionsCount} new complete communication phrases.
+                IMPORTANTLY, exclude the following options if possible: "${excludedOptionsText}".
+                
+                Requirements:
+                - Each option should be a complete, natural sentence or phrase
+                - Phrases should be ready to speak as complete communication
+                - Use first person perspective as if the user is speaking
+                - Make each option distinct and useful for communication
+                - Focus on natural, conversational language
+                
+                Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
+                ${summaryInstruction}
+                The "keywords" key should contain 3-5 words that match available symbols.
+                Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]`;
+                
+                console.log('Sending exclusion request to /llm endpoint with enhanced prompt:', enhancedPrompt);
+                
+                const requestBody = {
+                    count: optionsCount,
+                    prompt: enhancedPrompt,
+                    response_format: 'json'
+                };
+                
+                const response = await authenticatedFetch('/llm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('LLM exclusion response:', data);
+                
+                return Array.isArray(data) ? data : [];
+                
+            } catch (error) {
+                console.error('Error in generateGridpageLLMOptionsWithExclusion:', error);
+                return [];
+            }
+        }
+        
+        // Generate freestyle-style single words using category-specific endpoint
+        async function generateFreestyleLLMOptions(category, count = null, wordsPrompt = null) {
+            // Use FreestyleWordOptions setting if count not specified
+            const wordsCount = count !== null ? count : FreestyleWordOptions;
+            console.log('generateFreestyleLLMOptions called with category:', category, 'count:', wordsCount, 'wordsPrompt:', wordsPrompt);
+            
+            // SIMPLIFIED LOGIC: 
+            // 1. If we have a words prompt, use it as if it was already in Speech History
+            // 2. If no words prompt, use the category LLM prompt  
+            // 3. Always consider current Speech History for context
+            
+            if (wordsPrompt) {
+                console.log('🎯 Using words prompt as Speech History context:', wordsPrompt);
+                return await generateWordsBasedOnSpeechHistory(wordsPrompt, count);
+            }
+            try {
+                if (category && category.label) {
+                    // Use category-words endpoint for category-specific words
+                    console.log(`Generating category-specific words for: ${category.label}`);
+                    // Get current mood for context
+                    const currentMood = getCurrentMood ? getCurrentMood() : null;
+
+                    const response = await authenticatedFetch('/api/freestyle/category-words', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            category: category.label,
+                            build_space_content: buildSpace.value || "",
+                            exclude_words: [],
+                            current_mood: currentMood
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Response format: {words: [{text: "word", keywords: []}]}
+                        console.log(`Category words response for ${category.label}:`, data);
+                        return data.words || [];
+                    } else {
+                        throw new Error(`Failed to generate category words: ${response.status}`);
+                    }
+                } else {
+                    // Use word-options endpoint for general words when no category
+                    console.log('🟡 Generating general freestyle words (no category)');
+                    // Get current mood for context
+                    const currentMood = getCurrentMood ? getCurrentMood() : null;
+                    const moodContext = currentMood && currentMood !== 'none' ? ` when feeling ${currentMood}` : '';
+                    
+                    console.log('🟡 Current mood for general words:', currentMood);
+                    console.log('🟡 Build space content:', buildSpace.value || "(empty)");
+
+                    const requestBody = {
+                        context: `general communication${moodContext}`,
+                        source_page: "tap_interface",
+                        is_llm_generated: false,
+                        originating_button_text: "",
+                        build_space_text: buildSpace.value || "",
+                        single_words_only: false,
+                        request_different_options: false,
+                        current_mood: currentMood
+                    };
+                    
+                    console.log('🟡 Sending request to /api/freestyle/word-options:', requestBody);
+
+                    const response = await authenticatedFetch('/api/freestyle/word-options', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    console.log('🟡 Word-options response status:', response.status);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        // Response format: {word_options: [{text: "word", keywords: []}]}
+                        console.log('🟢 General words response data:', data);
+                        console.log('🟢 word_options array:', data.word_options);
+                        console.log('🟢 word_options count:', data.word_options ? data.word_options.length : 0);
+                        return data.word_options || [];
+                    } else {
+                        const errorText = await response.text();
+                        console.error('🔴 Word-options API failed:', response.status, errorText);
+                        throw new Error(`Failed to generate general options: ${response.status} ${errorText}`);
+                    }
+                }
+            } catch (error) {
+                console.error('Error generating freestyle options:', error);
                 return [];
             }
         }
 
         function renderCategoryOptions(options) {
+            console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0);
+            console.log('renderCategoryOptions called with:', options);
+            console.log('llmStaticOptions element:', llmStaticOptions);
+            
+            if (!llmStaticOptions) {
+                console.error('llmStaticOptions element not found!');
+                return;
+            }
+            
             llmStaticOptions.innerHTML = '';
             
-            // Fill up to 18 slots (2 rows × 9 columns)
-            for (let i = 0; i < 18; i++) {
+            // Fill up to available phrase slots based on LLMOptions setting
+            // Reserve one slot for "Something Else" button
+            const maxPhraseOptions = Math.max(1, LLMOptions - 1);
+            
+            for (let i = 0; i < LLMOptions; i++) {
                 const btn = document.createElement('button');
+                
+                // Create "Something Else" button in the last slot
+                if (i === LLMOptions - 1) {
+                    console.log('🚨 CREATING PHRASE SOMETHING ELSE BUTTON - SLOT', i, 'of', LLMOptions);
+                    btn.className = 'option-button';
+                    btn.textContent = 'Something Else';
+                    
+                    // Apply image matching like other buttons
+                    getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
+                        if (imageUrl) {
+                            // Create image + text layout like other buttons
+                            btn.innerHTML = '';
+                            const buttonContent = document.createElement('div');
+                            buttonContent.style.position = 'relative';
+                            buttonContent.style.width = '100%';
+                            buttonContent.style.height = '100%';
+                            buttonContent.style.display = 'flex';
+                            buttonContent.style.flexDirection = 'column';
+                            
+                            const imageContainer = document.createElement('div');
+                            imageContainer.style.flex = '1';
+                            imageContainer.style.width = '100%';
+                            imageContainer.style.overflow = 'hidden';
+                            imageContainer.style.borderRadius = '8px 8px 0 0';
+                            imageContainer.style.display = 'flex';
+                            imageContainer.style.alignItems = 'center';
+                            imageContainer.style.justifyContent = 'center';
+                            
+                            const imageElement = document.createElement('img');
+                            imageElement.src = imageUrl;
+                            imageElement.alt = 'Something Else';
+                            imageElement.style.width = '100%';
+                            imageElement.style.height = '100%';
+                            imageElement.style.objectFit = 'cover';
+                            
+                            const textFooter = document.createElement('div');
+                            textFooter.style.height = '18px';
+                            textFooter.style.width = '100%';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.color = 'white';
+                            textFooter.style.display = 'flex';
+                            textFooter.style.alignItems = 'center';
+                            textFooter.style.justifyContent = 'center';
+                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.position = 'absolute';
+                            textFooter.style.bottom = '0';
+                            textFooter.style.fontSize = '10px';
+                            textFooter.style.fontWeight = '600';
+                            textFooter.style.borderRadius = '0 0 8px 8px';
+                            textFooter.textContent = 'Something Else';
+                            
+                            imageContainer.appendChild(imageElement);
+                            buttonContent.appendChild(imageContainer);
+                            buttonContent.appendChild(textFooter);
+                            btn.appendChild(buttonContent);
+                        }
+                    });
+                    
+                    btn.onclick = async () => {
+                        console.log('🔄 Something Else clicked for phrases');
+                        await regeneratePhraseOptions();
+                    };
+                    
+                    llmStaticOptions.appendChild(btn);
+                    continue;
+                }
+                
                 btn.className = 'option-button';
                 
-                if (i < options.length) {
-                    btn.textContent = options[i];
-                    btn.addEventListener('click', () => addToSpeech(options[i]));
+                if (i < Math.min(options.length, maxPhraseOptions) && options[i]) {
+                    const option = options[i];
+                    let displayText, speechText, fullOption;
+                    
+                    // Handle both structured options (from /llm endpoint) and simple strings
+                    if (typeof option === 'object' && option.summary && option.option) {
+                        // Structured option with summary and full option
+                        fullOption = option.option;
+                        speechText = option.option; // Full text for speech
+                        
+                        // Use SummaryOff setting to determine display text (like gridpage)
+                        displayText = SummaryOff ? option.option : option.summary;
+                    } else {
+                        // Simple string option
+                        const text = typeof option === 'string' ? option : (option.text || option.option || '');
+                        displayText = text;
+                        speechText = text;
+                        fullOption = text;
+                    }
+                    
+                    // Set initial text first
+                    btn.textContent = displayText;
+                    
+                    // Add Firestore image support (like gridpage) - always attempt for debugging
+                    console.log(`🔍 Attempting image load for phrase: "${speechText}"`);
+                    const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                    getSymbolImageForText(speechText, phraseKeywords).then(imageUrl => {
+                        console.log(`🎯 Image result for "${speechText}": ${imageUrl ? 'Found' : 'Not found'}`);
+                        if (imageUrl) {
+                            // Create image + text layout like gridpage
+                            btn.innerHTML = '';
+                            const buttonContent = document.createElement('div');
+                            buttonContent.style.position = 'relative';
+                            buttonContent.style.width = '100%';
+                            buttonContent.style.height = '100%';
+                            buttonContent.style.display = 'flex';
+                            buttonContent.style.flexDirection = 'column';
+                            
+                            const imageContainer = document.createElement('div');
+                            imageContainer.style.flex = '1';
+                            imageContainer.style.width = '100%';
+                            imageContainer.style.overflow = 'hidden';
+                            imageContainer.style.borderRadius = '8px 8px 0 0';
+                            imageContainer.style.display = 'flex';
+                            imageContainer.style.alignItems = 'center';
+                            imageContainer.style.justifyContent = 'center';
+                            
+                            const imageElement = document.createElement('img');
+                            imageElement.src = imageUrl;
+                            imageElement.alt = displayText;
+                            imageElement.style.width = '100%';
+                            imageElement.style.height = '100%';
+                            imageElement.style.objectFit = 'cover';
+                            
+                            const textFooter = document.createElement('div');
+                            textFooter.style.height = '18px';
+                            textFooter.style.width = '100%';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.color = 'white';
+                            textFooter.style.display = 'flex';
+                            textFooter.style.alignItems = 'center';
+                            textFooter.style.justifyContent = 'center';
+                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.position = 'absolute';
+                            textFooter.style.bottom = '0';
+                            textFooter.style.left = '0';
+                            textFooter.style.right = '0';
+                            
+                            const textSpan = document.createElement('span');
+                            textSpan.textContent = displayText;
+                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontWeight = 'bold';
+                            textSpan.style.textAlign = 'center';
+                            
+                            imageContainer.appendChild(imageElement);
+                            textFooter.appendChild(textSpan);
+                            buttonContent.appendChild(imageContainer);
+                            buttonContent.appendChild(textFooter);
+                            btn.appendChild(buttonContent);
+                        }
+                    }).catch(error => {
+                        console.error('Error loading image for phrase button:', error);
+                    });
+                    
+                    btn.title = fullOption; // Show full text on hover
+                    btn.addEventListener('click', async () => {
+                        addToSpeech(speechText);
+                        // Announce the speech text when phrase is selected
+                        await announce(speechText, "system", true);
+                    });
                 } else {
                     btn.classList.add('empty-state');
                     btn.textContent = '—';
@@ -584,18 +2083,797 @@
             }
         }
 
-        function renderFreestyleOptions() {
+        async function loadFreestyleOptions() {
+            console.log('🟡 loadFreestyleOptions called - loading initial freestyle options');
+            try {
+                // Clear any current words prompt since we're loading general options
+                currentWordsPrompt = null;
+                // Store a general category for Something Else regeneration
+                currentCategory = { label: 'general' };
+                // Generate initial freestyle options (general communication words)
+                console.log('🟡 Calling generateFreestyleLLMOptions with null category...');
+                const options = await generateFreestyleLLMOptions(null, 29);
+                console.log('🟢 Generated initial freestyle options:', options);
+                console.log('🟢 Options count:', options ? options.length : 0);
+                renderFreestyleOptions(options);
+            } catch (error) {
+                console.error('🔴 Error loading freestyle options:', error);
+                renderFreestyleOptions([]);
+            }
+        }
+
+        async function updateFreestyleOptionsWithContext(categoryOrPath, initial = false, wordsPrompt = null) {
+            console.log('updateFreestyleOptionsWithContext called with:', categoryOrPath, 'initial:', initial, 'wordsPrompt:', wordsPrompt);
+            try {
+                // If this is the initial category selection, use the dedicated category-words endpoint
+                if (initial) {
+                    console.log('Using category-specific words for:', categoryOrPath);
+                    // categoryOrPath may be an object or a string full path
+                    const categoryPath = (typeof categoryOrPath === 'string') ? categoryOrPath : (categoryOrPath.label || '');
+                    const options = await generateFreestyleOptionsForCategory(categoryPath, 29, wordsPrompt);
+                    renderFreestyleOptions(options);
+                    return;
+                }
+
+                // Otherwise use the freestyle /word-options endpoint which uses navigation/build-space context
+                const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, 29, wordsPrompt);
+                renderFreestyleOptions(options);
+            } catch (error) {
+                console.error('Error updating freestyle options with context:', error);
+            }
+        }
+
+        // Use the category-specific endpoint to get words for a category path. This should be called
+        // only on the initial category selection to get category-focused single words.
+        async function generateFreestyleOptionsForCategory(categoryFullPath, count = 29, wordsPrompt = null) {
+            console.log('generateFreestyleOptionsForCategory called with path:', categoryFullPath, 'count:', count, 'wordsPrompt:', wordsPrompt);
+            
+            // If we have a custom words prompt, use the LLM endpoint instead of the category endpoint
+            if (wordsPrompt) {
+                console.log('Using custom words prompt for word generation:', wordsPrompt);
+                return await generateCustomWordOptions(wordsPrompt, count);
+            }
+            
+            try {
+                // Get current mood for context
+                const currentMood = getCurrentMood ? getCurrentMood() : null;
+                console.log('Current mood for context:', currentMood);
+
+                const response = await authenticatedFetch('/api/freestyle/category-words', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        category: categoryFullPath,
+                        build_space_content: buildSpace.value || "",
+                        exclude_words: [],
+                        current_mood: currentMood
+                    })
+                });
+
+                console.log('Category-words API response status:', response.status);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Category-words API response data:', data);
+                    // Response format: {words: [{text: "word", keywords: []}]}
+                    return data.words || [];
+                } else {
+                    const errorText = await response.text();
+                    console.error('Category-words API failed:', response.status, errorText);
+                    throw new Error(`Failed to generate category freestyle options: ${response.status} ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Error generating freestyle options for category:', error);
+                return [];
+            }
+        }
+
+        // DEPRECATED: This function is now replaced by generateWordsBasedOnSpeechHistory
+        // Generate word options using a custom prompt from tap navigation button  
+        async function generateCustomWordOptions(wordsPrompt, count = 29) {
+            console.log('generateCustomWordOptions called with prompt:', wordsPrompt, 'count:', count);
+            try {
+                // Get current mood for context
+                const currentMood = getCurrentMood ? getCurrentMood() : null;
+                
+                // CRITICAL: Use the word prompt as the build_space_text directly
+                // This exactly matches how freestyle.js works - when user types "Who" in build space,
+                // it sends build_space_text: "Who" to get continuations like "is there", "is that"
+                console.log('Using word prompt as build_space_text (freestyle.js method):', wordsPrompt);
+
+                // Use the EXACT same request format as freestyle.js
+                const requestBody = {
+                    build_space_text: wordsPrompt,  // This is the key - exactly like freestyle.js
+                    context: null,  // Let the backend determine context from build_space_text
+                    source_page: null,  // Keep it simple like freestyle.js
+                    is_llm_generated: false,
+                    originating_button_text: null,  // Don't confuse the backend with extra context
+                    current_mood: currentMood,
+                    max_options: count,
+                    single_words_only: false  // Allow phrases for continuations
+                };
+                
+                console.log('Sending request matching freestyle.js format:', requestBody);
+
+                const response = await authenticatedFetch('/api/freestyle/word-options', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Word options response (freestyle.js format):', data);
+                    console.log('Word options count received:', data.word_options ? data.word_options.length : 0);
+                    console.log('Full word options array:', data.word_options);
+                    
+                    // Response format: {word_options: [{text: "word", keywords: []}]}
+                    let options = data.word_options || [];
+                    
+                    // If we get back full phrases, try to extract just the continuation parts
+                    if (options.length > 0 && options.some(opt => opt.text.toLowerCase().startsWith(wordsPrompt.toLowerCase()))) {
+                        console.log('⚠️ Detected full phrases, extracting continuations...');
+                        options = options.map(opt => {
+                            if (opt.text.toLowerCase().startsWith(wordsPrompt.toLowerCase())) {
+                                // Extract the part after the prompt word
+                                const continuation = opt.text.substring(wordsPrompt.length).trim();
+                                if (continuation) {
+                                    return {
+                                        text: continuation,
+                                        keywords: opt.keywords || []
+                                    };
+                                }
+                            }
+                            return opt;
+                        }).filter(opt => opt.text && opt.text !== wordsPrompt);
+                    }
+                    
+                    if (options.length === 0 || (options.length === 1 && options[0].text === wordsPrompt)) {
+                        console.error('⚠️ API returned only the original prompt or no valid continuations - this indicates a backend processing issue');
+                        console.log('Request that caused this issue:', requestBody);
+                        console.log('Raw response that caused this issue:', data);
+                        
+                        // Return some fallback continuations based on the word prompt
+                        const fallbackOptions = getFallbackContinuations(wordsPrompt);
+                        console.log('Using fallback continuations:', fallbackOptions);
+                        return fallbackOptions;
+                    }
+                    
+                    return options;
+                } else {
+                    const errorText = await response.text();
+                    console.error('Custom words API failed:', response.status, errorText);
+                    throw new Error(`Failed to generate custom word options: ${response.status} ${errorText}`);
+                }
+            } catch (error) {
+                console.error('Error generating custom word options:', error);
+                return [];
+            }
+        }
+        
+        // SIMPLIFIED: Use exact same logic as freestyle.js
+        
+        // Generate words based on what's currently in Speech History - EXACTLY like freestyle.js
+        async function generateWordsBasedOnSpeechHistory(speechText, count = 29) {
+            console.log('🎯 Using FREESTYLE.JS logic for:', speechText);
+            try {
+                // Use the EXACT same requestPayload structure as freestyle.js line 935-942
+                const requestPayload = {
+                    build_space_text: speechText,  // This is the key - exactly like freestyle.js
+                    context: null,  // Keep simple like freestyle.js
+                    source_page: null,  // Keep simple like freestyle.js
+                    is_llm_generated: false,
+                    originating_button_text: null
+                };
+                
+                console.log('🎯 Using freestyle.js requestPayload format:', requestPayload);
+                
+                const response = await authenticatedFetch('/api/freestyle/word-options', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestPayload)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('🎯 Freestyle.js format response:', data.word_options?.length || 0, 'options');
+                    return data.word_options || [];
+                } else {
+                    console.error('Freestyle.js format API failed:', response.status);
+                    return getFallbackWordsForSpeech(speechText);
+                }
+            } catch (error) {
+                console.error('Error with freestyle.js format:', error);
+                return getFallbackWordsForSpeech(speechText);
+            }
+        }
+        
+        // Generate general starter words when no context
+        async function generateGeneralStarterWords(count = 29) {
+            console.log('🎯 Generating general starter words');
+            try {
+                const currentMood = getCurrentMood ? getCurrentMood() : null;
+                
+                const requestBody = {
+                    build_space_text: "",  // Empty - ask for starter words
+                    context: null,
+                    source_page: null,
+                    is_llm_generated: false,
+                    originating_button_text: null,
+                    current_mood: currentMood,
+                    max_options: count,
+                    single_words_only: false
+                };
+                
+                const response = await authenticatedFetch('/api/freestyle/word-options', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('🎯 General starter words response:', data.word_options?.length || 0, 'options');
+                    return data.word_options || [];
+                } else {
+                    console.error('General starter words API failed:', response.status);
+                    return getFallbackStarterWords();
+                }
+            } catch (error) {
+                console.error('Error generating general starter words:', error);
+                return getFallbackStarterWords();
+            }
+        }
+        
+        // Fallback words when API fails
+        function getFallbackWordsForSpeech(speechText) {
+            // Simple fallbacks based on common sentence patterns
+            if (speechText.toLowerCase().includes('who')) {
+                return [
+                    { text: 'is there', keywords: ['person'] },
+                    { text: 'are you', keywords: ['person'] },
+                    { text: 'can help', keywords: ['help'] }
+                ];
+            } else if (speechText.toLowerCase().includes('what')) {
+                return [
+                    { text: 'is that', keywords: ['question'] },
+                    { text: 'are you doing', keywords: ['activity'] },
+                    { text: 'do you want', keywords: ['want'] }
+                ];
+            } else {
+                return [
+                    { text: 'please', keywords: ['polite'] },
+                    { text: 'thank you', keywords: ['thanks'] },
+                    { text: 'help me', keywords: ['help'] }
+                ];
+            }
+        }
+        
+        function getFallbackStarterWords() {
+            return [
+                { text: "I", keywords: ["person"] },
+                { text: "want", keywords: ["desire"] },
+                { text: "need", keywords: ["need"] },
+                { text: "like", keywords: ["happy"] },
+                { text: "go", keywords: ["travel"] },
+                { text: "see", keywords: ["eye"] },
+                { text: "help", keywords: ["help"] },
+                { text: "more", keywords: ["plus"] },
+                { text: "please", keywords: ["polite"] },
+                { text: "thank you", keywords: ["thanks"] }
+            ];
+        }
+
+        async function updateFreestyleOptionsWithSelectedWord(selectedWord) {
+            try {
+                // Clear words prompt since we're now using Speech History context
+                currentWordsPrompt = null;
+                
+                // Get current speech history - this is the key!
+                const currentSpeech = buildSpace.value.trim();
+                console.log('🎯 Updating word options based on current Speech History:', currentSpeech);
+                
+                // Generate new options based on what's currently in the Speech History
+                let options;
+                if (currentSpeech) {
+                    options = await generateWordsBasedOnSpeechHistory(currentSpeech, 29);
+                } else {
+                    options = await generateGeneralStarterWords(29);
+                }
+                
+                renderFreestyleOptions(options);
+            } catch (error) {
+                console.error('Error updating freestyle options with selected word:', error);
+            }
+        }
+
+        function renderFreestyleOptions(options = []) {
+            console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length);
+            console.log('renderFreestyleOptions called with', options.length, 'options:', options);
+            console.log('freestyleOptions element:', freestyleOptions);
+            
+            // Store current options for exclusion in Something Else
+            currentWordOptions = options.slice(); // Create a copy
+            
+            if (!freestyleOptions) {
+                console.error('freestyleOptions element not found!');
+                return;
+            }
+            
             freestyleOptions.innerHTML = '';
             
-            // Create 27 freestyle slots (3 rows × 9 columns)
-            for (let i = 0; i < 27; i++) {
+            // Create freestyle slots based on FreestyleWordOptions setting
+            // Reserve one slot for "Something Else" button
+            const maxWordOptions = Math.max(1, FreestyleWordOptions - 1);
+            
+            for (let i = 0; i < FreestyleWordOptions; i++) {
                 const btn = document.createElement('button');
+                
+                // Create "Something Else" button in the last slot
+                if (i === FreestyleWordOptions - 1) {
+                    console.log('🚨 CREATING WORD SOMETHING ELSE BUTTON - SLOT', i, 'of', FreestyleWordOptions);
+                    btn.className = 'option-button freestyle-button';
+                    btn.textContent = 'Something Else';
+                    
+                    // Apply image matching like other buttons
+                    getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
+                        if (imageUrl) {
+                            // Create image + text layout like other buttons
+                            btn.innerHTML = '';
+                            const buttonContent = document.createElement('div');
+                            buttonContent.style.position = 'relative';
+                            buttonContent.style.width = '100%';
+                            buttonContent.style.height = '100%';
+                            buttonContent.style.display = 'flex';
+                            buttonContent.style.flexDirection = 'column';
+                            
+                            const imageContainer = document.createElement('div');
+                            imageContainer.style.flex = '1';
+                            imageContainer.style.width = '100%';
+                            imageContainer.style.overflow = 'hidden';
+                            imageContainer.style.borderRadius = '8px 8px 0 0';
+                            imageContainer.style.display = 'flex';
+                            imageContainer.style.alignItems = 'center';
+                            imageContainer.style.justifyContent = 'center';
+                            
+                            const imageElement = document.createElement('img');
+                            imageElement.src = imageUrl;
+                            imageElement.alt = 'Something Else';
+                            imageElement.style.width = '100%';
+                            imageElement.style.height = '100%';
+                            imageElement.style.objectFit = 'cover';
+                            
+                            const textFooter = document.createElement('div');
+                            textFooter.style.height = '18px';
+                            textFooter.style.width = '100%';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.color = 'white';
+                            textFooter.style.display = 'flex';
+                            textFooter.style.alignItems = 'center';
+                            textFooter.style.justifyContent = 'center';
+                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.position = 'absolute';
+                            textFooter.style.bottom = '0';
+                            textFooter.style.fontSize = '10px';
+                            textFooter.style.fontWeight = '600';
+                            textFooter.style.borderRadius = '0 0 8px 8px';
+                            textFooter.textContent = 'Something Else';
+                            
+                            imageContainer.appendChild(imageElement);
+                            buttonContent.appendChild(imageContainer);
+                            buttonContent.appendChild(textFooter);
+                            btn.appendChild(buttonContent);
+                        }
+                    });
+                    
+                    btn.onclick = async () => {
+                        console.log('🔄 Something Else clicked for words');
+                        await regenerateWordOptions();
+                    };
+                    
+                    freestyleOptions.appendChild(btn);
+                    continue;
+                }
+                
                 btn.className = 'option-button freestyle-button';
-                btn.textContent = 'Tap to add word';
-                btn.addEventListener('click', () => promptForFreestyleWord());
+                
+                if (i < Math.min(options.length, maxWordOptions) && options[i]) {
+                    const option = options[i];
+                    // Handle freestyle word format {text: "word", keywords: []}
+                    const text = option.text || option;
+                    
+                    // Add Firestore image support for words (like gridpage) - always attempt for debugging
+                    console.log(`🔍 Attempting image load for word: "${text}"`);
+                    getSymbolImageForText(text).then(imageUrl => {
+                        console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
+                            if (imageUrl) {
+                                // Create image + text layout like gridpage
+                                btn.innerHTML = '';
+                                const buttonContent = document.createElement('div');
+                                buttonContent.style.position = 'relative';
+                                buttonContent.style.width = '100%';
+                                buttonContent.style.height = '100%';
+                                buttonContent.style.display = 'flex';
+                                buttonContent.style.flexDirection = 'column';
+                                
+                                const imageContainer = document.createElement('div');
+                                imageContainer.style.flex = '1';
+                                imageContainer.style.width = '100%';
+                                imageContainer.style.overflow = 'hidden';
+                                imageContainer.style.borderRadius = '8px 8px 0 0';
+                                imageContainer.style.display = 'flex';
+                                imageContainer.style.alignItems = 'center';
+                                imageContainer.style.justifyContent = 'center';
+                                
+                                const imageElement = document.createElement('img');
+                                imageElement.src = imageUrl;
+                                imageElement.alt = text;
+                                imageElement.style.width = '100%';
+                                imageElement.style.height = '100%';
+                                imageElement.style.objectFit = 'cover';
+                                
+                                const textFooter = document.createElement('div');
+                                textFooter.style.height = '18px';
+                                textFooter.style.width = '100%';
+                                textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                                textFooter.style.color = 'white';
+                                textFooter.style.display = 'flex';
+                                textFooter.style.alignItems = 'center';
+                                textFooter.style.justifyContent = 'center';
+                                textFooter.style.padding = '1px 2px';
+                                textFooter.style.position = 'absolute';
+                                textFooter.style.bottom = '0';
+                                textFooter.style.left = '0';
+                                textFooter.style.right = '0';
+                                
+                                const textSpan = document.createElement('span');
+                                textSpan.textContent = text;
+                                textSpan.style.fontSize = '0.7em';
+                                textSpan.style.fontWeight = 'bold';
+                                textSpan.style.textAlign = 'center';
+                                
+                                imageContainer.appendChild(imageElement);
+                                textFooter.appendChild(textSpan);
+                                buttonContent.appendChild(imageContainer);
+                                buttonContent.appendChild(textFooter);
+                                btn.appendChild(buttonContent);
+                            }
+                    }).catch(error => {
+                        console.error('Error loading image for word button:', error);
+                    });
+                    
+                    // Set initial text (will be replaced by image if found)
+                    btn.textContent = text;
+                    
+                    btn.addEventListener('click', async () => {
+                        // SIMPLIFIED LOGIC: 
+                        // 1. If there's a word prompt, combine it with the selection
+                        // 2. Add the result to Speech History and announce it
+                        // 3. Generate new options based on the updated Speech History
+                        
+                        let phraseToAdd, phraseToAnnounce;
+                        
+                        if (currentWordsPrompt) {
+                            // Combine word prompt with selected option
+                            phraseToAdd = `${currentWordsPrompt} ${text}`;
+                            phraseToAnnounce = phraseToAdd;
+                            console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
+                        } else {
+                            // No word prompt, use selection as-is
+                            phraseToAdd = text;
+                            phraseToAnnounce = text;
+                            console.log('🎯 Using selection as-is:', text);
+                        }
+                        
+                        // Add to Speech History and announce
+                        addToSpeech(phraseToAdd);
+                        await announce(phraseToAnnounce, "system", true);
+                        
+                        // CRITICAL: Generate next options based on the UPDATED Speech History
+                        // This ensures continuity in the conversation
+                        console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
+                        await updateFreestyleOptionsWithSelectedWord(text);
+                    });
+                } else {
+                    // Empty slot - show dash or make invisible
+                    btn.classList.add('empty-state');
+                    btn.textContent = '—';
+                    btn.disabled = true;
+                }
+                
                 freestyleOptions.appendChild(btn);
             }
         }
+
+        // Removed promptForFreestyleWord function - no longer needed
+
+        // Speech synthesis enablement
+        function enableSpeechSynthesis() {
+            // Initialize audio context for TTS playback
+            if (!audioContextInitialized) {
+                try {
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioContext.state === 'suspended') {
+                        audioContext.resume();
+                    }
+                    audioContextInitialized = true;
+                    console.log("Audio context initialized by user gesture");
+                } catch (error) {
+                    console.warn("Could not initialize audio context:", error);
+                }
+            }
+            
+            // Also enable legacy speech synthesis as fallback
+            if (!speechSynthesisEnabled && 'speechSynthesis' in window) {
+                try {
+                    // Create a test utterance to enable speech synthesis
+                    const testUtterance = new SpeechSynthesisUtterance('');
+                    testUtterance.volume = 0;
+                    speechSynthesis.speak(testUtterance);
+                    speechSynthesisEnabled = true;
+                    console.log("Speech synthesis enabled by user gesture");
+                } catch (error) {
+                    console.warn("Could not enable speech synthesis:", error);
+                }
+            }
+        }
+
+        // TTS Announcement System (from gridpage)
+        async function announceText(textToAnnounce, announcementType = "system") {
+            console.log(`🔊 ANNOUNCE: "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
+            
+            // Initialize audio context if not already done
+            if (!audioContextInitialized) {
+                console.warn("🔊 Audio context not initialized - calling enableSpeechSynthesis");
+                enableSpeechSynthesis();
+            }
+            
+            return new Promise((resolve, reject) => {
+                announcementQueue.push({
+                    textToAnnounce,
+                    announcementType,
+                    resolve,
+                    reject
+                });
+                processAnnouncementQueue();
+            });
+        }
+
+        // Process announcement queue (from gridpage)
+        async function processAnnouncementQueue() {
+            if (isAnnouncingNow || announcementQueue.length === 0) {
+                console.log(`🔊 QUEUE: ${isAnnouncingNow ? 'Already announcing' : 'Queue empty'}`);
+                return;
+            }
+
+            isAnnouncingNow = true;
+            const { textToAnnounce, announcementType, resolve, reject } = announcementQueue.shift();
+
+            console.log(`🔊 QUEUE: Playing "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
+
+            try {
+                // Fetch audio data from server using authenticatedFetch (like gridpage)
+                console.log(`🔊 Fetching TTS audio from /play-audio...`);
+                const response = await authenticatedFetch(`/play-audio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => response.text());
+                    throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+                }
+
+                const jsonResponse = await response.json();
+                const audioData = jsonResponse.audio_data;
+                const sampleRate = jsonResponse.sample_rate;
+
+                if (!audioData) {
+                    throw new Error("No audio data received from server.");
+                }
+
+                console.log(`🔊 Audio data received, sample rate: ${sampleRate}, playing...`);
+                const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
+                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+                
+                console.log(`🔊 Audio playback completed successfully`);
+                resolve();
+
+            } catch (error) {
+                console.error('🔊 QUEUE ERROR: Error during announcement playback:', error);
+                reject(error);
+            } finally {
+                isAnnouncingNow = false;
+                if (announcementQueue.length > 0) {
+                    console.log(`🔊 QUEUE: Processing next item (${announcementQueue.length} remaining)`);
+                    processAnnouncementQueue();
+                }
+            }
+        }
+
+        // Audio utility functions (from gridpage)
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType) {
+            try {
+                console.log(`🔊 Creating audio context for playback...`);
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                console.log(`🔊 Audio context state: ${audioContext.state}`);
+                if (audioContext.state === 'suspended') {
+                    console.log(`🔊 Resuming suspended audio context...`);
+                    await audioContext.resume();
+                    console.log(`🔊 Audio context resumed, new state: ${audioContext.state}`);
+                }
+
+                console.log(`🔊 Decoding audio data (${audioDataArrayBuffer.byteLength} bytes)...`);
+                const audioBuffer = await audioContext.decodeAudioData(audioDataArrayBuffer);
+                console.log(`🔊 Audio decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels} channels`);
+                
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                
+                // Connect to appropriate output (system or personal speaker like gridpage)
+                const destination = audioContext.destination;
+                source.connect(destination);
+                
+                console.log(`🔊 Starting audio playback...`);
+                return new Promise((resolve, reject) => {
+                    source.onended = () => {
+                        console.log(`🔊 Audio playback ended normally`);
+                        resolve();
+                    };
+                    source.onerror = (error) => {
+                        console.error(`🔊 Audio playback error:`, error);
+                        reject(error);
+                    };
+                    source.start(0);
+                });
+            } catch (error) {
+                console.error('🔊 Error in playAudioToDevice:', error);
+                throw error;
+            }
+        }
+
+        // --- Custom Button Audio Playback Function ---
+        async function playCustomButtonAudio(audioUrl) {
+            try {
+                console.log(`[AUDIO] Playing custom button audio: ${audioUrl}`);
+                
+                // Create audio element
+                const audio = new Audio(audioUrl);
+                
+                // Wait for the audio to load and play
+                return new Promise((resolve, reject) => {
+                    audio.addEventListener('loadeddata', () => {
+                        console.log('[AUDIO] Custom audio loaded, starting playback');
+                    });
+                    
+                    audio.addEventListener('ended', () => {
+                        console.log('[AUDIO] Custom audio playback completed');
+                        resolve();
+                    });
+                    
+                    audio.addEventListener('error', (e) => {
+                        console.error('[AUDIO] Error playing custom audio:', e);
+                        resolve(); // Don't reject, just continue silently
+                    });
+                    
+                    // Start playback
+                    audio.play().catch(error => {
+                        console.error('[AUDIO] Failed to play custom audio:', error);
+                        resolve(); // Continue silently on error
+                    });
+                });
+                
+            } catch (error) {
+                console.error('[AUDIO] Error in playCustomButtonAudio:', error);
+                // Don't throw error, just continue silently
+            }
+        }
+
+        // Build space functionality
+        function addToSpeech(text) {
+            const currentText = buildSpace.value.trim();
+            if (currentText) {
+                buildSpace.value = currentText + ' ' + text;
+            } else {
+                buildSpace.value = text;
+            }
+            
+            console.log('🎯 Recording chat history for tap selection:', text.trim());
+            // Record chat history for user selections
+            recordChatHistory("", text.trim()).catch(error => {
+                console.error('Failed to record chat history for tap selection:', error);
+            });
+            
+            updateSpeechOutput();
+        }
+
+        function updateSpeechOutput() {
+            // No longer using a separate speech output display
+            // The build space textarea shows the current text
+        }
+
+        async function speakBuildSpace() {
+            const text = buildSpace.value.trim();
+            if (text) {
+                // Use backend TTS instead of browser speechSynthesis (like gridpage)
+                await announce(text, "system", true);
+            }
+        }
+
+        async function clearBuildSpace() {
+            const buildSpaceElement = document.getElementById('build-space');
+            if (buildSpaceElement) {
+                buildSpaceElement.value = '';
+                updateSpeechOutput();
+                console.log('Build space cleared');
+                
+                // Reset word options to start fresh after clearing
+                await updateFreestyleOptionsWithSelectedWord('');
+            } else {
+                console.error('Build space element not found - ID: build-space');
+            }
+        }
+
+        // Update build space when user types
+        if (buildSpace) {
+            buildSpace.addEventListener('input', updateSpeechOutput);
+        }
+
+        // Chat History Recording (same as gridpage)
+        async function recordChatHistory(question, response) {
+            console.log('🎯 recordChatHistory called with:', { question, response });
+            try {
+                console.log('🎯 Making authenticated fetch call...');
+                const recorded = await authenticatedFetch('/record_chat_history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, response })
+                });
+                console.log('🎯 Response received, status:', recorded.status);
+                if (!recorded.ok) {
+                    const errorText = await recorded.text();
+                    console.error('❌ Chat history server error:', recorded.status, errorText);
+                    throw new Error(`HTTP error! status: ${recorded.status} - ${errorText}`);
+                }
+                const responseData = await recorded.json();
+                console.log('✅ Chat history recorded successfully:', responseData);
+            } catch (error) {
+                console.error('❌ Error recording chat history:', error);
+            }
+        }
+        
+        // Modified announce function to record chat history for personal messages
+        const originalAnnounce = window.announce;
+        window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true) {
+            if (originalAnnounce) {
+                await originalAnnounce(textToAnnounce, announcementType, recordHistory);
+            }
+            
+            // Record chat history for personal announcements (user selections)
+            if (recordHistory && announcementType === "personal" && textToAnnounce && textToAnnounce.trim()) {
+                recordChatHistory("", textToAnnounce.trim()).catch(error => {
+                    console.error('Failed to record chat history for announcement:', error);
+                });
+            }
+        };
 
         function promptForFreestyleWord() {
             const word = prompt('Enter a word or phrase:');
@@ -604,37 +2882,623 @@
             }
         }
 
-        function addToSpeech(text) {
-            speechQueue.push(text);
-            updateSpeechDisplay();
+        // Wake Word Detection and Speech Recognition Functions
+        async function setupWakeWordDetection() {
+            // Settings are now loaded in loadUserSettings, just start speech recognition
+            setupSpeechRecognition();
         }
 
-        function updateSpeechDisplay() {
-            if (speechQueue.length > 0) {
-                speechOutput.textContent = speechQueue.join(' ');
-                speechOutput.style.backgroundColor = '#4CAF50';
-            } else {
-                speechOutput.textContent = 'Ready to speak...';
-                speechOutput.style.backgroundColor = '#6c757d';
+        function setupSpeechRecognition() {
+            if (isSettingUpRecognition || recognition) {
+                return;
+            }
+            
+            isSettingUpRecognition = true;
+            console.log("Setting up wake word speech recognition...");
+            
+            const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognitionAPI) {
+                console.error("Speech Recognition API not supported.");
+                isSettingUpRecognition = false;
+                return;
+            }
+            
+            recognition = new SpeechRecognitionAPI();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            console.log("Wake word recognition object created:", recognition);
+
+            recognition.onerror = function(event) {
+                console.error("Wake word speech recognition error:", event.error, event.message);
+                if (['no-speech', 'audio-capture', 'network'].includes(event.error) && !listeningForQuestion) {
+                    console.log("Wake word recognition error, attempting restart...");
+                    setTimeout(() => {
+                        recognition = null;
+                        isSettingUpRecognition = false;
+                        setupSpeechRecognition();
+                    }, 1000);
+                } else {
+                    isSettingUpRecognition = false;
+                    recognition = null;
+                }
+            };
+
+            recognition.onresult = async (event) => {
+                const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+                console.log('Wake word check - Speech recognized:', transcript);
+                
+                if (listeningForQuestion) {
+                    console.log("Ignoring wake word, currently listening for question.");
+                    return;
+                }
+
+                const interjectionToUse = wakeWordInterjection || "hey";
+                const nameToUse = wakeWordName || "bravo";
+                const phraseWithSpace = `${interjectionToUse} ${nameToUse}`;
+                const phraseWithComma = `${interjectionToUse}, ${nameToUse}`;
+                const phraseWithCommaNoSpace = `${interjectionToUse},${nameToUse}`;
+
+                console.log(`Checking for: "${phraseWithSpace}" OR "${phraseWithComma}" OR "${phraseWithCommaNoSpace}"`);
+
+                if (transcript.includes(phraseWithSpace) || transcript.includes(phraseWithComma) || transcript.includes(phraseWithCommaNoSpace)) {
+                    console.log(`Wake word detected! ("${transcript}")`);
+                    
+                    if (recognition) {
+                        console.log("Stopping wake word recognition...");
+                        try {
+                            recognition.stop();
+                        } catch (e) {
+                            console.warn("Error stopping wake word recognition:", e);
+                        }
+                        recognition.onresult = null;
+                        recognition.onerror = null;
+                        recognition.onend = null;
+                        recognition = null;
+                        console.log("Stopped and cleared wake word recognition instance.");
+                    }
+                    isSettingUpRecognition = false;
+
+                    // Highlight question textarea
+                    updateStatusMessage("Listening for your question...");
+                    if (questionDisplay) {
+                        questionDisplay.classList.add(LISTENING_HIGHLIGHT_CLASS);
+                        questionDisplay.placeholder = "I'm listening for your question...";
+                    }
+
+                    // Announce and start listening for question
+                    const announcement = "Listening for your question...";
+                    console.log("Calling announce for wake word response...");
+                    try {
+                        await announce(announcement, "system", false);
+                        console.log("Announce finished. Setting up question recognition.");
+                        setupQuestionRecognition();
+                    } catch (announceError) {
+                        console.error("Error during announcement:", announceError);
+                        if (questionDisplay) {
+                            questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
+                        }
+                        setupSpeechRecognition(); // Restart wake word detection
+                    }
+                }
+            };
+
+            recognition.onend = () => {
+                console.log("Wake word recognition ended.");
+                if (!listeningForQuestion && !isSettingUpRecognition && recognition) {
+                    console.log("Wake word recognition ended unexpectedly, restarting.");
+                    recognition = null;
+                    setTimeout(setupSpeechRecognition, 500);
+                } else {
+                    console.log("Wake word recognition ended normally or was already being reset/stopped.");
+                    isSettingUpRecognition = false;
+                }
+            };
+
+            try {
+                recognition.start();
+                console.log("Wake word recognition started.");
+                isSettingUpRecognition = false;
+            } catch (e) {
+                console.error("Error starting wake word recognition:", e);
+                isSettingUpRecognition = false;
+                recognition = null;
             }
         }
 
-        // Speech synthesis
-        speechOutput.addEventListener('click', () => {
-            if (speechQueue.length > 0) {
-                const text = speechQueue.join(' ');
-                const utterance = new SpeechSynthesisUtterance(text);
-                speechSynthesis.speak(utterance);
+        function setupQuestionRecognition() {
+            console.log("Attempting to set up question recognition...");
+            const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognitionAPI) {
+                console.error("Speech Recognition API not supported.");
+                announce("Sorry, I can't use speech recognition.", "system", false);
+                return;
             }
-        });
 
-        clearBtn.addEventListener('click', () => {
-            speechQueue = [];
-            updateSpeechDisplay();
-        });
+            questionRecognitionInstance = new SpeechRecognitionAPI();
+            questionRecognitionInstance.lang = 'en-US';
+            questionRecognitionInstance.continuous = false;
+            questionRecognitionInstance.interimResults = true;
+            questionRecognitionInstance.maxAlternatives = 1;
 
-        // Initialize
-        updateSpeechDisplay();
+            let finalTranscript = '';
+            let listeningTimeout;
+            let hasProcessedResult = false;
+            let isRestartingKeyword = false;
+
+            console.log("Question Recognition Config:", {
+                continuous: false,
+                interimResults: true,
+                lang: 'en-US',
+                maxAlternatives: 1
+            });
+
+            questionRecognitionInstance.onstart = () => {
+                console.log("===== QUESTION RECOGNITION: Listening started =====");
+                finalTranscript = '';
+                hasProcessedResult = false;
+                
+                updateStatusMessage("Listening for question...");
+                if (questionDisplay) {
+                    questionDisplay.placeholder = "Listening...";
+                    questionDisplay.value = "";
+                    questionDisplay.classList.add(LISTENING_HIGHLIGHT_CLASS);
+                    console.log("Question display updated: highlighted and cleared");
+                }
+                listeningForQuestion = true;
+                console.log("listeningForQuestion set to TRUE");
+                clearTimeout(listeningTimeout);
+                listeningTimeout = setTimeout(() => {
+                    if (listeningForQuestion && !finalTranscript && !hasProcessedResult) {
+                        console.log("===== QUESTION TIMEOUT: No speech detected =====");
+                        announce("I didn't hear anything. Try again?", "system", false);
+                        try {
+                            questionRecognitionInstance.stop();
+                        } catch (e) {}
+                    }
+                }, 10000);
+                console.log("Question recognition timeout set for 10 seconds");
+            };
+
+            questionRecognitionInstance.onresult = async (event) => {
+                console.log("===== QUESTION ONRESULT: Speech detected =====");
+                if (hasProcessedResult) {
+                    console.log("Result already processed, ignoring");
+                    return;
+                }
+                clearTimeout(listeningTimeout);
+                
+                let interimTranscript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcriptPart = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcriptPart;
+                    } else {
+                        interimTranscript += transcriptPart;
+                    }
+                }
+                
+                const isFinishedUtterance = event.results[event.results.length - 1].isFinal;
+                console.log("===== QUESTION TRANSCRIPT =====");
+                console.log("Interim:", interimTranscript);
+                console.log("Final so far:", finalTranscript);
+                console.log("Is final utterance:", isFinishedUtterance);
+                
+                // Update display with current transcript
+                if (questionDisplay) {
+                    questionDisplay.value = finalTranscript + (interimTranscript || '');
+                }
+
+                if (isFinishedUtterance && finalTranscript.trim()) {
+                    hasProcessedResult = true;
+                    console.log("Final Question:", finalTranscript.trim().toLowerCase());
+                    listeningForQuestion = false;
+
+                    // Remove highlight and process question
+                    if (questionDisplay) {
+                        questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
+                        questionDisplay.value = finalTranscript.trim();
+                    }
+
+                    try {
+                        announce("Okay, processing: " + finalTranscript.trim() + ". Give me a moment.", "system", false);
+                        currentQuestion = finalTranscript.trim().toLowerCase();
+                        
+                        // Update status message with current question
+                        updateStatusMessage(`Current: ${currentQuestion}`);
+
+                        // Process the question and update the interface
+                        await processQuestionAndUpdateInterface(currentQuestion);
+                        
+                    } catch (error) {
+                        console.error('Error processing question:', error);
+                        announce("Error processing question.", "system", false);
+                        isRestartingKeyword = true;
+                        setupSpeechRecognition();
+                    } finally {
+                        updateStatusMessage("Ready - Say 'Hey Bravo' to start");
+                        if (questionDisplay) {
+                            questionDisplay.placeholder = "Say 'Hey Bravo' followed by your question...";
+                        }
+                        console.log("Question processing finished.");
+                    }
+                } else if (!isFinishedUtterance) {
+                    console.log("Waiting for final result...");
+                } else {
+                    console.log("Final utterance empty.");
+                    listeningForQuestion = false;
+                    if (questionDisplay) {
+                        questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
+                    }
+                }
+            };
+
+            questionRecognitionInstance.onerror = (event) => {
+                clearTimeout(listeningTimeout);
+                if (hasProcessedResult) return;
+                
+                console.error("Question Error:", event.error, event.message);
+                let errorMessage = "Speech recognition error.";
+                let attemptRetry = false;
+                
+                if (event.error === 'no-speech') {
+                    errorMessage = "Didn't hear anything. Try again?";
+                    if (!questionRecognitionInstance.hasRetried) {
+                        attemptRetry = true;
+                        errorMessage += " Retrying...";
+                        questionRecognitionInstance.hasRetried = true;
+                    } else {
+                        console.log("Already retried.");
+                    }
+                } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    errorMessage = "Mic access denied.";
+                } else if (event.error === 'audio-capture') {
+                    errorMessage = "Mic problem.";
+                } else if (event.error === 'network') {
+                    errorMessage = "Network error.";
+                } else if (event.error === 'aborted') {
+                    errorMessage = "";
+                }
+
+                if (errorMessage) {
+                    announce(errorMessage, "system", false);
+                }
+                
+                updateStatusMessage("Ready - Say 'Hey Bravo' to start");
+                if (questionDisplay) {
+                    questionDisplay.placeholder = "Say 'Hey Bravo' followed by your question...";
+                    questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
+                }
+                listeningForQuestion = false;
+                try {
+                    questionRecognitionInstance.stop();
+                } catch (e) {}
+
+                if (attemptRetry) {
+                    setTimeout(() => {
+                        if (!hasProcessedResult && !listeningForQuestion) {
+                            setupQuestionRecognition();
+                        }
+                    }, 1500);
+                } else {
+                    isRestartingKeyword = true;
+                    setupSpeechRecognition();
+                }
+            };
+
+            questionRecognitionInstance.onend = () => {
+                console.log("Question Recognition ended.");
+                listeningForQuestion = false;
+                clearTimeout(listeningTimeout);
+                
+                if (questionDisplay) {
+                    questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
+                }
+                
+                if (!hasProcessedResult && !isRestartingKeyword) {
+                    console.log("Question rec ended (no result), restarting wake word detection.");
+                    setupSpeechRecognition();
+                } else {
+                    console.log("Not restarting wake word listener from onend (processed, retrying, or handled by error).");
+                }
+                
+                questionRecognitionInstance = null;
+                console.log("Question instance cleaned up.");
+            };
+
+            setTimeout(() => {
+                try {
+                    console.log("Calling start() for question recognition...");
+                    questionRecognitionInstance.start();
+                } catch (e) {
+                    console.error("Start error:", e);
+                    announce("Couldn't start listening.", "system", false);
+                    listeningForQuestion = false;
+                    clearTimeout(listeningTimeout);
+                    isRestartingKeyword = true;
+                    setupSpeechRecognition();
+                }
+            }, 150);
+        }
+
+        async function processQuestionAndUpdateInterface(question) {
+            console.log("Processing question and updating interface:", question);
+            
+            try {
+                // Use the question as a category context for generating options
+                const questionCategory = {
+                    label: question,
+                    llm_prompt: `Generate response options for the question: "${question}". Provide helpful answers, suggestions, or related communication phrases.`
+                };
+
+                // Update both gridpage-style options (top 2 rows) and freestyle options (bottom 3 rows)
+                console.log("Generating gridpage-style options for question...");
+                const gridpageOptions = await generateGridpageLLMOptions(questionCategory.llm_prompt, 18);
+                renderCategoryOptions(gridpageOptions);
+                
+                console.log("Generating freestyle options for question...");
+                const freestyleOptions = await generateFreestyleLLMOptions(questionCategory, 29);
+                renderFreestyleOptions(freestyleOptions);
+                
+                // Set the current category to the question for context
+                currentCategory = questionCategory;
+                
+                console.log("Interface updated with question-based options");
+                
+            } catch (error) {
+                console.error('Error updating interface with question:', error);
+                announce("Sorry, I had trouble processing that question.", "system", false);
+            }
+        }
+
+        // Proper announcement system (from gridpage)
+        async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
+            console.log(`🔊 ANNOUNCE: "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
+            
+            // Initialize audio context if not already done
+            if (!audioContextInitialized) {
+                console.warn("🔊 Audio context not initialized - calling enableSpeechSynthesis");
+                enableSpeechSynthesis();
+            }
+            
+            return new Promise((resolve, reject) => {
+                announcementQueue.push({
+                    textToAnnounce,
+                    announcementType,
+                    resolve,
+                    reject
+                });
+                processAnnouncementQueue();
+            });
+        }
+
+        // Initialize on page load
+        // Initialize mood selection if enabled
+        async function checkAndShowMoodSelection() {
+            try {
+                // Check if mood selection is enabled and not already shown this session
+                const existingMood = sessionStorage.getItem('currentSessionMood');
+                if (!existingMood || existingMood === '') {
+                    // Check if showMoodSelection function is available
+                    if (typeof showMoodSelection === 'function') {
+                        showMoodSelection((selectedMood) => {
+                            console.log('Mood selected on tap interface:', selectedMood);
+                            // Continue with normal page flow after mood selection
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking mood selection:', error);
+            }
+        }
+
+        // Show mood selection after page is ready
+        setTimeout(() => {
+            checkAndShowMoodSelection();
+        }, 1000); // Delay to ensure mood-selection.js is loaded
+
+        // (Initialization is now handled by DOMContentLoaded event listener above)
     </script>
+    
+    <!-- Add mood selection functionality -->
+    <script src="/static/mood-selection.js"></script>
+
+    <!-- Admin Toolbar JavaScript -->
+    <script>
+        // Admin toolbar functionality
+        const lockButton = document.getElementById('lock-icon');
+        const adminIcons = document.getElementById('admin-icons');
+        const pinModal = document.getElementById('pin-modal');
+        const pinInput = document.getElementById('pin-input');
+        const pinSubmitButton = document.getElementById('pin-submit');
+        const pinCancelButton = document.getElementById('pin-cancel');
+        const pinError = document.getElementById('pin-error');
+        const switchUserButton = document.getElementById('switch-user-button');
+        const logoutButton = document.getElementById('logout-button');
+
+        // Function to show PIN modal
+        function showPinModal() {
+            if (pinModal) {
+                pinModal.classList.remove('hidden');
+                if (pinInput) {
+                    pinInput.value = '';
+                    pinInput.focus();
+                }
+                if (pinError) {
+                    pinError.classList.add('hidden');
+                }
+            }
+        }
+
+        // Function to hide PIN modal
+        function hidePinModal() {
+            if (pinModal) {
+                pinModal.classList.add('hidden');
+            }
+            if (pinInput) {
+                pinInput.value = '';
+            }
+            if (pinError) {
+                pinError.classList.add('hidden');
+            }
+        }
+
+        // Function to validate PIN with backend
+        async function validatePin(pin) {
+            try {
+                const response = await authenticatedFetch('/api/account/toolbar-pin', {
+                    method: 'GET'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    return data.pin === pin;
+                }
+            } catch (error) {
+                console.error('Error validating PIN:', error);
+            }
+            return false;
+        }
+
+        // Function to unlock admin toolbar
+        function unlockToolbar() {
+            if (adminIcons) {
+                adminIcons.classList.remove('hidden');
+            }
+            if (lockButton) {
+                lockButton.style.display = 'none';
+            }
+            hidePinModal();
+        }
+
+        // Function to lock admin toolbar
+        function lockToolbar() {
+            if (adminIcons) {
+                adminIcons.classList.add('hidden');
+            }
+            if (lockButton) {
+                lockButton.style.display = 'block';
+            }
+        }
+
+        // Event listener for lock button
+        if (lockButton) {
+            lockButton.addEventListener('click', showPinModal);
+        }
+
+        // Event listener for lock toolbar button (locks the toolbar back)
+        const lockToolbarButton = document.getElementById('lock-toolbar-button');
+        if (lockToolbarButton) {
+            lockToolbarButton.addEventListener('click', lockToolbar);
+        }
+
+        // Event listener for PIN submit
+        if (pinSubmitButton) {
+            pinSubmitButton.addEventListener('click', async () => {
+                const pin = pinInput.value;
+                if (pin.length >= 3 && pin.length <= 10) {
+                    const isValid = await validatePin(pin);
+                    if (isValid) {
+                        unlockToolbar();
+                    } else {
+                        if (pinError) {
+                            pinError.textContent = 'Invalid PIN. Please try again.';
+                            pinError.classList.remove('hidden');
+                        }
+                        if (pinInput) {
+                            pinInput.value = '';
+                            pinInput.focus();
+                        }
+                    }
+                } else {
+                    if (pinError) {
+                        pinError.textContent = 'PIN must be 3-10 characters.';
+                        pinError.classList.remove('hidden');
+                    }
+                }
+            });
+        }
+
+        // Event listener for PIN cancel
+        if (pinCancelButton) {
+            pinCancelButton.addEventListener('click', hidePinModal);
+        }
+
+        // Event listener for Enter key in PIN input
+        if (pinInput) {
+            pinInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    if (pinSubmitButton) {
+                        pinSubmitButton.click();
+                    }
+                }
+            });
+        }
+
+        // Switch user functionality
+        if (switchUserButton) {
+            switchUserButton.addEventListener('click', () => {
+                // Clear session and redirect to auth page for user selection
+                sessionStorage.removeItem('currentAacUserId');
+                window.location.href = 'auth.html';
+            });
+        }
+
+        // Logout functionality
+        if (logoutButton) {
+            logoutButton.addEventListener('click', () => {
+                // Clear all session storage and redirect to auth page
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+            });
+        }
+
+        // Avatar manager functionality removed
+
+        // Close PIN modal when clicking outside
+        if (pinModal) {
+            pinModal.addEventListener('click', (e) => {
+                if (e.target === pinModal) {
+                    hidePinModal();
+                }
+            });
+        }
+
+        // Close PIN modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && pinModal && !pinModal.classList.contains('hidden')) {
+                hidePinModal();
+            }
+        });
+
+        // Dynamic Home navigation function
+        async function navigateToHome() {
+            try {
+                const response = await authenticatedFetch('/api/interface-preference', {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.useTapInterface) {
+                        window.location.href = 'tap_interface.html';
+                    } else {
+                        window.location.href = 'gridpage.html?page=home';
+                    }
+                } else {
+                    // Fallback to gridpage if can't determine preference
+                    window.location.href = 'gridpage.html?page=home';
+                }
+            } catch (error) {
+                console.error('Error determining interface preference:', error);
+                // Fallback to gridpage
+                window.location.href = 'gridpage.html?page=home';
+            }
+        }
+
+        // Make navigateToHome available globally for admin pages
+        window.navigateToHome = navigateToHome;
+    </script>
+
 </body>
 </html>
