@@ -9512,27 +9512,31 @@ async def generate_category_words(
         if request.current_mood and request.current_mood != 'none':
             mood_context = f" The user is currently feeling {request.current_mood}, so consider words that would be appropriate for someone in this emotional state."
         
-        # Create the prompt for word generation with enhanced context
-        prompt = f"""Given the user context: '{user_context}' and category '{request.category}', generate {freestyle_options} words or short phrases for this category.{mood_context}{context_clause}{exclude_clause}
+        # Create the prompt for word generation with balanced context
+        prompt = f"""Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
 
-IMPORTANT: Use the user context to provide personalized, relevant words. For example:
-- If category is "People" and user context mentions specific people, prioritize those names
-- If category is "Places" and user has a current location, include relevant locations
-- If category is "Activities" and user has a current activity, include related activities
+FOCUS: Provide words that are clearly and directly related to "{request.category}" category. While user context can add relevant personalization, the primary focus should be category-appropriate words.
+
+User context (use lightly for personalization only): {user_context}
 
 Requirements:
 - Provide exactly {freestyle_options} words or short phrases (1-3 words each)
-- Allow proper nouns and place names (e.g., "Disney World", "Broncos stadium", "talker group")
-- Words should be relevant to "{request.category}"
-- Prioritize words from user context when applicable
+- ALL words must be clearly relevant to the "{request.category}" category
+- Include a mix of: 80% general category words + 20% personalized (if user context is relevant)
+- Allow proper nouns and place names when category-appropriate
 - Words should be commonly used and appropriate for AAC communication
 - Each word should be useful for building messages
 - For each word, provide a related keyword for image searching
-- Format: "word|keyword" (e.g., "mom|mother", "dog|animal", "happy|smile")
+- Format: "word|keyword" (e.g., "butterfly|insect", "snake|reptile", "gecko|lizard")
 - The keyword should be a single word that would help find relevant images
 - If the word itself is the best keyword, use the same word (e.g., "car|car")
 - For colors, always use the color name itself as the keyword (e.g., "red|red", "blue|blue")
 - For specific objects, people, or actions, use the word itself unless there's a better search term
+
+EXAMPLES:
+- For "Animals": dog, cat, bird, fish, horse, rabbit (not user's specific pet names unless very relevant)  
+- For "Insects": butterfly, bee, ant, spider, ladybug, grasshopper
+- For "Reptiles": snake, lizard, turtle, gecko, iguana, chameleon
 
 Category: {request.category}"""
 
