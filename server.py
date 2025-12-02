@@ -9532,11 +9532,13 @@ Requirements:
 - If the word itself is the best keyword, use the same word (e.g., "car|car")
 - For colors, always use the color name itself as the keyword (e.g., "red|red", "blue|blue")
 - For specific objects, people, or actions, use the word itself unless there's a better search term
+- DO NOT use numbered lists (1., 2., etc.) - just provide the words one per line
+- DO NOT include explanatory text or headers - only the word|keyword pairs
 
 EXAMPLES:
-- For "Animals": dog, cat, bird, fish, horse, rabbit (not user's specific pet names unless very relevant)  
-- For "Insects": butterfly, bee, ant, spider, ladybug, grasshopper
-- For "Reptiles": snake, lizard, turtle, gecko, iguana, chameleon
+- For "Animals": dog|dog, cat|cat, bird|bird, fish|fish, horse|horse, rabbit|rabbit
+- For "Insects": butterfly|insect, bee|insect, ant|insect, spider|arachnid, ladybug|beetle, grasshopper|insect
+- For "Reptiles": snake|reptile, lizard|reptile, turtle|reptile, gecko|lizard, iguana|reptile, chameleon|reptile
 
 Category: {request.category}"""
 
@@ -9548,7 +9550,13 @@ Category: {request.category}"""
         if words_response:
             lines = words_response.strip().split('\n')
             for line in lines:
-                clean_line = line.strip().strip('-').strip('*').strip().strip('"').strip("'")
+                # Clean the line: remove numbers, bullets, quotes, etc.
+                clean_line = line.strip()
+                # Remove numbered list formatting (1., 2., etc.)
+                import re
+                clean_line = re.sub(r'^\d+\.?\s*', '', clean_line)
+                # Remove bullet points and other formatting
+                clean_line = clean_line.strip('-').strip('*').strip('•').strip().strip('"').strip("'")
                 
                 if '|' in clean_line:
                     # Parse word|keyword format
@@ -9614,6 +9622,8 @@ def get_generic_category_words(category: str) -> List[str]:
         "People": ["mom", "dad", "friend", "teacher", "doctor", "family"],
         "Places": ["home", "school", "store", "park", "hospital", "library"],
         "Animals": ["dog", "cat", "bird", "fish", "horse", "rabbit"],
+        "Insects": ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper"],
+        "Reptiles": ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon"],
         "Around the House": ["kitchen", "bedroom", "bathroom", "living", "garage", "yard"],
         "In the Room": ["chair", "table", "bed", "lamp", "window", "door"],
         "General things": ["book", "phone", "keys", "bag", "water", "food"],
