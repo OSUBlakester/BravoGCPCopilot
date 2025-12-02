@@ -1567,6 +1567,11 @@
             modalGrid.innerHTML = '';
             const basePath = parentPath ? parentPath : category.label;
 
+            // Debug: Show which child buttons have audio files configured
+            category.children.forEach((child, index) => {
+                console.log(`[AUDIO DEBUG] Child Button ${index}: "${child.label}" - Audio: ${child.custom_audio_file ? '✓ ' + child.custom_audio_file : '✗ None'}`);
+            });
+
             category.children.forEach(child => {
                 console.log('Adding child option:', child.label);
                 const categoryBtn = document.createElement('button');
@@ -1638,10 +1643,27 @@
                 categoryBtn.textContent = child.label;
                 
                 categoryBtn.addEventListener('click', async () => {
+                    console.log(`[DEBUG] Child button clicked: ${child.label}`);
+                    console.log(`[DEBUG] Child button data:`, child);
+                    console.log(`[DEBUG] Child custom audio file:`, child.custom_audio_file);
+                    
                     // Only announce if there is a speech_text value (same logic as main categories)
                     if (child.speech_text && child.speech_text.trim() !== '') {
                         await announce(child.speech_text, "system", true);
                     }
+                    
+                    // Play custom audio file if assigned (same logic as main categories)
+                    if (child.custom_audio_file) {
+                        console.log(`[DEBUG] Playing custom audio for child: ${child.custom_audio_file}`);
+                        try {
+                            await playCustomButtonAudio(child.custom_audio_file);
+                        } catch (error) {
+                            console.error('Error playing child button audio:', error);
+                        }
+                    } else {
+                        console.log(`[DEBUG] No custom audio file configured for child button: ${child.label}`);
+                    }
+                    
                     console.log('Subcategory clicked:', child.label);
                     selectSubcategory(child, basePath);
                 });
