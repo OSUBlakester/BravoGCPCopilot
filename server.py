@@ -2311,6 +2311,14 @@ async def _copy_user_data(account_id: str, source_user_id: str, target_user_id: 
             await save_button_activity_log(account_id, target_user_id, source_activity_log)
             logging.info(f"Copied {len(source_activity_log)} button activity entries from {source_user_id} to {target_user_id}")
         
+        # 11. Copy tap navigation config (tap_interface_config/config)
+        source_tap_config = await load_tap_nav_config(account_id, source_user_id)
+        if source_tap_config:
+            await save_tap_nav_config(account_id, target_user_id, source_tap_config)
+            logging.info(f"Copied tap navigation config from {source_user_id} to {target_user_id}")
+        else:
+            logging.info(f"No tap navigation config found for {source_user_id}, target user will get default config")
+        
         logging.info(f"Successfully copied ALL user data from '{source_user_id}' to '{target_user_id}'")
         
     except Exception as e:
@@ -2425,6 +2433,14 @@ async def _copy_user_data_cross_account(source_account_id: str, source_user_id: 
         if source_activity_log:
             await save_button_activity_log(target_account_id, target_user_id, source_activity_log)
             logging.info(f"Copied {len(source_activity_log)} button activity entries from {source_account_id}/{source_user_id} to {target_account_id}/{target_user_id}")
+        
+        # 11. Copy tap navigation config (tap_interface_config/config)
+        source_tap_config = await load_tap_nav_config(source_account_id, source_user_id)
+        if source_tap_config:
+            await save_tap_nav_config(target_account_id, target_user_id, source_tap_config)
+            logging.info(f"Copied tap navigation config from {source_account_id}/{source_user_id} to {target_account_id}/{target_user_id}")
+        else:
+            logging.info(f"No tap navigation config found for {source_account_id}/{source_user_id}, target user will get default config")
         
         logging.info(f"Successfully copied ALL user data from '{source_account_id}/{source_user_id}' to '{target_account_id}/{target_user_id}'")
         
