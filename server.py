@@ -9545,6 +9545,11 @@ Category: {request.category}"""
         # Generate words using LLM
         words_response = await _generate_gemini_content_with_fallback(prompt, None, account_id, aac_user_id)
         
+        # Debug logging for AI response
+        logging.info(f"DEBUG: Category '{request.category}' - AI response length: {len(words_response) if words_response else 0}")
+        if words_response:
+            logging.info(f"DEBUG: Category '{request.category}' - AI response preview: {words_response[:200]}...")
+        
         # Parse the response into individual words with keywords
         words = []
         if words_response:
@@ -9617,7 +9622,40 @@ Category: {request.category}"""
         return JSONResponse(content={"words": []})
 
 def get_generic_category_words(category: str) -> List[str]:
-    """Get generic fallback words for a category"""
+    """Get generic fallback words for a category with flexible matching"""
+    
+    # Log the exact category name for debugging
+    logging.info(f"DEBUG: get_generic_category_words called with category: '{category}'")
+    
+    # Flexible category mapping - check for keywords in category name
+    category_lower = category.lower()
+    
+    # Insect-related categories (most specific first)
+    if any(keyword in category_lower for keyword in ['insect', 'bug', 'beetles', 'butterfly', 'bee']):
+        logging.info(f"DEBUG: Matched insects category for '{category}'")
+        return ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper", "beetle", "moth"]
+    
+    # Reptile-related categories
+    if any(keyword in category_lower for keyword in ['reptile', 'snake', 'lizard', 'turtle']):
+        logging.info(f"DEBUG: Matched reptiles category for '{category}'")
+        return ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon", "alligator", "crocodile"]
+    
+    # Fish and sea life
+    if any(keyword in category_lower for keyword in ['fish', 'sea', 'ocean', 'marine', 'aquatic']):
+        logging.info(f"DEBUG: Matched fish/sea category for '{category}'")
+        return ["fish", "shark", "whale", "dolphin", "octopus", "crab", "lobster", "seahorse"]
+    
+    # Birds
+    if any(keyword in category_lower for keyword in ['bird', 'flying', 'wings', 'feather']):
+        logging.info(f"DEBUG: Matched birds category for '{category}'")
+        return ["bird", "eagle", "robin", "owl", "parrot", "penguin", "chicken", "duck"]
+    
+    # Wild animals
+    if any(keyword in category_lower for keyword in ['wild', 'jungle', 'safari', 'zoo']):
+        logging.info(f"DEBUG: Matched wild animals category for '{category}'")
+        return ["lion", "tiger", "elephant", "giraffe", "zebra", "monkey", "bear", "deer"]
+    
+    # Exact match fallback for common categories
     generic_words = {
         "People": ["mom", "dad", "friend", "teacher", "doctor", "family"],
         "Places": ["home", "school", "store", "park", "hospital", "library"],
@@ -9642,7 +9680,16 @@ def get_generic_category_words(category: str) -> List[str]:
         "Technology": ["computer", "phone", "tablet", "internet", "email", "game"],
         "Sports & Games": ["ball", "team", "play", "win", "run", "jump"]
     }
-    return generic_words.get(category, ["thing", "stuff", "item", "object", "something", "anything"])
+    
+    # Try exact match first
+    exact_match = generic_words.get(category)
+    if exact_match:
+        logging.info(f"DEBUG: Found exact match for '{category}'")
+        return exact_match
+    
+    # Log when falling back to generic words
+    logging.info(f"DEBUG: No match found for '{category}', using generic fallback")
+    return ["thing", "stuff", "item", "object", "something", "anything"]
 
 
 # --- ADMIN ENDPOINTS ---
