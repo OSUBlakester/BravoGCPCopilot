@@ -47,15 +47,17 @@ const LLMOptionsInput = document.getElementById('LLMOptions');
 const FreestyleOptionsInput = document.getElementById('FreestyleOptions');
 const scanLoopLimitInput = document.getElementById('scanLoopLimit');
 const ScanningOffInput = document.getElementById('ScanningOff');
+// const useTapInterfaceInput = document.getElementById('useTapInterface'); // Removed from UI
+const interfaceAuditoryInput = document.getElementById('interfaceAuditory');
+const interfaceTapInput = document.getElementById('interfaceTap');
 const SummaryOffInput = document.getElementById('SummaryOff');
+const enablePictogramsInput = document.getElementById('enablePictograms');
+const enableSightWordsInput = document.getElementById('enableSightWords');
+const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const autoCleanInput = document.getElementById('autoClean');
 const displaySplashInput = document.getElementById('displaySplash');
 const displaySplashTimeInput = document.getElementById('displaySplashTime');
 const enableMoodSelectionInput = document.getElementById('enableMoodSelection');
-const useTapInterfaceInput = document.getElementById('useTapInterface');
-const enablePictogramsInput = document.getElementById('enablePictograms');
-const enableSightWordsInput = document.getElementById('enableSightWords');
-const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
 const testTtsVoiceButton = document.getElementById('testTtsVoiceButton');
 const ttsVoiceStatus = document.getElementById('tts-voice-status');
@@ -191,14 +193,25 @@ async function loadSettings() {
             FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : ''; 
         }
         if (scanLoopLimitInput) { scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0; }
-        if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; }
+        
+        // Handle Interface Mode Radio Buttons
+        if (interfaceAuditoryInput && interfaceTapInput) {
+            if (currentSettings.useTapInterface) {
+                interfaceTapInput.checked = true;
+            } else {
+                interfaceAuditoryInput.checked = true;
+            }
+        }
+
+        // if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; } // Removed from UI
         if (SummaryOffInput) { SummaryOffInput.checked = currentSettings.SummaryOff || false; }
         if (autoCleanInput) { autoCleanInput.checked = currentSettings.autoClean || false; }
         if (displaySplashInput) { displaySplashInput.checked = currentSettings.displaySplash || false; }
         if (displaySplashTimeInput) { displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000; }
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
-        if (useTapInterfaceInput) { useTapInterfaceInput.checked = currentSettings.useTapInterface || false; }
-        if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms || false; }
+        // if (useTapInterfaceInput) { useTapInterfaceInput.checked = currentSettings.useTapInterface || false; } // Removed from UI
+        if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms !== false; }
+        if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; }
         if (enableSightWordsInput) { enableSightWordsInput.checked = currentSettings.enableSightWords !== false; }
         if (sightWordGradeLevelInput) { sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k'; }
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
@@ -247,14 +260,25 @@ async function saveSettings() {
     const newFreestyleOptions = FreestyleOptionsInput.value;
     console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
     const newScanLoopLimit = scanLoopLimitInput.value;
-    const newScanningOff = ScanningOffInput.checked;
+    
+    // Determine Interface Mode
+    let newUseTapInterface = false;
+
+    if (interfaceTapInput && interfaceTapInput.checked) {
+        newUseTapInterface = true;
+    } else {
+        newUseTapInterface = false;
+    }
+
+    // const newScanningOff = ScanningOffInput.checked; // Removed from UI
     const newSummaryOff = SummaryOffInput.checked;
     const newAutoClean = autoCleanInput.checked;
     const newDisplaySplash = displaySplashInput.checked;
     const newDisplaySplashTime = displaySplashTimeInput.value ? parseInt(displaySplashTimeInput.value) : 3000;
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
-    const newUseTapInterface = useTapInterfaceInput.checked;
-    const newEnablePictograms = enablePictogramsInput.checked;
+    // const newUseTapInterface = useTapInterfaceInput.checked; // Removed from UI
+    const newEnablePictograms = enablePictogramsInput ? enablePictogramsInput.checked : true;
+    const newScanningOff = ScanningOffInput ? ScanningOffInput.checked : false;
     const newEnableSightWords = enableSightWordsInput.checked;
     const newSightWordGradeLevel = sightWordGradeLevelInput.value;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
@@ -344,6 +368,7 @@ async function saveSettings() {
         gridColumns: newGridColumns // Add gridColumns to save payload
     };
     console.log('DEBUG FreestyleOptions - Payload value:', settingsToSave.FreestyleOptions);
+    console.log('DEBUG enablePictograms - Payload value:', settingsToSave.enablePictograms);
 
     console.log("Saving settings:", settingsToSave);
     showTemporaryStatus(settingsStatus, 'Saving...', false, 0)
@@ -358,6 +383,7 @@ async function saveSettings() {
         if (!response.ok) { const errorText = await response.text(); throw new Error(`Save failed: ${response.status} ${errorText}`); }
 
         currentSettings = await response.json(); // Update local state with response
+        console.log('DEBUG enablePictograms - Server response value:', currentSettings.enablePictograms);
         
         if (scanDelayInput) scanDelayInput.value = currentSettings.scanDelay || '';
         if (wakeWordInterjectionInput) wakeWordInterjectionInput.value = currentSettings.wakeWordInterjection || '';
@@ -381,8 +407,7 @@ async function saveSettings() {
         if (displaySplashInput) displaySplashInput.checked = currentSettings.displaySplash || false;
         if (displaySplashTimeInput) displaySplashTimeInput.value = currentSettings.displaySplashTime || 3000;
         if (enableMoodSelectionInput) enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false;
-        if (useTapInterfaceInput) useTapInterfaceInput.checked = currentSettings.useTapInterface || false;
-        if (enablePictogramsInput) enablePictogramsInput.checked = currentSettings.enablePictograms || false;
+        if (enablePictogramsInput) enablePictogramsInput.checked = currentSettings.enablePictograms !== false;
         if (enableSightWordsInput) enableSightWordsInput.checked = currentSettings.enableSightWords !== false;
         if (sightWordGradeLevelInput) sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k';
         if (ttsVoiceSelect) ttsVoiceSelect.value = currentSettings.selected_tts_voice_name || '';

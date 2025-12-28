@@ -1,6 +1,7 @@
 import os
 import sys
 
+# Force rebuild 2025-12-13
 # Security: Remove debug prints of sensitive environment variables
 # print("DEBUG: GOOGLE_API_KEY =", os.environ.get("GOOGLE_API_KEY"))
 # print("DEBUG: GOOGLE_APPLICATION_CREDENTIALS =", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
@@ -135,6 +136,8 @@ import openai # Add OpenAI import
 # SERVICE_ACCOUNT_KEY_PATH is now imported from config.py
 
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
+from routes import router as static_router # Import static pages router
+
 oauth2_scheme = HTTPBearer()
 
 # Mood update tracking to prevent race conditions
@@ -145,6 +148,8 @@ redis_client = None
 
 app = FastAPI()
 
+# Include static pages router
+app.include_router(static_router)
 
 # CORS middleware FIRST - Now uses environment-specific allowed origins
 app.add_middleware(
@@ -677,7 +682,7 @@ class TestScrapingRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return RedirectResponse(url="/static/auth.html")
+    return RedirectResponse(url="/auth.html")
 
 @app.get("/avatar-selector")
 async def avatar_selector():
@@ -694,10 +699,10 @@ async def symbol_admin():
     """Serve the symbol administration page"""
     return FileResponse(os.path.join(static_file_path, "symbol_admin.html"))
 
-@app.get("/tap-interface-admin")
-async def tap_interface_admin():
-    """Serve the fixed tap interface navigation administration page"""
-    return FileResponse(os.path.join(static_file_path, "tap_interface_admin_fixed.html"))
+# @app.get("/tap-interface-admin")
+# async def tap_interface_admin():
+#     """Serve the tap interface navigation administration page"""
+#     return FileResponse(os.path.join(static_file_path, "tap_interface_admin.html"))
 
 class AvatarVariationRequest(BaseModel):
     baseConfig: Dict[str, Any] = Field(..., description="Base avatar configuration")
@@ -939,12 +944,19 @@ class UserCurrentState(BaseModel):
     favorite_name: Optional[str] = None  # NEW: Name of the favorite that was loaded
     saved_at: Optional[str] = None  # NEW: ISO timestamp when data was manually saved
 
+class FavoriteSchedule(BaseModel):
+    enabled: bool = False
+    days_of_week: List[str] = []  # List of days: Monday, Tuesday, etc.
+    start_time: str = "12:00"  # 24-hour format HH:MM
+    end_time: str = "13:00"    # 24-hour format HH:MM
+
 class UserCurrentFavorite(BaseModel):
     name: str
     location: str
     people: str
     activity: str
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
+    schedule: Optional[FavoriteSchedule] = None # NEW: Schedule for this favorite
 
 class UserCurrentFavoritesData(BaseModel):
     favorites: List[UserCurrentFavorite] = []
@@ -954,6 +966,7 @@ class FavoriteRequest(BaseModel):
     location: str
     people: str
     activity: str
+    schedule: Optional[FavoriteSchedule] = None # NEW: Schedule for this favorite
 
 class ManageFavoriteRequest(BaseModel):
     action: str  # "edit" or "delete"
@@ -1098,7 +1111,8 @@ async def save_user_current_favorite(payload: FavoriteRequest, current_ids: Anno
             "name": payload.name,
             "location": payload.location,
             "people": payload.people,
-            "activity": payload.activity
+            "activity": payload.activity,
+            "schedule": payload.schedule.model_dump() if payload.schedule else None
         }
         favorites_list.append(new_favorite)
         
@@ -1149,7 +1163,8 @@ async def manage_user_current_favorite(payload: ManageFavoriteRequest, current_i
                         "name": payload.favorite.name,
                         "location": payload.favorite.location,
                         "people": payload.favorite.people,
-                        "activity": payload.favorite.activity
+                        "activity": payload.favorite.activity,
+                        "schedule": payload.favorite.schedule.model_dump() if payload.favorite.schedule else None
                     }
                     break
             message = "Favorite updated successfully"
@@ -3038,12 +3053,22 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
     def extract_json_from_response(response_text: str) -> str:
-        """Extract JSON from LLM response, handling markdown code blocks"""
+        """Extract JSON from LLM response, handling markdown code blocks and conversational text"""
         response_text = response_text.strip()
+        
+        # Try to find JSON list pattern using regex (most robust)
+        # Looks for [ ... ] across multiple lines
+        import re
+        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if match:
+            return match.group(0)
+            
+        # Fallback: Handle markdown code blocks if regex didn't match (e.g. if inside code block but regex failed?)
         if response_text.startswith('```json') and response_text.endswith('```'):
             return '\n'.join(response_text.split('\n')[1:-1]).strip()
         if response_text.startswith('```') and response_text.endswith('```'):
             return '\n'.join(response_text.split('\n')[1:-1]).strip()
+            
         return response_text
 
     clean_json_str = extract_json_from_response(llm_response_json_str)
@@ -9451,6 +9476,7 @@ class FreestyleCategoryWordsRequest(BaseModel):
     build_space_content: Optional[str] = Field("", description="Current build space content for context")
     exclude_words: Optional[List[str]] = Field(default_factory=list, description="Words to exclude from generation")
     current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
+    custom_prompt: Optional[str] = Field(None, description="Custom prompt instructions that take priority over general category handling")
 
 @app.post("/api/freestyle/category-words")
 async def generate_category_words(
@@ -9460,6 +9486,9 @@ async def generate_category_words(
     """
     Generates word options for a specific category using LLM with user context
     """
+    # TEMPORARY DEBUG: Log the exact category being received
+    logging.info(f"CATEGORY_DEBUG: Received category request: '{request.category}'")
+    
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     
@@ -9507,38 +9536,78 @@ async def generate_category_words(
             
         user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
         
-        # Add mood context if available
+        # Add mood context only if semantically relevant to the category
         mood_context = ""
         if request.current_mood and request.current_mood != 'none':
-            mood_context = f" The user is currently feeling {request.current_mood}, so consider words that would be appropriate for someone in this emotional state."
+            # Only apply mood context for categories that are inherently about emotions/feelings
+            # Avoid applying mood to descriptive categories (like "positive adjectives" which describe objects, not feelings)
+            category_lower = request.category.lower()
+            mood_relevant_categories = [
+                'feeling', 'emotion', 'mood', 'how i feel', 'my feelings', 
+                'emotional', 'mental state', 'how are you'
+            ]
+            
+            # Check if this category is actually about the user's emotional state
+            is_mood_relevant = any(mood_keyword in category_lower for mood_keyword in mood_relevant_categories)
+            
+            if is_mood_relevant:
+                mood_context = f" The user is currently feeling {request.current_mood}, so prioritize words that match this emotional state."
+            # For non-mood categories, don't inject mood context as it can interfere with specific category requirements
         
-        # Create the prompt for word generation with balanced context
-        prompt = f"""Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
+        # Create the prompt - use custom prompt if provided, otherwise use general template
+        if request.custom_prompt:
+            logging.info(f"DEBUG: Using custom prompt for category '{request.category}': {request.custom_prompt[:50]}...")
+            # Custom prompt takes priority - use it directly with minimal server additions
+            # IMPORTANT: Do NOT inject mood_context here as it overrides the custom prompt's intent
+            
+            prompt = f"""TASK: Generate words based on the following specific instructions.
+            
+INSTRUCTIONS:
+{request.custom_prompt}
 
-FOCUS: Provide words that are clearly and directly related to "{request.category}" category. While user context can add relevant personalization, the primary focus should be category-appropriate words.
+CONSTRAINTS:
+- You MUST follow all "Do not" or "Exclude" instructions in the prompt above.
+- Provide exactly {freestyle_options} words or short phrases (1-3 words each).
+- STRICTLY ADHERE to the user's instructions.
+- PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words (e.g., use "loud" instead of "cacophonous").
+- Do NOT include mood or emotion words (like "happy", "sad", "melancholy") unless the instructions specifically ask for feelings. Focus on describing the object, event, or experience itself.
+{context_clause}
+{exclude_clause}
 
-User context (use lightly for personalization only): {user_context}
+FORMAT:
+- word|keyword (one per line)
+- No numbering, no headers.
+- If the word itself is the best keyword, use the same word (e.g., "car|car")"""
+        else:
+            # Use general template for categories without specific instructions
+            prompt = f"""Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
 
+You are helping someone communicate by providing words that fit the category '{request.category}'. Use the user context below to personalize your suggestions, but ONLY when the personal information semantically fits the category type.
+
+User context: {user_context}
+
+DECISION FRAMEWORK for using personal context:
+- For SEMANTIC categories (adjectives, emotions, actions, descriptions): Use personal context to choose which appropriate words to prioritize, but don't include personal nouns that don't fit the semantic type
+- For OBJECT categories (animals, food, places, people): Personal preferences can be included as objects (e.g., user's favorite restaurant for "places")
+- For ABSTRACT categories (feelings, activities): Personal context helps choose relevant options from the category
+
+EXAMPLES of appropriate personalization:
+- "Positive adjectives" + user likes Disney → "magical, wonderful, exciting" (Disney-inspired adjectives, not "Disney" itself)
+- "Animals" + user likes dogs → include "puppy, retriever, beagle" (specific dog types)
+- "Food" + user likes Italian → "pizza, pasta, gelato" (actual Italian foods)
 Requirements:
 - Provide exactly {freestyle_options} words or short phrases (1-3 words each)
-- ALL words must be clearly relevant to the "{request.category}" category
-- Include a mix of: 80% general category words + 20% personalized (if user context is relevant)
-- Allow proper nouns and place names when category-appropriate
+- ALL words must semantically belong to the category type '{request.category}'
+- PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words.
+- Do NOT include mood or emotion words unless the category is explicitly about feelings.
+- Use personal context to choose the most relevant and useful words from the category
 - Words should be commonly used and appropriate for AAC communication
-- Each word should be useful for building messages
 - For each word, provide a related keyword for image searching
 - Format: "word|keyword" (e.g., "butterfly|insect", "snake|reptile", "gecko|lizard")
 - The keyword should be a single word that would help find relevant images
 - If the word itself is the best keyword, use the same word (e.g., "car|car")
-- For colors, always use the color name itself as the keyword (e.g., "red|red", "blue|blue")
-- For specific objects, people, or actions, use the word itself unless there's a better search term
 - DO NOT use numbered lists (1., 2., etc.) - just provide the words one per line
 - DO NOT include explanatory text or headers - only the word|keyword pairs
-
-EXAMPLES:
-- For "Animals": dog|dog, cat|cat, bird|bird, fish|fish, horse|horse, rabbit|rabbit
-- For "Insects": butterfly|insect, bee|insect, ant|insect, spider|arachnid, ladybug|beetle, grasshopper|insect
-- For "Reptiles": snake|reptile, lizard|reptile, turtle|reptile, gecko|lizard, iguana|reptile, chameleon|reptile
 
 Category: {request.category}"""
 
@@ -9549,6 +9618,9 @@ Category: {request.category}"""
         logging.info(f"DEBUG: Category '{request.category}' - AI response length: {len(words_response) if words_response else 0}")
         if words_response:
             logging.info(f"DEBUG: Category '{request.category}' - AI response preview: {words_response[:200]}...")
+            logging.info(f"DEBUG: Category '{request.category}' - Full AI response: {words_response}")
+        else:
+            logging.info(f"DEBUG: Category '{request.category}' - AI response was empty/None")
         
         # Parse the response into individual words with keywords
         words = []
@@ -9586,6 +9658,7 @@ Category: {request.category}"""
         # Ensure we have the right number of words
         if len(words) < freestyle_options:
             # If we don't have enough, pad with generic words for the category
+            logging.info(f"DEBUG: Category '{request.category}' - Only got {len(words)} words from AI, padding with fallback words")
             generic_words = get_generic_category_words(request.category)
             existing_word_texts_lower = [w.get("text", w).lower() if isinstance(w, dict) else w.lower() for w in words]
             
@@ -13373,6 +13446,8 @@ class TapNavigationButton(BaseModel):
     words_prompt: Optional[str] = Field(None, description="LLM query for generating word options (e.g., 'I am hungry for')")
     static_options: Optional[str] = Field(None, description="Comma-separated list of static options (alternative to LLM prompt)")
     custom_audio_file: Optional[str] = Field(None, description="URL to custom audio file to play after speech text")
+    special_function: Optional[str] = Field(None, description="Special function identifier (e.g., 'spell')")
+    hidden: bool = Field(default=False, description="Whether button is hidden")
     children: List["TapNavigationButton"] = Field(default_factory=list, description="Child buttons for submenus")
 
 class TapNavigationConfig(BaseModel):
@@ -13433,7 +13508,7 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     # Helper function to create button with all required fields
     def create_button(button_id, label, speech_text=None, image_url=None, bg_color="#FFFFFF", 
                      text_color="#000000", llm_prompt=None, words_prompt=None, static_options=None, 
-                     custom_audio_file=None, children=None):
+                     custom_audio_file=None, special_function=None, children=None):
         return {
             "id": button_id,
             "label": label,
@@ -13445,6 +13520,7 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "words_prompt": words_prompt,
             "static_options": static_options,
             "custom_audio_file": custom_audio_file,
+            "special_function": special_function,
             "children": children or []
         }
     
@@ -13528,6 +13604,16 @@ async def get_tap_interface_config(
             config_data = create_default_tap_config(account_id, aac_user_id)
             await save_tap_nav_config(account_id, aac_user_id, config_data)
         
+        # DEBUG: Log words_prompt presence
+        if config_data and 'buttons' in config_data:
+            for b in config_data['buttons']:
+                if b.get('words_prompt'):
+                    logging.info(f"DEBUG: Loaded button '{b.get('label')}' with words_prompt: {b.get('words_prompt')[:20]}...")
+                if 'children' in b:
+                    for c in b['children']:
+                        if c.get('words_prompt'):
+                            logging.info(f"DEBUG: Loaded child '{c.get('label')}' with words_prompt: {c.get('words_prompt')[:20]}...")
+
         return JSONResponse(content=config_data)
     except Exception as e:
         logging.error(f"Error getting tap interface config: {e}")
@@ -13543,6 +13629,14 @@ async def save_tap_interface_config(
     account_id = current_ids["account_id"]
     
     try:
+        # DEBUG: Log words_prompt presence in received config
+        for b in config_data.buttons:
+            if b.words_prompt:
+                logging.info(f"DEBUG: Saving button '{b.label}' with words_prompt: {b.words_prompt[:20]}...")
+            for c in b.children:
+                if c.words_prompt:
+                    logging.info(f"DEBUG: Saving child '{c.label}' with words_prompt: {c.words_prompt[:20]}...")
+
         # Convert Pydantic model to dict
         config_dict = config_data.model_dump()
         # Always use 'user_config' as ID for single configuration per user
@@ -13671,6 +13765,488 @@ async def generate_options(
     except Exception as e:
         logging.error(f"Error generating options: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate options")
+
+
+# ===================================
+# ACCENT TO BRAVO MIGRATION ENDPOINTS
+# ===================================
+
+# Import migration utilities
+try:
+    from accent_mti_parser import AccentMTIParser
+    from accent_bravo_mapper import create_mapper
+    MIGRATION_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Migration utilities not available: {e}")
+    MIGRATION_AVAILABLE = False
+
+# Store parsed MTI data temporarily (in production, use Redis or database)
+migration_sessions = {}  # Format: {session_id: {parsed_data, mapper, timestamp}}
+
+
+@app.post("/api/migration/upload-mti")
+async def upload_mti_file(
+    file: UploadFile = File(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Upload and parse an Accent MTI file
+    
+    Returns a session ID and summary of parsed data
+    """
+    if not MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Migration functionality not available")
+    
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    
+    try:
+        # Read binary file content
+        content = await file.read()
+        
+        # Save to temporary file for parsing
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mti') as tmp_file:
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+        
+        try:
+            # Parse the MTI file
+            parser = AccentMTIParser()
+            parsed_data = parser.parse_file(tmp_path)
+            
+            # Add metadata for compatibility
+            parsed_data['file'] = file.filename
+            parsed_data['extraction_date'] = dt.now(timezone.utc).strftime('%Y-%m-%d')
+            
+            # Create session ID
+            session_id = str(uuid.uuid4())
+            
+            # Build page name mapping: Accent page ID -> inferred name
+            page_name_map = {
+                page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
+                for page_id, page_data in parsed_data["pages"].items()
+            }
+            
+            # Store in session (with timestamp for cleanup)
+            migration_sessions[session_id] = {
+                "parsed_data": parsed_data,
+                "mapper": create_mapper(page_name_map, parsed_data["pages"]),
+                "timestamp": dt.now(timezone.utc),
+                "account_id": account_id,
+                "aac_user_id": aac_user_id
+            }
+            
+            logging.info(f"Created migration session {session_id} for account {account_id}, user {aac_user_id}")
+            logging.info(f"Session contains {len(parsed_data['pages'])} pages, {parsed_data['total_buttons']} buttons")
+            
+            # Clean up old sessions (older than 1 hour)
+            cleanup_time = dt.now(timezone.utc) - timedelta(hours=1)
+            sessions_to_remove = [
+                sid for sid, data in migration_sessions.items()
+                if data["timestamp"] < cleanup_time
+            ]
+            for sid in sessions_to_remove:
+                del migration_sessions[sid]
+            
+            return JSONResponse(content={
+                "session_id": session_id,
+                "summary": {
+                    "file": parsed_data["file"],
+                    "total_pages": parsed_data["total_pages"],
+                    "total_buttons": parsed_data["total_buttons"],
+                    "extraction_date": parsed_data["extraction_date"]
+                }
+            })
+        finally:
+            # Clean up temp file
+            import os
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        
+    except Exception as e:
+        logging.error(f"Error parsing MTI file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse MTI file: {str(e)}")
+
+
+@app.post("/api/migration/upload-json")
+async def upload_json_data(
+    json_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Upload pre-parsed JSON data (like all_pages_FINAL.json from POC)
+    
+    This allows using the POC's extracted data without re-parsing MTI
+    """
+    if not MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Migration functionality not available")
+    
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    
+    try:
+        # Validate and load the JSON data
+        parsed_data = load_existing_json(json_data)
+        
+        # Create session ID
+        session_id = str(uuid.uuid4())
+        
+        # Build page name mapping: Accent page ID -> inferred name
+        page_name_map = {
+            page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
+            for page_id, page_data in parsed_data["pages"].items()
+        }
+        
+        # Store in session
+        migration_sessions[session_id] = {
+            "parsed_data": parsed_data,
+            "mapper": create_mapper(page_name_map, parsed_data["pages"]),
+            "timestamp": dt.now(timezone.utc),
+            "account_id": account_id,
+            "aac_user_id": aac_user_id
+        }
+        
+        return JSONResponse(content={
+            "session_id": session_id,
+            "summary": {
+                "file": parsed_data["file"],
+                "total_pages": parsed_data["total_pages"],
+                "total_buttons": parsed_data["total_buttons"],
+                "extraction_date": parsed_data["extraction_date"]
+            }
+        })
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error loading JSON data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load JSON data: {str(e)}")
+
+
+@app.get("/api/migration/pages/{session_id}")
+async def get_migration_pages(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Get all pages from a migration session
+    
+    Returns the parsed page data for display in the frontend
+    """
+    if not MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Migration functionality not available")
+    
+    logging.info(f"Fetching migration session {session_id}")
+    logging.info(f"Available sessions: {list(migration_sessions.keys())}")
+    
+    # Verify session exists
+    if session_id not in migration_sessions:
+        logging.error(f"Migration session {session_id} not found. Available: {list(migration_sessions.keys())}")
+        raise HTTPException(status_code=404, detail="Migration session not found or expired")
+    
+    session = migration_sessions[session_id]
+    
+    # Verify ownership
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to access this migration session")
+    
+    logging.info(f"Returning session data with {len(session['parsed_data']['pages'])} pages")
+    return JSONResponse(content=session["parsed_data"])
+
+
+@app.post("/api/migration/import-buttons")
+async def import_buttons(
+    request_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """
+    Import selected buttons from Accent to Bravo
+    
+    Request body:
+    {
+        "session_id": "uuid",
+        "accent_page_id": "0400",
+        "selected_button_indices": [0, 1, 2],
+        "destination_type": "new" | "existing",
+        "destination_page_name": "pagename",
+        "create_navigation_pages": true/false
+    }
+    """
+    if not MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Migration functionality not available")
+    
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    
+    # Extract request parameters
+    session_id = request_data.get("session_id")
+    accent_page_id = request_data.get("accent_page_id")
+    selected_indices = request_data.get("selected_button_indices", [])
+    destination_type = request_data.get("destination_type", "new")
+    destination_page_name = request_data.get("destination_page_name")
+    create_nav_pages = request_data.get("create_navigation_pages", False)
+    conflict_resolutions = request_data.get("conflict_resolutions", {})  # New parameter
+    
+    # Validate inputs
+    if not session_id or not accent_page_id or not destination_page_name:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+    
+    if session_id not in migration_sessions:
+        raise HTTPException(status_code=404, detail="Migration session not found or expired")
+    
+    session = migration_sessions[session_id]
+    
+    # Verify ownership
+    if session["account_id"] != account_id or session["aac_user_id"] != aac_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this migration session")
+    
+    try:
+        parsed_data = session["parsed_data"]
+        mapper = session["mapper"]
+        
+        # Get the Accent page
+        if accent_page_id not in parsed_data["pages"]:
+            raise HTTPException(status_code=404, detail=f"Page {accent_page_id} not found in parsed data")
+        
+        accent_page = parsed_data["pages"][accent_page_id]
+        
+        # Sort buttons by row/col (same as POC)
+        sorted_buttons = sorted(accent_page["buttons"], key=lambda b: (b["row"], b["col"]))
+        
+        # Get selected buttons
+        selected_buttons = [sorted_buttons[i] for i in selected_indices if i < len(sorted_buttons)]
+        
+        if not selected_buttons:
+            raise HTTPException(status_code=400, detail="No valid buttons selected")
+        
+        # Load existing user pages
+        existing_pages = await load_pages_from_file(account_id, aac_user_id)
+        
+        # VALIDATION: Check for conflicts (only if no resolutions provided)
+        if not conflict_resolutions:
+            conflicts = []
+            
+            if destination_type == "new":
+                # Check if page name already exists
+                existing_page_names = {p["name"].lower() for p in existing_pages}
+                if destination_page_name.lower().replace(' ', '') in existing_page_names:
+                    # Check if it's the home page
+                    is_home = destination_page_name.lower().replace(' ', '') == "home"
+                    conflicts.append({
+                        "type": "page_exists",
+                        "page_name": destination_page_name,
+                        "is_home": is_home,
+                        "message": f"Page '{destination_page_name}' already exists"
+                    })
+            else:  # existing page
+                # Find the target page
+                target_page = next((p for p in existing_pages if p["name"] == destination_page_name), None)
+                
+                if not target_page:
+                    raise HTTPException(status_code=404, detail=f"Target page '{destination_page_name}' not found")
+                
+                # No position conflict checking - buttons will auto-position at next available slot
+            
+            # Check for navigation targets that don't exist
+            nav_conflicts = []
+            page_names = {p["name"].lower() for p in existing_pages}
+            
+            # Build a map of Accent page IDs to their display names from parsed data
+            accent_page_names = {
+                page_id: page_data.get("inferred_name", f"Page_{page_id}")
+                for page_id, page_data in parsed_data["pages"].items()
+            }
+            
+            for accent_button in selected_buttons:
+                if accent_button.get("navigation_target"):
+                    # The navigation_target is an Accent page ID (e.g., "0201")
+                    target_page_id = accent_button["navigation_target"]
+                    
+                    # Get the human-readable name for this Accent page
+                    target_page_name = accent_page_names.get(target_page_id, target_page_id)
+                    
+                    # Check if this page exists in Bravo (by normalized name)
+                    target_normalized = target_page_name.lower().replace(' ', '')
+                    if target_normalized not in page_names:
+                        nav_conflicts.append({
+                            "button_name": accent_button.get("name", "Unnamed"),
+                            "navigation_target_id": target_page_id,
+                            "navigation_target_name": target_page_name,
+                            "message": f"Navigation target '{target_page_name}' does not exist"
+                        })
+            
+            # If there are conflicts and no resolutions, return them for user decision
+            if conflicts or nav_conflicts:
+                # Store conflict context in session for resolution
+                session["pending_import"] = {
+                    "accent_page_id": accent_page_id,
+                    "selected_button_indices": selected_indices,
+                    "destination_type": destination_type,
+                    "destination_page_name": destination_page_name
+                }
+                
+                return JSONResponse(content={
+                    "session_id": session_id,
+                    "accent_page_id": accent_page_id,
+                    "selected_button_indices": selected_indices,
+                    "destination_type": destination_type,
+                    "destination_page_name": destination_page_name,
+                    "conflicts": conflicts,
+                    "navigation_conflicts": nav_conflicts,
+                    "requires_confirmation": True
+                })
+        
+        
+        # Apply conflict resolutions if provided
+        if conflict_resolutions:
+            resolved_conflicts = conflict_resolutions.get("conflicts", [])
+            resolved_nav_conflicts = conflict_resolutions.get("navigation_conflicts", [])
+            
+            # Apply button name changes from rename resolutions
+            button_name_changes = {}
+            for conflict in resolved_conflicts:
+                if conflict.get("resolution") == "rename" and conflict.get("new_name"):
+                    # Find the button by name and update
+                    old_name = conflict.get("button_name")
+                    new_name = conflict.get("new_name")
+                    button_name_changes[old_name] = new_name
+            
+            # Apply navigation changes and create missing navigation pages
+            navigation_changes = {}
+            pages_to_create = []
+            
+            for nav_conflict in resolved_nav_conflicts:
+                if nav_conflict.get("resolution") == "change_navigation" and nav_conflict.get("new_target"):
+                    button_name = nav_conflict.get("button_name")
+                    new_target = nav_conflict.get("new_target")
+                    navigation_changes[button_name] = new_target
+                elif nav_conflict.get("resolution") == "create_page":
+                    # Create the navigation target page
+                    target_name = nav_conflict.get("navigation_target_name")
+                    if target_name and target_name not in pages_to_create:
+                        pages_to_create.append(target_name)
+            
+            # Create any missing navigation pages
+            for page_name in pages_to_create:
+                # Check if page doesn't already exist
+                if not any(p.get("name") == page_name.lower().replace(' ', '') for p in existing_pages):
+                    new_nav_page = {
+                        "name": page_name.lower().replace(' ', ''),
+                        "displayName": page_name,
+                        "buttons": []
+                    }
+                    existing_pages.append(new_nav_page)
+                    logging.info(f"Created navigation target page: {page_name}")
+        
+        # Handle destination page
+        if destination_type == "new":
+            # Create new page
+            new_page = {
+                "name": destination_page_name.lower().replace(' ', ''),
+                "displayName": destination_page_name,
+                "buttons": []
+            }
+            
+            # Map and add buttons
+            for accent_button in selected_buttons:
+                # Apply name change if there's a rename resolution
+                if conflict_resolutions and accent_button.get("name") in button_name_changes:
+                    accent_button = accent_button.copy()
+                    accent_button["name"] = button_name_changes[accent_button["name"]]
+                
+                # Apply navigation change if there's a resolution
+                if conflict_resolutions and accent_button.get("name") in navigation_changes:
+                    accent_button = accent_button.copy()
+                    accent_button["navigation_target"] = navigation_changes[accent_button["name"]]
+                
+                bravo_button = mapper.map_button(accent_button)
+                new_page["buttons"].append(bravo_button)
+            
+            # Add to existing pages
+            existing_pages.append(new_page)
+            
+        else:  # existing page
+            # Find the target page
+            target_page = next((p for p in existing_pages if p["name"] == destination_page_name), None)
+            
+            if not target_page:
+                raise HTTPException(status_code=404, detail=f"Target page '{destination_page_name}' not found")
+            
+            # Build set of existing positions
+            existing_positions = {(b.get("row", -1), b.get("col", -1)): idx 
+                                 for idx, b in enumerate(target_page.get("buttons", []))}
+            
+            # Function to find next available position in 10x10 grid
+            def find_next_available_position(occupied_positions):
+                for row in range(10):
+                    for col in range(10):
+                        if (row, col) not in occupied_positions:
+                            return (row, col)
+                return (0, 0)  # Fallback if grid is full
+            
+            # Map and add buttons
+            for accent_button in selected_buttons:
+                # Apply name change if there's a rename resolution
+                if conflict_resolutions and accent_button.get("name") in button_name_changes:
+                    accent_button = accent_button.copy()
+                    accent_button["name"] = button_name_changes[accent_button["name"]]
+                
+                # Apply navigation change if there's a resolution
+                if conflict_resolutions and accent_button.get("name") in navigation_changes:
+                    accent_button = accent_button.copy()
+                    accent_button["navigation_target"] = navigation_changes[accent_button["name"]]
+                
+                bravo_button = mapper.map_button(accent_button)
+                
+                # Always find next available position - don't use source position
+                next_position = find_next_available_position(existing_positions.keys())
+                bravo_button["row"] = next_position[0]
+                bravo_button["col"] = next_position[1]
+                existing_positions[next_position] = len(target_page["buttons"])
+                
+                # Add new button
+                target_page["buttons"].append(bravo_button)
+        
+        # Save updated pages
+        await save_pages_to_file(account_id, aac_user_id, existing_pages)
+        
+        # Get unmapped icons for reporting
+        unmapped_icons = mapper.get_unmapped_icons()
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Successfully imported {len(selected_buttons)} buttons",
+            "destination_page": destination_page_name,
+            "destination_type": destination_type,
+            "buttons_imported": len(selected_buttons),
+            "unmapped_icons": unmapped_icons if unmapped_icons else None
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error importing buttons: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to import buttons: {str(e)}")
+
+
+@app.delete("/api/migration/session/{session_id}")
+async def delete_migration_session(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Delete a migration session"""
+    if session_id in migration_sessions:
+        session = migration_sessions[session_id]
+        
+        # Verify ownership
+        if session["account_id"] == current_ids["account_id"] and session["aac_user_id"] == current_ids["aac_user_id"]:
+            del migration_sessions[session_id]
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    
+    raise HTTPException(status_code=404, detail="Session not found")
 
 
 if __name__ == "__main__":

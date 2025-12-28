@@ -319,6 +319,17 @@
             border: 2px solid #e9ecef;
             border-radius: 4px;
             cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        .color-input::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+        
+        .color-input::-webkit-color-swatch {
+            border: none;
+            border-radius: 2px;
         }
 
         .form-actions {
@@ -471,20 +482,38 @@
                             <div id="audioUploadStatus" style="font-size: 0.8rem; margin-top: 0.5rem; display: none;"></div>
                         </div>
 
-                        <div class="form-group">
-                            <label for="backgroundColor">Background Color</label>
-                            <div class="color-input-container">
-                                <input type="color" id="backgroundColor" name="backgroundColor" class="color-input" value="#FFFFFF">
-                                <input type="text" id="backgroundColorText" placeholder="#FFFFFF" style="flex: 1;">
+                        <div class="form-row" style="display: flex; gap: 1rem;">
+                            <div class="form-group" style="flex: 1;">
+                                <label for="backgroundColor">Background Color</label>
+                                <div class="color-input-container">
+                                    <input type="color" id="backgroundColor" name="backgroundColor" class="color-input" value="#FFFFFF">
+                                    <input type="text" id="backgroundColorText" placeholder="#FFFFFF" style="flex: 1;">
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="flex: 1;">
+                                <label for="textColor">Text Color</label>
+                                <div class="color-input-container">
+                                    <input type="color" id="textColor" name="textColor" class="color-input" value="#000000">
+                                    <input type="text" id="textColorText" placeholder="#000000" style="flex: 1;">
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="flex: 0 0 auto; display: flex; flex-direction: column; justify-content: flex-end;">
+                                <div style="display: flex; align-items: center; height: 42px; margin-bottom: 2px;">
+                                    <input type="checkbox" id="hidden" name="hidden" style="width: auto; margin-right: 0.5rem;">
+                                    <label for="hidden" style="margin-bottom: 0; cursor: pointer;">Hidden</label>
+                                </div>
                             </div>
                         </div>
 
                         <div class="form-group">
-                            <label for="textColor">Text Color</label>
-                            <div class="color-input-container">
-                                <input type="color" id="textColor" name="textColor" class="color-input" value="#000000">
-                                <input type="text" id="textColorText" placeholder="#000000" style="flex: 1;">
-                            </div>
+                            <label for="specialFunction">Special Function (Optional)</label>
+                            <select id="specialFunction" name="specialFunction" style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem; background-color: white;">
+                                <option value="">None</option>
+                                <option value="spell">Spell</option>
+                            </select>
+                            <small class="form-text text-muted">Assign a special function to this button (e.g., open Spelling interface).</small>
                         </div>
 
                         <div class="form-group">
@@ -704,6 +733,19 @@
             try {
                 console.log('Saving configuration for user:', window.currentAacUserId);
                 
+                // DEBUG: Log buttons with words_prompt before saving
+                if (currentConfig.buttons) {
+                    console.log('[DEBUG] Checking buttons before save:');
+                    currentConfig.buttons.forEach(b => {
+                        if (b.words_prompt) console.log(`  - Button '${b.label}' has words_prompt: ${b.words_prompt.substring(0, 20)}...`);
+                        if (b.children) {
+                            b.children.forEach(c => {
+                                if (c.words_prompt) console.log(`    - Child '${c.label}' has words_prompt: ${c.words_prompt.substring(0, 20)}...`);
+                            });
+                        }
+                    });
+                }
+                
                 const headers = getAuthHeaders();
                 console.log('Auth headers:', headers);
                 console.log('Config being sent:', JSON.stringify(currentConfig, null, 2));
@@ -820,7 +862,7 @@
 
         // Setup form input listeners
         function setupFormInputs() {
-            const inputs = ['buttonLabel', 'speechText', 'imageUrl', 'llmPrompt', 'wordsPrompt', 'staticOptions'];
+            const inputs = ['buttonLabel', 'speechText', 'imageUrl', 'llmPrompt', 'wordsPrompt', 'staticOptions', 'specialFunction'];
             inputs.forEach(id => {
                 document.getElementById(id).addEventListener('input', updateButtonFromForm);
             });
@@ -830,6 +872,9 @@
             
             // Setup clear audio file button listener
             document.getElementById('clearAudioBtn').addEventListener('click', clearAudioFile);
+
+            // Setup hidden checkbox listener
+            document.getElementById('hidden').addEventListener('change', updateButtonFromForm);
         }
 
         // Handle custom audio file upload
@@ -919,8 +964,15 @@
             button.image_url = document.getElementById('imageUrl').value || null;
             button.background_color = document.getElementById('backgroundColor').value || '#FFFFFF';
             button.text_color = document.getElementById('textColor').value || '#000000';
+            button.hidden = document.getElementById('hidden').checked;
+            button.special_function = document.getElementById('specialFunction').value || null;
             button.llm_prompt = document.getElementById('llmPrompt').value || null;
-            button.words_prompt = document.getElementById('wordsPrompt').value || null;
+            
+            // Explicitly capture words_prompt and log it
+            const wordsPromptVal = document.getElementById('wordsPrompt').value;
+            button.words_prompt = wordsPromptVal || null;
+            console.log(`[DEBUG] Updated button '${button.label}' words_prompt to:`, button.words_prompt);
+            
             button.static_options = document.getElementById('staticOptions').value || null;
             button.custom_audio_file = document.getElementById('customAudioFileUrl').value || null;
 
@@ -953,9 +1005,13 @@
             buttonDiv.innerHTML = `
                 <div class="tree-button ${isSelected ? 'selected' : ''}" 
                      draggable="true" 
-                     data-path='${JSON.stringify(path)}'>
+                     data-path='${JSON.stringify(path)}'
+                     style="${button.hidden ? 'opacity: 0.6; border-style: dashed;' : ''}">
                     <div class="button-content">
-                        <div class="button-label">${button.label || 'Untitled Button'}</div>
+                        <div class="button-label">
+                            ${button.label || 'Untitled Button'}
+                            ${button.hidden ? '<span style="font-size: 0.7em; background: #eee; padding: 2px 4px; border-radius: 3px; margin-left: 5px;">HIDDEN</span>' : ''}
+                        </div>
                         <div class="button-details">
                             ${button.children && button.children.length ? `${button.children.length} child button(s)` : 'No children'}
                             ${button.llm_prompt ? ' • Has Phrase prompt' : ''}
@@ -1319,6 +1375,8 @@
             document.getElementById('backgroundColorText').value = button.background_color || '#FFFFFF';
             document.getElementById('textColor').value = button.text_color || '#000000';
             document.getElementById('textColorText').value = button.text_color || '#000000';
+            document.getElementById('hidden').checked = button.hidden || false;
+            document.getElementById('specialFunction').value = button.special_function || '';
             document.getElementById('llmPrompt').value = button.llm_prompt || '';
             document.getElementById('wordsPrompt').value = button.words_prompt || '';
             document.getElementById('staticOptions').value = button.static_options || '';
@@ -1359,6 +1417,8 @@
                 image_url: null,
                 background_color: '#FFFFFF',
                 text_color: '#000000',
+                hidden: false,
+                special_function: null,
                 llm_prompt: null,
                 words_prompt: null,
                 static_options: null,
@@ -1387,6 +1447,8 @@
                 image_url: null,
                 background_color: '#FFFFFF',
                 text_color: '#000000',
+                hidden: false,
+                special_function: null,
                 llm_prompt: null,
                 words_prompt: null,
                 static_options: null,

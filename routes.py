@@ -1,4 +1,5 @@
-from fastapi import APIRouter, FileResponse
+from fastapi import APIRouter
+from fastapi.responses import FileResponse
 import os
 
 router = APIRouter()
@@ -24,7 +25,16 @@ STATIC_PAGES = [
     "auth.html",
     "user_diary_admin.html",
     "freestyle.html",
-    "threads.html"
+    "threads.html",
+    "tap_interface.html",
+    "tap_interface_admin.html",
+    "image_management.html",
+    "help_admin.html",
+    "avatar_admin.html",
+    "games.html",
+    "mood.html",
+    "symbol_admin.html",
+    "accent_migration.html"
 ]
 
 for page in STATIC_PAGES:

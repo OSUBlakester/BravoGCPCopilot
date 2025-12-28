@@ -11,77 +11,161 @@
         /* --- Basic Body Style --- */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0; /* Remove default body margin to ensure banner spans full width */
-            padding: 0;
-            background-color: #f4f7f6; /* Optional: Light background for the page body */
+            margin: 0;
+            padding: 20px; /* Add padding around the "device" */
+            /* Darker background to make the app container pop */
+            background: #e2e8f0; 
+            min-height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* --- App Container (The "Phone/Tablet") --- */
+        #app-container {
+            width: 100%;
+            max-width: 1200px; /* Tablet/Desktop limit */
+            background-color: #f8fafc; /* Light blue-grey inside the app */
+            border-radius: 40px; /* Large rounded corners */
+            box-shadow: 
+                0 25px 50px -12px rgba(0, 0, 0, 0.25), /* Deep shadow */
+                0 0 0 1px rgba(0,0,0,0.05); /* Subtle border */
+            overflow: hidden; /* Clip content to corners */
+            min-height: calc(100vh - 40px); /* Full height minus body padding */
+            position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         /* --- Admin Toolbar Styles --- */
         .admin-toolbar {
-            background-color: #ffffff;
-            padding: 0.25rem 0.5rem; /* Reduced padding for more compact look */
+            background-color: transparent;
+            padding: 0.5rem 1rem;
             display: flex;
-            justify-content: flex-end; /* Align to right side of header */
+            justify-content: flex-end;
             align-items: center;
-            gap: 0.4rem; /* Reduced gap between buttons */
-            flex-wrap: wrap; /* Allow buttons to wrap on smaller screens */
+            gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         /* --- Page Banner Styles --- */
         .page-banner {
-            background-color: #002244; /* Dark grey, similar to admin page navs */
-            color: #FB4F14;
-            padding: 0.75em 1.5em; /* Reduced vertical padding to accommodate toolbar */
-            display: flex; /* Use flexbox for layout */
-            justify-content: space-between; /* Space between title and toolbar */
-            align-items: center; /* Center align vertically */
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* Optional subtle shadow */
+            /* Ensure it matches container rounding if at top */
+            background: rgba(255, 255, 255, 0.95); /* Glassmorphism effect */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            color: #0f172a; /* Dark slate for contrast */
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
         }
         .page-banner h1 {
             margin: 0;
-            font-size: 1.75em; /* Adjust size as needed */
-            font-weight: 500; /* Medium weight */
-            text-align: left; /* Left justify the title */
+            font-size: 1.5rem;
+            font-weight: 800;
+            text-align: left;
+            background: linear-gradient(to right, #002244, #FB4F14);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.025em;
         }
         /* --- Original Styles --- */
         #gridContainer {
             display: grid;
             /* grid-template-columns will be set dynamically by JavaScript based on gridColumns setting */
-            gap: 10px;
-            padding: 20px;
-            --button-font-size: 16px; /* CSS custom property for dynamic font sizing */
+            gap: 24px; /* Generous gap for "app icon" feel */
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+            --button-font-size: 16px;
         }
 
         #gridContainer button {
-            position: relative; /* Needed for the tail pseudo-elements */
-            padding: 15px 20px; /* Adjust padding as needed for text */
-            font-size: var(--button-font-size); /* Use the CSS custom property */
-            font-weight: 500; /* Slightly bolder text */
+            position: relative;
+            padding: 12px;
+            font-size: var(--button-font-size);
+            font-weight: 600;
             cursor: pointer;
-            background-color: white;   /* White inside */
-            color: #002244;           /* Dark blue text */
-            border: 2px solid #002244; /* Dark blue border, 2px thick */
-            border-radius: 12px;       /* Somewhat rounded corners */
+            
+            /* Mobile Icon Style */
+            background-color: #ffffff;
+            color: #1e293b;
+            border: 1px solid rgba(255,255,255,0.5); /* Subtle border */
+            border-radius: 24px; /* "Squircle" look */
+            
+            /* Deep shadow for pop/depth */
+            box-shadow: 
+                0 10px 15px -3px rgba(0, 0, 0, 0.08),
+                0 4px 6px -2px rgba(0, 0, 0, 0.04),
+                inset 0 0 0 1px rgba(255,255,255,0.5);
+                
             text-align: center;
-            min-height: 50px;          /* Ensure buttons have some height */
-            display: flex;             /* For centering text */
+            min-height: 100px; /* Square-ish aspect ratio preferred */
+            aspect-ratio: 1 / 1; /* Try to keep it square if content allows */
+            display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            margin-bottom: 8px; /* Reduced margin since speech bubble tail was removed */
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12); /* Optional: subtle shadow for depth */
-            transition: transform 0.1s ease-out, font-size 0.2s ease-out; /* Smooth transitions */
-            word-wrap: break-word;     /* Allow text to wrap if needed */
-            hyphens: auto;             /* Enable automatic hyphenation */
-            line-height: 1.2;          /* Better line spacing for readability */
+            
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); /* Bouncy spring transition */
+            word-wrap: break-word;
+            hyphens: auto;
+            line-height: 1.2;
+            overflow: hidden;
         }
+        
+        /* Ensure aspect ratio doesn't break layout on small screens or weird content */
+        @supports not (aspect-ratio: 1 / 1) {
+            #gridContainer button {
+                height: 120px; 
+            }
+        }
+
          #gridContainer button:hover {
-             /* You can add a subtle hover effect if desired, e.g., slight brightness change */
-             filter: brightness(97%);
+             transform: translateY(-6px) scale(1.02);
+             box-shadow: 
+                0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                0 10px 10px -5px rgba(0, 0, 0, 0.04);
+             z-index: 10;
          }
 
-         #gridContainer button:active { /* Optional: press effect */
-            transform: scale(0.97);
+         #gridContainer button:active {
+            transform: scale(0.95);
+            box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
          }
+
+        /* Sight Word Button Styling */
+        .sight-word-button {
+            font-size: 1.6em !important;
+            font-weight: 700;
+            color: #334155;
+            background: #ffffff;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 12px;
+            box-shadow: 
+                0 4px 6px -1px rgba(0, 0, 0, 0.05),
+                0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            transition: all 0.2s;
+            aspect-ratio: auto !important; /* Sight words might be wider */
+            min-height: 80px !important;
+        }
+        .sight-word-button:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border-color: #FB4F14 !important;
+            color: #FB4F14;
+        }
 
         /* Speech Bubble Tail - REMOVED */
         /* Removed speech bubble tail/triangle to clean up button appearance */
@@ -108,40 +192,81 @@
         /* Text area styling */
         #chat-history-container, #question-container {
             width: 100%;
-            margin-bottom: 12px; /* Reduced from 15px (20% smaller) */
-            padding: 0 16px; /* Reduced from 20px (20% smaller) */
-            box-sizing: border-box; /* Include padding in width */
+            margin-bottom: 8px;
+            padding: 0 20px;
+            box-sizing: border-box;
+            max-width: 1400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .input-wrapper {
+            position: relative;
+            width: 100%;
+            margin-top: 4px;
         }
 
         #speech-history, #question-display {
-            width: 100%; /* Take full width of container */
+            width: 100%;
             box-sizing: border-box;
-            padding: 6px; /* Reduced from 8px (25% smaller for better proportion) */
-            border: 1px solid #aaa; /* Slightly darker border for textareas */
-            border-radius: 4px;
+            padding: 6px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
             font-family: inherit;
-            font-size: 1.5rem; /* Increased from 1rem */
-            margin-top: 4px; /* Reduced from 5px (20% smaller) */
+            font-size: 0.75rem;
+            background-color: #ffffff;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+            transition: border-color 0.2s, box-shadow 0.2s;
+            display: block;
+            resize: none; /* Fixed size based on rows */
         }
-
+        
         #speech-history {
-            min-height: 60px; /* Reduced from 150px to accommodate ~3 lines of text */
-            resize: vertical;
+            padding-right: 24px; /* Space for clear button */
         }
-         #question-display {
-            min-height: 32px; /* Reduced from 40px (20% smaller) */
-         }
 
-        /* --- Styles for Clear and Admin Buttons --- */
-        .history-controls {
-             margin-top: 6px; /* Reduced from 8px (25% smaller) */
+        #question-display {
+            margin-top: 4px;
+        }
+        
+        #speech-history:focus, #question-display:focus {
+            outline: none;
+            border-color: #FB4F14;
+            box-shadow: 0 0 0 2px rgba(251, 79, 20, 0.1);
+        }
+
+        /* Clear button positioning */
+        #clear-history {
+            position: absolute;
+            right: 6px;
+            top: 6px; /* Align with top padding */
+            background-color: transparent;
+            color: #94a3b8;
+            border: none;
+            font-size: 0.6rem;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 50%;
+            transition: all 0.2s;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+        }
+        
+        #clear-history:hover {
+            background-color: #f1f5f9;
+            color: #ef4444;
         }
 
         /* Label styling for speech history and question */
         #chat-history-container label, #question-container label {
-            font-size: 0.9rem; /* Slightly smaller labels */
-            font-weight: 500;
-            color: #374151; /* Tailwind gray-700 */
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #1e293b; /* Darker gray */
+            margin-left: 2px;
         }
 
         /* Spinner styles (Original border spinner - kept for reference if needed) */
@@ -240,6 +365,7 @@
     </style>
 </head>
 <body>
+    <div id="app-container">
 
 
     <div class="page-banner">
@@ -319,15 +445,17 @@
 
     <div id="chat-history-container">
         <label for="speech-history">Speech History:</label>
-        <textarea id="speech-history" readonly></textarea>
-        <div class="history-controls">
-            <button id="clear-history" class="control-button">Clear</button>
+        <div class="input-wrapper">
+            <textarea id="speech-history" readonly rows="3"></textarea>
+            <button id="clear-history" title="Clear History">
+                <i class="fas fa-times"></i>
+            </button>
         </div>
     </div>
 
     <div id="question-container">
         <label for="question-display">Question:</label>
-        <textarea id="question-display" readonly></textarea>
+        <textarea id="question-display" readonly rows="1"></textarea>
     </div>
 
     <div id="gridContainer">
@@ -338,6 +466,7 @@
                  class="image-spinner">
              <p>Loading...</p>
     </div>
+    </div> <!-- End of app-container -->
 
 
     <script src="/static/splash-screen.js"></script>

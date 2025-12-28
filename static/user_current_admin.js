@@ -25,6 +25,14 @@ let cancelAddFavorite = null;
 let confirmAddFavorite = null;
 let favoritesManagementList = null;
 
+// Schedule DOM elements
+let scheduleEnabled = null;
+let scheduleFields = null;
+let scheduleDaysContainer = null; // Container for checkboxes
+let scheduleStartTime = null;
+let scheduleEndTime = null;
+let editingFavoriteName = null; // To track if we are editing
+
 
 // Utility function to display status messages
 function showStatus(message, isError = false, duration = 3000) {
@@ -183,6 +191,8 @@ async function openThreadForLoadedFavorite() {
 // Function to show add favorite modal
 function showAddFavoriteModal() {
     console.log("showAddFavoriteModal() called");
+    editingFavoriteName = null; // Reset editing state
+    
     // Update preview with current values
     document.getElementById('favoritePreviewLocation').textContent = `Location: ${locationInput.value || '(empty)'}`;
     document.getElementById('favoritePreviewPeople').textContent = `People: ${peopleInput.value || '(empty)'}`;
@@ -191,6 +201,20 @@ function showAddFavoriteModal() {
     // Clear the name input
     favoriteName.value = '';
     
+    // Reset schedule fields
+    scheduleEnabled.checked = false;
+    scheduleFields.classList.add('opacity-50', 'pointer-events-none');
+    // Uncheck all days
+    const checkboxes = scheduleDaysContainer.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach(cb => cb.checked = false);
+    
+    scheduleStartTime.value = '';
+    scheduleEndTime.value = '';
+    
+    // Update modal title and button text
+    document.querySelector('#addFavoriteModal h3').textContent = 'Add to Favorites';
+    confirmAddFavorite.textContent = 'Save Favorite';
+
     // Show modal
     addFavoriteModal.classList.remove('hidden');
     favoriteName.focus();
@@ -204,25 +228,100 @@ async function saveFavorite() {
         return;
     }
     
+    // Construct the favorite object
     const favoriteData = {
         name: name,
         location: locationInput.value || '',
         people: peopleInput.value || '',
         activity: activityInput.value || ''
     };
+
+    // Add schedule if enabled
+    if (scheduleEnabled.checked) {
+        if (!scheduleStartTime.value || !scheduleEndTime.value) {
+            showStatus('Please enter start and end times for the schedule', true);
+            return;
+        }
+        
+        // Collect selected days
+        const selectedDays = [];
+        const checkboxes = scheduleDaysContainer.querySelectorAll('input[type="checkbox"]:checked');
+        checkboxes.forEach(cb => selectedDays.push(cb.value));
+        
+        if (selectedDays.length === 0) {
+            showStatus('Please select at least one day for the schedule', true);
+            return;
+        }
+
+        favoriteData.schedule = {
+            enabled: true,
+            days_of_week: selectedDays,
+            start_time: scheduleStartTime.value,
+            end_time: scheduleEndTime.value
+        };
+    } else {
+        favoriteData.schedule = null;
+    }
     
     try {
-        const response = await window.authenticatedFetch('/api/user-current-favorites', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(favoriteData)
-        });
+        let response;
+        if (editingFavoriteName) {
+            // We are editing an existing favorite
+            // Use the manage endpoint with 'edit' action
+            // Note: For edit, we might want to preserve the location/people/activity if the user didn't change them
+            // But here we are taking the current values from the inputs (which might be from the loaded favorite or current state)
+            // Wait, if we are editing, we should probably have populated the inputs with the favorite's data first.
+            // Let's assume editFavorite does that.
+            
+            // However, the current UI design for "Add Favorite" takes the *current* state values.
+            // If we reuse this modal for editing, we should probably allow editing the location/people/activity too, 
+            // or at least keep the existing ones if we don't want to overwrite them with current state.
+            // But the modal shows "Current Values". 
+            
+            // If we are in "Edit" mode, we should probably NOT use the current state values for the preview, 
+            // but rather the values from the favorite being edited.
+            // But the modal structure is "Current Values: ...". 
+            
+            // Let's stick to the plan: "Add/Edit Favorite". 
+            // If editing, we are updating the favorite with the *current* form values (name, schedule) 
+            // AND potentially the location/people/activity.
+            
+            // Actually, `editFavorite` in the previous implementation used `prompt` to ask for new values.
+            // If we use this modal, we are effectively saying "Update this favorite with these settings".
+            // But the "Current Values" section is read-only text based on `locationInput`, etc.
+            
+            // If I want to allow editing the schedule of an existing favorite WITHOUT changing its location/people/activity to the current state,
+            // I would need to populate `locationInput` etc. with the favorite's data when opening the modal.
+            // That's what `loadSelectedFavorite` does.
+            
+            // So, `editFavorite` should:
+            // 1. Load the favorite data into the main form inputs (location, people, activity).
+            // 2. Open the modal with the favorite's name and schedule.
+            
+            response = await window.authenticatedFetch('/api/user-current-favorites/manage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'edit',
+                    old_name: editingFavoriteName,
+                    favorite: favoriteData
+                })
+            });
+        } else {
+            // Creating a new favorite
+            response = await window.authenticatedFetch('/api/user-current-favorites', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(favoriteData)
+            });
+        }
         
         const result = await response.json();
         if (result.success) {
             showStatus(result.message, false);
             addFavoriteModal.classList.add('hidden');
-            await loadFavorites(); // Refresh the list
+            await showManageFavoritesModal(); // Refresh the management list if it was open
+            await loadFavorites(); // Refresh the dropdown
         } else {
             showStatus(result.message, true);
         }
@@ -231,6 +330,8 @@ async function saveFavorite() {
         showStatus('Error saving favorite', true);
     }
 }
+
+let currentFavoritesList = []; // Store loaded favorites for editing
 
 // Function to show manage favorites modal
 async function showManageFavoritesModal() {
@@ -241,6 +342,8 @@ async function showManageFavoritesModal() {
         const data = await response.json();
         console.log("Management modal favorites data:", data);
         
+        currentFavoritesList = data.favorites; // Store for access in editFavorite
+        
         // Populate the management list
         favoritesManagementList.innerHTML = '';
         
@@ -248,21 +351,36 @@ async function showManageFavoritesModal() {
             favoritesManagementList.innerHTML = '<p class="text-gray-500 text-center py-4">No favorites saved yet.</p>';
         } else {
             data.favorites.forEach(favorite => {
+                // Format schedule string for display
+                let scheduleInfo = '<span class="text-gray-400 italic">No schedule</span>';
+                if (favorite.schedule && favorite.schedule.enabled) {
+                    // Handle both old single day and new multiple days format for backward compatibility
+                    let daysDisplay = '';
+                    if (favorite.schedule.days_of_week && Array.isArray(favorite.schedule.days_of_week)) {
+                        daysDisplay = favorite.schedule.days_of_week.map(d => d.substring(0, 3)).join(', ');
+                    } else if (favorite.schedule.day_of_week) {
+                        daysDisplay = favorite.schedule.day_of_week;
+                    }
+                    
+                    scheduleInfo = `<span class="text-green-600"><i class="fas fa-clock mr-1"></i>${daysDisplay} ${favorite.schedule.start_time} - ${favorite.schedule.end_time}</span>`;
+                }
+
                 const favoriteDiv = document.createElement('div');
                 favoriteDiv.className = 'border border-gray-200 rounded-lg p-4';
                 favoriteDiv.innerHTML = `
                     <div class="flex justify-between items-start">
                         <div class="flex-1">
-                            <h4 class="font-medium text-gray-800 mb-2">${favorite.name}</h4>
+                            <h4 class="font-medium text-gray-800 mb-1">${favorite.name}</h4>
+                            <div class="text-sm mb-2">${scheduleInfo}</div>
                             <p class="text-sm text-gray-600">Location: ${favorite.location || '(empty)'}</p>
                             <p class="text-sm text-gray-600">People: ${favorite.people || '(empty)'}</p>
                             <p class="text-sm text-gray-600">Activity: ${favorite.activity || '(empty)'}</p>
                         </div>
                         <div class="flex gap-2 ml-4">
-                            <button onclick="editFavorite('${favorite.name}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                            <button onclick="editFavorite('${favorite.name.replace(/'/g, "\\'")}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
                                 Edit
                             </button>
-                            <button onclick="deleteFavorite('${favorite.name}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm">
+                            <button onclick="deleteFavorite('${favorite.name.replace(/'/g, "\\'")}')" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm">
                                 Delete
                             </button>
                         </div>
@@ -282,46 +400,75 @@ async function showManageFavoritesModal() {
 
 // Function to edit favorite
 async function editFavorite(favoriteName) {
-    const newName = prompt('Enter new name:', favoriteName);
-    if (!newName || newName.trim() === '') return;
-    
-    const newLocation = prompt('Enter location:');
-    if (newLocation === null) return;
-    
-    const newPeople = prompt('Enter people:');
-    if (newPeople === null) return;
-    
-    const newActivity = prompt('Enter activity:');
-    if (newActivity === null) return;
-    
-    try {
-        const response = await window.authenticatedFetch('/api/user-current-favorites/manage', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'edit',
-                old_name: favoriteName,
-                favorite: {
-                    name: newName.trim(),
-                    location: newLocation,
-                    people: newPeople,
-                    activity: newActivity
-                }
-            })
-        });
-        
-        const result = await response.json();
-        if (result.success) {
-            showStatus(result.message, false);
-            await showManageFavoritesModal(); // Refresh the modal
-            await loadFavorites(); // Refresh the dropdown
-        } else {
-            showStatus(result.message, true);
-        }
-    } catch (error) {
-        console.error('Error editing favorite:', error);
-        showStatus('Error editing favorite', true);
+    const favorite = currentFavoritesList.find(f => f.name === favoriteName);
+    if (!favorite) {
+        showStatus('Favorite not found', true);
+        return;
     }
+
+    editingFavoriteName = favoriteName; // Set editing state
+
+    // Populate the main form inputs temporarily for the preview
+    // Note: This doesn't change the actual saved state on the server, just the inputs on the page
+    // which are used for the "Current Values" preview in the modal.
+    // Ideally, we should have separate inputs in the modal for editing these values, 
+    // but reusing the "Add" modal structure implies we use the page inputs.
+    locationInput.value = favorite.location || '';
+    peopleInput.value = favorite.people || '';
+    activityInput.value = favorite.activity || '';
+
+    // Update preview with these values
+    document.getElementById('favoritePreviewLocation').textContent = `Location: ${locationInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewPeople').textContent = `People: ${peopleInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewActivity').textContent = `Activity: ${activityInput.value || '(empty)'}`;
+
+    // Populate name
+    document.getElementById('favoriteName').value = favorite.name;
+
+    // Populate schedule
+    if (favorite.schedule && favorite.schedule.enabled) {
+        scheduleEnabled.checked = true;
+        scheduleFields.classList.remove('opacity-50', 'pointer-events-none');
+        
+        // Reset checkboxes first
+        const checkboxes = scheduleDaysContainer.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = false);
+        
+        // Check appropriate boxes
+        if (favorite.schedule.days_of_week && Array.isArray(favorite.schedule.days_of_week)) {
+            favorite.schedule.days_of_week.forEach(day => {
+                const cb = scheduleDaysContainer.querySelector(`input[value="${day}"]`);
+                if (cb) cb.checked = true;
+            });
+        } else if (favorite.schedule.day_of_week) {
+            // Backward compatibility
+            const cb = scheduleDaysContainer.querySelector(`input[value="${favorite.schedule.day_of_week}"]`);
+            if (cb) cb.checked = true;
+        }
+        
+        scheduleStartTime.value = favorite.schedule.start_time;
+        scheduleEndTime.value = favorite.schedule.end_time;
+    } else {
+        scheduleEnabled.checked = false;
+        scheduleFields.classList.add('opacity-50', 'pointer-events-none');
+        // Uncheck all
+        const checkboxes = scheduleDaysContainer.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = false);
+        
+        scheduleStartTime.value = '';
+        scheduleEndTime.value = '';
+    }
+
+    // Update modal title and button text
+    document.querySelector('#addFavoriteModal h3').textContent = 'Edit Favorite';
+    confirmAddFavorite.textContent = 'Update Favorite';
+
+    // Show modal (and hide management modal temporarily if needed, but they can stack)
+    // Stacking might be confusing if not handled well with z-index, but let's try.
+    // Or we can close the management modal.
+    manageFavoritesModal.classList.add('hidden');
+    addFavoriteModal.classList.remove('hidden');
+    document.getElementById('favoriteName').focus();
 }
 
 // Function to delete favorite
@@ -389,6 +536,13 @@ async function initializePage() {
         confirmAddFavorite = document.getElementById('confirmAddFavorite');
         favoritesManagementList = document.getElementById('favoritesManagementList');
 
+        // Schedule DOM elements
+        scheduleEnabled = document.getElementById('scheduleEnabled');
+        scheduleFields = document.getElementById('scheduleFields');
+        scheduleDaysContainer = document.getElementById('scheduleDaysContainer');
+        scheduleStartTime = document.getElementById('scheduleStartTime');
+        scheduleEndTime = document.getElementById('scheduleEndTime');
+
         // Basic check for essential elements
         if (!locationInput || !peopleInput || !activityInput || !saveButton || !dictationButton || !favoritesSelect || !loadFavoriteBtn || !openThreadBtn || !addToFavoritesBtn || !manageFavoritesBtn) {
             console.error("CRITICAL ERROR: One or more essential DOM elements for user_current_admin.js not found.");
@@ -424,6 +578,17 @@ async function initializePage() {
         if (cancelAddFavorite) cancelAddFavorite.addEventListener('click', () => addFavoriteModal.classList.add('hidden'));
         if (confirmAddFavorite) confirmAddFavorite.addEventListener('click', saveFavorite);
         
+        // Schedule checkbox listener
+        if (scheduleEnabled) {
+            scheduleEnabled.addEventListener('change', () => {
+                if (scheduleEnabled.checked) {
+                    scheduleFields.classList.remove('opacity-50', 'pointer-events-none');
+                } else {
+                    scheduleFields.classList.add('opacity-50', 'pointer-events-none');
+                }
+            });
+        }
+
         // Close modals when clicking outside
         manageFavoritesModal.addEventListener('click', (e) => {
             if (e.target === manageFavoritesModal) {

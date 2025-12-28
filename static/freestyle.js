@@ -59,204 +59,17 @@ function getNavigationContext() {
 }
 
 // --- Pictogram Support ---
-let enablePictograms = false; // Global setting for pictogram display - loaded from user settings
+// Pictograms removed as per user request
+let enablePictograms = false; // Global setting for pictogram display - Always false for Freestyle
 
-const PICTOGRAM_MAP = {
-    // Emotions & Feelings
-    'happy': '😊', 'joy': '😊', 'glad': '😊', 'cheerful': '😊', 'delighted': '😊',
-    'sad': '😢', 'unhappy': '😢', 'crying': '😭', 'tears': '😭', 'weep': '😭',
-    'angry': '😠', 'mad': '😠', 'furious': '😡', 'rage': '😡', 'upset': '😠',
-    'tired': '😴', 'sleepy': '😴', 'exhausted': '😴', 'weary': '😴',
-    'excited': '🤩', 'thrilled': '🤩', 'enthusiastic': '🤩',
-    'confused': '😕', 'puzzled': '🤔', 'thinking': '🤔', 'wonder': '🤔',
-    'surprised': '😲', 'shocked': '😱', 'amazed': '😲',
-    'scared': '😨', 'afraid': '😨', 'frightened': '😨', 'worried': '😟',
-    'love': '❤️', 'heart': '❤️', 'care': '❤️', 'affection': '❤️',
-    'like': '👍', 'enjoy': '😊', 'prefer': '👍',
-    'hurt': '🤕', 'pain': '🤕', 'injured': '🤕', 'sore': '🤕',
-    'sick': '🤢', 'ill': '🤢', 'unwell': '🤢', 'nauseous': '🤮',
-    'calm': '😌', 'peaceful': '😌', 'relaxed': '😌', 'serene': '😌',
-
-    // Basic Communication
-    'hello': '👋', 'hi': '👋', 'hey': '👋', 'greetings': '👋', 'wave': '👋',
-    'goodbye': '👋', 'bye': '👋', 'farewell': '👋', 'see you': '👋',
-    'yes': '✅', 'okay': '✅', 'ok': '✅', 'agree': '✅', 'correct': '✅',
-    'no': '❌', 'nope': '❌', 'disagree': '❌', 'wrong': '❌', 'incorrect': '❌',
-    'please': '🙏', 'thank you': '🙏', 'thanks': '🙏', 'grateful': '🙏',
-    'help': '🆘', 'assist': '🆘', 'support': '🆘', 'aid': '🆘',
-    'sorry': '😞', 'apologize': '😞', 'excuse me': '🙏',
-
-    // Actions & Activities
-    'eat': '🍽️', 'eating': '🍽️', 'meal': '🍽️', 'dining': '🍽️',
-    'drink': '🥤', 'drinking': '🥤', 'sip': '🥤', 'beverage': '🥤',
-    'sleep': '😴', 'sleeping': '😴', 'nap': '😴', 'rest': '😴',
-    'wake up': '⏰', 'awake': '⏰', 'get up': '⏰',
-    'walk': '🚶', 'walking': '🚶', 'stroll': '🚶', 'hike': '🥾',
-    'run': '🏃', 'running': '🏃', 'jog': '🏃', 'sprint': '🏃',
-    'sit': '🪑', 'sitting': '🪑', 'chair': '🪑',
-    'stand': '🧍', 'standing': '🧍',
-    'play': '🎮', 'playing': '🎮', 'game': '🎮', 'fun': '🎉',
-    'work': '💼', 'working': '💼', 'job': '💼', 'office': '🏢',
-    'study': '📚', 'studying': '📚', 'learn': '📚', 'education': '🎓',
-    'read': '📖', 'reading': '📚', 'book': '📚',
-    'write': '✍️', 'writing': '✍️', 'pen': '🖊️', 'pencil': '✏️',
-    'listen': '👂', 'hearing': '👂', 'sound': '🔊',
-    'watch': '👀', 'look': '👀', 'see': '👀', 'observe': '👀',
-    'talk': '💬', 'speak': '💬', 'say': '💬', 'tell': '💬',
-    'sing': '🎤', 'singing': '🎤', 'song': '🎵', 'music': '🎵',
-    'dance': '💃', 'dancing': '💃',
-    'cook': '👨‍🍳', 'cooking': '👨‍🍳', 'chef': '👨‍🍳',
-    'clean': '🧹', 'cleaning': '🧹', 'tidy': '🧹',
-    'drive': '🚗', 'driving': '🚗',
-
-    // Food & Drink
-    'food': '🍽️', 'hungry': '🍽️', 'appetite': '🍽️',
-    'water': '💧', 'thirsty': '💧',
-    'coffee': '☕', 'tea': '🍵',
-    'bread': '🍞', 'toast': '🍞',
-    'fruit': '🍎', 'apple': '🍎', 'orange': '🍊', 'banana': '🍌',
-    'vegetables': '🥕', 'carrot': '🥕', 'broccoli': '🥦',
-    'meat': '🥩', 'chicken': '🍗', 'beef': '🥩', 'fish': '🐟',
-    'milk': '🥛', 'cheese': '🧀', 'egg': '🥚',
-    'pizza': '🍕', 'burger': '🍔', 'sandwich': '🥪',
-    'cake': '🎂', 'cookie': '🍪', 'candy': '🍬',
-    'hot': '🔥', 'warm': '🔥', 'cold': '🧊', 'cool': '❄️',
-
-    // Places & Locations
-    'home': '🏠', 'house': '🏠', 'apartment': '🏢',
-    'school': '🏫', 'classroom': '🏫', 'university': '🎓',
-    'hospital': '🏥', 'doctor': '👩‍⚕️', 'nurse': '👩‍⚕️',
-    'store': '🏪', 'shop': '🏪', 'market': '🏪',
-    'restaurant': '🍽️', 'cafe': '☕',
-    'park': '🌳', 'garden': '🌻', 'outdoors': '🌲',
-    'beach': '🏖️', 'ocean': '🌊', 'water': '💧',
-    'bathroom': '🚻', 'toilet': '🚽', 'shower': '🚿',
-    'bedroom': '🛏️', 'bed': '🛏️',
-    'kitchen': '🍽️', 'living room': '🛋️',
-    'car': '🚗', 'bus': '🚌', 'train': '🚆', 'plane': '✈️',
-
-    // People & Relationships
-    'family': '👨‍👩‍👧‍👦', 'mom': '👩', 'mother': '👩', 'dad': '👨', 'father': '👨',
-    'child': '👶', 'baby': '👶', 'kid': '🧒', 'boy': '👦', 'girl': '👧',
-    'friend': '👫', 'buddy': '👫', 'pal': '👫',
-    'person': '👤', 'people': '👥', 'everyone': '👥',
-    'teacher': '👩‍🏫', 'student': '👨‍🎓',
-
-    // Objects & Technology
-    'phone': '📱', 'computer': '💻', 'tablet': '📲',
-    'tv': '📺', 'television': '📺', 'screen': '📺',
-    'book': '📚', 'magazine': '📖', 'newspaper': '📰',
-    'toy': '🧸', 'ball': '⚽', 'game': '🎮',
-    'clothes': '👕', 'shirt': '👕', 'pants': '👖', 'shoes': '👟',
-    'glasses': '👓', 'hat': '👒',
-    'money': '💰', 'dollar': '💵', 'coin': '🪙',
-    'key': '🔑', 'door': '🚪', 'window': '🪟',
-    'light': '💡', 'lamp': '🔦',
-
-    // Time & Weather
-    'morning': '🌅', 'afternoon': '☀️', 'evening': '🌅', 'night': '🌙',
-    'today': '📅', 'tomorrow': '📅', 'yesterday': '📅',
-    'time': '🕐', 'clock': '🕐', 'hour': '🕐', 'minute': '⏰',
-    'sun': '☀️', 'sunny': '☀️', 'rain': '🌧️', 'rainy': '🌧️',
-    'snow': '❄️', 'snowy': '❄️', 'wind': '💨', 'windy': '💨',
-    'cloud': '☁️', 'cloudy': '☁️', 'storm': '⛈️',
-
-    // Body Parts & Health
-    'head': '🗣️', 'face': '😊', 'eye': '👁️', 'nose': '👃', 'mouth': '👄',
-    'ear': '👂', 'hand': '🤚', 'finger': '👆', 'arm': '💪', 'leg': '🦵',
-    'foot': '🦶', 'body': '🧍', 'hair': '💇',
-    'medicine': '💊', 'pill': '💊', 'bandage': '🩹',
-    'healthy': '💪', 'strong': '💪', 'weak': '😞',
-
-    // Directions & Movement
-    'up': '⬆️', 'down': '⬇️', 'left': '⬅️', 'right': '➡️',
-    'forward': '⬆️', 'back': '⬇️', 'backward': '⬇️',
-    'here': '👇', 'there': '👆', 'where': '❓',
-    'come': '👈', 'go': '🏃', 'stop': '✋', 'wait': '⏸️',
-    'fast': '💨', 'slow': '🐌', 'quick': '⚡',
-
-    // Colors
-    'red': '🔴', 'blue': '🔵', 'green': '🟢', 'yellow': '🟡',
-    'orange': '🟠', 'purple': '🟣', 'pink': '🩷', 'brown': '🟤',
-    'black': '⚫', 'white': '⚪', 'gray': '🔘', 'grey': '🔘',
-
-    // Numbers (basic)
-    'one': '1️⃣', 'two': '2️⃣', 'three': '3️⃣', 'four': '4️⃣', 'five': '5️⃣',
-    'six': '6️⃣', 'seven': '7️⃣', 'eight': '8️⃣', 'nine': '9️⃣', 'ten': '🔟',
-    'first': '1️⃣', 'second': '2️⃣', 'third': '3️⃣',
-
-    // Size & Quantity
-    'big': '📏', 'large': '📏', 'huge': '📏', 'giant': '📏',
-    'small': '🤏', 'little': '🤏', 'tiny': '🤏', 'mini': '🤏',
-    'more': '➕', 'less': '➖', 'many': '📊', 'few': '🤏',
-    'all': '💯', 'some': '📊', 'none': '⭕',
-
-    // Actions/States
-    'on': '🔛', 'off': '📴', 'open': '📂', 'close': '📁', 'closed': '📁',
-    'start': '▶️', 'begin': '▶️', 'finish': '⏹️', 'end': '⏹️',
-    'finished': '✅', 'done': '✅', 'complete': '✅',
-    'good': '👍', 'great': '👍', 'excellent': '⭐', 'perfect': '💯',
-    'bad': '👎', 'terrible': '👎', 'awful': '👎',
-    'new': '🆕', 'old': '📜', 'broken': '💔', 'fix': '🔧',
-    'clean': '✨', 'dirty': '🧽', 'messy': '🌪️',
-    'full': '💯', 'empty': '⭕', 'half': '½',
-
-    // Questions
-    'what': '❓', 'where': '📍', 'when': '🕐', 'who': '👤', 'why': '❓', 'how': '❓',
-    'question': '❓', 'answer': '💡', 'know': '🧠', 'understand': '🧠',
-
-    // Emergency & Safety
-    'emergency': '🚨', 'danger': '⚠️', 'safe': '🛡️', 'careful': '⚠️',
-    'fire': '🔥', 'police': '👮', 'ambulance': '🚑',
-
-    // Technology & Communication
-    'internet': '🌐', 'wifi': '📶', 'email': '📧', 'message': '💬',
-    'call': '📞', 'video': '📹', 'photo': '📷', 'picture': '🖼️',
-
-    // Shopping & Money
-    'buy': '🛒', 'sell': '💰', 'pay': '💳', 'cost': '💰', 'price': '💰',
-    'expensive': '💸', 'cheap': '💰', 'free': '🆓',
-
-    // Feelings about activities
-    'boring': '😴', 'interesting': '🤔', 'fun': '🎉', 'exciting': '🤩',
-    'easy': '👍', 'hard': '😤', 'difficult': '😤',
-
-    // Transportation
-    'bike': '🚲', 'bicycle': '🚲', 'motorcycle': '🏍️', 'truck': '🚚',
-    'taxi': '🚕', 'subway': '🚇', 'boat': '⛵', 'ship': '🚢',
-
-    // Animals
-    'dog': '🐕', 'cat': '🐱', 'bird': '🐦', 'fish': '🐟',
-    'horse': '🐴', 'cow': '🐄', 'pig': '🐷', 'chicken': '🐔',
-
-    // Nature
-    'tree': '🌳', 'flower': '🌸', 'grass': '🌱', 'mountain': '⛰️',
-    'river': '🏞️', 'lake': '🏞️', 'forest': '🌿', 'desert': '🏜️'
-};
+// const PICTOGRAM_MAP = { ... }; // Removed
 
 function getPictogramForText(text) {
-    if (!enablePictograms || !text) return null;
-    
-    // Check if this text is a sight word - if so, force text-only display
-    if (window.isSightWord && window.isSightWord(text)) {
-        console.log(`🔤 Sight word pictogram blocked: "${text}" - using text-only display`);
-        return null;
-    }
-    
-    const lowerText = text.toLowerCase().trim();
-    
-    // Direct match
-    if (PICTOGRAM_MAP[lowerText]) {
-        return PICTOGRAM_MAP[lowerText];
-    }
-    
-    // Partial matches for phrases containing key words
-    for (const [key, symbol] of Object.entries(PICTOGRAM_MAP)) {
-        if (lowerText.includes(key)) {
-            return symbol;
-        }
-    }
-    
+    return null;
+}
+// (Rest of PICTOGRAM_MAP removed)
+
+function getPictogramForText(text) {
     return null;
 }
 
@@ -627,7 +440,7 @@ async function loadScanSettings() {
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
             autoClean = settings.autoClean || false; // Load Auto Clean setting
-            enablePictograms = settings.enablePictograms === true; // Load pictograms setting
+            // enablePictograms = settings.enablePictograms === true; // Load pictograms setting - Disabled for Freestyle
             
             // Update sight word service with new settings
             if (window.updateSightWordSettings) {
@@ -1596,6 +1409,11 @@ function generateCategoryButtons() {
         { name: "People", icon: "fas fa-users" },
         { name: "Places", icon: "fas fa-map-marker-alt" },
         { name: "Animals", icon: "fas fa-paw" },
+        { name: "Insects", icon: "fas fa-bug" },
+        { name: "Reptiles", icon: "fas fa-dragon" },
+        { name: "Fish", icon: "fas fa-fish" },
+        { name: "Birds", icon: "fas fa-dove" },
+        { name: "Wild Animals", icon: "fas fa-paw" },
         { name: "Around the House", icon: "fas fa-home" },
         { name: "In the Room", icon: "fas fa-couch" },
         { name: "General things", icon: "fas fa-cube" },

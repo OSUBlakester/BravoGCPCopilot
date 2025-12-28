@@ -346,6 +346,36 @@
             </div>
         </div>
 
+        <!-- User Interface Section -->
+        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                <i class="fas fa-user-cog mr-2 text-indigo-600"></i>User Interface
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="md:col-span-2">
+                    <label class="block text-lg font-medium text-gray-700 mb-2">Interface Mode:</label>
+                    <div class="flex items-center space-x-6 mt-2">
+                        <div class="flex items-center">
+                            <input type="radio" id="interfaceAuditory" name="interfaceMode" value="auditory" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                            <label for="interfaceAuditory" class="ml-2 block text-sm font-medium text-gray-700">
+                                Auditory Scanning
+                            </label>
+                        </div>
+                        <div class="flex items-center">
+                            <input type="radio" id="interfaceTap" name="interfaceMode" value="tap" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                            <label for="interfaceTap" class="ml-2 block text-sm font-medium text-gray-700">
+                                Tap Screen
+                            </label>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">
+                        <strong>Auditory Scanning:</strong> Uses the grid interface with auditory scanning enabled.<br>
+                        <strong>Tap Screen:</strong> Uses the direct touch interface (Tap Interface).
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- AI Settings Section -->
         <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
@@ -474,16 +504,6 @@
                     <p class="text-xs text-gray-500 mt-1">Adjust the number of columns to control button size (2 = largest buttons, 18 = smallest buttons).</p>
                 </div>
                 <div>
-                    <label for="useTapInterface" class="block text-lg font-medium text-gray-700 mb-2">Use Tap Interface</label>
-                    <input type="checkbox" id="useTapInterface" name="useTapInterface" class="usetapinterface-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Use the tap interface as the main interface instead of the grid page. Users will be redirected to tap_interface.html after authentication.</p>
-                </div>
-                <div>
-                    <label for="enablePictograms" class="block text-lg font-medium text-gray-700 mb-2">Enable AAC Pictograms</label>
-                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Show pictogram/symbol icons on buttons to assist with AAC (Augmentative and Alternative Communication).</p>
-                </div>
-                <div>
                     <label for="enableSightWords" class="block text-lg font-medium text-gray-700 mb-2">Enable Sight Word Logic</label>
                     <input type="checkbox" id="enableSightWords" name="enableSightWords" class="enablesightwords-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                     <p class="text-xs text-gray-500 mt-1">Use Dolch sight word logic to show sight words as text-only (no pictograms). When disabled, all words will show pictograms if pictograms are enabled.</p>
@@ -519,10 +539,13 @@
                     <input type="number" id="scanLoopLimit" name="scanLoopLimit" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="e.g., 0">
                     <p class="text-xs text-gray-500 mt-1">Number of complete scanning cycles before pausing (0 = unlimited, 1-10 = limit cycles)</p>
                 </div>
-                <div class="md:col-span-2">
-                    <label for="ScanningOff" class="block text-lg font-medium text-gray-700 mb-2">Turn off Auditory Scanning:</label>
-                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="scanningoff-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Turn off Auditory Scanning</p>
+                <div class="flex items-center">
+                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
+                    <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="mr-2 w-5 h-5">
+                    <label for="enablePictograms" class="text-lg font-medium text-gray-700">Enable Pictograms</label>
                 </div>
             </div>
         </div>
