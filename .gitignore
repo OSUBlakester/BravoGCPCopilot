@@ -111,3 +111,41 @@ cloud-sql-proxy
 *copy*.py.txt
 *Copy*.py.txt
 server*.py.txt
+
+# Large image asset directories
+BravoImages/
+AccentToBravo/
+
+# Test and debug files
+test_*.py
+debug_*.py
+*_backup*.py
+compare_outputs.py
+verify_*.py
+list_sample_pages.py
+
+# Migration and conversion utilities
+accent_*.py
+apply_transparency_conversion.py
+
+# Admin interface backups
+static/*_old.html
+static/*_simple.html
+
+# Documentation (keep in repo but exclude backups)
+*_DEBUGGING.md
+*_FLOW.md
+*_FIXES.md
+*_REFERENCE.md
+*_TESTING_GUIDE.md
+
+# Backup JSON files
+tap_config_backup_*.json
+*_backup_*.json
+
+# User data checking scripts
+check_user_collections.py
+fix_pages_data.py
+
+# Custom schemas (may contain test data)
+custom_images_schema.json
