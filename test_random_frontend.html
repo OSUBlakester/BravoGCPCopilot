@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test RANDOM Speech Frontend</title>
+</head>
+<body>
+    <h1>Test RANDOM Choice Frontend Logic</h1>
+    <button onclick="testRandom()">Test Random Selection</button>
+    <div id="output"></div>
+    
+    <script>
+        function testRandom() {
+            const testCases = [
+                '{RANDOM:hi, how are you?|hey, how are you?|hi there. how are you?|hello, how are you?}',
+                '{RANDOM:yes|no|maybe}',
+                '{RANDOM:option1}',
+                'Normal speech without random',
+                '{RANDOM:}'
+            ];
+            
+            const output = document.getElementById('output');
+            output.innerHTML = '<h2>Test Results:</h2>';
+            
+            testCases.forEach((testCase, index) => {
+                // Simulate the announce function's RANDOM logic
+                let textToAnnounce = testCase;
+                const randomPattern = /^\{RANDOM:(.+)\}$/;
+                const randomMatch = textToAnnounce.match(randomPattern);
+                
+                if (randomMatch) {
+                    const options = randomMatch[1].split('|').map(opt => opt.trim()).filter(opt => opt.length > 0);
+                    
+                    if (options.length > 0) {
+                        const selectedOption = options[Math.floor(Math.random() * options.length)];
+                        console.log(`RANDOM CHOICE: Selected "${selectedOption}" from ${options.length} options`);
+                        textToAnnounce = selectedOption;
+                    } else {
+                        console.warn('RANDOM CHOICE: No valid options found, using original text');
+                    }
+                }
+                
+                output.innerHTML += `<div style="margin: 10px 0; padding: 10px; border: 1px solid #ccc;">
+                    <strong>Test ${index + 1}:</strong><br>
+                    Input: <code>${testCase}</code><br>
+                    Output: <strong>${textToAnnounce}</strong><br>
+                    ${randomMatch ? `(${randomMatch[1].split('|').length} options available)` : '(No random pattern)'}
+                </div>`;
+            });
+        }
+    </script>
+</body>
+</html>

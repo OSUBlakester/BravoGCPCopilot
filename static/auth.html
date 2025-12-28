@@ -1179,6 +1179,8 @@
             
             // Small delay to ensure session storage is written
             setTimeout(async () => {
+                // Check for scheduled favorites BEFORE redirecting
+                await checkScheduledFavoritesOnAuth();
                 await redirectToPreferredInterface();
             }, 100);
         }
@@ -1961,5 +1963,145 @@ registerForm.addEventListener('submit', async (e) => {
     </script>
     <script src="/static/avatar-selector.js"></script>
     <script src="/static/mood-selection.js"></script>
+
+    <!-- Scheduled Favorite Prompt Modal (Added to Auth Page) -->
+    <div id="scheduledFavoriteModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 500px; text-align: center;">
+            <div class="modal-header" style="justify-content: center; border-bottom: none;">
+                <h3 class="modal-title">Scheduled Location Found</h3>
+            </div>
+            <p id="scheduledFavoriteMessage" style="margin-bottom: 20px; font-size: 1.1em; color: #555;">
+                It looks like you are at [Location Name]. Would you like to load this location?
+            </p>
+            <div style="display: flex; gap: 15px; justify-content: center;">
+                <button id="ignoreScheduledFavorite" class="clear-btn" style="background: #ccc; color: #333; font-size: 1em; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+                    No
+                </button>
+                <button id="loadScheduledFavorite" class="speak-btn" style="background-color: #28a745; color: white; font-size: 1em; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
+                    Yes, Load It
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Scheduled Favorites Logic for Auth Page
+        async function checkScheduledFavoritesOnAuth() {
+            console.log("Checking for scheduled favorites on auth page...");
+            
+            const firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
+            const currentAacUserId = sessionStorage.getItem('currentAacUserId');
+            
+            if (!firebaseIdToken || !currentAacUserId) {
+                console.log("Auth context missing, skipping schedule check.");
+                return false; // Proceed immediately
+            }
+
+            try {
+                // Helper for auth fetch
+                const authFetch = async (url, options = {}) => {
+                    const headers = options.headers || {};
+                    headers['Authorization'] = `Bearer ${firebaseIdToken}`;
+                    headers['X-User-ID'] = currentAacUserId;
+                    const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+                    if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+                    options.headers = headers;
+                    return fetch(url, options);
+                };
+
+                // Fetch favorites
+                const response = await authFetch('/api/user-current-favorites');
+                if (!response.ok) return false;
+                
+                const data = await response.json();
+                const favorites = data.favorites;
+                
+                const now = new Date();
+                const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const currentDay = days[now.getDay()];
+                const currentHour = now.getHours();
+                const currentMinute = now.getMinutes();
+                const currentTime = currentHour * 60 + currentMinute;
+                
+                for (const favorite of favorites) {
+                    if (favorite.schedule && favorite.schedule.enabled) {
+                        let isDayMatch = false;
+                        if (favorite.schedule.days_of_week && Array.isArray(favorite.schedule.days_of_week)) {
+                            isDayMatch = favorite.schedule.days_of_week.includes(currentDay);
+                        } else if (favorite.schedule.day_of_week) {
+                            isDayMatch = favorite.schedule.day_of_week === currentDay;
+                        }
+
+                        if (isDayMatch) {
+                            const [startHour, startMinute] = favorite.schedule.start_time.split(':').map(Number);
+                            const [endHour, endMinute] = favorite.schedule.end_time.split(':').map(Number);
+                            const startTime = startHour * 60 + startMinute;
+                            const endTime = endHour * 60 + endMinute;
+                            
+                            if (currentTime >= startTime && currentTime <= endTime) {
+                                // Check if handled in session (unlikely on fresh login, but good practice)
+                                const sessionKey = `bravo_schedule_handled_${favorite.name}_${currentDay}`;
+                                if (sessionStorage.getItem(sessionKey)) continue;
+
+                                console.log(`Found matching scheduled favorite on auth: ${favorite.name}`);
+                                
+                                // Show Modal and wait for user response
+                                return new Promise((resolve) => {
+                                    const modal = document.getElementById('scheduledFavoriteModal');
+                                    const message = document.getElementById('scheduledFavoriteMessage');
+                                    const yesBtn = document.getElementById('loadScheduledFavorite');
+                                    const noBtn = document.getElementById('ignoreScheduledFavorite');
+                                    
+                                    message.textContent = `It looks like you are at ${favorite.name}. Would you like to load this location?`;
+                                    modal.style.display = 'flex';
+                                    
+                                    const handleYes = async () => {
+                                        modal.style.display = 'none';
+                                        sessionStorage.setItem(sessionKey, 'true');
+                                        
+                                        // Load the favorite
+                                        try {
+                                            const loadTimestamp = new Date().toISOString();
+                                            const saveData = {
+                                                location: favorite.location || '',
+                                                people: favorite.people || '',
+                                                activity: favorite.activity || '',
+                                                loaded_at: loadTimestamp,
+                                                favorite_name: favorite.name,
+                                                saved_at: loadTimestamp
+                                            };
+                                            
+                                            await authFetch('/user_current', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify(saveData)
+                                            });
+                                            console.log("Scheduled favorite loaded successfully via auth page.");
+                                        } catch (e) {
+                                            console.error("Error loading favorite:", e);
+                                        }
+                                        resolve(true); // Proceed
+                                    };
+                                    
+                                    const handleNo = () => {
+                                        modal.style.display = 'none';
+                                        sessionStorage.setItem(sessionKey, 'true');
+                                        resolve(true); // Proceed
+                                    };
+                                    
+                                    // One-time event listeners
+                                    yesBtn.onclick = handleYes;
+                                    noBtn.onclick = handleNo;
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking scheduled favorites on auth:', error);
+            }
+            return false; // Proceed if error or no match
+        }
+    </script>
 </body>
 </html>

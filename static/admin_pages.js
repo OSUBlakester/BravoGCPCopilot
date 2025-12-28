@@ -227,10 +227,14 @@ function setupEventListeners() {
     document.getElementById('wizardRejectBtn').addEventListener('click', wizardReject);
     
     // Real-time preview updates in button editor
-    ['buttonText', 'speechPhrase', 'targetPage', 'llmQuery', 'buttonHidden', 'assignedImageUrl'].forEach(id => {
+    ['buttonText', 'speechPhrase', 'targetPage', 'temporaryNavigation', 'llmQuery', 'buttonHidden', 'assignedImageUrl'].forEach(id => {
         const element = document.getElementById(id);
         if (element) {
             element.addEventListener('input', updateButtonPreview);
+            // Also listen for 'change' event for checkboxes
+            if (element.type === 'checkbox') {
+                element.addEventListener('change', updateButtonPreview);
+            }
         }
     });
     
@@ -518,6 +522,7 @@ function openButtonEditor(row, col) {
     // Populate target page dropdown
     populateTargetPageDropdown();
     document.getElementById('targetPage').value = buttonData.targetPage || '';
+    document.getElementById('temporaryNavigation').checked = (buttonData.navigationType === 'TEMPORARY');
     
     // Update position info
     document.getElementById('positionInfo').textContent = `Row ${row + 1}, Column ${col + 1}`;
@@ -538,13 +543,17 @@ function saveButtonEdit() {
     if (!currentEditingButton) return;
     
     const assignedImageUrl = document.getElementById('assignedImageUrl').value.trim();
+    const targetPage = document.getElementById('targetPage').value.trim();
+    const isTemporary = document.getElementById('temporaryNavigation').checked;
+    
     const buttonData = {
         row: currentEditingButton.row,
         col: currentEditingButton.col,
         text: document.getElementById('buttonText').value.trim(),
         speechPhrase: document.getElementById('speechPhrase').value.trim() || null,
         customAudioFile: document.getElementById('customAudioFileUrl').value.trim() || null,
-        targetPage: document.getElementById('targetPage').value.trim(),
+        targetPage: targetPage,
+        navigationType: (targetPage && isTemporary) ? 'TEMPORARY' : (targetPage ? 'PERMANENT' : ''),
         LLMQuery: document.getElementById('llmQuery').value.trim(),
         queryType: "options", // Always options
         hidden: document.getElementById('buttonHidden').checked,

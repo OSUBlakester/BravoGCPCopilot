@@ -4,6 +4,12 @@
 .git
 .gitignore
 
+# Development and testing folders
+AccentToBravo/
+tests/
+test_*.py
+*_test.py
+
 # Python
 __pycache__/
 *.pyc
@@ -35,6 +41,11 @@ build/
 my_chroma_db/
 user_data/
 user_docs/
+
+# Development folders
+flutterflies/
+ImageCreator/
+New Folder With Items/
 
 # Image folders - these are stored in GCS, not needed in container
 BravoImages/
