@@ -49,182 +49,12 @@ let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
 let currentSpeechRate = 180;                 // Default words-per-minute
 
 // --- AAC Pictogram Support ---
-let enablePictograms = false; // Global setting for pictogram display
+let enablePictograms = false; // Global setting for pictogram display - Always false for Gridpage
 
 // Simple mapping of button text to Unicode emoji or icons
 // This can be extended with more sophisticated matching or external APIs
-const PICTOGRAM_MAP = {
-    // Emotions & Feelings
-    'happy': '😊', 'joy': '😊', 'glad': '😊', 'cheerful': '😊', 'delighted': '😊',
-    'sad': '😢', 'unhappy': '😢', 'crying': '😭', 'tears': '😭', 'weep': '😭',
-    'angry': '😠', 'mad': '😠', 'furious': '😡', 'rage': '😡', 'upset': '😠',
-    'tired': '😴', 'sleepy': '😴', 'exhausted': '😴', 'weary': '😴',
-    'excited': '🤩', 'thrilled': '🤩', 'enthusiastic': '🤩',
-    'confused': '😕', 'puzzled': '🤔', 'thinking': '🤔', 'wonder': '🤔',
-    'surprised': '😲', 'shocked': '😱', 'amazed': '😲',
-    'scared': '😨', 'afraid': '😨', 'frightened': '😨', 'worried': '😟',
-    'love': '❤️', 'heart': '❤️', 'care': '❤️', 'affection': '❤️',
-    'like': '👍', 'enjoy': '😊', 'prefer': '👍',
-    'hurt': '🤕', 'pain': '🤕', 'injured': '🤕', 'sore': '🤕',
-    'sick': '🤢', 'ill': '🤢', 'unwell': '🤢', 'nauseous': '🤮',
-    'calm': '😌', 'peaceful': '😌', 'relaxed': '😌', 'serene': '😌',
-
-    // Basic Communication
-    'hello': '👋', 'hi': '👋', 'hey': '👋', 'greetings': '👋', 'wave': '👋',
-    'goodbye': '👋', 'bye': '👋', 'farewell': '👋', 'see you': '👋',
-    'yes': '✅', 'okay': '✅', 'ok': '✅', 'agree': '✅', 'correct': '✅',
-    'no': '❌', 'nope': '❌', 'disagree': '❌', 'wrong': '❌', 'incorrect': '❌',
-    'please': '🙏', 'thank you': '🙏', 'thanks': '🙏', 'grateful': '🙏',
-    'help': '🆘', 'assist': '🆘', 'support': '🆘', 'aid': '🆘',
-    'sorry': '😞', 'apologize': '😞', 'excuse me': '🙏',
-
-    // Actions & Activities
-    'eat': '🍽️', 'eating': '🍽️', 'meal': '🍽️', 'dining': '🍽️',
-    'drink': '🥤', 'drinking': '🥤', 'sip': '🥤', 'beverage': '🥤',
-    'sleep': '😴', 'sleeping': '😴', 'nap': '😴', 'rest': '😴',
-    'wake up': '⏰', 'awake': '⏰', 'get up': '⏰',
-    'walk': '🚶', 'walking': '🚶', 'stroll': '🚶', 'hike': '🥾',
-    'run': '🏃', 'running': '🏃', 'jog': '🏃', 'sprint': '🏃',
-    'sit': '🪑', 'sitting': '🪑', 'chair': '🪑',
-    'stand': '🧍', 'standing': '🧍',
-    'play': '🎮', 'playing': '🎮', 'game': '🎮', 'fun': '🎉',
-    'work': '💼', 'working': '💼', 'job': '💼', 'office': '🏢',
-    'study': '📚', 'studying': '📚', 'learn': '📚', 'education': '🎓',
-    'read': '📖', 'reading': '📚', 'book': '📚',
-    'write': '✍️', 'writing': '✍️', 'pen': '🖊️', 'pencil': '✏️',
-    'listen': '👂', 'hearing': '👂', 'sound': '🔊',
-    'watch': '👀', 'look': '👀', 'see': '👀', 'observe': '👀',
-    'talk': '💬', 'speak': '💬', 'say': '💬', 'tell': '💬',
-    'sing': '🎤', 'singing': '🎤', 'song': '🎵', 'music': '🎵',
-    'dance': '💃', 'dancing': '💃',
-    'cook': '👨‍🍳', 'cooking': '👨‍🍳', 'chef': '👨‍🍳',
-    'clean': '🧹', 'cleaning': '🧹', 'tidy': '🧹',
-    'drive': '🚗', 'driving': '🚗',
-
-    // Food & Drink
-    'food': '🍽️', 'hungry': '🍽️', 'appetite': '🍽️',
-    'water': '💧', 'thirsty': '💧',
-    'coffee': '☕', 'tea': '🍵',
-    'bread': '🍞', 'toast': '🍞',
-    'fruit': '🍎', 'apple': '🍎', 'orange': '🍊', 'banana': '🍌',
-    'vegetables': '🥕', 'carrot': '🥕', 'broccoli': '🥦',
-    'meat': '🥩', 'chicken': '🍗', 'beef': '🥩', 'fish': '🐟',
-    'milk': '🥛', 'cheese': '🧀', 'egg': '🥚',
-    'pizza': '🍕', 'burger': '🍔', 'sandwich': '🥪',
-    'cake': '🎂', 'cookie': '🍪', 'candy': '🍬',
-    'hot': '🔥', 'warm': '🔥', 'cold': '🧊', 'cool': '❄️',
-
-    // Places & Locations
-    'home': '🏠', 'house': '🏠', 'apartment': '🏢',
-    'school': '🏫', 'classroom': '🏫', 'university': '🎓',
-    'hospital': '🏥', 'doctor': '👩‍⚕️', 'nurse': '👩‍⚕️',
-    'store': '🏪', 'shop': '🏪', 'market': '🏪',
-    'restaurant': '🍽️', 'cafe': '☕',
-    'park': '🌳', 'garden': '🌻', 'outdoors': '🌲',
-    'beach': '🏖️', 'ocean': '🌊', 'water': '💧',
-    'bathroom': '🚻', 'toilet': '🚽', 'shower': '🚿',
-    'bedroom': '🛏️', 'bed': '🛏️',
-    'kitchen': '🍽️', 'living room': '🛋️',
-    'car': '🚗', 'bus': '🚌', 'train': '🚆', 'plane': '✈️',
-
-    // People & Relationships
-    'family': '👨‍👩‍👧‍👦', 'mom': '👩', 'mother': '👩', 'dad': '👨', 'father': '👨',
-    'child': '👶', 'baby': '👶', 'kid': '🧒', 'boy': '👦', 'girl': '👧',
-    'friend': '👫', 'buddy': '👫', 'pal': '👫',
-    'person': '👤', 'people': '👥', 'everyone': '👥',
-    'teacher': '👩‍🏫', 'student': '👨‍🎓',
-
-    // Objects & Technology
-    'phone': '📱', 'computer': '💻', 'tablet': '📲',
-    'tv': '📺', 'television': '📺', 'screen': '📺',
-    'book': '📚', 'magazine': '📖', 'newspaper': '📰',
-    'toy': '🧸', 'ball': '⚽', 'game': '🎮',
-    'clothes': '👕', 'shirt': '👕', 'pants': '👖', 'shoes': '👟',
-    'glasses': '👓', 'hat': '👒',
-    'money': '💰', 'dollar': '💵', 'coin': '🪙',
-    'key': '🔑', 'door': '🚪', 'window': '🪟',
-    'light': '💡', 'lamp': '🔦',
-
-    // Time & Weather
-    'morning': '🌅', 'afternoon': '☀️', 'evening': '🌅', 'night': '🌙',
-    'today': '📅', 'tomorrow': '📅', 'yesterday': '📅',
-    'time': '🕐', 'clock': '🕐', 'hour': '🕐', 'minute': '⏰',
-    'sun': '☀️', 'sunny': '☀️', 'rain': '🌧️', 'rainy': '🌧️',
-    'snow': '❄️', 'snowy': '❄️', 'wind': '💨', 'windy': '💨',
-    'cloud': '☁️', 'cloudy': '☁️', 'storm': '⛈️',
-
-    // Body Parts & Health
-    'head': '🗣️', 'face': '😊', 'eye': '👁️', 'nose': '👃', 'mouth': '👄',
-    'ear': '👂', 'hand': '🤚', 'finger': '👆', 'arm': '💪', 'leg': '🦵',
-    'foot': '🦶', 'body': '🧍', 'hair': '💇',
-    'medicine': '💊', 'pill': '💊', 'bandage': '🩹',
-    'healthy': '💪', 'strong': '💪', 'weak': '😞',
-
-    // Directions & Movement
-    'up': '⬆️', 'down': '⬇️', 'left': '⬅️', 'right': '➡️',
-    'forward': '⬆️', 'back': '⬇️', 'backward': '⬇️',
-    'here': '👇', 'there': '👆', 'where': '❓',
-    'come': '👈', 'go': '🏃', 'stop': '✋', 'wait': '⏸️',
-    'fast': '💨', 'slow': '🐌', 'quick': '⚡',
-
-    // Colors
-    'red': '🔴', 'blue': '🔵', 'green': '🟢', 'yellow': '🟡',
-    'orange': '🟠', 'purple': '🟣', 'pink': '🩷', 'brown': '🟤',
-    'black': '⚫', 'white': '⚪', 'gray': '🔘', 'grey': '🔘',
-
-    // Numbers (basic)
-    'one': '1️⃣', 'two': '2️⃣', 'three': '3️⃣', 'four': '4️⃣', 'five': '5️⃣',
-    'six': '6️⃣', 'seven': '7️⃣', 'eight': '8️⃣', 'nine': '9️⃣', 'ten': '🔟',
-    'first': '1️⃣', 'second': '2️⃣', 'third': '3️⃣',
-
-    // Size & Quantity
-    'big': '📏', 'large': '📏', 'huge': '📏', 'giant': '📏',
-    'small': '🤏', 'little': '🤏', 'tiny': '🤏', 'mini': '🤏',
-    'more': '➕', 'less': '➖', 'many': '📊', 'few': '🤏',
-    'all': '💯', 'some': '📊', 'none': '⭕',
-
-    // Actions/States
-    'on': '🔛', 'off': '📴', 'open': '📂', 'close': '📁', 'closed': '📁',
-    'start': '▶️', 'begin': '▶️', 'finish': '⏹️', 'end': '⏹️',
-    'finished': '✅', 'done': '✅', 'complete': '✅',
-    'good': '👍', 'great': '👍', 'excellent': '⭐', 'perfect': '💯',
-    'bad': '👎', 'terrible': '👎', 'awful': '👎',
-    'new': '🆕', 'old': '📜', 'broken': '💔', 'fix': '🔧',
-    'clean': '✨', 'dirty': '🧽', 'messy': '🌪️',
-    'full': '💯', 'empty': '⭕', 'half': '½',
-
-    // Questions
-    'what': '❓', 'where': '📍', 'when': '🕐', 'who': '👤', 'why': '❓', 'how': '❓',
-    'question': '❓', 'answer': '💡', 'know': '🧠', 'understand': '🧠',
-
-    // Emergency & Safety
-    'emergency': '🚨', 'danger': '⚠️', 'safe': '🛡️', 'careful': '⚠️',
-    'fire': '🔥', 'police': '👮', 'ambulance': '🚑',
-
-    // Technology & Communication
-    'internet': '🌐', 'wifi': '📶', 'email': '📧', 'message': '💬',
-    'call': '📞', 'video': '📹', 'photo': '📷', 'picture': '🖼️',
-
-    // Shopping & Money
-    'buy': '🛒', 'sell': '💰', 'pay': '💳', 'cost': '💰', 'price': '💰',
-    'expensive': '💸', 'cheap': '💰', 'free': '🆓',
-
-    // Feelings about activities
-    'boring': '😴', 'interesting': '🤔', 'fun': '🎉', 'exciting': '🤩',
-    'easy': '👍', 'hard': '😤', 'difficult': '😤',
-
-    // Transportation
-    'bike': '🚲', 'bicycle': '🚲', 'motorcycle': '🏍️', 'truck': '🚚',
-    'taxi': '🚕', 'subway': '🚇', 'boat': '⛵', 'ship': '🚢',
-
-    // Animals
-    'dog': '🐕', 'cat': '🐱', 'bird': '🐦', 'fish': '🐟',
-    'horse': '🐴', 'cow': '🐄', 'pig': '🐷', 'chicken': '🐔',
-
-    // Nature
-    'tree': '🌳', 'flower': '🌸', 'grass': '🌱', 'mountain': '⛰️',
-    'river': '🏞️', 'lake': '🏞️', 'forest': '🌿', 'desert': '🏜️'
-};
+// const PICTOGRAM_MAP = { ... }; // Removed
+// (Rest of PICTOGRAM_MAP removed)
 
 /**
  * Gets a pictogram for the given text
@@ -232,27 +62,6 @@ const PICTOGRAM_MAP = {
  * @returns {string|null} - Unicode emoji/symbol or null if none found
  */
 function getPictogramForText(text) {
-    if (!enablePictograms || !text) return null;
-    
-    // Check if this text is a sight word - if so, force text-only display
-    if (window.isSightWord && window.isSightWord(text)) {
-        return null;
-    }
-    
-    const lowerText = text.toLowerCase().trim();
-    
-    // Direct match
-    if (PICTOGRAM_MAP[lowerText]) {
-        return PICTOGRAM_MAP[lowerText];
-    }
-    
-    // Partial matches for phrases containing key words
-    for (const [key, symbol] of Object.entries(PICTOGRAM_MAP)) {
-        if (lowerText.includes(key)) {
-            return symbol;
-        }
-    }
-    
     return null;
 }
 
@@ -512,15 +321,32 @@ async function getSymbolImageForText(text, keywords = null) {
         return null;
     }
     
-    // Simple in-memory cache to avoid repeated requests
+    // Persistent in-memory and sessionStorage cache to avoid repeated requests
     if (!window.symbolImageCache) {
         window.symbolImageCache = new Map();
+        
+        // Load cache from sessionStorage on first initialization
+        try {
+            const cachedData = sessionStorage.getItem('symbolImageCache');
+            if (cachedData) {
+                const parsed = JSON.parse(cachedData);
+                Object.entries(parsed).forEach(([key, value]) => {
+                    // Only restore if not expired (1 hour TTL)
+                    if (value.timestamp > Date.now() - 3600000) {
+                        window.symbolImageCache.set(key, value);
+                    }
+                });
+                console.log(`✅ Restored ${window.symbolImageCache.size} cached symbol images from sessionStorage`);
+            }
+        } catch (e) {
+            console.warn('Failed to restore symbol image cache:', e);
+        }
     }
     
     const cacheKey = `grid_${text.trim().toLowerCase()}`;
     if (window.symbolImageCache.has(cacheKey)) {
         const cached = window.symbolImageCache.get(cacheKey);
-        if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
+        if (cached.timestamp > Date.now() - 3600000) { // Cache for 1 hour (up from 5 min)
             return cached.imageUrl;
         }
     }
@@ -558,6 +384,13 @@ async function getSymbolImageForText(text, keywords = null) {
                 imageUrl: symbolUrl,
                 timestamp: Date.now()
             });
+            // Persist to sessionStorage for cross-page persistence
+            try {
+                const cacheObj = Object.fromEntries(window.symbolImageCache);
+                sessionStorage.setItem('symbolImageCache', JSON.stringify(cacheObj));
+            } catch (e) {
+                console.warn('Failed to persist symbol cache:', e);
+            }
             console.log(`✅ Found Firestore image for "${text}": ${symbolUrl}`);
             return symbolUrl;
         } else {
@@ -566,6 +399,13 @@ async function getSymbolImageForText(text, keywords = null) {
                 imageUrl: null,
                 timestamp: Date.now()
             });
+            // Persist to sessionStorage
+            try {
+                const cacheObj = Object.fromEntries(window.symbolImageCache);
+                sessionStorage.setItem('symbolImageCache', JSON.stringify(cacheObj));
+            } catch (e) {
+                console.warn('Failed to persist symbol cache:', e);
+            }
             console.log(`❌ No Firestore image found for "${text}"`);
             return null;
         }
@@ -708,6 +548,7 @@ async function loadScanSettings() {
         ScanningOff = settings.ScanningOff === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
+        console.log('🔍 DEBUG enablePictograms loaded from settings:', settings.enablePictograms, '-> final value:', enablePictograms);
         
         // Update sight word service with new settings
         if (window.updateSightWordSettings) {
@@ -940,9 +781,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
 
-    // 2. Load scan settings (these now use currentUserId implicitly via fetch)
-     // Note: currentAacUserId is used by authenticatedFetch
-    await loadScanSettings();
+    // Parallelize independent async operations for faster load
+    const [scanSettingsResult, pagesResponse] = await Promise.all([
+        loadScanSettings(),
+        authenticatedFetch('/pages', { method: 'GET' })
+    ]);
+    console.log('✅ Core initialization complete (parallelized)');
     
     // 3. Initialize grid layout with loaded gridColumns setting
     updateGridLayout();
@@ -951,12 +795,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('user-id-selector')?.closest('div')?.remove();
 
     // 4. Show mood selection if enabled and not already set for this session
-    await showMoodSelectionIfNeeded();
-
-    // 5. Initialize avatar selector with user's saved configuration now that authentication is complete
-    if (window.avatarSelector && window.avatarSelector.initializeAfterAuth) {
-        await window.avatarSelector.initializeAfterAuth();
-    }
+    // Lazy load non-critical features - don't block page render
+    Promise.all([
+        showMoodSelectionIfNeeded(),
+        window.avatarSelector?.initializeAfterAuth?.()
+    ]).catch(err => console.warn('Non-critical feature init failed:', err));
 
     const gridContainer = document.getElementById('gridContainer');
     const params = new URLSearchParams(window.location.search);
@@ -970,14 +813,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     setBannerAndPageTitle();
 
     try {
-        const response = await authenticatedFetch('/pages', {
-            method: 'GET'
-        });
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Failed to load pages: ${response.status} - ${errorText}`);
+        if (!pagesResponse.ok) {
+            const errorText = await pagesResponse.text();
+            throw new Error(`Failed to load pages: ${pagesResponse.status} - ${errorText}`);
         }
-        const userPages = await response.json();
+        const userPages = await pagesResponse.json();
 
         let pageToDisplay = userPages.find(p => p.name === pageName);
 
@@ -1308,6 +1148,8 @@ async function generateGrid(page, container) {
         if (window.sightWordService && await window.sightWordService.isSightWord(buttonData.text)) {
             console.log('[SIGHT WORD] Rendering text-only button for:', buttonData.text);
             button.textContent = buttonData.text;
+            button.classList.add('sight-word-button');
+            /*
             button.style.fontSize = '1.8em';
             button.style.fontWeight = 'bold';
             button.style.color = '#333';
@@ -1319,14 +1161,12 @@ async function generateGrid(page, container) {
             button.style.justifyContent = 'center';
             button.style.textAlign = 'center';
             button.style.padding = '8px';
+            */
         } else {
             // Check for manually assigned image first, then search if not found
             let symbolImageUrl = buttonData.assigned_image_url || null;
             
             if (!symbolImageUrl) {
-                // Add delay between requests to prevent server overwhelm (200ms per button for better spacing)
-                await new Promise(resolve => setTimeout(resolve, idx * 200));
-                
                 // Try to get symbol image through search, fall back to pictogram if needed
                 symbolImageUrl = await getSymbolImageForText(buttonData.text);
             }
@@ -1355,23 +1195,23 @@ async function generateGrid(page, container) {
             imageElement.alt = buttonData.text;
             imageElement.style.width = '100%';
             imageElement.style.height = '100%';
-            imageElement.style.objectFit = 'cover';
+            imageElement.style.objectFit = 'cover'; // Match LLM buttons - fills container
             imageElement.onerror = () => {
                 console.warn(`Failed to load image for "${buttonData.text}" - using text-only display`);
                 // No emoji fallback - just hide the broken image
                 imageElement.style.display = 'none';
             };
             
-            // Text footer (edge to edge, no margins)
+            // Text footer (overlays bottom of image)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '18px';
+            textFooter.style.height = '28px'; // Taller to accommodate 2 rows
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '1px 2px';
+            textFooter.style.padding = '2px 4px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
             textFooter.style.position = 'absolute';
@@ -1391,8 +1231,6 @@ async function generateGrid(page, container) {
             textSpan.style.display = '-webkit-box';
             textSpan.style.webkitLineClamp = '2';
             textSpan.style.webkitBoxOrient = 'vertical';
-            textSpan.style.margin = '0';
-            textSpan.style.padding = '0';
             
             imageContainer.appendChild(imageElement);
             textFooter.appendChild(textSpan);
@@ -1409,15 +1247,14 @@ async function generateGrid(page, container) {
         button.dataset.targetPage = buttonData.targetPage || '';
         button.dataset.speechPhrase = buttonData.speechPhrase || '';
         button.dataset.queryType = buttonData.queryType || '';
-        button.className = '';
+        button.className = 'grid-button'; // Add class for CSS styling
         button.style.gridRowStart = currentRow + 1;
         button.style.gridColumnStart = currentCol + 1;
-        button.style.minHeight = '100px'; // Ensure buttons are tall enough for images
-        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
-        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
         button.style.padding = '0'; // Remove all padding
         button.style.margin = '0'; // Remove all margin
         button.style.border = 'none'; // Remove border
+        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
+        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
         button.addEventListener('click', debounce(() => handleButtonClick(buttonData), clickDebounceDelay));
         
         return button;
@@ -1425,7 +1262,11 @@ async function generateGrid(page, container) {
     
     // Wait for all buttons to be created and append them to container
     const buttons = await Promise.all(buttonPromises);
-    buttons.forEach(button => container.appendChild(button));
+    
+    // Use DocumentFragment for batch DOM append (much faster than individual appends)
+    const fragment = document.createDocumentFragment();
+    buttons.forEach(button => fragment.appendChild(button));
+    container.appendChild(fragment);
 
     // Delay scanning until after the page is rendered
     setTimeout(() => {
@@ -1458,6 +1299,7 @@ async function handleButtonClick(buttonData) {
     const localQueryType = buttonData.queryType || '';
     const llmQuery = buttonData.LLMQuery || '';
     const targetPage = buttonData.targetPage || '';
+    const navigationType = buttonData.navigationType || '';
     const speechPhrase = buttonData.speechPhrase || '';
     const customAudioFile = buttonData.customAudioFile || null;
 
@@ -1663,9 +1505,72 @@ async function handleButtonClick(buttonData) {
             
             debugTimes.threadBranch = performance.now();
 
-        } else if (targetPage) {
-            // Case 3: Button is a navigation link (special or normal)
+        } else if (navigationType === 'GO-BACK-PAGE') {
+            // Case 3a: GO-BACK-PAGE navigation (return to previous page in history)
             activeOriginatingButtonText = null;
+            
+            if (speechPhrase) {
+                const tAnnounce0 = performance.now();
+                await announce(speechPhrase, "system");
+                const tAnnounce1 = performance.now();
+                console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (go-back) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                
+                // Record chat history for user speech selection
+                console.log('🎯 GRIDPAGE Recording go-back speech:', speechPhrase);
+                recordChatHistory("", speechPhrase).catch(error => {
+                    console.error('Failed to record chat history for go-back speech:', error);
+                });
+            }
+            
+            // Play custom MP3 audio file if assigned
+            if (customAudioFile) {
+                const tAudio0 = performance.now();
+                await playCustomButtonAudio(customAudioFile);
+                const tAudio1 = performance.now();
+                console.log(`[DEBUG] handleButtonClick: playCustomButtonAudio (go-back) took ${(tAudio1-tAudio0).toFixed(2)} ms`);
+            }
+            
+            // Navigate back in browser history
+            console.log('⬅️ GO-BACK-PAGE: Navigating to previous page');
+            window.history.back();
+            return;
+            
+        } else if (targetPage) {
+            // Case 3b: Button is a navigation link (special or normal)
+            activeOriginatingButtonText = null;
+            
+            // Check if we should return to a TEMPORARY navigation source instead
+            const tempNavReturn = sessionStorage.getItem('tempNavReturnPage');
+            if (tempNavReturn) {
+                console.log('🔄 TEMPORARY navigation: Returning to original page:', tempNavReturn);
+                sessionStorage.removeItem('tempNavReturnPage');
+                
+                if (speechPhrase) {
+                    const tAnnounce0 = performance.now();
+                    await announce(speechPhrase, "system");
+                    const tAnnounce1 = performance.now();
+                    console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (temp nav return) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                    
+                    // Record chat history for user speech selection
+                    console.log('🎯 GRIDPAGE Recording temp nav return speech:', speechPhrase);
+                    recordChatHistory("", speechPhrase).catch(error => {
+                        console.error('Failed to record chat history for temp nav return:', error);
+                    });
+                }
+                
+                // Play custom MP3 audio file if assigned
+                if (customAudioFile) {
+                    const tAudio0 = performance.now();
+                    await playCustomButtonAudio(customAudioFile);
+                    const tAudio1 = performance.now();
+                    console.log(`[DEBUG] handleButtonClick: playCustomButtonAudio (temp nav return) took ${(tAudio1-tAudio0).toFixed(2)} ms`);
+                }
+                
+                // Return to original page (ignore this button's targetPage)
+                window.location.href = `gridpage.html?page=${tempNavReturn}`;
+                return;
+            }
+            
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
                 await announce(speechPhrase, "system");
@@ -1686,6 +1591,16 @@ async function handleButtonClick(buttonData) {
                 const tAudio1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: playCustomButtonAudio (nav) took ${(tAudio1-tAudio0).toFixed(2)} ms`);
             }
+            
+            // If this is TEMPORARY navigation, store current page for return
+            if (navigationType === 'TEMPORARY') {
+                const currentPageName = pageInfo?.name;
+                if (currentPageName && currentPageName !== 'UnknownPage') {
+                    console.log('🔄 TEMPORARY navigation: Storing return page:', currentPageName);
+                    sessionStorage.setItem('tempNavReturnPage', currentPageName);
+                }
+            }
+            
             // Navigate immediately (no delay)
             if (typeof targetPage === 'string' && targetPage.startsWith('!')) {
                 // Special page: navigate directly to the corresponding HTML
@@ -1734,6 +1649,32 @@ async function handleButtonClick(buttonData) {
         } else if (speechPhrase || customAudioFile) {
             // Case 4: Button just speaks a phrase or plays audio.
             activeOriginatingButtonText = null;
+            
+            // Check if we should return to a TEMPORARY navigation source
+            const tempNavReturn = sessionStorage.getItem('tempNavReturnPage');
+            if (tempNavReturn) {
+                console.log('🔄 TEMPORARY navigation: Returning to original page after speech:', tempNavReturn);
+                sessionStorage.removeItem('tempNavReturnPage');
+                
+                if (speechPhrase) {
+                    await announce(speechPhrase, "system");
+                    // Record chat history for user speech selection
+                    console.log('🎯 GRIDPAGE Recording temp nav speech before return:', speechPhrase);
+                    recordChatHistory("", speechPhrase).catch(error => {
+                        console.error('Failed to record chat history for temp nav speech:', error);
+                    });
+                }
+                
+                // Play custom MP3 audio file if assigned
+                if (customAudioFile) {
+                    await playCustomButtonAudio(customAudioFile);
+                }
+                
+                // Return to original page
+                window.location.href = `gridpage.html?page=${tempNavReturn}`;
+                return;
+            }
+            
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
                 await announce(speechPhrase, "system");
@@ -2481,12 +2422,12 @@ async function processAnnouncementQueue() {
     }
 
     isAnnouncingNow = true;
-    const { textToAnnounce, announcementType, recordHistory, resolve, reject } = announcementQueue.shift(); 
+    const { textToAnnounce, announcementType, recordHistory, showSplash, resolve, reject } = announcementQueue.shift(); 
 
     console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
-    // Show splash screen if enabled
-    if (typeof showSplashScreen === 'function') {
+    // Show splash screen if enabled and requested
+    if (typeof showSplashScreen === 'function' && showSplash !== false) {
         showSplashScreen(textToAnnounce);
     }
 
@@ -2543,8 +2484,36 @@ async function processAnnouncementQueue() {
 
 // --- Announce Function (MODIFIED to use the queue) ---
 // This function will now queue up messages for sequential playback.
-async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
+async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true) {
     console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
+    
+    // Special handling for RANDOM choice - detect {RANDOM:option1|option2|option3} pattern
+    // Trim the input first to handle any whitespace issues
+    const trimmedText = textToAnnounce.trim();
+    const randomPattern = /^\{RANDOM:(.+)\}$/;
+    const randomMatch = trimmedText.match(randomPattern);
+    
+    if (randomMatch) {
+        // Extract options and split by pipe delimiter
+        const options = randomMatch[1].split('|').map(opt => opt.trim()).filter(opt => opt.length > 0);
+        
+        if (options.length > 0) {
+            // Randomly select one option
+            const selectedOption = options[Math.floor(Math.random() * options.length)];
+            console.log(`RANDOM CHOICE: Selected "${selectedOption}" from ${options.length} options`);
+            console.log(`RANDOM CHOICE DEBUG: Original length=${textToAnnounce.length}, Trimmed length=${trimmedText.length}`);
+            
+            // Replace textToAnnounce with the selected option
+            textToAnnounce = selectedOption;
+        } else {
+            console.warn('RANDOM CHOICE: No valid options found, using original text');
+        }
+    } else if (trimmedText.startsWith('{RANDOM:')) {
+        // Pattern didn't match but it looks like it should be RANDOM - log for debugging
+        console.warn('RANDOM CHOICE: Pattern detected but regex failed to match');
+        console.warn('RANDOM CHOICE DEBUG: Text =', JSON.stringify(textToAnnounce));
+        console.warn('RANDOM CHOICE DEBUG: Trimmed =', JSON.stringify(trimmedText));
+    }
     
     // Special handling for jokes - detect if text contains a question followed by an answer
     const jokePattern = /^(.+\?)\s*(.+[!.])$/;
@@ -2562,6 +2531,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 textToAnnounce: question,
                 announcementType,
                 recordHistory: false, // Don't record the split parts
+                showSplash: showSplash,
                 resolve,
                 reject
             });
@@ -2577,6 +2547,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 textToAnnounce: punchline,
                 announcementType,
                 recordHistory, // Record the full joke in history if requested
+                showSplash: showSplash,
                 resolve,
                 reject
             });
@@ -2590,6 +2561,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
             textToAnnounce,
             announcementType,
             recordHistory,
+            showSplash,
             resolve, // Store the resolve function of this promise
             reject   // Store the reject function of this promise
         });
@@ -2649,7 +2621,7 @@ function startAuditoryScanning() {
                 
                 // Announce that scanning is paused using the proper audio system
                 try {
-                    await announce("Scanning paused", "system", false);
+                    await announce("Scanning paused", "system", false, false);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -2684,7 +2656,7 @@ async function speakAndHighlight(button) {
     try {
         const textToSpeak = button.textContent;
         // Use backend TTS instead of browser speech synthesis
-        await announce(textToSpeak, "system", false);
+        await announce(textToSpeak, "system", false, false);
     } catch (e) { console.error("Speech synthesis error:", e); }
 }
 
@@ -2711,7 +2683,7 @@ async function resumeAuditoryScanning() {
     
     // Announce that scanning is resumed using the proper audio system
     try {
-        await announce("Scanning resumed", "system", false);
+        await announce("Scanning resumed", "system", false, false);
     } catch (e) { 
         console.error("Speech synthesis error:", e); 
     }
@@ -2799,16 +2771,16 @@ async function generateLlmButtons(options) {
                 imageElement.style.display = 'none';
             };
             
-            // Text footer (edge to edge, no margins)
+            // Text footer (overlays bottom of image)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '18px';
+            textFooter.style.height = '28px'; // Taller to accommodate 2 rows
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '1px 2px';
+            textFooter.style.padding = '2px 4px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
             textFooter.style.position = 'absolute';

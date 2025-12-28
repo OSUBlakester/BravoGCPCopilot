@@ -179,23 +179,34 @@ class MoodSelection {
     async show(onComplete) {
         this.onComplete = onComplete;
         
-        // Check if mood selection is enabled in settings
-        const isEnabled = await this.isMoodSelectionEnabled();
-        if (!isEnabled) {
-            console.log('Mood selection is disabled in settings');
+        try {
+            // Check if mood selection is enabled in settings
+            const isEnabled = await this.isMoodSelectionEnabled();
+            if (!isEnabled) {
+                console.log('Mood selection is disabled in settings');
+                if (this.onComplete) this.onComplete(null);
+                return;
+            }
+
+            // Check if mood was already set this session
+            const existingMood = sessionStorage.getItem('currentSessionMood');
+            if (existingMood) {
+                console.log('Mood already set for this session:', existingMood);
+                if (this.onComplete) this.onComplete(existingMood);
+                return;
+            }
+
+            // Only show loading overlay if we're actually going to show mood selection
+            const loadingOverlay = this.showLoadingOverlay();
+                return;
+            }
+
+            await this.createMoodInterface();
+        } catch (error) {
+            console.error('Error showing mood selection:', error);
+            this.removeLoadingOverlay();
             if (this.onComplete) this.onComplete(null);
-            return;
         }
-
-        // Check if mood was already set this session
-        const existingMood = sessionStorage.getItem('currentSessionMood');
-        if (existingMood) {
-            console.log('Mood already set for this session:', existingMood);
-            if (this.onComplete) this.onComplete(existingMood);
-            return;
-        }
-
-        this.createMoodInterface();
     }
 
     /**
@@ -227,39 +238,212 @@ class MoodSelection {
     }
 
     /**
+     * Pre-fetch all mood images in batch to avoid timeout issues
+     * @param {Function} progressCallback - Optional callback to report progress (current, total)
+     */
+    async prefetchMoodImages(progressCallback = null) {
+        // Check enablePictograms - try window.enablePictograms first, fallback to checking settings
+        let pictogramsEnabled = false;
+        if (typeof window.enablePictograms !== 'undefined') {
+            pictogramsEnabled = window.enablePictograms;
+            console.log('📷 Using window.enablePictograms:', pictogramsEnabled);
+        } else {
+            // Load from settings if not available yet
+            try {
+                const fetchFunction = window.authenticatedFetch || fetch;
+                const response = await fetchFunction('/api/settings', {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    const settings = await response.json();
+                    pictogramsEnabled = settings.enablePictograms === true;
+                    console.log('📷 Loaded enablePictograms from settings:', pictogramsEnabled);
+                }
+            } catch (error) {
+                console.warn('Failed to load enablePictograms setting:', error);
+            }
+        }
+        
+        if (!pictogramsEnabled) {
+            console.log('Pictograms disabled, skipping mood image prefetch');
+            return new Map(); // Return empty map
+        }
+        
+        const imageMap = new Map();
+        const moodNames = MOOD_OPTIONS.map(m => m.name);
+        
+        console.log('🎨 Pre-fetching mood images in batch...');
+        
+        let completed = 0;
+        
+        // Fetch images in parallel but with staggered timing to avoid overwhelming backend
+        const promises = moodNames.map((name, index) => {
+            return new Promise(resolve => {
+                // Stagger requests by 50ms each (1 second total for all 20 moods)
+                setTimeout(async () => {
+                    try {
+                        if (typeof getSymbolImageForText === 'function') {
+                            const imageUrl = await getSymbolImageForText(name);
+                            if (imageUrl) {
+                                imageMap.set(name, imageUrl);
+                                console.log(`✅ Pre-fetched image for mood: ${name}`);
+                            } else {
+                                console.log(`❌ No image found for mood: ${name}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`Error pre-fetching mood image for ${name}:`, error);
+                    }
+                    completed++;
+                    if (progressCallback) {
+                        progressCallback(completed, moodNames.length);
+                    }
+                    resolve();
+                }, index * 50); // 50ms stagger
+            });
+        });
+        
+        await Promise.all(promises);
+        console.log(`🎨 Pre-fetch complete: ${imageMap.size}/${moodNames.length} mood images loaded`);
+        
+        return imageMap;
+    }
+    
+    /**
+     * Shows a loading overlay during mood image prefetch
+     */
+    showLoadingOverlay() {
+        // Ensure document.body is ready
+        if (!document.body) {
+            console.warn('Document body not ready, deferring overlay creation');
+            // Wait for DOM to be ready
+            if (document.readyState === 'loading') {
+                return new Promise(resolve => {
+                    document.addEventListener('DOMContentLoaded', () => {
+                        resolve(this.showLoadingOverlay());
+                    });
+                });
+            }
+            return null;
+        }
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'mood-loading-overlay';
+        overlay.id = 'mood-loading-overlay';
+        // Add critical inline styles to ensure it shows immediately even if CSS not loaded
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #003366;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        `;
+        
+        const container = document.createElement('div');
+        container.className = 'mood-loading-container';
+        
+        const spinner = document.createElement('div');
+        spinner.className = 'mood-loading-spinner';
+        
+        const headline = document.createElement('div');
+        headline.className = 'mood-loading-headline';
+        headline.textContent = 'Welcome to Bravo!';
+        
+        const text = document.createElement('div');
+        text.className = 'mood-loading-text';
+        text.textContent = 'Loading user data...';
+        
+        const progress = document.createElement('div');
+        progress.className = 'mood-loading-progress';
+        progress.id = 'mood-loading-progress';
+        progress.textContent = '0%';
+        
+        container.appendChild(spinner);
+        container.appendChild(headline);
+        container.appendChild(text);
+        container.appendChild(progress);
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
+        
+        return overlay;
+    }
+    
+    /**
+     * Updates loading progress
+     */
+    updateLoadingProgress(current, total) {
+        const progressEl = document.getElementById('mood-loading-progress');
+        if (progressEl) {
+            const percent = Math.round((current / total) * 100);
+            progressEl.textContent = `${percent}%`;
+        }
+    }
+    
+    /**
+     * Removes loading overlay
+     */
+    removeLoadingOverlay() {
+        const overlay = document.getElementById('mood-loading-overlay');
+        if (overlay) {
+            overlay.remove();
+        }
+    }
+
+    /**
      * Creates the mood selection interface
      */
     async createMoodInterface() {
-        // Initialize avatar generation
-        await this.initializeAvatarGeneration();
-        
-        // Remove existing overlay if it exists
-        this.removeMoodInterface();
+        try {
+            // Initialize avatar generation
+            await this.initializeAvatarGeneration();
+            
+            console.log('🎨 Starting mood image prefetch...');
+            
+            // Pre-fetch mood images to avoid timeouts during display
+            const moodImageMap = await this.prefetchMoodImages((current, total) => {
+                console.log(`📊 Progress: ${current}/${total}`);
+                this.updateLoadingProgress(current, total);
+            });
+            
+            console.log('✅ Mood image prefetch complete');
+            
+            // Remove loading overlay
+            this.removeLoadingOverlay();
+            
+            // Remove existing overlay if it exists
+            this.removeMoodInterface();
 
-        // Create overlay
-        this.moodOverlay = document.createElement('div');
-        this.moodOverlay.className = 'mood-selection-overlay';
-        this.moodOverlay.id = 'mood-selection-overlay';
+            // Create overlay
+            this.moodOverlay = document.createElement('div');
+            this.moodOverlay.className = 'mood-selection-overlay';
+            this.moodOverlay.id = 'mood-selection-overlay';
 
-        // Create container
-        const container = document.createElement('div');
-        container.className = 'mood-selection-container';
+            // Create container
+            const container = document.createElement('div');
+            container.className = 'mood-selection-container';
 
-        // Create title
-        const title = document.createElement('h2');
-        title.className = 'mood-selection-title';
-        title.textContent = 'How are you feeling today?';
+            // Create title
+            const title = document.createElement('h2');
+            title.className = 'mood-selection-title';
+            title.textContent = 'How are you feeling today?';
 
-        // Create subtitle
-        const subtitle = document.createElement('p');
-        subtitle.className = 'mood-selection-subtitle';
-        subtitle.textContent = 'Select your current mood to help personalize your experience';
+            // Create subtitle
+            const subtitle = document.createElement('p');
+            subtitle.className = 'mood-selection-subtitle';
+            subtitle.textContent = 'Select your current mood to help personalize your experience';
 
-        // Create mood grid
-        const moodGrid = document.createElement('div');
-        moodGrid.className = 'mood-grid';
+            // Create mood grid
+            const moodGrid = document.createElement('div');
+            moodGrid.className = 'mood-grid';
 
-        // Add mood buttons with image matching (same as tap/grid pages)
+        // Add mood buttons with pre-fetched images
         for (const mood of MOOD_OPTIONS) {
             const button = document.createElement('button');
             button.className = 'mood-button';
@@ -269,33 +453,34 @@ class MoodSelection {
             const imageContainer = document.createElement('div');
             imageContainer.className = 'mood-image-container';
             
-            // Try to get image using getSymbolImageForText (same as tap interface - no emoji fallbacks)
-            if (typeof getSymbolImageForText === 'function') {
-                getSymbolImageForText(mood.name).then(imageUrl => {
-                    console.log(`🎯 Image result for mood "${mood.name}": ${imageUrl ? 'Found' : 'Not found'}`);
-                    if (imageUrl) {
-                        // Clear any existing content and add image
-                        imageContainer.innerHTML = '';
-                        const imageElement = document.createElement('img');
-                        imageElement.className = 'mood-image';
-                        imageElement.src = imageUrl;
-                        imageElement.alt = mood.name;
-                        
-                        // No emoji fallback on image error - just hide broken image
-                        imageElement.onerror = () => {
-                            console.warn(`Failed to load image for ${mood.name} - using text-only display`);
-                            imageElement.style.display = 'none';
-                        };
-                        
-                        imageContainer.appendChild(imageElement);
-                    }
-                    // No fallback - if no image found, just show text
-                }).catch(error => {
-                    console.warn(`Error loading image for ${mood.name}:`, error);
-                    // No emoji fallback on error - just show text
-                });
+            // Check if we have a pre-fetched image for this mood
+            const imageUrl = moodImageMap.get(mood.name);
+            
+            if (imageUrl) {
+                // Use pre-fetched image
+                const imageElement = document.createElement('img');
+                imageElement.className = 'mood-image';
+                imageElement.src = imageUrl;
+                imageElement.alt = mood.name;
+                
+                // Fallback to emoji on image load error
+                imageElement.onerror = () => {
+                    console.warn(`Failed to load pre-fetched image for ${mood.name} - falling back to emoji`);
+                    imageContainer.innerHTML = '';
+                    const emojiSpan = document.createElement('span');
+                    emojiSpan.className = 'mood-emoji';
+                    emojiSpan.textContent = mood.emoji;
+                    imageContainer.appendChild(emojiSpan);
+                };
+                
+                imageContainer.appendChild(imageElement);
+            } else {
+                // No image available (either pictograms disabled, not found, or error) - use emoji
+                const emojiSpan = document.createElement('span');
+                emojiSpan.className = 'mood-emoji';
+                emojiSpan.textContent = mood.emoji;
+                imageContainer.appendChild(emojiSpan);
             }
-            // No initial placeholder - clean start
             
             const name = document.createElement('div');
             name.className = 'mood-name';
@@ -352,6 +537,14 @@ class MoodSelection {
             const firstButton = moodGrid.querySelector('.mood-button');
             if (firstButton) {
                 firstButton.focus();
+            }
+        }
+        } catch (error) {
+            console.error('Error creating mood interface:', error);
+            this.removeLoadingOverlay();
+            // Call completion callback with null on error
+            if (this.onComplete) {
+                this.onComplete(null);
             }
         }
     }
