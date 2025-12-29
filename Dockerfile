@@ -35,7 +35,7 @@ RUN pip install uv
 RUN mkdir -p /keys
 
 # Cloud Run expects the application to listen on the port specified by the PORT environment variable
-ENV PORT 8080
+ENV PORT=8080
 ENV PYTHONPATH=/app
 
 # Environment will be set by Cloud Run deployment
@@ -52,4 +52,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # --error-logfile - : direct errors to stderr (Cloud Logging captures stderr well)
 # --access-logfile - : direct access logs to stdout
 # --log-file - : (deprecated/overridden) should not be used if using above
-CMD ["sh", "-c", "exec gunicorn --worker-class uvicorn.workers.UvicornWorker --bind \"0.0.0.0:$PORT\" server:app --error-logfile - --access-logfile -"]
+# Using array format for Cloud Code compatibility
+CMD ["python", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]

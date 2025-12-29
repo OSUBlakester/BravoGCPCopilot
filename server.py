@@ -1,5 +1,11 @@
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (if present)
+# This allows local python execution to work, while Cloud Run/Cloud Code
+# will rely on injected environment variables.
+load_dotenv()
 
 # Force rebuild 2025-12-13
 # Security: Remove debug prints of sensitive environment variables

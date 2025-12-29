@@ -169,3 +169,4 @@ yarl==1.20.0
 zipp==3.22.0
 firebase-admin
 openai==1.61.0
+debugpy>=1.8.0
