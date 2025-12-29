@@ -22,6 +22,10 @@ Required Environment Variables:
 
 import os
 from typing import Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Environment detection
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'development').lower()

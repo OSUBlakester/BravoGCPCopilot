@@ -89,7 +89,6 @@ test_llm_http.py
 test_llm_recovery.py
 user_vectors.json
 create_test_favorite.py
-config_secure.py
 config.py.template
 birthdays.json
 audio_config.json
