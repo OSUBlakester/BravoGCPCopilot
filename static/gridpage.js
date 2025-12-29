@@ -1145,23 +1145,14 @@ async function generateGrid(page, container) {
         const button = document.createElement('button');
         
         // Check if this is a sight word - if so, render as text-only
-        if (window.sightWordService && await window.sightWordService.isSightWord(buttonData.text)) {
+        if (window.isSightWord && window.isSightWord(buttonData.text)) {
             console.log('[SIGHT WORD] Rendering text-only button for:', buttonData.text);
             button.textContent = buttonData.text;
             button.classList.add('sight-word-button');
-            /*
-            button.style.fontSize = '1.8em';
-            button.style.fontWeight = 'bold';
-            button.style.color = '#333';
-            button.style.backgroundColor = '#f8f9fa';
-            button.style.border = '2px solid #ddd';
-            button.style.borderRadius = '8px';
-            button.style.display = 'flex';
-            button.style.alignItems = 'center';
-            button.style.justifyContent = 'center';
-            button.style.textAlign = 'center';
-            button.style.padding = '8px';
-            */
+            // Apply inline styles for sight words (bigger, bolder, red text)
+            button.style.fontSize = '2.2em';
+            button.style.fontWeight = '900';
+            button.style.color = '#dc2626';
         } else {
             // Check for manually assigned image first, then search if not found
             let symbolImageUrl = buttonData.assigned_image_url || null;
@@ -1247,14 +1238,19 @@ async function generateGrid(page, container) {
         button.dataset.targetPage = buttonData.targetPage || '';
         button.dataset.speechPhrase = buttonData.speechPhrase || '';
         button.dataset.queryType = buttonData.queryType || '';
-        button.className = 'grid-button'; // Add class for CSS styling
+        button.classList.add('grid-button'); // Add class for CSS styling (preserves sight-word-button if already set)
         button.style.gridRowStart = currentRow + 1;
         button.style.gridColumnStart = currentCol + 1;
-        button.style.padding = '0'; // Remove all padding
-        button.style.margin = '0'; // Remove all margin
-        button.style.border = 'none'; // Remove border
-        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
-        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
+        
+        // Only apply these inline styles for non-sight-word buttons (they would override CSS class)
+        if (!button.classList.contains('sight-word-button')) {
+            button.style.padding = '0'; // Remove all padding
+            button.style.margin = '0'; // Remove all margin
+            button.style.border = 'none'; // Remove border
+            button.style.position = 'relative'; // Allow for absolute positioning of text overlay
+            button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
+        }
+        
         button.addEventListener('click', debounce(() => handleButtonClick(buttonData), clickDebounceDelay));
         
         return button;

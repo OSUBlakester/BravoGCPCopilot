@@ -21,6 +21,7 @@ class AudioInterviewSystem {
         this.recognition = null;
         this.isListening = false;
         this.currentRecognizedText = '';
+        this.accumulatedText = ''; // Initialize accumulated text for multi-pause responses
         
         // TTS
         this.ttsEnabled = true;
@@ -192,25 +193,36 @@ class AudioInterviewSystem {
             let interimTranscript = '';
             let finalTranscript = '';
             
+            console.log('[INTERVIEW DEBUG] onresult fired. resultIndex:', event.resultIndex, 'total results:', event.results.length);
+            console.log('[INTERVIEW DEBUG] Accumulated text before processing:', this.accumulatedText);
+            
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
                     finalTranscript += transcript;
+                    console.log('[INTERVIEW DEBUG] Final transcript chunk:', transcript);
                 } else {
                     interimTranscript += transcript;
+                    console.log('[INTERVIEW DEBUG] Interim transcript chunk:', transcript);
                 }
             }
             
-            // Append new text to any existing accumulated text
-            const newText = finalTranscript || interimTranscript;
-            if (newText.trim()) {
-                // Add a space between accumulated segments if needed
+            // If we have final results, permanently add them to accumulated text
+            if (finalTranscript.trim()) {
                 const separator = (this.accumulatedText && this.accumulatedText.trim()) ? ' ' : '';
-                this.currentRecognizedText = (this.accumulatedText || '') + separator + newText.trim();
+                this.accumulatedText = (this.accumulatedText || '') + separator + finalTranscript.trim();
+                console.log('[INTERVIEW DEBUG] Final transcript added. New accumulated text:', this.accumulatedText);
+            }
+            
+            // Current recognized text includes accumulated (final) text + interim (in-progress) text
+            if (interimTranscript.trim()) {
+                const separator = (this.accumulatedText && this.accumulatedText.trim()) ? ' ' : '';
+                this.currentRecognizedText = (this.accumulatedText || '') + separator + interimTranscript.trim();
             } else {
                 this.currentRecognizedText = this.accumulatedText || '';
             }
             
+            console.log('[INTERVIEW DEBUG] Current recognized text:', this.currentRecognizedText);
             this.recognizedText.textContent = this.currentRecognizedText || '(Listening...)';
             
             // Show confirm button if we have any text
@@ -241,12 +253,14 @@ class AudioInterviewSystem {
         this.recognition.onend = () => {
             this.isListening = false;
             
-            // Save any final text to accumulated text for continuation
-            if (this.currentRecognizedText && this.currentRecognizedText.trim()) {
-                this.accumulatedText = this.currentRecognizedText;
-            }
+            console.log('[INTERVIEW DEBUG] Recognition ended. Current accumulated text:', this.accumulatedText);
+            console.log('[INTERVIEW DEBUG] Recognition ended. Current recognized text:', this.currentRecognizedText);
             
-            if (this.currentRecognizedText.length < 1) {
+            // Don't override accumulatedText here - it's already updated in onresult
+            // Just ensure currentRecognizedText matches accumulated text
+            this.currentRecognizedText = this.accumulatedText || '';
+            
+            if (!this.accumulatedText || this.accumulatedText.length < 1) {
                 // No speech detected yet - keep trying to listen
                 this.updateStatus('Listening for your response...', 'listening');
                 
@@ -525,7 +539,10 @@ class AudioInterviewSystem {
             return;
         }
         
+        console.log('[INTERVIEW DEBUG] Continue listening. Accumulated text:', this.accumulatedText);
+        
         // Don't clear accumulated text - continue building on existing response
+        this.currentRecognizedText = this.accumulatedText || '';
         this.recognizedText.textContent = this.currentRecognizedText || '(Listening...)';
         
         try {
