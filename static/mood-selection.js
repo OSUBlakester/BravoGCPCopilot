@@ -198,8 +198,6 @@ class MoodSelection {
 
             // Only show loading overlay if we're actually going to show mood selection
             const loadingOverlay = this.showLoadingOverlay();
-                return;
-            }
 
             await this.createMoodInterface();
         } catch (error) {

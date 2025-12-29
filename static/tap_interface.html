@@ -321,6 +321,13 @@
             transform: scale(1.02);
         }
 
+        /* Sight Word Styling - distinctive format for sight words */
+        .sight-word-button {
+            font-size: 1.65em !important;
+            font-weight: 900 !important;
+            color: #dc2626 !important;
+        }
+
         .options-grid-container {
             display: flex;
             flex-direction: column;
@@ -1155,6 +1162,9 @@
     </div>
     </div> <!-- End of app-container -->
 
+    <!-- Sight Word Service -->
+    <script src="/static/sight-word-service.js"></script>
+
     <script>
         // Authentication variables (same pattern as gridpage)
         let currentAacUserId = null;
@@ -1253,6 +1263,12 @@
             console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
             if (!text || text.trim() === '') {
                 console.log(`❌ Empty text provided to getSymbolImageForText`);
+                return null;
+            }
+            
+            // Check if this text is a sight word - if so, force text-only display (no images)
+            if (window.isSightWord && window.isSightWord(text)) {
+                console.log(`🔤 Tap interface sight word detected: "${text}" - using text-only display`);
                 return null;
             }
             
@@ -1821,17 +1837,23 @@
                 const categoryBtn = document.createElement('button');
                 categoryBtn.className = 'category-button';
                 
+                // Check if this is a sight word - if so, apply special styling and skip images
+                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                
                 // Only apply custom background if specified in config, otherwise let CSS handle it
                 if (button.background_color && button.background_color !== '#FFFFFF') {
                     categoryBtn.style.backgroundColor = button.background_color;
                 }
                 
-                categoryBtn.style.color = button.text_color || '#000000';
+                if (!isSightWord) {
+                    categoryBtn.style.color = button.text_color || '#000000';
+                }
                 
-                // Add Firestore image support for categories (like gridpage) - always attempt for debugging  
-                console.log(`🔍 Attempting image load for category: "${button.label}"`);
-                getSymbolImageForText(button.label).then(imageUrl => {
-                    console.log(`🎯 Image result for "${button.label}": ${imageUrl ? 'Found' : 'Not found'}`);
+                // Add Firestore image support for categories (like gridpage) - skip for sight words
+                if (!isSightWord) {
+                    console.log(`🔍 Attempting image load for category: "${button.label}"`);
+                    getSymbolImageForText(button.label).then(imageUrl => {
+                        console.log(`🎯 Image result for "${button.label}": ${imageUrl ? 'Found' : 'Not found'}`);
                         if (imageUrl) {
                             // Create image + text layout like gridpage
                             categoryBtn.innerHTML = '';
@@ -1887,9 +1909,22 @@
                     }).catch(error => {
                         console.error('Error loading image for category button:', error);
                     });
+                }
                 
                 // Set initial text (will be replaced by image if found)
-                categoryBtn.textContent = button.label;
+                // For sight words, apply special styling
+                if (isSightWord) {
+                    console.log('[SIGHT WORD] Rendering text-only button for:', button.label);
+                    categoryBtn.classList.add('sight-word-button');
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = button.label;
+                    textSpan.style.fontSize = '1.25em';
+                    textSpan.style.fontWeight = '900';
+                    textSpan.style.color = '#dc2626';
+                    categoryBtn.appendChild(textSpan);
+                } else {
+                    categoryBtn.textContent = button.label;
+                }
                 
                 categoryBtn.addEventListener('click', async (event) => {
                     console.log(`[DEBUG] Button clicked: ${button.label}`);
@@ -2549,15 +2584,16 @@
                         fullOption = text;
                     }
                     
-                    // Set initial text first
-                    btn.textContent = displayText;
+                    // Check if displayText is a sight word - if so, skip image loading
+                    const isSightWord = window.isSightWord && window.isSightWord(displayText);
                     
-                    // Add Firestore image support (like gridpage) - always attempt for debugging
-                    console.log(`🔍 Attempting image load for phrase: "${speechText}"`);
-                    const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
-                    getSymbolImageForText(speechText, phraseKeywords).then(imageUrl => {
-                        console.log(`🎯 Image result for "${speechText}": ${imageUrl ? 'Found' : 'Not found'}`);
-                        if (imageUrl) {
+                    // Add Firestore image support (like gridpage) - skip for sight words
+                    if (!isSightWord) {
+                        console.log(`🔍 Attempting image load for phrase: "${speechText}"`);
+                        const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                        getSymbolImageForText(speechText, phraseKeywords).then(imageUrl => {
+                            console.log(`🎯 Image result for "${speechText}": ${imageUrl ? 'Found' : 'Not found'}`);
+                            if (imageUrl) {
                             // Create image + text layout like gridpage
                             btn.innerHTML = '';
                             const buttonContent = document.createElement('div');
@@ -2607,9 +2643,25 @@
                             buttonContent.appendChild(textFooter);
                             btn.appendChild(buttonContent);
                         }
-                    }).catch(error => {
-                        console.error('Error loading image for phrase button:', error);
-                    });
+                        }).catch(error => {
+                            console.error('Error loading image for phrase button:', error);
+                        });
+                    }
+                    
+                    // Set initial text (will be replaced by image if found)
+                    // For sight words, apply special styling
+                    if (isSightWord) {
+                        console.log('[SIGHT WORD] Rendering text-only phrase button for:', displayText);
+                        btn.classList.add('sight-word-button');
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = displayText;
+                        textSpan.style.fontSize = '1.00em';
+                        textSpan.style.fontWeight = '900';
+                        textSpan.style.color = '#dc2626';
+                        btn.appendChild(textSpan);
+                    } else {
+                        btn.textContent = displayText;
+                    }
                     
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
@@ -3325,10 +3377,14 @@
                     // Handle freestyle word format {text: "word", keywords: []}
                     const text = option.text || option;
                     
-                    // Add Firestore image support for words (like gridpage) - always attempt for debugging
-                    console.log(`🔍 Attempting image load for word: "${text}"`);
-                    getSymbolImageForText(text).then(imageUrl => {
-                        console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
+                    // Check if this is a sight word - if so, skip image loading
+                    const isSightWord = window.isSightWord && window.isSightWord(text);
+                    
+                    // Add Firestore image support for words (like gridpage) - skip for sight words
+                    if (!isSightWord) {
+                        console.log(`🔍 Attempting image load for word: "${text}"`);
+                        getSymbolImageForText(text).then(imageUrl => {
+                            console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
                             if (imageUrl) {
                                 // Create image + text layout like gridpage
                                 btn.innerHTML = '';
@@ -3379,12 +3435,25 @@
                                 buttonContent.appendChild(textFooter);
                                 btn.appendChild(buttonContent);
                             }
-                    }).catch(error => {
-                        console.error('Error loading image for word button:', error);
-                    });
+                        }).catch(error => {
+                            console.error('Error loading image for word button:', error);
+                        });
+                    }
                     
                     // Set initial text (will be replaced by image if found)
-                    btn.textContent = text;
+                    // For sight words, apply special styling
+                    if (isSightWord) {
+                        console.log('[SIGHT WORD] Rendering text-only freestyle button for:', text);
+                        btn.classList.add('sight-word-button');
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = text;
+                        textSpan.style.fontSize = '1.25em';
+                        textSpan.style.fontWeight = '900';
+                        textSpan.style.color = '#dc2626';
+                        btn.appendChild(textSpan);
+                    } else {
+                        btn.textContent = text;
+                    }
                     
                     btn.addEventListener('click', async () => {
                         // SIMPLIFIED LOGIC: 
