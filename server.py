@@ -1450,8 +1450,8 @@ SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embedding
 
 # LLM Model Configuration - Environment Variables
 # Gemini Models
-GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "models/gemini-1.5-flash-latest")
-GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "models/gemini-pro")
+GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-1.5-flash-latest")
+GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-1.5-flash-latest")
 
 # ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
 # GPT-4o/4o-mini use: max_tokens, adjustable temperature
@@ -1514,7 +1514,8 @@ DEFAULT_SETTINGS = {
     "enableSightWords": True,  # Default sight word logic enabled
     "sightWordGradeLevel": "pre_k",  # Default sight word grade level
     "useTapInterface": False,  # Default to gridpage interface
-    "applicationVolume": 8  # Default application volume (80%)
+    "applicationVolume": 8,  # Default application volume (80%)
+    "spellLetterOrder": "alphabetical"  # Default spell page letter order
 }
 
 
@@ -5627,6 +5628,7 @@ class SettingsModel(BaseModel):
     sightWordGradeLevel: Optional[str] = Field(None, description="Dolch sight word grade level for text-only buttons (pre_k, kindergarten, first_grade, second_grade, third_grade, third_grade_with_nouns)")
     useTapInterface: Optional[bool] = Field(None, description="Use tap interface as main interface instead of gridpage")
     applicationVolume: Optional[int] = Field(None, description="Application volume level 0-10", ge=0, le=10)
+    spellLetterOrder: Optional[str] = Field(None, description="Letter order for spell page: 'alphabetical', 'qwerty', or 'frequency'")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -5642,6 +5644,17 @@ class SettingsModel(BaseModel):
     def ensure_uppercase_codes(cls, value: Any) -> Optional[str]:
         if isinstance(value, str) and value:
             return value.strip().upper() # Add strip here too
+        return value
+    
+    @field_validator('spellLetterOrder', mode='before')
+    @classmethod
+    def validate_spell_letter_order(cls, value: Any) -> Optional[str]:
+        if isinstance(value, str) and value:
+            value = value.strip().lower()
+            if value in ['alphabetical', 'qwerty', 'frequency']:
+                return value
+            else:
+                raise ValueError(f"Invalid spellLetterOrder value: {value}. Must be 'alphabetical', 'qwerty', or 'frequency'")
         return value
     
 
