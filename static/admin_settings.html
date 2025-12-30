@@ -504,6 +504,11 @@
                     <p class="text-xs text-gray-500 mt-1">Adjust the number of columns to control button size (2 = largest buttons, 18 = smallest buttons).</p>
                 </div>
                 <div>
+                    <label for="enablePictograms" class="block text-lg font-medium text-gray-700 mb-2">Enable Pictograms</label>
+                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Show pictogram images on buttons. <strong>Note:</strong> This setting only applies to the Auditory Scanning interface. Pictograms are automatically enabled for the Tap Interface.</p>
+                </div>
+                <div>
                     <label for="enableSightWords" class="block text-lg font-medium text-gray-700 mb-2">Enable Sight Word Logic</label>
                     <input type="checkbox" id="enableSightWords" name="enableSightWords" class="enablesightwords-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                     <p class="text-xs text-gray-500 mt-1">Use Dolch sight word logic to show sight words as text-only (no pictograms). When disabled, all words will show pictograms if pictograms are enabled.</p>
@@ -519,6 +524,15 @@
                         <option value="third_grade_with_nouns">Third Grade + Nouns (complete list)</option>
                     </select>
                     <p class="text-xs text-gray-500 mt-1">Dolch sight words at or below this level will show as text-only buttons (no pictograms) even when pictograms are enabled. Selection is cumulative - higher grades include all lower grade words.</p>
+                </div>
+                <div>
+                    <label for="spellLetterOrder" class="block text-lg font-medium text-gray-700 mb-2">Spell Page Letter Order:</label>
+                    <select id="spellLetterOrder" name="spellLetterOrder" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="alphabetical">Alphabetical (A-Z)</option>
+                        <option value="qwerty">QWERTY Keyboard</option>
+                        <option value="frequency">Frequency-Based</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Letter arrangement for the Spell page in Tap Interface.</p>
                 </div>
             </div>
         </div>
@@ -542,10 +556,6 @@
                 <div class="flex items-center">
                     <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
                     <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
-                </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="mr-2 w-5 h-5">
-                    <label for="enablePictograms" class="text-lg font-medium text-gray-700">Enable Pictograms</label>
                 </div>
             </div>
         </div>

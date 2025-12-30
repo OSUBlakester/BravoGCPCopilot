@@ -62,6 +62,7 @@ const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
 const testTtsVoiceButton = document.getElementById('testTtsVoiceButton');
 const ttsVoiceStatus = document.getElementById('tts-voice-status');
 const toolbarPINInput = document.getElementById('toolbarPIN');
+const spellLetterOrderSelect = document.getElementById('spellLetterOrder');
 // Grid slider elements will be assigned in initializePage when DOM is ready
 let gridColumnsSlider = null;
 let gridColumnsValue = null;
@@ -217,6 +218,10 @@ async function loadSettings() {
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
             ttsVoiceSelect.value = currentSettings.selected_tts_voice_name;
         }
+        // Load spellLetterOrder setting
+        if (spellLetterOrderSelect) {
+            spellLetterOrderSelect.value = currentSettings.spellLetterOrder || 'alphabetical';
+        }
         // Load gridColumns setting
         if (gridColumnsSlider && currentSettings.gridColumns !== undefined) {
             gridColumnsSlider.value = currentSettings.gridColumns;
@@ -284,7 +289,13 @@ async function saveSettings() {
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
     const newGridColumns = gridColumnsSlider ? parseInt(gridColumnsSlider.value) : 6;
     const newToolbarPIN = toolbarPINInput ? toolbarPINInput.value.trim() : null;
+    const newSpellLetterOrder = spellLetterOrderSelect ? spellLetterOrderSelect.value : 'alphabetical';
 
+    console.log(`Save Settings Debug - Spell Letter Order:
+        - spellLetterOrderSelect exists: ${!!spellLetterOrderSelect}
+        - spellLetterOrderSelect.value: ${spellLetterOrderSelect ? spellLetterOrderSelect.value : 'N/A'}
+        - newSpellLetterOrder: ${newSpellLetterOrder}`);
+    
     console.log(`Save Settings Debug:
         - gridColumnsSlider exists: ${!!gridColumnsSlider}
         - gridColumnsSlider.value: ${gridColumnsSlider ? gridColumnsSlider.value : 'N/A'}
@@ -365,10 +376,12 @@ async function saveSettings() {
         sightWordGradeLevel: newSightWordGradeLevel,
         selected_tts_voice_name: newSelectedTtsVoice,
         llm_provider: newLlmProvider, // Updated to use provider instead of specific model
-        gridColumns: newGridColumns // Add gridColumns to save payload
+        gridColumns: newGridColumns, // Add gridColumns to save payload
+        spellLetterOrder: newSpellLetterOrder // Add spell letter order setting
     };
     console.log('DEBUG FreestyleOptions - Payload value:', settingsToSave.FreestyleOptions);
     console.log('DEBUG enablePictograms - Payload value:', settingsToSave.enablePictograms);
+    console.log('DEBUG spellLetterOrder - Payload value:', settingsToSave.spellLetterOrder);
 
     console.log("Saving settings:", settingsToSave);
     showTemporaryStatus(settingsStatus, 'Saving...', false, 0)
@@ -384,6 +397,7 @@ async function saveSettings() {
 
         currentSettings = await response.json(); // Update local state with response
         console.log('DEBUG enablePictograms - Server response value:', currentSettings.enablePictograms);
+        console.log('DEBUG spellLetterOrder - Server response value:', currentSettings.spellLetterOrder);
         
         if (scanDelayInput) scanDelayInput.value = currentSettings.scanDelay || '';
         if (wakeWordInterjectionInput) wakeWordInterjectionInput.value = currentSettings.wakeWordInterjection || '';
@@ -418,6 +432,13 @@ async function saveSettings() {
         }
         // Update LLM provider select
         if (llmProviderSelect) llmProviderSelect.value = currentSettings.llm_provider || 'gemini';
+        // Update spellLetterOrder select
+        if (spellLetterOrderSelect) {
+            const savedValue = currentSettings.spellLetterOrder || 'alphabetical';
+            console.log('DEBUG spellLetterOrder - Setting dropdown to:', savedValue);
+            spellLetterOrderSelect.value = savedValue;
+            console.log('DEBUG spellLetterOrder - Dropdown now shows:', spellLetterOrderSelect.value);
+        }
         
         // Save toolbar PIN separately (account level)
         if (newToolbarPIN) {
