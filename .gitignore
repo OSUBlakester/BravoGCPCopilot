@@ -124,8 +124,8 @@ compare_outputs.py
 verify_*.py
 list_sample_pages.py
 
-# Migration and conversion utilities
-accent_*.py
+# Migration and conversion utilities - KEEP accent_mti_parser.py and accent_bravo_mapper.py in repo
+accent_mti_parser_backup*.py
 apply_transparency_conversion.py
 
 # Admin interface backups
