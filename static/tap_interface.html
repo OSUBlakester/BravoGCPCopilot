@@ -2039,9 +2039,6 @@
                 return;
             }
             
-            // Show splash screen for loading options
-            showSplashScreen(`Loading ${category.label}...`);
-            
             console.log('Loading phrases for category:', category.label);
             
             // Clear existing options
@@ -2236,9 +2233,6 @@
             // Close modal and load options
             closeModal();
             
-            // Show splash screen for loading options
-            showSplashScreen(`Loading ${subcategory.label}...`);
-
             // Clear existing options and show loading
             llmStaticOptions.innerHTML = '';
             for (let i = 0; i < LLMOptions; i++) {
