@@ -1,0 +1,55 @@
+# Dockerfile for Cloud Run Local Development/Debugging
+# This version uses requirements-cloud-run.txt which excludes GPU dependencies
+# Use this for "Cloud Run: Debug Locally" in VS Code Cloud Code
+FROM python:3.12-slim
+
+# Recommended: Set environment variables for non-interactive commands
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install system dependencies required for psycopg2-binary and others
+# libpq-dev for psycopg2-binary
+# build-essential for general compilation if any other packages need it in the future
+# curl for health checks
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy lightweight requirements for Cloud Run (no GPU deps)
+COPY requirements-cloud-run.txt .
+
+# Install Python dependencies
+RUN pip install --upgrade pip
+RUN pip install --no-cache-dir -r requirements-cloud-run.txt
+
+# Copy the rest of your application code
+COPY . .
+
+# Install uv for MCP server
+RUN pip install uv
+
+# Create keys directory for service account files
+RUN mkdir -p /keys
+
+# Cloud Run expects the application to listen on the port specified by the PORT environment variable
+ENV PORT=8080
+ENV PYTHONPATH=/app
+
+# Environment will be set by Cloud Run deployment
+
+# Expose the port (informative, Cloud Run uses health checks)
+EXPOSE ${PORT}
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT}/health || exit 1
+
+# Command to run your application using Uvicorn
+# Use PORT environment variable from Cloud Run
+# Direct stdout/stderr to the console for Cloud Logging
+CMD ["sh", "-c", "python -m uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080}"]
+
