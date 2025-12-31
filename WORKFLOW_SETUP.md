@@ -1,4 +1,51 @@
-# Git-Centric Workflow Setup Guide
+## Summary
+
+**Your Git-centric workflow is now active!** 🎉
+
+The automated Cloud Build trigger is working correctly. Here's what happens:
+
+1. You (or your collaborator) push code to `main` branch
+2. Cloud Build automatically triggers
+3. Builds Docker image from `Dockerfile.cloudrun`
+4. Pushes to Container Registry
+5. Deploys to `bravo-aac-api` service
+
+**Important Notes:**
+- ✅ Automated deployments update **code only** - they preserve existing service configuration
+- ✅ Environment variables, secrets, memory, CPU settings are **NOT changed** by automated deployments
+- ⚠️ **First deployment to a new environment MUST use `./deploy.sh`** to set all env vars and secrets
+- ⚠️ **Configuration changes** (env vars, memory, secrets) should be done via `./deploy.sh` or GCP Console
+
+## When to Use Each Method
+
+### Use Automated Deployment (Git Push) For:
+- Code changes (new features, bug fixes)
+- UI updates
+- Static file changes
+- Database schema changes (code-side)
+- Most day-to-day development
+
+### Use Manual Deployment (`./deploy.sh`) For:
+- **First-time setup** of a new environment
+- Changing environment variables
+- Updating secrets
+- Changing memory/CPU allocation
+- Changing service configuration (timeout, min instances, etc.)
+
+## Current Status
+
+✅ **Dev Environment** - Trigger configured and working
+- Service: `bravo-aac-api`
+- Project: `bravo-dev-465400`
+- Custom Domain: https://dev.talkwithbravo.com
+- Trigger: Watches `main` branch
+
+⏸️ **Test Environment** - Not configured yet
+⏸️ **Prod Environment** - Not configured yet
+
+---
+
+# Original Setup Instructions Below
 
 This guide will help you set up automated deployments from GitHub to Google Cloud Platform.
 

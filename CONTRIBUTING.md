@@ -98,19 +98,29 @@ skaffold dev --profile cloud-run-dev-internal
 - Check browser console for errors
 - Test on different screen sizes if UI changes were made
 
-### Deployment
+## Deployment
 
 **Automatic Deployment:**
 - Any merge to `main` triggers Cloud Build
 - Cloud Build builds the Docker image
 - Image is deployed to Cloud Run automatically
+- **Code and static files are updated**, service configuration is preserved
 - Monitor deployment in GCP Console > Cloud Build
 
-**Manual Deployment (Emergency Only):**
+**Manual Deployment (for config changes):**
 ```bash
-# Only use if automated deployment fails
-./deploy.sh
+# Use this when you need to change environment variables, secrets, or service settings
+./deploy.sh dev   # Deploy to development
+./deploy.sh test  # Deploy to testing
+./deploy.sh prod  # Deploy to production
 ```
+
+**When to use manual deployment:**
+- First-time environment setup
+- Changing environment variables
+- Updating secrets or API keys
+- Changing memory, CPU, or other service settings
+- Troubleshooting deployment issues
 
 ### Rollback Procedure
 
