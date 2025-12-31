@@ -26,9 +26,6 @@ COPY requirements-cloud-run.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements-cloud-run.txt
 
-# Copy configuration first (explicit to ensure it's included)
-COPY config.py .
-
 # Copy the rest of your application code
 COPY . .
 
