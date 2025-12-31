@@ -12,6 +12,12 @@ steps:
       - '.'
     timeout: '1200s'
 
+  # Push the image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/$_SERVICE_NAME:$COMMIT_SHA'
+
   # Deploy to Cloud Run (matching deploy.sh configuration)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
