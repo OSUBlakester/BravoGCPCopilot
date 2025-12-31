@@ -31,23 +31,6 @@ steps:
       - '$_REGION'
       - '--platform'
       - 'managed'
-      - '--allow-unauthenticated'
-      - '--memory'
-      - '2Gi'
-      - '--cpu'
-      - '1'
-      - '--max-instances'
-      - '10'
-      - '--timeout'
-      - '300'
-      - '--port'
-      - '8080'
-      - '--set-secrets'
-      - 'GOOGLE_API_KEY=bravo-google-api-key:latest'
-      - '--update-env-vars'
-      - 'ENVIRONMENT=$_ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID'
-      - '--min-instances'
-      - '1'
 
 # Images to be pushed to Google Container Registry
 images:
