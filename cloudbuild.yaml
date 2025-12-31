@@ -40,6 +40,8 @@ steps:
       - 'GOOGLE_API_KEY=bravo-google-api-key:latest'
       - '--update-env-vars'
       - 'ENVIRONMENT=$_ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID'
+      - '--min-instances'
+      - '1'
 
 # Images to be pushed to Google Container Registry
 images:

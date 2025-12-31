@@ -1,0 +1,12 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: bravo-aac-api-dev
+build:
+  artifacts:
+  - image: bravo-aac-api-dev
+    docker:
+      dockerfile: Dockerfile.cloudrun
+  local:
+    useBuildkit: true
+    push: false

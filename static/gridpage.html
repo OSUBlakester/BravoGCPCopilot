@@ -50,30 +50,23 @@
 
         /* --- Page Banner Styles --- */
         .page-banner {
-            /* Ensure it matches container rounding if at top */
-            background: rgba(255, 255, 255, 0.95); /* Glassmorphism effect */
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            color: #0f172a; /* Dark slate for contrast */
-            padding: 1rem 2rem;
+            background-color: #002244; /* Solid navy blue like admin pages */
+            color: #FB4F14; /* Orange text */
+            padding: 0.5rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             position: sticky;
             top: 0;
             z-index: 50;
-            border-bottom: 1px solid rgba(0,0,0,0.05);
         }
         .page-banner h1 {
             margin: 0;
-            font-size: 1.5rem;
-            font-weight: 800;
+            font-size: 1.25rem;
+            font-weight: 600;
             text-align: left;
-            background: linear-gradient(to right, #002244, #FB4F14);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            letter-spacing: -0.025em;
+            color: #FB4F14; /* Orange text */
         }
         /* --- Original Styles --- */
         #gridContainer {
@@ -355,27 +348,27 @@
         <h1 id="dynamic-page-title">Grid Page</h1> <!-- This H1 will be updated by JavaScript -->
         <div class="admin-toolbar">
             <!-- Always visible lock icon -->
-            <button id="lock-icon" title="Admin Toolbar" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600">
+            <button id="lock-icon" title="Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100">
                 <i class="fas fa-lock"></i>
             </button>
             <!-- Admin toolbar icons - initially hidden -->
             <div id="admin-icons" class="hidden flex items-center gap-0.4rem">
-                <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-red-100 hover:text-red-600"><i class="fas fa-lock"></i></button>
-                <span class="border-l border-gray-300 h-6 mx-1"></span> <!-- Separator -->
-                <a href="admin_pages.html" title="Pages & Buttons" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-th-large"></i></a>
-                <a href="admin_settings.html" title="Global Settings" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-cog"></i></a>
-                <a href="user_current_admin.html" title="User Current Location" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-map-marker-alt"></i></a>
-                <a href="user_info_admin.html" title="User Info & Birthdays" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-info-circle"></i></a>
-                <a href="user_diary_admin.html" title="User Diary" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-book-open"></i></a>
-                <a href="audio_admin.html" title="Audio Devices" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-volume-up"></i></a>
-                <a href="favorites_admin.html" title="Favorites Topics" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-star"></i></a>
-                <a href="admin_audit_report.html" title="Activity Reports" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-clipboard-list"></i></a>
-                <span class="border-l border-gray-300 h-6 mx-1"></span> <!-- Separator - made smaller -->
-                <button id="switch-user-button" title="Switch User Profile" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-users"></i></button>
-                <button id="logout-button" title="Logout" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-sm hover:bg-blue-100 hover:text-blue-600"><i class="fas fa-sign-out-alt"></i></button>
+                <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-lock"></i></button>
+                <span class="border-l border-white h-6 mx-1"></span> <!-- Separator -->
+                <a href="admin_pages.html" title="Pages & Buttons" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-th-large"></i></a>
+                <a href="admin_settings.html" title="Global Settings" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-cog"></i></a>
+                <a href="user_current_admin.html" title="User Current Location" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-map-marker-alt"></i></a>
+                <a href="user_info_admin.html" title="User Info & Birthdays" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-info-circle"></i></a>
+                <a href="user_diary_admin.html" title="User Diary" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-book-open"></i></a>
+                <a href="audio_admin.html" title="Audio Devices" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-volume-up"></i></a>
+                <a href="favorites_admin.html" title="Favorites Topics" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-star"></i></a>
+                <a href="admin_audit_report.html" title="Activity Reports" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-clipboard-list"></i></a>
+                <span class="border-l border-white h-6 mx-1"></span> <!-- Separator -->
+                <button id="switch-user-button" title="Switch User Profile" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-users"></i></button>
+                <button id="logout-button" title="Logout" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-sign-out-alt"></i></button>
             </div>
             <!-- Help icon, always visible, to the right of admin toolbar -->
-            <button id="help-icon" title="Help" aria-label="Help" class="h-8 w-8 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full ml-2 transition-colors duration-200 text-sm hover:bg-green-100 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500">
+            <button id="help-icon" title="Help" aria-label="Help" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full ml-2 transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
                 <i class="fas fa-question-circle"></i>
             </button>
         </div>

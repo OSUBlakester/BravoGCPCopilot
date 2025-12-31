@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+College_Logos#!/usr/bin/env python3
 """
 Bulk import script for BravoImages to Firestore database with AI-generated tags.
 

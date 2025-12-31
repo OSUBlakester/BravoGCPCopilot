@@ -502,18 +502,18 @@ class MoodSelection {
 
         actions.appendChild(skipButton);
 
-        // Assemble the interface
+        // Assemble the interface - Skip button at top
         container.appendChild(title);
+        container.appendChild(actions); // Skip button after title
         container.appendChild(subtitle);
         container.appendChild(moodGrid);
-        container.appendChild(actions);
         this.moodOverlay.appendChild(container);
 
         // Add to page
         document.body.appendChild(this.moodOverlay);
 
-        // Store references to buttons for scanning
-        this.moodButtons = [...moodGrid.querySelectorAll('.mood-button'), skipButton];
+        // Store references to buttons for scanning - Skip button first
+        this.moodButtons = [skipButton, ...moodGrid.querySelectorAll('.mood-button')];
 
         // Focus the modal container to capture keyboard events
         container.setAttribute('tabindex', '-1');
