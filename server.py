@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # will rely on injected environment variables.
 load_dotenv()
 
-# Force rebuild 2025-12-13
+# Force rebuild 2025-12-31 - Testing test branch automated deployment
 # Security: Remove debug prints of sensitive environment variables
 # print("DEBUG: GOOGLE_API_KEY =", os.environ.get("GOOGLE_API_KEY"))
 # print("DEBUG: GOOGLE_APPLICATION_CREDENTIALS =", os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
