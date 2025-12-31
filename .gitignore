@@ -72,7 +72,6 @@ exportdb.py
 # Configuration files that may contain secrets
 config_local.py
 local_config.py
-config.py
 
 # Backup and temporary files that might contain sensitive data
 *.backup
