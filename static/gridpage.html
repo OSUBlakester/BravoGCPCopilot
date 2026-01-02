@@ -606,7 +606,7 @@
                     <!-- Legend -->
                     <div class="bg-gray-50 border border-gray-300 rounded-lg p-4">
                         <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
-                            <i class="fas fa-info-circle text-gray-600 mr-2"></i>Admin Toolbar Pages
+                            <i class="fas fa-info-circle text-gray-600 mr-2"></i>Admin Toolbar Pages Icons Key
                         </h4>
                         <div class="grid grid-cols-2 md:grid-cols-2 gap-3 text-sm">
                             <div class="flex items-center">
@@ -614,7 +614,7 @@
                                 <span class="text-gray-700">User Settings</span>
                             </div>
                             <div class="flex items-center">
-                                <i class="fas fa-user text-blue-600 text-lg mr-2"></i>
+                                <i class="fas fa-info-circle text-blue-600 text-lg mr-2"></i>
                                 <span class="text-gray-700">User Info</span>
                             </div>
                             <div class="flex items-center">
@@ -622,7 +622,7 @@
                                 <span class="text-gray-700">Page Management</span>
                             </div>
                             <div class="flex items-center">
-                                <i class="fas fa-book text-blue-600 text-lg mr-2"></i>
+                                <i class="fas fa-book-open text-blue-600 text-lg mr-2"></i>
                                 <span class="text-gray-700">Diary Settings</span>
                             </div>
                         </div>
@@ -679,7 +679,7 @@
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Choose how the user will interact with Bravo's communication grid.</p>
-                                                <p><strong>Auditory Scanning:</strong> Buttons are highlighted and announced one at a time. The user activates a switch or button when they hear the option they want.</p>
+                                                <p><strong>Auditory Scanning:</strong> Buttons are highlighted and and spoken to the personal speaker one at a time. The user activates a switch or button when they hear the option they want.</p>
                                                 <p><strong>Tap Interface:</strong> The user directly taps or touches buttons on the screen to make selections.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
@@ -710,7 +710,7 @@
                                                 <p><strong>Purpose:</strong> Control how many communication option buttons appear on the Grid page and Freestyle page.</p>
                                                 <p><strong>AI Options:</strong> These are buttons with AI-generated phrases based on context and the user's interests.</p>
                                                 <p><strong>Freestyle Options:</strong> These are buttons that appear on the Freestyle page for quick access to commonly used phrases.</p>
-                                                <p><strong>Default:</strong> 6-8 options per page</p>
+                                                <p><strong>Default:</strong> 10 AI Options and 20 Freestyle options</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → AI Settings</strong></li>
@@ -769,7 +769,7 @@
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Control how quickly buttons are highlighted and announced during Auditory Scanning, and how many times the system cycles through all options.</p>
                                                 <p><strong>Scan Speed:</strong> The delay (in seconds) between each button highlight. Slower speeds give more time to react; faster speeds make navigation quicker.</p>
-                                                <p><strong>Loop Limit:</strong> How many complete cycles through all buttons before scanning stops automatically.</p>
+                                                <p><strong>Loop Limit:</strong> How many complete cycles through all buttons before scanning pauses until switch is used. A value of 0 will have no limit.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
@@ -788,7 +788,7 @@
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-user text-blue-600 text-lg"></i>
+                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
@@ -804,7 +804,7 @@
                                                     <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
                                                     <li>Find the <strong>Personal Details</strong> section</li>
                                                     <li>Enter the user's name in the <strong>Name</strong> field</li>
-                                                    <li>Click <strong>Save</strong> at the bottom of the page</li>
+                                                    <li>Click <strong>User Name, Info and Birthday</strong> button at the end of the section</li>
                                                 </ol>
                                             </div>
                                         </div>
@@ -816,7 +816,7 @@
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-user text-blue-600 text-lg"></i>
+                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
@@ -832,7 +832,7 @@
                                                     <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
                                                     <li>Find the <strong>Personal Details</strong> section</li>
                                                     <li>Enter the user's birthday using the date picker</li>
-                                                    <li>Click <strong>Save</strong> at the bottom of the page</li>
+                                                    <li>Click <strong>User Name, Info and Birthday</strong> button at the end of the section</li>
                                                 </ol>
                                             </div>
                                         </div>
@@ -844,7 +844,7 @@
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-user text-blue-600 text-lg"></i>
+                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
@@ -854,7 +854,8 @@
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Provide information about the user's hobbies, favorite topics, likes, and dislikes to help Bravo's AI generate more relevant and personalized communication options.</p>
-                                                <p><strong>What to Include:</strong> Favorite activities, sports teams, TV shows, foods, family members, pets, places, and anything else important to the user.</p>
+                                                <p><strong>What to Include:</strong> Favorite activities, sports teams, TV shows, foods, family members, pets, places, and anything else important to the user. Also include information about the user's personality and history.</p>
+                                                <p><strong>How to Add:</strong> You can use the Audio Interview button to have Bravo ask questions and record responses, or type the information directly into the text field.</p>
                                                 <p><strong>Impact:</strong> The more details you provide, the better Bravo can tailor communication options to the user's life and interests.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
@@ -862,7 +863,7 @@
                                                     <li>Find the <strong>Interests</strong> or <strong>About</strong> section</li>
                                                     <li>Add information about hobbies, favorite topics, and preferences</li>
                                                     <li>Include details about family members, pets, or important people</li>
-                                                    <li>Click <strong>Save</strong> at the bottom of the page</li>
+                                                    <li>Click <strong>User Name, Info and Birthday</strong> button at the end of the section</li>
                                                 </ol>
                                             </div>
                                         </div>
@@ -893,7 +894,7 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Automatically clear the Freestyle input field after a period of inactivity.</p>
+                                                <p><strong>Purpose:</strong> Automatically enhances Freestyle input to make it more conversational.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → Freestyle</strong></li>
@@ -919,12 +920,12 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Show a welcome screen when the application starts up and configure how long it displays.</p>
+                                                <p><strong>Purpose:</strong> Show a large temporary window with the user's communicate to make it easier for others to read.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → Display</strong></li>
                                                     <li>Enable the <strong>Splash Screen</strong> option</li>
-                                                    <li>Set the display duration if needed</li>
+                                                    <li>Adjust the <strong>Display Time</strong> to control how long the splash screen appears</li>
                                                     <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
                                                 </ol>
                                             </div>
@@ -946,11 +947,11 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Configure how sight word suggestions appear during spelling activities.</p>
+                                                <p><strong>Purpose:</strong> Choose to assign pictures to words that are typically recognized by sight. You can also select a different level of sight words.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → Spelling</strong></li>
-                                                    <li>Configure the <strong>Sight Word Logic</strong> settings</li>
+                                                    <li>Select <strong>Sight Words Grade Level</strong></li>
                                                     <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
                                                 </ol>
                                             </div>
@@ -989,7 +990,7 @@
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-user text-blue-600 text-lg"></i>
+                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
@@ -1003,7 +1004,7 @@
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Info → People</strong></li>
                                                     <li>Add family members and friends with their names and relationships</li>
-                                                    <li>Click <strong>Save</strong> at the bottom of the page</li>
+                                                    <li>Click <strong>Save Friends and Family</strong> button at the end of the section</li>
                                                 </ol>
                                             </div>
                                         </div>
@@ -1025,12 +1026,19 @@
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Edit communication pages and buttons to customize labels, images, and content for the user's specific needs.</p>
-                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <p><strong>Note:</strong> There is a feature available to import pages and buttons from other devices.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps to Edit Pages and Buttons Directly:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → Page Management</strong></li>
                                                     <li>Select pages and buttons to customize</li>
                                                     <li>Edit labels, add images, or modify content as needed</li>
                                                     <li>Changes are saved automatically</li>
+                                                </ol>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps to Migrate User Data from Other Devices:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → Page Management</strong></li>
+                                                    <li>Use the import feature to transfer pages and buttons from another device</li>
+                                                    <li>Follow the migration wizard to complete the transfer</li>
                                                 </ol>
                                             </div>
                                         </div>
@@ -1052,21 +1060,21 @@
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-user text-gray-600 text-lg"></i>
+                                        <i class="fas fa-map-marker-alt text-gray-600 text-lg"></i>
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
-                                            <div class="font-semibold text-gray-900">Favorite Locations - User Info</div>
+                                            <div class="font-semibold text-gray-900">Favorite Locations - User Current Location</div>
                                             <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Add frequently visited places to enable location-based vocabulary and communication suggestions.</p>
+                                                <p><strong>Purpose:</strong> Bravo uses the user's current location to provide context-aware communication suggestions. Adding favorite locations makes it easier to quickly load locations that may be repeated frequently, such as home, school, grandparents' house, or favorite restaurants.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
-                                                    <li>Navigate to <strong>Admin Toolbar → User Info → Locations</strong></li>
+                                                    <li>Navigate to <strong>Admin Toolbar → User Current Location</strong></li>
                                                     <li>Add favorite locations with names and descriptions</li>
-                                                    <li>Click <strong>Save</strong> at the bottom of the page</li>
+                                                    <li>Click <strong>Save Friends and Family</strong> button at the end of the section</li>
                                                 </ol>
                                             </div>
                                         </div>
@@ -1078,7 +1086,7 @@
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-book text-gray-600 text-lg"></i>
+                                        <i class="fas fa-book-open text-gray-600 text-lg"></i>
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
@@ -1087,12 +1095,14 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Enable communication logging and configure privacy preferences for diary entries.</p>
+                                                <p><strong>Purpose:</strong> Enable the user to discuss past and future events by logging diary entries.</p>
+                                                <p><strong>How It Works:</strong> The admin selects a date (past, present, or future) and includes a short narrative about the event for the user. Input can be typed directly or entered using dictation.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → Diary Settings</strong></li>
-                                                    <li>Enable diary entries and set privacy preferences</li>
-                                                    <li>Changes are saved automatically</li>
+                                                    <li>Select a date for the entry (past, present, or future)</li>
+                                                    <li>Type or use dictation to enter a short narrative about the event</li>
+                                                    <li>Click <strong>Save Entry</strong> when done</li>
                                                 </ol>
                                             </div>
                                         </div>
