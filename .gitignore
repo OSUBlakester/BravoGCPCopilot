@@ -70,6 +70,7 @@ exportdb.py
 *_credentials.py
 
 # Configuration files that may contain secrets
+config.py
 config_local.py
 local_config.py
 
