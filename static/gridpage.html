@@ -784,7 +784,7 @@
                                 </div>
                             </div>
 
-                            <!-- User Name -->
+                            <!-- User Narrative -->
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
@@ -792,78 +792,35 @@
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
-                                            <div class="font-semibold text-gray-900">Enter User Name - User Info</div>
+                                            <div class="font-semibold text-gray-900">Create User Narrative - User Info</div>
                                             <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Set the user's name as it will appear throughout the application and in communications.</p>
-                                                <p><strong>Display Name:</strong> This name is used for personalization and can be the user's first name, nickname, or full name.</p>
-                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <p><strong>Purpose:</strong> Build a complete user story including their name, birthday, and personal narrative to help Bravo provide personalized and age-appropriate communication.</p>
+                                                <p><strong>How to Complete:</strong> You can use the <strong>Audio Interview</strong> button to have Bravo ask questions and automatically fill in all information, or you can manually enter each item separately.</p>
+                                                <p><strong>What to Include:</strong></p>
+                                                <ul class="list-disc list-inside ml-2 space-y-1 text-sm">
+                                                    <li><strong>User Name:</strong> The user's preferred name (first name, nickname, or full name)</li>
+                                                    <li><strong>Birthday:</strong> Date of birth for age-appropriate content and birthday reminders</li>
+                                                    <li><strong>User Narrative:</strong> A full user story including hobbies, favorite topics, likes, dislikes, personality traits, history, family members, pets, favorite places, and anything else important to the user</li>
+                                                </ul>
+                                                <p><strong>Impact:</strong> The more complete the narrative, the better Bravo can tailor communication options to the user's life and personality.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps Using Audio Interview:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
-                                                    <li>Find the <strong>Personal Details</strong> section</li>
-                                                    <li>Enter the user's name in the <strong>Name</strong> field</li>
-                                                    <li>Click <strong>User Name, Info and Birthday</strong> button at the end of the section</li>
+                                                    <li>Click the <strong>Start Audio Interview</strong> button at the top of the page</li>
+                                                    <li>Follow Bravo's prompts to answer questions about the user</li>
+                                                    <li>Review the automatically populated information</li>
+                                                    <li>Click <strong>Save User Name, Info & Birthday</strong> button</li>
                                                 </ol>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Birthday -->
-                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
-                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                                    <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
-                                    </div>
-                                    <div class="ml-3 flex-1">
-                                        <div class="flex items-center justify-between">
-                                            <div class="font-semibold text-gray-900">Add User Birthday - User Info</div>
-                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                        </div>
-                                        <div class="task-details hidden mt-2">
-                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Setting the user's birthday helps Bravo provide age-appropriate content and can enable special features like birthday reminders.</p>
-                                                <p><strong>Privacy:</strong> Birthday information is stored securely and used only for personalization.</p>
-                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps for Manual Entry:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
-                                                    <li>Find the <strong>Personal Details</strong> section</li>
-                                                    <li>Enter the user's birthday using the date picker</li>
-                                                    <li>Click <strong>User Name, Info and Birthday</strong> button at the end of the section</li>
-                                                </ol>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Interests -->
-                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
-                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                                    <div class="flex-shrink-0 mt-1">
-                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
-                                    </div>
-                                    <div class="ml-3 flex-1">
-                                        <div class="flex items-center justify-between">
-                                            <div class="font-semibold text-gray-900">Add User Interests - User Info</div>
-                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
-                                        </div>
-                                        <div class="task-details hidden mt-2">
-                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Provide information about the user's hobbies, favorite topics, likes, and dislikes to help Bravo's AI generate more relevant and personalized communication options.</p>
-                                                <p><strong>What to Include:</strong> Favorite activities, sports teams, TV shows, foods, family members, pets, places, and anything else important to the user. Also include information about the user's personality and history.</p>
-                                                <p><strong>How to Add:</strong> You can use the Audio Interview button to have Bravo ask questions and record responses, or type the information directly into the text field.</p>
-                                                <p><strong>Impact:</strong> The more details you provide, the better Bravo can tailor communication options to the user's life and interests.</p>
-                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
-                                                <ol class="list-decimal list-inside ml-2 space-y-1">
-                                                    <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
-                                                    <li>Find the <strong>Interests</strong> or <strong>About</strong> section</li>
-                                                    <li>Add information about hobbies, favorite topics, and preferences</li>
-                                                    <li>Include details about family members, pets, or important people</li>
-                                                    <li>Click <strong>User Name, Info and Birthday</strong> button at the end of the section</li>
+                                                    <li>Enter the user's <strong>Name</strong> in the Personal Details section</li>
+                                                    <li>Select the user's <strong>Birthday</strong> using the date picker</li>
+                                                    <li>Type or dictate the user's <strong>Narrative</strong> in the text field, including personality, history, favorites, and interests</li>
+                                                    <li>Click <strong>Save User Name, Info & Birthday</strong> button</li>
                                                 </ol>
                                             </div>
                                         </div>
