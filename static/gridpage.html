@@ -376,16 +376,40 @@
     <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] h-[90vh] max-w-5xl max-h-[90vh] mx-2 relative flex flex-col">
             <button id="help-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Help">&times;</button>
-            <div class="flex justify-between items-center mb-2">
-                <h2 class="text-2xl font-bold text-gray-800">Help &amp; User Guide</h2>
-                <a href="https://docs.google.com/document/d/e/2PACX-1vTartmB8DUzCYfFOkZtCaaZxD8TJMEMYThAEwM1v6_ccYgZOReamVGpG2XE0XdzJ5NTyw9aJLm5Yh6G/pub" target="_blank" rel="noopener" class="bg-green-100 text-green-700 px-4 py-2 rounded-md font-semibold hover:bg-green-200 transition">View Full Help</a>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold text-gray-800">Help &amp; Support</h2>
             </div>
-            <div id="help-modal-content" class="overflow-y-auto flex-1 px-0 py-0">
-                <!-- Help content will be loaded here dynamically -->
-                <div id="help-loading" class="text-center text-gray-400">Loading help...</div>
+            
+            <!-- Help Topics Grid -->
+            <div id="help-topics-menu" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <!-- Bravo Guide -->
+                <button id="help-bravo-guide" class="help-topic-btn bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                    <i class="fas fa-book-open text-4xl mb-3"></i>
+                    <h3 class="text-xl font-bold mb-2">Bravo Guide</h3>
+                    <p class="text-sm opacity-90">Learn about Bravo's interface and features</p>
+                </button>
+                
+                <!-- New User Setup -->
+                <button id="help-user-setup" class="help-topic-btn bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                    <i class="fas fa-user-plus text-4xl mb-3"></i>
+                    <h3 class="text-xl font-bold mb-2">New User Setup</h3>
+                    <p class="text-sm opacity-90">Step-by-step guide to set up a new user</p>
+                </button>
+                
+                <!-- Contact Support -->
+                <button id="help-contact-support" class="help-topic-btn bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-xl shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                    <i class="fas fa-headset text-4xl mb-3"></i>
+                    <h3 class="text-xl font-bold mb-2">Contact Support</h3>
+                    <p class="text-sm opacity-90">Get help or report an issue</p>
+                </button>
             </div>
-            <div class="mt-4 text-center">
-                <a href="#" id="open-contact-modal" class="inline-block text-green-700 font-semibold underline hover:text-green-900">Contact Support</a>
+            
+            <!-- Help Content Area -->
+            <div id="help-modal-content" class="overflow-y-auto flex-1 px-4 py-2 hidden">
+                <button id="help-back-btn" class="mb-4 text-blue-600 hover:text-blue-800 font-semibold flex items-center">
+                    <i class="fas fa-arrow-left mr-2"></i>Back to Topics
+                </button>
+                <div id="help-content-display"></div>
             </div>
     <!-- Contact Support Modal -->
     <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
@@ -455,218 +479,704 @@
     const helpIcon = document.getElementById('help-icon');
     const helpModal = document.getElementById('help-modal');
     const helpModalClose = document.getElementById('help-modal-close');
+    const helpTopicsMenu = document.getElementById('help-topics-menu');
     const helpModalContent = document.getElementById('help-modal-content');
-    const helpLoading = document.getElementById('help-loading');
+    const helpContentDisplay = document.getElementById('help-content-display');
+    const helpBackBtn = document.getElementById('help-back-btn');
+    
+    const contactModal = document.getElementById('contact-modal');
+    const contactModalClose = document.getElementById('contact-modal-close');
     const contactForm = document.getElementById('contact-support-form');
     const supportSuccess = document.getElementById('support-success');
     const supportError = document.getElementById('support-error');
-    const openContactModal = document.getElementById('open-contact-modal');
-    const contactModal = document.getElementById('contact-modal');
-    const contactModalClose = document.getElementById('contact-modal-close');
 
-    // Google Doc HTML export link
-    const HELP_DOC_URL = 'https://docs.google.com/document/d/e/2PACX-1vTartmB8DUzCYfFOkZtCaaZxD8TJMEMYThAEwM1v6_ccYgZOReamVGpG2XE0XdzJ5NTyw9aJLm5Yh6G/pub';
+    // Help content for each topic
+    const helpTopics = {
+        'bravo-guide': {
+            title: 'Bravo Guide',
+            icon: 'fa-book-open',
+            color: 'blue',
+            content: `
+                <h3 class="text-2xl font-bold text-blue-700 mb-4">Welcome to Bravo AAC!</h3>
+                
+                <div class="space-y-6">
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-info-circle mr-2 text-blue-600"></i>About Bravo
+                        </h4>
+                        <p class="text-gray-700 mb-3">Bravo is an Augmentative and Alternative Communication (AAC) application that uses artificial intelligence to help users communicate effectively. The AI generates personalized communication options based on context, user preferences, and conversational needs.</p>
+                        <p class="text-gray-700">Whether you're expressing basic needs, having conversations, or sharing complex thoughts, Bravo adapts to support your unique communication style.</p>
+                    </section>
 
-    async function loadDynamicHelpContent() {
-        try {
-            helpLoading.style.display = '';
-            helpModalContent.innerHTML = '';
-            
-            // Get current page from URL
-            const urlParams = new URLSearchParams(window.location.search);
-            const currentPage = urlParams.get('page') || 'home';
-            
-            // Load page-specific help first
-            let pageHelpResponse, generalHelpResponse;
-            
-            try {
-                pageHelpResponse = await fetch(`/api/help/content?page=${currentPage}`);
-            } catch (error) {
-                console.warn('Failed to load page-specific help:', error);
-            }
-            
-            try {
-                generalHelpResponse = await fetch('/api/help/content');
-            } catch (error) {
-                console.warn('Failed to load general help:', error);
-            }
-            
-            let helpContent = '';
-            
-            // Display page-specific help first
-            if (pageHelpResponse && pageHelpResponse.ok) {
-                const pageHelpData = await pageHelpResponse.json();
-                if (pageHelpData.content && pageHelpData.content.length > 0) {
-                    helpContent += `
-                        <div class="mb-6">
-                            <h3 class="text-lg font-semibold text-green-700 mb-3 border-b border-green-200 pb-2">
-                                <i class="fas fa-map-marker-alt mr-2"></i>Help for ${currentPage.charAt(0).toUpperCase() + currentPage.slice(1)} Page
-                            </h3>
-                            <div class="space-y-4">
-                    `;
-                    
-                    pageHelpData.content.forEach(item => {
-                        helpContent += `
-                            <div class="bg-green-50 border border-green-200 rounded-lg p-4">
-                                <h4 class="font-medium text-gray-800 mb-2">${escapeHtml(item.title)}</h4>
-                                <div class="text-gray-700">${item.content}</div>
-                            </div>
-                        `;
-                    });
-                    
-                    helpContent += `
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-            
-            // Display general help
-            if (generalHelpResponse && generalHelpResponse.ok) {
-                const generalHelpData = await generalHelpResponse.json();
-                if (generalHelpData.content && generalHelpData.content.length > 0) {
-                    helpContent += `
-                        <div class="mb-6">
-                            <h3 class="text-lg font-semibold text-blue-700 mb-3 border-b border-blue-200 pb-2">
-                                <i class="fas fa-info-circle mr-2"></i>General Help
-                            </h3>
-                            <div class="space-y-4">
-                    `;
-                    
-                    generalHelpData.content.forEach(item => {
-                        helpContent += `
-                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                <h4 class="font-medium text-gray-800 mb-2">${escapeHtml(item.title)}</h4>
-                                <div class="text-gray-700">${item.content}</div>
-                            </div>
-                        `;
-                    });
-                    
-                    helpContent += `
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-            
-            // If no dynamic content is available, show fallback message
-            if (!helpContent.trim()) {
-                helpContent = `
-                    <div class="text-center py-8">
-                        <i class="fas fa-info-circle text-gray-400 text-4xl mb-4"></i>
-                        <p class="text-gray-600 mb-4">No help content is currently available.</p>
-                        <p class="text-gray-500 text-sm">Contact your administrator to add help content.</p>
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-th mr-2 text-blue-600"></i>Grid Interface
+                        </h4>
+                        <p class="text-gray-700 mb-3">The main screen displays buttons in a grid layout. The grid is primarily designed for <strong>Auditory Scanning</strong>, which highlights and prompts each option one at a time until you select an option. Once an option is selected, Bravo will either announce the options, move to another page, or both.</p>
+                        <p class="text-gray-700 mb-2">A <strong>Tap Interface</strong> is also available for users who prefer direct touch selection. To switch between interfaces:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li>Access the Admin toolbar (lock icon in top-right)</li>
+                            <li>Go to User Settings</li>
+                            <li>Select your preferred interface mode</li>
+                        </ul>
+                    </section>
+
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-history mr-2 text-blue-600"></i>Speech History
+                        </h4>
+                        <p class="text-gray-700">Located at the top of the screen, the Speech History displays what you've communicated during your current session.</p>
+                    </section>
+
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-question-circle mr-2 text-blue-600"></i>Question Display
+                        </h4>
+                        <p class="text-gray-700 mb-3">The Question box will highlight when Bravo hears the selected wake word (just like your smart device) to indicate that it is listening for a question.</p>
+                        <p class="text-gray-700">The Question box will then show the question it heard while Bravo generates options to respond, facilitating natural conversation flow and providing communication opportunities.</p>
+                    </section>
+
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-th-large mr-2 text-blue-600"></i>Button Grid
+                        </h4>
+                        <p class="text-gray-700 mb-2">The main grid displays communication buttons. Each button can:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li><strong>Speak a word or phrase</strong> - Adds to your message</li>
+                            <li><strong>Navigate to another page</strong> - Access more specific vocabulary</li>
+                        </ul>
+                        <p class="text-gray-700 mt-3 mb-2">Buttons may include:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li><strong>Images</strong> - Visual symbols representing the word/action</li>
+                            <li><strong>Text labels</strong> - Clear text descriptions</li>
+                            <li><strong>Colors</strong> - Category coding (e.g., green for actions, blue for people)</li>
+                        </ul>
+                        <p class="text-gray-700 mt-3">In Auditory Scanning mode, buttons are highlighted sequentially and spoken aloud until you activate your switch to make a selection.</p>
+                    </section>
+
+                    <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h4 class="font-semibold text-lg text-gray-800 mb-3 flex items-center">
+                            <i class="fas fa-lock mr-2 text-blue-600"></i>Admin Toolbar & Lock
+                        </h4>
+                        <p class="text-gray-700 mb-2">Located in the top-right corner, the Admin toolbar provides access to settings and customization:</p>
+                        <ul class="list-disc list-inside text-gray-700 ml-4 space-y-1">
+                            <li><strong>Lock Icon (🔒)</strong> - Tap to unlock and access admin features</li>
+                            <li><strong>PIN Protection</strong> - Requires admin PIN to prevent accidental changes</li>
+                            <li><strong>Settings Access</strong> - Configure voice, display, scanning, and user preferences</li>
+                            <li><strong>Page Management</strong> - Edit button layouts, add vocabulary, and organize pages</li>
+                            <li><strong>User Management</strong> - Switch between users or manage user profiles</li>
+                        </ul>
+                        <p class="text-gray-700 mt-3">When locked, the admin features are hidden to keep the interface clean and prevent unintended modifications during communication.</p>
+                    </section>
+                </div>
+            `
+        },
+        'user-setup': {
+            title: 'New User Setup Guide',
+            icon: 'fa-user-plus',
+            color: 'green',
+            content: `
+                <h3 class="text-2xl font-bold text-green-700 mb-4">Setting Up a New User</h3>
+                
+                <div class="space-y-4">
+                    <div class="bg-blue-50 border-l-4 border-blue-400 p-4">
+                        <p class="text-gray-700">A new Bravo account is created with default settings for pages, buttons, voices, wake word, and other settings. All of these settings can be easily changed to customize the experience for the user.</p>
                     </div>
-                `;
-            }
-            
-            helpModalContent.innerHTML = helpContent;
-            helpLoading.style.display = 'none';
-            
-        } catch (error) {
-            console.error('Error loading help content:', error);
-            // Fallback to original static help
-            loadStaticHelpContent();
+
+                    <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                        <p class="text-sm font-semibold text-yellow-800">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            You'll need the Admin PIN to access these settings. <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:text-blue-800 underline">Contact Bravo</a> if you don't have it.
+                        </p>
+                    </div>
+
+                    <!-- Access Admin Toolbar - First Step -->
+                    <div class="bg-gradient-to-r from-purple-50 to-purple-100 border-l-4 border-purple-500 rounded-lg shadow-sm p-4">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <i class="fas fa-lock-open text-purple-600 text-2xl mr-3"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="font-bold text-lg text-gray-900">First: Access Admin Toolbar</div>
+                                <div class="text-sm text-gray-700 mt-1">Tap the lock icon (🔒) in the top-right corner and enter the Admin PIN when prompted.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Legend -->
+                    <div class="bg-gray-50 border border-gray-300 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-900 mb-3 flex items-center">
+                            <i class="fas fa-info-circle text-gray-600 mr-2"></i>Admin Toolbar Pages Icons Key
+                        </h4>
+                        <div class="grid grid-cols-2 md:grid-cols-2 gap-3 text-sm">
+                            <div class="flex items-center">
+                                <i class="fas fa-cog text-blue-600 text-lg mr-2"></i>
+                                <span class="text-gray-700">User Settings</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-info-circle text-blue-600 text-lg mr-2"></i>
+                                <span class="text-gray-700">User Info</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-th text-blue-600 text-lg mr-2"></i>
+                                <span class="text-gray-700">Page Management</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-book-open text-blue-600 text-lg mr-2"></i>
+                                <span class="text-gray-700">Diary Settings</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- High Priority Settings -->
+                    <div class="bg-white border-l-4 border-yellow-500 rounded-lg shadow-sm p-4">
+                        <h4 class="font-bold text-lg text-gray-900 mb-3 flex items-center">
+                            <i class="fas fa-star text-yellow-500 mr-2"></i>High Priority Settings
+                        </h4>
+                        <p class="text-sm text-gray-600 mb-4">Complete these essential settings first:</p>
+                        
+                        <div class="space-y-3">
+                            <!-- Wake Word -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Configure Wake Word - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> The Wake Word is used to prompt Bravo to listen for a question from someone nearby. When Bravo hears the wake word, it will activate the microphone and wait for a question.</p>
+                                                <p><strong>Default Value:</strong> "Hey Friend"</p>
+                                                <p><strong>Requirements:</strong> The wake word must be exactly 2 words. You can change one or both words to customize it for your user.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings → AI Settings</strong></li>
+                                                    <li>Locate the <strong>Wake Word</strong> section</li>
+                                                    <li>Change one or both words as desired</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Interface -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Set Interface Mode - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Choose how the user will interact with Bravo's communication grid.</p>
+                                                <p><strong>Auditory Scanning:</strong> Buttons are highlighted and and spoken to the personal speaker one at a time. The user activates a switch or button when they hear the option they want.</p>
+                                                <p><strong>Tap Interface:</strong> The user directly taps or touches buttons on the screen to make selections.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
+                                                    <li>Find the <strong>Interface Mode</strong> option</li>
+                                                    <li>Select either "Auditory Scanning" or "Tap Interface"</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- AI Options -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Set Number of AI Options - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Control how many communication option buttons appear on the Grid page and Freestyle page.</p>
+                                                <p><strong>AI Options:</strong> These are buttons with AI-generated phrases based on context and the user's interests.</p>
+                                                <p><strong>Freestyle Options:</strong> These are buttons that appear on the Freestyle page for quick access to commonly used phrases.</p>
+                                                <p><strong>Default:</strong> 10 AI Options and 20 Freestyle options</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings → AI Settings</strong></li>
+                                                    <li>Find the <strong>Number of Options</strong> or <strong>Grid Size</strong> setting</li>
+                                                    <li>Adjust the number for AI options and Freestyle options separately</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Voice -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Select Text to Speech Voice - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Choose the voice that Bravo uses to speak words, phrases, and sentences selected by the user.</p>
+                                                <p><strong>Voice Options:</strong> Multiple voice options are available with different genders, accents, and speaking styles.</p>
+                                                <p><strong>Adjustable Settings:</strong> Speech rate (speed), pitch (high/low), and volume can all be customized.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
+                                                    <li>Find the <strong>Voice</strong> or <strong>Text-to-Speech</strong> section</li>
+                                                    <li>Select a voice from the dropdown menu (you can preview each voice)</li>
+                                                    <li>Adjust speech rate, pitch, and volume using the sliders</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Scanning Speed -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Configure Scanning Speed - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Control how quickly buttons are highlighted and announced during Auditory Scanning, and how many times the system cycles through all options.</p>
+                                                <p><strong>Scan Speed:</strong> The delay (in seconds) between each button highlight. Slower speeds give more time to react; faster speeds make navigation quicker.</p>
+                                                <p><strong>Loop Limit:</strong> How many complete cycles through all buttons before scanning pauses until switch is used. A value of 0 will have no limit.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
+                                                    <li>Find the <strong>Scanning</strong> or <strong>Auditory Scanning</strong> section</li>
+                                                    <li>Adjust the <strong>Scan Speed</strong> slider (try 2-3 seconds to start)</li>
+                                                    <li>Set the <strong>Loop Limit</strong> (typically 2-3 loops)</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- User Narrative -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Create User Narrative - User Info</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Build a complete user story including their name, birthday, and personal narrative to help Bravo provide personalized and age-appropriate communication.</p>
+                                                <p><strong>How to Complete:</strong> You can use the <strong>Audio Interview</strong> button to have Bravo ask questions and automatically fill in all information, or you can manually enter each item separately.</p>
+                                                <p><strong>What to Include:</strong></p>
+                                                <ul class="list-disc list-inside ml-2 space-y-1 text-sm">
+                                                    <li><strong>User Name:</strong> The user's preferred name (first name, nickname, or full name)</li>
+                                                    <li><strong>Birthday:</strong> Date of birth for age-appropriate content and birthday reminders</li>
+                                                    <li><strong>User Narrative:</strong> A full user story including hobbies, favorite topics, likes, dislikes, personality traits, history, family members, pets, favorite places, and anything else important to the user</li>
+                                                </ul>
+                                                <p><strong>Impact:</strong> The more complete the narrative, the better Bravo can tailor communication options to the user's life and personality.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps Using Audio Interview:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
+                                                    <li>Click the <strong>Start Audio Interview</strong> button at the top of the page</li>
+                                                    <li>Follow Bravo's prompts to answer questions about the user</li>
+                                                    <li>Review the automatically populated information</li>
+                                                    <li>Click <strong>Save User Name, Info & Birthday</strong> button</li>
+                                                </ol>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps for Manual Entry:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Info</strong></li>
+                                                    <li>Enter the user's <strong>Name</strong> in the Personal Details section</li>
+                                                    <li>Select the user's <strong>Birthday</strong> using the date picker</li>
+                                                    <li>Type or dictate the user's <strong>Narrative</strong> in the text field, including personality, history, favorites, and interests</li>
+                                                    <li>Click <strong>Save User Name, Info & Birthday</strong> button</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Medium Priority Settings -->
+                    <div class="bg-white border-l-4 border-blue-500 rounded-lg shadow-sm p-4">
+                        <h4 class="font-bold text-lg text-gray-900 mb-3 flex items-center">
+                            <i class="fas fa-adjust text-blue-500 mr-2"></i>Medium Priority Settings
+                        </h4>
+                        <p class="text-sm text-gray-600 mb-4">Configure these to enhance the experience:</p>
+                        
+                        <div class="space-y-3">
+                            <!-- Auto Clean -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Auto Clean Freestyle - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Automatically enhances Freestyle input to make it more conversational.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings → Freestyle</strong></li>
+                                                    <li>Enable or configure the <strong>Auto Clean</strong> option</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Splash Screen -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Display Splash Screen - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Show a large temporary window with the user's communicate to make it easier for others to read.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings → Display</strong></li>
+                                                    <li>Enable the <strong>Splash Screen</strong> option</li>
+                                                    <li>Adjust the <strong>Display Time</strong> to control how long the splash screen appears</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Sight Words -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Sight Word Logic - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Choose to assign pictures to words that are typically recognized by sight. You can also select a different level of sight words.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings → Spelling</strong></li>
+                                                    <li>Select <strong>Sight Words Grade Level</strong></li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Letter Order -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-cog text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Spell Letter Order - User Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Set how letters are arranged during spelling (alphabetical, QWERTY keyboard layout, or frequency-based).</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Settings → Spelling</strong></li>
+                                                    <li>Select the desired <strong>Letter Order</strong> option</li>
+                                                    <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Family -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-info-circle text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Family and Friends Info - User Info</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Add names and relationships of family members and friends for more personalized communication suggestions.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Info → People</strong></li>
+                                                    <li>Add family members and friends with their names and relationships</li>
+                                                    <li>Click <strong>Save Friends and Family</strong> button at the end of the section</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Pages -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-th text-blue-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Customize Pages and Buttons - Page Management</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Edit communication pages and buttons to customize labels, images, and content for the user's specific needs.</p>
+                                                <p><strong>Note:</strong> There is a feature available to import pages and buttons from other devices.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps to Edit Pages and Buttons Directly:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → Page Management</strong></li>
+                                                    <li>Select pages and buttons to customize</li>
+                                                    <li>Edit labels, add images, or modify content as needed</li>
+                                                    <li>Changes are saved automatically</li>
+                                                </ol>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps to Migrate User Data from Other Devices:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → Page Management</strong></li>
+                                                    <li>Use the import feature to transfer pages and buttons from another device</li>
+                                                    <li>Follow the migration wizard to complete the transfer</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Lower Priority Settings -->
+                    <div class="bg-white border-l-4 border-gray-400 rounded-lg shadow-sm p-4">
+                        <h4 class="font-bold text-lg text-gray-900 mb-3 flex items-center">
+                            <i class="fas fa-ellipsis-h text-gray-500 mr-2"></i>Lower Priority Settings
+                        </h4>
+                        <p class="text-sm text-gray-600 mb-4">Optional settings for further personalization:</p>
+                        
+                        <div class="space-y-3">
+                            <!-- Locations -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-map-marker-alt text-gray-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Favorite Locations - User Current Location</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Bravo uses the user's current location to provide context-aware communication suggestions. Adding favorite locations makes it easier to quickly load locations that may be repeated frequently, such as home, school, grandparents' house, or favorite restaurants.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → User Current Location</strong></li>
+                                                    <li>Add favorite locations with names and descriptions</li>
+                                                    <li>Click <strong>Save Friends and Family</strong> button at the end of the section</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Diary -->
+                            <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
+                                <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                    <div class="flex-shrink-0 mt-1">
+                                        <i class="fas fa-book-open text-gray-600 text-lg"></i>
+                                    </div>
+                                    <div class="ml-3 flex-1">
+                                        <div class="flex items-center justify-between">
+                                            <div class="font-semibold text-gray-900">Diary Entries - Diary Settings</div>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                        <div class="task-details hidden mt-2">
+                                            <div class="text-sm text-gray-700 mt-2 space-y-2">
+                                                <p><strong>Purpose:</strong> Enable the user to discuss past and future events by logging diary entries.</p>
+                                                <p><strong>How It Works:</strong> The admin selects a date (past, present, or future) and includes a short narrative about the event for the user. Input can be typed directly or entered using dictation.</p>
+                                                <p class="font-semibold text-gray-900 mt-3">Steps:</p>
+                                                <ol class="list-decimal list-inside ml-2 space-y-1">
+                                                    <li>Navigate to <strong>Admin Toolbar → Diary Settings</strong></li>
+                                                    <li>Select a date for the entry (past, present, or future)</li>
+                                                    <li>Type or use dictation to enter a short narrative about the event</li>
+                                                    <li>Click <strong>Save Entry</strong> when done</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Completion Message -->
+                    <div class="bg-green-50 border border-green-300 rounded-lg p-4">
+                        <p class="text-gray-700 flex items-center">
+                            <i class="fas fa-check-circle text-green-600 text-xl mr-3"></i>
+                            <span><strong>Setup Complete!</strong> The user can now start communicating with Bravo. Remember that all settings can be adjusted anytime as the user's needs evolve.</span>
+                        </p>
+                    </div>
+                </div>
+            `
         }
-    }
+    };
 
-    async function loadStaticHelpContent() {
-        try {
-            // Load the local HTML export for the help guide as fallback
-            const response = await fetch('/static/Guide with talkwithbravo.com/Guide with talkwithbravo.com.html');
-            const html = await response.text();
-            
-            // Parse and extract the main guide content
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = html;
-            // Get the first <div> inside <body>
-            const body = tempDiv.querySelector('body');
-            let guideDiv = body ? body.querySelector('div') : tempDiv.querySelector('div');
-            
-            if (guideDiv) {
-                // Fix image and video src paths to be absolute paths
-                guideDiv.querySelectorAll('img').forEach(img => {
-                    let src = img.getAttribute('src');
-                    if (src && !src.startsWith('http') && !src.startsWith('/static/Guide with talkwithbravo.com/')) {
-                        img.setAttribute('src', '/static/Guide with talkwithbravo.com/' + src);
-                    }
-                });
-                guideDiv.querySelectorAll('video source').forEach(source => {
-                    let src = source.getAttribute('src');
-                    if (src && !src.startsWith('http') && !src.startsWith('/static/Guide with talkwithbravo.com/')) {
-                        source.setAttribute('src', '/static/Guide with talkwithbravo.com/' + src);
-                    }
-                });
-
-                // Build navigation bar for steps
-                const steps = Array.from(guideDiv.querySelectorAll('div > h3'));
-                let navHtml = '<nav class="help-nav" style="min-width:180px;max-width:220px;padding:1rem 0 1rem 1rem;border-right:1px solid #eee;">';
-                navHtml += '<h3 class="font-bold mb-2">Jump to Step</h3><ul style="list-style:none;padding:0;margin:0;">';
-                steps.forEach((h3, idx) => {
-                    const stepText = h3.textContent.trim();
-                    const anchorId = 'help-step-' + (idx+1);
-                    h3.setAttribute('id', anchorId);
-                    navHtml += `<li style="margin-bottom:8px;"><a href="#${anchorId}" class="text-green-700 hover:text-green-900 underline">${stepText}</a></li>`;
-                });
-                navHtml += '</ul></nav>';
-
-                // Layout: left nav, right content
-                helpModalContent.innerHTML = `<div style="display:flex;height:100%;"><div>${navHtml}</div><div style="flex:1;overflow-y:auto;padding-left:2rem;">${guideDiv.outerHTML}</div></div>`;
-            } else {
-                helpModalContent.innerHTML = '<div class="text-red-600">Could not load help content. Please try again later.</div>';
-            }
-            helpLoading.style.display = 'none';
-        } catch (error) {
-            console.error('Error loading static help content:', error);
-            helpModalContent.innerHTML = '<div class="text-red-600">Could not load help content. Please try again later.</div>';
-            helpLoading.style.display = 'none';
-        }
-    }
-
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    function openHelpModal() {
+    // Show help modal
+    helpIcon.addEventListener('click', () => {
         helpModal.classList.remove('hidden');
-        loadDynamicHelpContent();
-    }
-    // --- Contact Modal Logic ---
-    function openContactSupportModal() {
-        contactModal.classList.remove('hidden');
-        if (contactForm) contactForm.reset();
-        if (supportSuccess) supportSuccess.classList.add('hidden');
-        if (supportError) supportError.classList.add('hidden');
-    }
-    function closeContactSupportModal() {
-        contactModal.classList.add('hidden');
-    }
-    if (openContactModal) openContactModal.addEventListener('click', function(e) {
-        e.preventDefault();
-        openContactSupportModal();
-    });
-    if (contactModalClose) contactModalClose.addEventListener('click', closeContactSupportModal);
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !contactModal.classList.contains('hidden')) closeContactSupportModal();
-    });
-    contactModal.addEventListener('mousedown', (e) => {
-        if (e.target === contactModal) closeContactSupportModal();
+        showTopicsMenu();
     });
 
-    function closeHelpModal() {
+    // Close help modal
+    helpModalClose.addEventListener('click', () => {
         helpModal.classList.add('hidden');
+        showTopicsMenu();
+    });
+
+    // Show topics menu
+    function showTopicsMenu() {
+        helpTopicsMenu.classList.remove('hidden');
+        helpModalContent.classList.add('hidden');
     }
 
-    if (helpIcon) helpIcon.addEventListener('click', openHelpModal);
-    if (helpModalClose) helpModalClose.addEventListener('click', closeHelpModal);
-    // Close modal on Escape or click outside
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !helpModal.classList.contains('hidden')) closeHelpModal();
+    // Show specific help topic
+    function showHelpTopic(topicKey) {
+        const topic = helpTopics[topicKey];
+        if (!topic) return;
+
+        helpTopicsMenu.classList.add('hidden');
+        helpModalContent.classList.remove('hidden');
+        helpContentDisplay.innerHTML = topic.content;
+    }
+
+    // Back to topics
+    helpBackBtn.addEventListener('click', () => {
+        showTopicsMenu();
     });
-    helpModal.addEventListener('mousedown', (e) => {
-        if (e.target === helpModal) closeHelpModal();
+
+    // Toggle task details in setup checklist
+    function toggleTaskDetails(taskElement) {
+        const details = taskElement.querySelector('.task-details');
+        const chevron = taskElement.querySelector('.fa-chevron-down');
+        
+        if (details.classList.contains('hidden')) {
+            details.classList.remove('hidden');
+            chevron.style.transform = 'rotate(180deg)';
+        } else {
+            details.classList.add('hidden');
+            chevron.style.transform = 'rotate(0deg)';
+        }
+    }
+
+    // Topic button handlers
+    document.getElementById('help-bravo-guide').addEventListener('click', () => {
+        showHelpTopic('bravo-guide');
+    });
+
+    document.getElementById('help-user-setup').addEventListener('click', () => {
+        showHelpTopic('user-setup');
+    });
+
+    document.getElementById('help-contact-support').addEventListener('click', () => {
+        helpModal.classList.add('hidden');
+        contactModal.classList.remove('hidden');
+    });
+
+    // Close contact modal
+    contactModalClose.addEventListener('click', () => {
+        contactModal.classList.add('hidden');
+    });
+
+    // Handle contact form submission
+    contactForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        supportSuccess.classList.add('hidden');
+        supportError.classList.add('hidden');
+        
+        try {
+            const formData = new FormData(contactForm);
+            const response = await fetch(contactForm.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                supportSuccess.classList.remove('hidden');
+                contactForm.reset();
+                setTimeout(() => {
+                    contactModal.classList.add('hidden');
+                    supportSuccess.classList.add('hidden');
+                }, 3000);
+            } else {
+                supportError.classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('Error submitting form:', error);
+            supportError.classList.remove('hidden');
+        }
     });
 
     // --- Contact Support Form Logic (Formspree AJAX) ---

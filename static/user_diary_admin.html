@@ -225,6 +225,12 @@
                     <input type="date" id="date" name="date" required class="max-w-xs">
                 </div>
 
+                <div class="flex justify-start mb-4">
+                    <button type="button" id="dictationButton" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center">
+                         <i class="fas fa-microphone-alt mr-2"></i> Start Dictation
+                    </button>
+                </div>
+
                 <div>
                     <label for="entry">Entry:</label>
                     <textarea id="entry" name="entry" placeholder="Enter diary details here..." required class="w-full"></textarea>
@@ -232,11 +238,8 @@
             </div>
 
             <div class="flex flex-wrap gap-4">
-                <button type="button" id="dictationButton" class="button-success">
-                     <i class="fas fa-microphone-alt mr-2"></i> Start Dictation
-                </button>
-                <button type="button" id="saveButton" class="button-primary">
-                     <i class="fas fa-save mr-2"></i> Save Entry
+                <button type="button" id="saveButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center">
+                     <i class="fas fa-save mr-3 text-xl"></i> Save Entry
                 </button>
             </div>
              <p id="save-status" class="text-sm text-green-600 mt-4 h-4"></p> <div id="diaryEntries">
