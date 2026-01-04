@@ -810,6 +810,293 @@
         });
     </script>
 
+    <script>
+        // Guide resumption logic for cross-page guides
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Admin Pages loaded, checking for active guide...');
+            
+            // Initialize the guide system if not already present
+            if (!window.pageGuide) {
+                window.pageGuide = {
+                    guideData: {
+                        'customize-pages': {
+                            title: 'Customize Pages and Buttons',
+                            steps: [
+                                {
+                                    title: 'Unlock Admin Toolbar',
+                                    icon: 'fa-unlock',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access Page Management.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                                        </div>
+                                        <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                                    `
+                                },
+                                {
+                                    title: 'Open Page Management',
+                                    icon: 'fa-th',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">Navigate to the Page Management interface.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>Click the <strong>grid icon</strong> <i class="fas fa-th text-rose-600"></i> in the Admin toolbar</p>
+                                        </div>
+                                        <p class="text-sm text-gray-600">This opens the page where you can customize pages and buttons.</p>
+                                    `
+                                },
+                                {
+                                    title: 'Select Content to Customize',
+                                    icon: 'fa-mouse-pointer',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">Choose which pages or buttons to edit.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>You can:</p>
+                                            <ul class="text-xs text-gray-600 ml-4 mt-1 space-y-1">
+                                                <li>• Edit existing pages and buttons</li>
+                                                <li>• Change labels and images</li>
+                                                <li>• Reorganize button layout</li>
+                                                <li>• Import user data from other AAC devices</li>
+                                            </ul>
+                                        </div>
+                                        <p class="text-sm text-gray-600">The Page Management interface lets you customize all aspects of your communication grid.</p>
+                                    `
+                                },
+                                {
+                                    title: 'Make Customizations',
+                                    icon: 'fa-edit',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">Customize labels, images, and content as needed.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>Edit the content to match the user's needs</p>
+                                        </div>
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3">
+                                            <p class="text-xs text-gray-600"><i class="fas fa-question-circle text-blue-600 mr-2"></i>For more details on making changes, refer to the Help menu on the Page & Button Administration page</p>
+                                        </div>
+                                    `
+                                }
+                            ]
+                        }
+                    },
+                    
+                    start: function(taskId, stepIndex = 0) {
+                        console.log('pageGuide.start called:', taskId, stepIndex);
+                        const task = this.guideData[taskId];
+                        if (!task) {
+                            console.error('Task not found:', taskId);
+                            return;
+                        }
+                        
+                        this.currentTask = taskId;
+                        this.currentStep = stepIndex;
+                        
+                        // Show or create the guide window
+                        this.showGuideWindow(task);
+                    },
+                    
+                    showGuideWindow: function(task) {
+                        console.log('showGuideWindow called for task:', task.title);
+                        let guideWindow = document.getElementById('page-setup-guide');
+                        console.log('Existing guide window:', !!guideWindow);
+                        
+                        // Create guide window if it doesn't exist
+                        if (!guideWindow) {
+                            console.log('Creating new guide window...');
+                            guideWindow = document.createElement('div');
+                            guideWindow.id = 'page-setup-guide';
+                            guideWindow.className = 'fixed top-20 right-4 w-96 bg-white rounded-lg shadow-2xl border-2 border-blue-500 z-50';
+                            guideWindow.innerHTML = `
+                                <div class="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg">
+                                    <div class="flex items-center justify-between">
+                                        <h3 id="page-guide-title" class="text-lg font-bold"></h3>
+                                        <button id="page-guide-close" class="text-white hover:text-gray-200">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                    <div id="page-guide-progress" class="text-sm opacity-90 mt-1"></div>
+                                </div>
+                                <div class="p-6">
+                                    <div id="page-guide-step-indicator" class="flex gap-2 mb-4"></div>
+                                    <div id="page-guide-content" class="mb-6"></div>
+                                    <div class="flex gap-3">
+                                        <button id="page-guide-prev" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+                                            <i class="fas fa-arrow-left mr-1"></i> Previous
+                                        </button>
+                                        <button id="page-guide-next" class="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                                            Next <i class="fas fa-arrow-right ml-1"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                            document.body.appendChild(guideWindow);
+                            console.log('Guide window created and appended');
+                            
+                            // Add event listeners with proper binding
+                            const self = this;
+                            setTimeout(() => {
+                                const closeBtn = document.getElementById('page-guide-close');
+                                const prevBtn = document.getElementById('page-guide-prev');
+                                const nextBtn = document.getElementById('page-guide-next');
+                                
+                                console.log('Attaching event listeners - closeBtn:', !!closeBtn, 'prevBtn:', !!prevBtn, 'nextBtn:', !!nextBtn);
+                                
+                                if (closeBtn) closeBtn.addEventListener('click', () => self.close());
+                                if (prevBtn) prevBtn.addEventListener('click', () => self.previousStep());
+                                if (nextBtn) nextBtn.addEventListener('click', () => self.nextStep());
+                                
+                                console.log('Event listeners attached');
+                            }, 100);
+                        }
+                        
+                        // Update the guide window
+                        guideWindow.classList.remove('hidden');
+                        guideWindow.style.display = 'block';
+                        
+                        // Wait for DOM to be ready, then update content
+                        setTimeout(() => {
+                            const titleEl = document.getElementById('page-guide-title');
+                            if (titleEl) {
+                                titleEl.textContent = task.title;
+                                console.log('Title set to:', task.title);
+                            }
+                            this.showStep();
+                        }, 150);
+                    },
+                    
+                    showStep: function() {
+                        console.log('showStep called - currentTask:', this.currentTask, 'currentStep:', this.currentStep);
+                        const task = this.guideData[this.currentTask];
+                        const step = task.steps[this.currentStep];
+                        console.log('Step data:', step);
+                        
+                        // Update progress
+                        const progressEl = document.getElementById('page-guide-progress');
+                        console.log('Progress element:', !!progressEl);
+                        if (progressEl) {
+                            progressEl.textContent = `Step ${this.currentStep + 1} of ${task.steps.length}`;
+                        }
+                        
+                        // Update content
+                        const contentEl = document.getElementById('page-guide-content');
+                        console.log('Content element:', !!contentEl);
+                        if (contentEl) {
+                            contentEl.innerHTML = `
+                                <div class="flex items-center gap-3 mb-4">
+                                    <div class="w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center text-white">
+                                        <i class="fas ${step.icon} text-xl"></i>
+                                    </div>
+                                    <h4 class="text-lg font-semibold text-gray-800">${step.title}</h4>
+                                </div>
+                                ${step.content}
+                            `;
+                            console.log('Content updated');
+                        }
+                        
+                        // Update step indicators
+                        const container = document.getElementById('page-guide-step-indicator');
+                        console.log('Step indicator container:', !!container);
+                        if (container) {
+                            container.innerHTML = '';
+                            for (let i = 0; i < task.steps.length; i++) {
+                                const dot = document.createElement('div');
+                                dot.className = 'w-3 h-3 rounded-full ' + 
+                                    (i === this.currentStep ? 'bg-blue-500' : 
+                                     i < this.currentStep ? 'bg-green-500' : 'bg-gray-300');
+                                container.appendChild(dot);
+                            }
+                        }
+                        
+                        // Update buttons
+                        const prevBtn = document.getElementById('page-guide-prev');
+                        if (prevBtn) {
+                            prevBtn.style.display = this.currentStep === 0 ? 'none' : 'block';
+                        }
+                        
+                        const nextBtn = document.getElementById('page-guide-next');
+                        if (nextBtn) {
+                            if (this.currentStep === task.steps.length - 1) {
+                                nextBtn.innerHTML = '<i class="fas fa-check mr-1"></i> Complete';
+                            } else {
+                                nextBtn.innerHTML = 'Next <i class="fas fa-arrow-right ml-1"></i>';
+                            }
+                        }
+                        
+                        console.log('showStep completed');
+                        
+                        // Save state
+                        localStorage.setItem('activeGuide', JSON.stringify({
+                            taskId: this.currentTask,
+                            stepIndex: this.currentStep
+                        }));
+                    },
+                    
+                    nextStep: function() {
+                        const task = this.guideData[this.currentTask];
+                        if (this.currentStep < task.steps.length - 1) {
+                            this.currentStep++;
+                            this.showStep();
+                        } else {
+                            this.complete();
+                        }
+                    },
+                    
+                    previousStep: function() {
+                        if (this.currentStep > 0) {
+                            this.currentStep--;
+                            this.showStep();
+                        }
+                    },
+                    
+                    complete: function() {
+                        document.getElementById('guide-content').innerHTML = `
+                            <div class="text-center py-8">
+                                <div class="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center text-white mx-auto mb-4">
+                                    <i class="fas fa-check text-3xl"></i>
+                                </div>
+                                <h4 class="text-xl font-semibold text-gray-800 mb-2">Task Complete!</h4>
+                                <p class="text-gray-600">You've completed customizing pages and buttons.</p>
+                            </div>
+                        `;
+                        
+                        localStorage.removeItem('activeGuide');
+                        
+                        setTimeout(() => {
+                            this.close();
+                        }, 2000);
+                    },
+                    
+                    close: function() {
+                        const guideWindow = document.getElementById('page-setup-guide');
+                        if (guideWindow) {
+                            guideWindow.style.display = 'none';
+                        }
+                        localStorage.removeItem('activeGuide');
+                    }
+                };
+            }
+            
+            // Small delay to ensure guide systems are initialized
+            setTimeout(() => {
+                const savedGuide = localStorage.getItem('activeGuide');
+                console.log('Saved guide state:', savedGuide);
+                
+                if (savedGuide) {
+                    try {
+                        const guideState = JSON.parse(savedGuide);
+                        console.log('Found active guide to resume:', guideState);
+                        
+                        // Check if this is the customize-pages guide
+                        if (guideState.taskId === 'customize-pages') {
+                            console.log('Resuming customize-pages guide on admin_pages');
+                            window.pageGuide.start(guideState.taskId, guideState.stepIndex || 0);
+                        }
+                    } catch (e) {
+                        console.error('Error parsing saved guide:', e);
+                    }
+                }
+            }, 500);
+        });
+    </script>
+
 </body>
 </html>
 
