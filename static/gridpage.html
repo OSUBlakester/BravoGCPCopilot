@@ -1794,11 +1794,48 @@
                 title: 'Auto Clean Freestyle',
                 steps: [
                     {
+                        title: 'Unlock Admin Toolbar',
+                        icon: 'fa-unlock',
+                        content: `<p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>`,
+                        action: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.remove('guide-highlight-target');
+                        }
+                    },
+                    {
                         title: 'Navigate to User Settings',
                         icon: 'fa-cog',
-                        content: `<p class="text-gray-700 mb-3">This guide will help you configure Auto Clean Freestyle settings.</p>`,
-                        action: function() {},
-                        cleanup: function() {}
+                        content: `<p class="text-gray-700 mb-3">Click the gear icon to open User Settings. The detailed guide will continue there.</p>
+                        <p class="text-sm text-blue-600 mt-2"><i class="fas fa-info-circle mr-1"></i>The guide will automatically continue when you reach the settings page.</p>`,
+                        action: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) {
+                                settingsLink.classList.add('guide-highlight-target');
+                                
+                                // Update localStorage to indicate we're continuing this guide on admin_settings
+                                const savedGuide = localStorage.getItem('activeGuide');
+                                if (savedGuide) {
+                                    try {
+                                        const guideState = JSON.parse(savedGuide);
+                                        // Save the task index so admin_settings knows which task to continue
+                                        localStorage.setItem('continueGuideOnSettings', JSON.stringify({
+                                            taskId: guideState.taskId,
+                                            taskIndex: guideState.taskIndex
+                                        }));
+                                    } catch (e) {
+                                        console.error('Error saving continuation state:', e);
+                                    }
+                                }
+                            }
+                        },
+                        cleanup: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.remove('guide-highlight-target');
+                        }
                     }
                 ]
             },
@@ -1806,11 +1843,30 @@
                 title: 'Display Splash Screen',
                 steps: [
                     {
+                        title: 'Unlock Admin Toolbar',
+                        icon: 'fa-unlock',
+                        content: `<p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>`,
+                        action: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.remove('guide-highlight-target');
+                        }
+                    },
+                    {
                         title: 'Navigate to User Settings',
                         icon: 'fa-cog',
-                        content: `<p class="text-gray-700 mb-3">This guide will help you configure Splash Screen display.</p>`,
-                        action: function() {},
-                        cleanup: function() {}
+                        content: `<p class="text-gray-700 mb-3">Click the gear icon to open User Settings. The detailed guide will continue there.</p>`,
+                        action: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.remove('guide-highlight-target');
+                        }
                     }
                 ]
             },
@@ -1818,11 +1874,30 @@
                 title: 'Sight Word Logic',
                 steps: [
                     {
+                        title: 'Unlock Admin Toolbar',
+                        icon: 'fa-unlock',
+                        content: `<p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>`,
+                        action: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.remove('guide-highlight-target');
+                        }
+                    },
+                    {
                         title: 'Navigate to User Settings',
                         icon: 'fa-cog',
-                        content: `<p class="text-gray-700 mb-3">This guide will help you configure Sight Word settings.</p>`,
-                        action: function() {},
-                        cleanup: function() {}
+                        content: `<p class="text-gray-700 mb-3">Click the gear icon to open User Settings. The detailed guide will continue there.</p>`,
+                        action: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.remove('guide-highlight-target');
+                        }
                     }
                 ]
             },
@@ -1830,11 +1905,30 @@
                 title: 'Spell Letter Order',
                 steps: [
                     {
+                        title: 'Unlock Admin Toolbar',
+                        icon: 'fa-unlock',
+                        content: `<p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>`,
+                        action: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.remove('guide-highlight-target');
+                        }
+                    },
+                    {
                         title: 'Navigate to User Settings',
                         icon: 'fa-cog',
-                        content: `<p class="text-gray-700 mb-3">This guide will help you configure Letter Order for spelling.</p>`,
-                        action: function() {},
-                        cleanup: function() {}
+                        content: `<p class="text-gray-700 mb-3">Click the gear icon to open User Settings. The detailed guide will continue there.</p>`,
+                        action: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const settingsLink = document.querySelector('a[href="admin_settings.html"]');
+                            if (settingsLink) settingsLink.classList.remove('guide-highlight-target');
+                        }
                     }
                 ]
             },
@@ -1842,11 +1936,30 @@
                 title: 'Family and Friends Info',
                 steps: [
                     {
+                        title: 'Unlock Admin Toolbar',
+                        icon: 'fa-unlock',
+                        content: `<p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>`,
+                        action: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.remove('guide-highlight-target');
+                        }
+                    },
+                    {
                         title: 'Navigate to User Info',
                         icon: 'fa-info-circle',
-                        content: `<p class="text-gray-700 mb-3">This guide will help you add family and friends information.</p>`,
-                        action: function() {},
-                        cleanup: function() {}
+                        content: `<p class="text-gray-700 mb-3">Click the User Info icon in the admin toolbar. The detailed guide will continue there.</p>`,
+                        action: function() {
+                            const userInfoLink = document.querySelector('a[href="user_info_admin.html"]');
+                            if (userInfoLink) userInfoLink.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const userInfoLink = document.querySelector('a[href="user_info_admin.html"]');
+                            if (userInfoLink) userInfoLink.classList.remove('guide-highlight-target');
+                        }
                     }
                 ]
             },
@@ -1854,11 +1967,30 @@
                 title: 'Customize Pages and Buttons',
                 steps: [
                     {
+                        title: 'Unlock Admin Toolbar',
+                        icon: 'fa-unlock',
+                        content: `<p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>`,
+                        action: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const lockButton = document.getElementById('lock-icon');
+                            if (lockButton) lockButton.classList.remove('guide-highlight-target');
+                        }
+                    },
+                    {
                         title: 'Navigate to Page Management',
                         icon: 'fa-th',
-                        content: `<p class="text-gray-700 mb-3">This guide will help you customize pages and buttons.</p>`,
-                        action: function() {},
-                        cleanup: function() {}
+                        content: `<p class="text-gray-700 mb-3">Click the Page Management icon in the admin toolbar. You can then customize pages and buttons.</p>`,
+                        action: function() {
+                            const pageLink = document.querySelector('a[href*="page" i][href*="edit" i], a[href*="page" i][href*="manage" i]');
+                            if (pageLink) pageLink.classList.add('guide-highlight-target');
+                        },
+                        cleanup: function() {
+                            const pageLink = document.querySelector('a[href*="page" i][href*="edit" i], a[href*="page" i][href*="manage" i]');
+                            if (pageLink) pageLink.classList.remove('guide-highlight-target');
+                        }
                     }
                 ]
             }
@@ -1948,6 +2080,24 @@
                 stepIndex: 0,
                 taskIndex: taskIndex !== -1 ? taskIndex : 0
             }));
+            
+            // For medium priority tasks (index 6+), also save continuation state
+            if (taskIndex >= 6) {
+                // Family and Friends goes to user_info_admin.html, others go to admin_settings.html
+                if (taskId === 'add-family-friends') {
+                    localStorage.setItem('continueGuideOnUserInfo', JSON.stringify({
+                        taskId: taskId,
+                        taskIndex: taskIndex
+                    }));
+                    console.log('Saved continuation state for user_info_admin:', taskId, 'at index:', taskIndex);
+                } else {
+                    localStorage.setItem('continueGuideOnSettings', JSON.stringify({
+                        taskId: taskId,
+                        taskIndex: taskIndex
+                    }));
+                    console.log('Saved continuation state for admin_settings:', taskId, 'at index:', taskIndex);
+                }
+            }
             
             // Hide help modal
             const helpModal = document.getElementById('help-modal');

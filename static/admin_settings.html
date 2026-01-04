@@ -1903,12 +1903,12 @@
                         }
                     },
                     {
-                        title: 'Find People Section',
+                        title: 'Find Family & Friends Section',
                         icon: 'fa-users',
                         content: `
-                            <p class="text-gray-700 mb-3">On the User Info page, locate the People section.</p>
+                            <p class="text-gray-700 mb-3">On the User Info page, locate the Family & Friends section.</p>
                             <div class="bg-orange-50 border-l-4 border-orange-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-orange-500 mr-2"></i>Scroll to find <strong>"Friends and Family"</strong> or <strong>"People"</strong> section</p>
+                                <p class="text-sm"><i class="fas fa-info-circle text-orange-500 mr-2"></i>Scroll to find the <strong>Family & Friends</strong> section</p>
                             </div>
                             <p class="text-sm text-gray-600">Here you can add names and relationships of important people.</p>
                         `,
@@ -2515,6 +2515,7 @@
             this.guideNext.style.display = 'none';
             
             // Show the guide window
+            this.guideWindow.classList.remove('hidden');
             this.guideWindow.style.display = 'block';
         },
         
@@ -2590,14 +2591,28 @@
             const lastCompletedIndex = localStorage.getItem('lastCompletedTaskIndex');
             const completedIndex = localStorage.getItem('completedTaskIndex');
             const savedGuide = localStorage.getItem('activeGuide');
+            const continueGuide = localStorage.getItem('continueGuideOnSettings');
             
             console.log('localStorage check:');
             console.log('  - lastCompletedTaskIndex:', lastCompletedIndex);
             console.log('  - completedTaskIndex:', completedIndex);
             console.log('  - activeGuide:', savedGuide);
+            console.log('  - continueGuideOnSettings:', continueGuide);
             
-            // Priority order: savedGuide.taskIndex > completedTaskIndex > lastCompletedTaskIndex
-            if (savedGuide) {
+            // Priority order: continueGuideOnSettings > savedGuide.taskIndex > completedTaskIndex > lastCompletedTaskIndex
+            if (continueGuide) {
+                try {
+                    const continueState = JSON.parse(continueGuide);
+                    if (continueState.taskIndex !== undefined) {
+                        interactiveGuide.currentSetupTaskIndex = continueState.taskIndex;
+                        console.log('✓ Restored task index from continueGuideOnSettings:', continueState.taskIndex);
+                    }
+                    // Clear the continuation flag
+                    localStorage.removeItem('continueGuideOnSettings');
+                } catch (e) {
+                    console.error('Error parsing continuation state:', e);
+                }
+            } else if (savedGuide) {
                 try {
                     const guideState = JSON.parse(savedGuide);
                     if (guideState.taskIndex !== undefined) {
@@ -2670,11 +2685,22 @@
                 console.log('Not task 5, proceeding with auto-advance');
                 // Wait a moment, then advance to next task
                 setTimeout(() => {
+                    console.log('=== AUTO-ADVANCE SETTIMEOUT FIRED ===');
+                    console.log('currentSetupTaskIndex BEFORE increment:', interactiveGuide.currentSetupTaskIndex);
                     interactiveGuide.currentSetupTaskIndex++;
+                    console.log('currentSetupTaskIndex AFTER increment:', interactiveGuide.currentSetupTaskIndex);
+                    console.log('setupTasks.length:', interactiveGuide.setupTasks.length);
+                    console.log('Condition check (index < length):', interactiveGuide.currentSetupTaskIndex < interactiveGuide.setupTasks.length);
+                    
                     if (interactiveGuide.currentSetupTaskIndex < interactiveGuide.setupTasks.length) {
+                        console.log('✓ Calling showUserSetupMenu for task index', interactiveGuide.currentSetupTaskIndex);
                         interactiveGuide.showUserSetupMenu();
+                        console.log('✓ showUserSetupMenu returned');
+                        console.log('✓ Guide window display:', interactiveGuide.guideWindow.style.display);
+                        console.log('✓ Guide window classList:', interactiveGuide.guideWindow.classList.toString());
                     } else {
                         // All tasks complete
+                        console.log('✗ All tasks complete, calling endUserSetup');
                         interactiveGuide.endUserSetup();
                     }
                 }, 500);
@@ -2692,13 +2718,13 @@
                     console.log('Guide state taskIndex:', guideState.taskIndex);
                     console.log('currentSetupTaskIndex BEFORE resume:', interactiveGuide.currentSetupTaskIndex);
                     
-                    // Task index already restored above, just resume the guide
-                    interactiveGuide.currentTask = guideState.taskId;
-                    interactiveGuide.currentStep = guideState.stepIndex;
-                    
-                    console.log('currentSetupTaskIndex AFTER resume:', interactiveGuide.currentSetupTaskIndex);
                     const task = interactiveGuide.guideData[guideState.taskId];
                     if (task) {
+                        // Task exists in admin_settings guideData - resume normally
+                        interactiveGuide.currentTask = guideState.taskId;
+                        interactiveGuide.currentStep = guideState.stepIndex;
+                        
+                        console.log('currentSetupTaskIndex AFTER resume:', interactiveGuide.currentSetupTaskIndex);
                         console.log('Found task:', task.title);
                         interactiveGuide.guideTitle.textContent = task.title;
                         interactiveGuide.guideWindow.classList.remove('hidden');
@@ -2706,7 +2732,16 @@
                         interactiveGuide.showStep();
                         console.log('Guide should now be visible');
                     } else {
-                        console.error('Task not found:', guideState.taskId);
+                        // Task not found - this is a gridpage guide for a medium priority task
+                        // Start the detailed guide fresh from admin_settings
+                        console.log('Task not found in admin_settings guideData:', guideState.taskId);
+                        console.log('Starting detailed guide with taskIndex:', interactiveGuide.currentSetupTaskIndex);
+                        
+                        // Clear the gridpage guide from localStorage
+                        localStorage.removeItem('activeGuide');
+                        
+                        // Start the admin_settings version of this guide
+                        interactiveGuide.start(guideState.taskId);
                     }
                 } catch (e) {
                     console.error('Error resuming guide:', e);
