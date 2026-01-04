@@ -689,7 +689,7 @@
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Choose how the user will interact with Bravo's communication grid.</p>
-                                                <p><strong>Auditory Scanning:</strong> Buttons are highlighted and and spoken to the personal speaker one at a time. The user activates a switch or button when they hear the option they want.</p>
+                                                <p><strong>Auditory Scanning:</strong> Buttons are highlighted and spoken to the personal speaker one at a time. The user activates a switch or button when they hear the option they want.</p>
                                                 <p><strong>Tap Interface:</strong> The user directly taps or touches buttons on the screen to make selections.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
@@ -759,13 +759,13 @@
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Choose the voice that Bravo uses to speak words, phrases, and sentences selected by the user.</p>
                                                 <p><strong>Voice Options:</strong> Multiple voice options are available with different genders, accents, and speaking styles.</p>
-                                                <p><strong>Adjustable Settings:</strong> Speech rate (speed), pitch (high/low), and volume can all be customized.</p>
+                                                <p><strong>Adjustable Settings:</strong> Speech rate (speed) and volume can all be customized.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
                                                     <li>Find the <strong>Voice</strong> or <strong>Text-to-Speech</strong> section</li>
                                                     <li>Select a voice from the dropdown menu (you can preview each voice)</li>
-                                                    <li>Adjust speech rate, pitch, and volume using the sliders</li>
+                                                    <li>Adjust speech rate and volume using the sliders</li>
                                                     <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
                                                 </ol>
                                             </div>
@@ -793,13 +793,13 @@
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
                                                 <p><strong>Purpose:</strong> Control how quickly buttons are highlighted and announced during Auditory Scanning, and how many times the system cycles through all options.</p>
-                                                <p><strong>Scan Speed:</strong> The delay (in seconds) between each button highlight. Slower speeds give more time to react; faster speeds make navigation quicker.</p>
+                                                <p><strong>Scan Speed:</strong> The delay (in milliseconds) between each button highlight. Slower speeds give more time to react; faster speeds make navigation quicker.</p>
                                                 <p><strong>Loop Limit:</strong> How many complete cycles through all buttons before scanning pauses until switch is used. A value of 0 will have no limit.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
                                                     <li>Find the <strong>Scanning</strong> or <strong>Auditory Scanning</strong> section</li>
-                                                    <li>Adjust the <strong>Scan Speed</strong> slider (try 2-3 seconds to start)</li>
+                                                    <li>Enter the <strong>Scan Speed</strong> in the input field (try 2000-3000 milliseconds to start)</li>
                                                     <li>Set the <strong>Loop Limit</strong> (typically 2-3 loops)</li>
                                                     <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
                                                 </ol>
@@ -917,7 +917,7 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Show a large temporary window with the user's communicate to make it easier for others to read.</p>
+                                                <p><strong>Purpose:</strong> Show a large temporary window showing the user's selected communication. This makes it easier to notify those nearby that the user is communicating and what they are saying.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → Display</strong></li>
@@ -949,7 +949,7 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Choose to assign pictures to words that are typically recognized by sight. You can also select a different level of sight words.</p>
+                                                <p><strong>Purpose:</strong> Choose to assign pictures to words that are typically recognized by sight. You can also select a different grade level of sight words.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → Spelling</strong></li>
@@ -980,7 +980,7 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Set how letters are arranged during spelling (alphabetical, QWERTY keyboard layout, or frequency-based).</p>
+                                                <p><strong>Purpose:</strong> Set how letters are arranged on spelling page (alphabetical, QWERTY keyboard layout, or frequency-based).</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings → Spelling</strong></li>
@@ -1014,7 +1014,7 @@
                                                 <p><strong>Purpose:</strong> Add names and relationships of family members and friends for more personalized communication suggestions.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
-                                                    <li>Navigate to <strong>Admin Toolbar → User Info → People</strong></li>
+                                                    <li>Navigate to <strong>Admin Toolbar → User Info → Family & Friends</strong></li>
                                                     <li>Add family members and friends with their names and relationships</li>
                                                     <li>Click <strong>Save Friends and Family</strong> button at the end of the section</li>
                                                 </ol>
@@ -1091,7 +1091,7 @@
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Current Location</strong></li>
                                                     <li>Add favorite locations with names and descriptions</li>
-                                                    <li>Click <strong>Save Friends and Family</strong> button at the end of the section</li>
+                                                    <li>Click <strong>Add to Favorites</strong> button to save the location</li>
                                                 </ol>
                                             </div>
                                         </div>
