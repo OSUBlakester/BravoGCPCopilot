@@ -6,8 +6,6 @@
     <title>Audio Device Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <script src="/static/interactive-guide.js"></script>
-    <script src="/static/audio-admin-guide.js"></script>
     <script src="/static/audio_admin.js" defer></script>
 </head>
 <style>
@@ -225,5 +223,792 @@
         });
     </script>
 
-</body>
-</html>
+    <!-- Audio Devices Help Modal -->
+    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1000] flex items-center justify-center p-4" style="z-index: 1000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50 flex justify-between items-center">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    <i class="fas fa-volume-up text-[#FB4F14] mr-2"></i>Audio Devices Guide
+                </h2>
+                <button id="close-help-modal" class="text-gray-500 hover:text-gray-700 transition-colors">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-6">
+                <div class="prose max-w-none">
+                    <p class="text-gray-700 mb-6">
+                        The Audio Devices page allows you to configure separate audio outputs for personal (private) and system (public) audio. This dual-audio setup ensures private communication stays private while allowing important announcements to be heard by everyone nearby.
+                    </p>
+                    
+                    <div class="space-y-3">
+                        <!-- Personal Speaker -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-headphones text-purple-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Personal Speaker Configuration</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startAudioGuide('personal');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> Configure private audio output for personal, confidential communication.</p>
+                                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-purple-900 mb-1">Personal Speaker Uses:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Private AI Conversations:</strong> Personal questions, private discussions</li>
+                                                    <li>• <strong>Confidential Content:</strong> Personal information, health reminders, passwords</li>
+                                                    <li>• <strong>Individual Preferences:</strong> Music, podcasts, entertainment choices</li>
+                                                    <li>• <strong>Phone Calls:</strong> Private telephone conversations</li>
+                                                    <li>• <strong>Personal Notifications:</strong> Calendar alerts, text messages, emails</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-purple-500 mr-1"></i><strong>Typical Setup:</strong> Use headphones, earbuds, or a nearby personal speaker for private audio.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Speaker -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-bullhorn text-blue-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">System Speaker Configuration</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startAudioGuide('system');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> Configure public audio output for announcements meant to be heard by others nearby.</p>
+                                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-blue-900 mb-1">System Speaker Uses:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Public Announcements:</strong> General alerts, system notifications</li>
+                                                    <li>• <strong>Group Interactions:</strong> Shared conversations with family or caregivers</li>
+                                                    <li>• <strong>Emergency Alerts:</strong> Important warnings that need to be heard by everyone</li>
+                                                    <li>• <strong>Celebrations:</strong> Birthday messages, achievement announcements</li>
+                                                    <li>• <strong>Educational Content:</strong> Lessons shared with teachers or therapists</li>
+                                                    <li>• <strong>Doorbell/Visitor Alerts:</strong> Notifications for people arriving</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-blue-500 mr-1"></i><strong>Typical Setup:</strong> Use room speakers, smart speakers, or computer speakers for public audio.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Testing Audio -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-vial text-green-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Testing Audio Devices</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startAudioGuide('testing');" class="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> Verify that audio is being sent to the correct devices and at appropriate volume levels.</p>
+                                            <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-green-900 mb-1">What Testing Verifies:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Device Targeting:</strong> Audio plays from the correct speaker/headphones</li>
+                                                    <li>• <strong>Volume Levels:</strong> Sound is at an appropriate and comfortable volume</li>
+                                                    <li>• <strong>Audio Clarity:</strong> Speech is clear and understandable without distortion</li>
+                                                    <li>• <strong>Response Time:</strong> No significant delays between triggering and hearing audio</li>
+                                                    <li>• <strong>Connection Status:</strong> Device is properly connected and functional</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Best Practice:</strong> Always test after changing devices or if audio seems wrong.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Saving Settings -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-save text-indigo-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Saving Audio Settings</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startAudioGuide('saving');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> Permanently apply your audio device selections to the user profile.</p>
+                                            <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-indigo-900 mb-1">Important Notes:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Must Save:</strong> Device selections are not applied until you click "Save Audio Settings"</li>
+                                                    <li>• <strong>Profile-Specific:</strong> Each user profile can have different audio device preferences</li>
+                                                    <li>• <strong>Persistent Settings:</strong> Saved settings remain active across sessions and restarts</li>
+                                                    <li>• <strong>Override Default:</strong> System-wide defaults are overridden by these user-specific settings</li>
+                                                    <li>• <strong>Test Before Saving:</strong> Always test both devices before saving to ensure they work correctly</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-exclamation-triangle text-red-500 mr-1"></i><strong>Warning:</strong> Changes are not active until you click the Save button!</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Use Cases & Scenarios -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-users text-orange-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Common Use Cases & Scenarios</div>
+                                        <div class="flex items-center space-x-2">
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <div class="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-orange-900 mb-1">Real-World Scenarios:</p>
+                                                <div class="text-xs text-gray-700 space-y-3 ml-2">
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">🏠 Home Setting:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• <strong>Personal:</strong> Wireless earbuds for private conversations</li>
+                                                            <li>• <strong>System:</strong> Living room smart speaker for family announcements</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">🏫 School/Therapy Setting:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• <strong>Personal:</strong> Student headphones for individual work</li>
+                                                            <li>• <strong>System:</strong> Classroom speakers for shared lessons</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">🏥 Care Facility:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• <strong>Personal:</strong> Bedside speaker for patient privacy</li>
+                                                            <li>• <strong>System:</strong> Room speaker for caregiver alerts</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">💼 Workplace:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• <strong>Personal:</strong> Noise-cancelling headphones for focus</li>
+                                                            <li>• <strong>System:</strong> Desk speaker for meetings and collaboration</li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Best Practices -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-lightbulb text-yellow-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Best Practices & Tips</div>
+                                        <div class="flex items-center space-x-2">
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-yellow-900 mb-1">Audio Configuration Tips:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Privacy First:</strong> Always configure personal audio for confidential content</li>
+                                                    <li>• <strong>Test Regularly:</strong> Verify audio devices work correctly, especially after system updates</li>
+                                                    <li>• <strong>Volume Levels:</strong> Set comfortable volumes that don't startle or strain hearing</li>
+                                                    <li>• <strong>Battery Check:</strong> For wireless devices, ensure they're charged before sessions</li>
+                                                    <li>• <strong>Backup Device:</strong> Have an alternative device available if primary fails</li>
+                                                    <li>• <strong>Clear Labels:</strong> Physically label devices to avoid confusion</li>
+                                                    <li>• <strong>Distance Matters:</strong> Keep personal speakers close, system speakers at appropriate distance</li>
+                                                    <li>• <strong>Interference:</strong> Minimize Bluetooth interference from other devices</li>
+                                                    <li>• <strong>Same Type:</strong> If possible, use similar device types (both Bluetooth or both wired)</li>
+                                                    <li>• <strong>Document Setup:</strong> Keep notes on which physical devices are selected for each role</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Troubleshooting -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleAudioGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-wrench text-red-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Troubleshooting Audio Issues</div>
+                                        <div class="flex items-center space-x-2">
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-red-900 mb-1">Common Problems & Solutions:</p>
+                                                <div class="text-xs text-gray-700 space-y-2 ml-2">
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">🔇 No Audio Output:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• Check device is powered on and connected</li>
+                                                            <li>• Verify device appears in dropdown list</li>
+                                                            <li>• Test device with another app to confirm it works</li>
+                                                            <li>• Try disconnecting and reconnecting the device</li>
+                                                            <li>• Check system volume and mute settings</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">🔀 Audio Playing From Wrong Device:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• Verify correct device selected in dropdown</li>
+                                                            <li>• Click "Save Audio Settings" to apply changes</li>
+                                                            <li>• Refresh the page and reselect devices</li>
+                                                            <li>• Check for duplicate device names</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">📡 Bluetooth Connection Issues:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• Ensure Bluetooth is enabled on your device</li>
+                                                            <li>• Move device closer to reduce distance</li>
+                                                            <li>• Remove and re-pair the Bluetooth device</li>
+                                                            <li>• Check for interference from other devices</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div>
+                                                        <p class="font-semibold text-gray-800">🎚️ Volume Too Low/High:</p>
+                                                        <ul class="ml-4 mt-1 space-y-1">
+                                                            <li>• Adjust volume on both the device and in system settings</li>
+                                                            <li>• Check if device has independent volume controls</li>
+                                                            <li>• Verify volume in Global Settings (Application Volume)</li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                <button id="contact-support-btn" class="text-sm text-[#FB4F14] hover:text-orange-600 transition-colors flex items-center">
+                    <i class="fas fa-envelope mr-2"></i>Contact Support
+                </button>
+                <button id="close-help-modal-footer" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Support Modal -->
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1001] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50">
+                <h3 class="text-xl font-bold text-gray-800">
+                    <i class="fas fa-envelope text-[#FB4F14] mr-2"></i>Contact Support
+                </h3>
+            </div>
+            
+            <div class="p-6">
+                <form id="contact-form" action="https://formspree.io/f/xnnqkvqj" method="POST">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-1">Your Email</label>
+                            <input type="email" id="contact-email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                        <div>
+                            <label for="contact-message" class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                            <textarea id="contact-message" name="message" rows="4" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-6">
+                        <button type="button" id="cancel-contact" class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                            Cancel
+                        </button>
+                        <button type="submit" class="flex-1 px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
+                            Send Message
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Guide highlighting animation */
+        @keyframes guidePulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(251, 79, 20, 0.7), 0 0 20px rgba(251, 79, 20, 0.4);
+                border-color: #FB4F14;
+            }
+            50% {
+                box-shadow: 0 0 0 10px rgba(251, 79, 20, 0), 0 0 30px rgba(251, 79, 20, 0.6);
+                border-color: #F97316;
+            }
+        }
+        
+        .guide-highlight-target {
+            animation: guidePulse 2s ease-in-out infinite;
+            position: relative;
+            z-index: 1000;
+            border: 3px solid #FB4F14 !important;
+            border-radius: 8px !important;
+        }
+    </style>
+
+    <script>
+        // Toggle guide details
+        function toggleAudioGuideDetails(element) {
+            const details = element.querySelector('.guide-details');
+            const chevron = element.querySelector('.fa-chevron-down');
+            
+            if (details.classList.contains('hidden')) {
+                details.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                details.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // Help modal controls
+        const helpIcon = document.getElementById('help-icon');
+        const helpModal = document.getElementById('help-modal');
+        const closeHelpModal = document.getElementById('close-help-modal');
+        const closeHelpModalFooter = document.getElementById('close-help-modal-footer');
+        const contactSupportBtn = document.getElementById('contact-support-btn');
+        const contactModal = document.getElementById('contact-modal');
+        const cancelContact = document.getElementById('cancel-contact');
+
+        function openHelpModal() {
+            helpModal.classList.remove('hidden');
+        }
+
+        function closeHelpModalFunc() {
+            helpModal.classList.add('hidden');
+        }
+
+        function openContactModal() {
+            contactModal.classList.remove('hidden');
+            helpModal.classList.add('hidden');
+        }
+
+        function closeContactModal() {
+            contactModal.classList.add('hidden');
+        }
+
+        helpIcon?.addEventListener('click', openHelpModal, true);
+        closeHelpModal?.addEventListener('click', closeHelpModalFunc);
+        closeHelpModalFooter?.addEventListener('click', closeHelpModalFunc);
+        contactSupportBtn?.addEventListener('click', openContactModal);
+        cancelContact?.addEventListener('click', closeContactModal);
+
+        // Close modals on outside click
+        helpModal?.addEventListener('click', function(e) {
+            if (e.target === helpModal) closeHelpModalFunc();
+        });
+        contactModal?.addEventListener('click', function(e) {
+            if (e.target === contactModal) closeContactModal();
+        });
+
+        // Contact form submission
+        const contactForm = document.getElementById('contact-form');
+        contactForm?.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            try {
+                const response = await fetch(contactForm.action, {
+                    method: 'POST',
+                    body: new FormData(contactForm),
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    alert('Thank you for contacting support! We\'ll get back to you soon.');
+                    contactForm.reset();
+                    closeContactModal();
+                } else {
+                    alert('There was a problem sending your message. Please try again.');
+                }
+            } catch (error) {
+                alert('There was a problem sending your message. Please try again.');
+            }
+        });
+
+        // Interactive Guide Objects
+        let currentAudioGuide = null;
+
+        const personalGuide = {
+            id: 'personal',
+            steps: [
+                {
+                    title: 'Personal Speaker Dropdown',
+                    content: 'Select your preferred device for private audio from this dropdown. This will be used for personal conversations, confidential information, and individual entertainment. Common choices include headphones, earbuds, or a nearby personal speaker.',
+                    highlight: '#personalSpeakerSelect',
+                    action: function() {
+                        const select = document.getElementById('personalSpeakerSelect');
+                        if (select) {
+                            select.classList.add('guide-highlight-target');
+                            select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const select = document.getElementById('personalSpeakerSelect');
+                        if (select) select.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Test Personal Speaker',
+                    content: 'Click this button to verify your personal speaker selection. You should hear a test message from the device you selected. This confirms the audio is routed correctly and the volume is appropriate.',
+                    highlight: '#testPersonalSpeakerBtn',
+                    action: function() {
+                        const btn = document.getElementById('testPersonalSpeakerBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('testPersonalSpeakerBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const systemGuide = {
+            id: 'system',
+            steps: [
+                {
+                    title: 'System Speaker Dropdown',
+                    content: 'Select your preferred device for public audio from this dropdown. This will be used for announcements meant to be heard by family, caregivers, or others nearby. Common choices include room speakers, smart speakers, or computer speakers.',
+                    highlight: '#systemSpeakerSelect',
+                    action: function() {
+                        const select = document.getElementById('systemSpeakerSelect');
+                        if (select) {
+                            select.classList.add('guide-highlight-target');
+                            select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const select = document.getElementById('systemSpeakerSelect');
+                        if (select) select.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Test System Speaker',
+                    content: 'Click this button to verify your system speaker selection. You should hear a test message from the device you selected. This confirms public announcements will be heard by everyone nearby.',
+                    highlight: '#testSystemSpeakerBtn',
+                    action: function() {
+                        const btn = document.getElementById('testSystemSpeakerBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('testSystemSpeakerBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const testingGuide = {
+            id: 'testing',
+            steps: [
+                {
+                    title: 'Why Test Audio?',
+                    content: 'Testing verifies that audio plays from the correct device at the right volume with good clarity. Always test after selecting devices and before saving settings to ensure everything works as expected.',
+                    highlight: null,
+                    action: function() {},
+                    cleanup: function() {}
+                },
+                {
+                    title: 'Test Personal Speaker',
+                    content: 'Click to send a test message to your personal speaker. Listen carefully - the audio should be clear, at a comfortable volume, and only audible to you (if using headphones).',
+                    highlight: '#testPersonalSpeakerBtn',
+                    action: function() {
+                        const btn = document.getElementById('testPersonalSpeakerBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('testPersonalSpeakerBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Test System Speaker',
+                    content: 'Click to send a test message to your system speaker. This should be audible to others nearby and loud enough to be clearly heard across the room.',
+                    highlight: '#testSystemSpeakerBtn',
+                    action: function() {
+                        const btn = document.getElementById('testSystemSpeakerBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('testSystemSpeakerBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const savingGuide = {
+            id: 'saving',
+            steps: [
+                {
+                    title: 'Review Your Selections',
+                    content: 'Before saving, verify that you\'ve selected the correct devices for both personal and system audio. Check the dropdowns to confirm your choices.',
+                    highlight: '#audioSettingsContainer',
+                    action: function() {
+                        const container = document.getElementById('audioSettingsContainer');
+                        if (container) {
+                            container.classList.add('guide-highlight-target');
+                            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const container = document.getElementById('audioSettingsContainer');
+                        if (container) container.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Test Both Devices',
+                    content: 'Click both test buttons to ensure your personal and system speakers work correctly. Verify the audio comes from the expected devices at appropriate volumes.',
+                    highlight: '#audioSettingsContainer',
+                    action: function() {
+                        const container = document.getElementById('audioSettingsContainer');
+                        if (container) {
+                            container.classList.add('guide-highlight-target');
+                            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const container = document.getElementById('audioSettingsContainer');
+                        if (container) container.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Save Audio Settings',
+                    content: 'Click this button to permanently save your audio device selections. Your settings won\'t be applied until you click Save!',
+                    highlight: '#saveAudioSettingsBtn',
+                    action: function() {
+                        const btn = document.getElementById('saveAudioSettingsBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('saveAudioSettingsBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        // Start guide function
+        function startAudioGuide(guideId) {
+            console.log('Starting audio guide for:', guideId);
+            
+            closeHelpModalFunc();
+            
+            const guides = {
+                'personal': personalGuide,
+                'system': systemGuide,
+                'testing': testingGuide,
+                'saving': savingGuide
+            };
+            
+            const guide = guides[guideId];
+            if (guide) {
+                currentAudioGuide = {
+                    guide: guide,
+                    currentStep: 0
+                };
+                showAudioGuideWindow();
+            }
+        }
+
+        // Guide window functions
+        function showAudioGuideWindow() {
+            if (!currentAudioGuide) return;
+            
+            let guideWindow = document.getElementById('audio-guide-window');
+            if (!guideWindow) {
+                guideWindow = document.createElement('div');
+                guideWindow.id = 'audio-guide-window';
+                guideWindow.style.cssText = 'position: fixed; bottom: 20px; right: 20px; width: 400px; max-height: 500px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 9999; display: flex; flex-direction: column;';
+                
+                guideWindow.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #FB4F14 0%, #F97316 100%); color: white; padding: 16px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div id="audio-guide-title" style="font-weight: bold; font-size: 18px;"></div>
+                            <div id="audio-guide-progress" style="font-size: 12px; opacity: 0.9; margin-top: 4px;"></div>
+                        </div>
+                        <button id="audio-guide-close" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
+                    </div>
+                    <div id="audio-guide-content" style="padding: 20px; flex: 1; overflow-y: auto;"></div>
+                    <div style="border-top: 1px solid #e5e7eb; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 0 0 12px 12px;">
+                        <button id="audio-guide-prev" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <div id="audio-guide-step-indicator" style="display: flex; gap: 8px;"></div>
+                        <button id="audio-guide-next" style="padding: 8px 16px; background: #FB4F14; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                `;
+                
+                document.body.appendChild(guideWindow);
+                
+                document.getElementById('audio-guide-close').addEventListener('click', closeAudioGuide);
+                document.getElementById('audio-guide-prev').addEventListener('click', previousAudioGuideStep);
+                document.getElementById('audio-guide-next').addEventListener('click', nextAudioGuideStep);
+            }
+            
+            guideWindow.style.display = 'flex';
+            updateAudioGuideStep();
+        }
+
+        function updateAudioGuideStep() {
+            if (!currentAudioGuide) return;
+            
+            const guide = currentAudioGuide.guide;
+            const step = guide.steps[currentAudioGuide.currentStep];
+            
+            document.getElementById('audio-guide-title').textContent = step.title;
+            document.getElementById('audio-guide-progress').textContent = `Step ${currentAudioGuide.currentStep + 1} of ${guide.steps.length}`;
+            document.getElementById('audio-guide-content').innerHTML = `<p style="color: #374151; line-height: 1.6;">${step.content}</p>`;
+            
+            const indicatorContainer = document.getElementById('audio-guide-step-indicator');
+            indicatorContainer.innerHTML = '';
+            for (let i = 0; i < guide.steps.length; i++) {
+                const dot = document.createElement('div');
+                dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s;';
+                if (i < currentAudioGuide.currentStep) {
+                    dot.style.background = '#10b981';
+                } else if (i === currentAudioGuide.currentStep) {
+                    dot.style.background = '#FB4F14';
+                    dot.style.transform = 'scale(1.3)';
+                } else {
+                    dot.style.background = '#d1d5db';
+                }
+                indicatorContainer.appendChild(dot);
+            }
+            
+            const prevBtn = document.getElementById('audio-guide-prev');
+            const nextBtn = document.getElementById('audio-guide-next');
+            
+            prevBtn.disabled = currentAudioGuide.currentStep === 0;
+            prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+            prevBtn.style.cursor = prevBtn.disabled ? 'not-allowed' : 'pointer';
+            
+            const isLastStep = currentAudioGuide.currentStep === guide.steps.length - 1;
+            nextBtn.innerHTML = isLastStep ? 'Complete <i class="fas fa-check"></i>' : 'Next <i class="fas fa-arrow-right"></i>';
+            
+            if (step.action) {
+                if (currentAudioGuide.currentStep > 0) {
+                    const prevStep = guide.steps[currentAudioGuide.currentStep - 1];
+                    if (prevStep.cleanup) prevStep.cleanup();
+                }
+                step.action();
+            }
+        }
+
+        function nextAudioGuideStep() {
+            if (!currentAudioGuide) return;
+            
+            const guide = currentAudioGuide.guide;
+            
+            if (currentAudioGuide.currentStep < guide.steps.length - 1) {
+                currentAudioGuide.currentStep++;
+                updateAudioGuideStep();
+            } else {
+                closeAudioGuide();
+            }
+        }
+
+        function previousAudioGuideStep() {
+            if (!currentAudioGuide) return;
+            
+            if (currentAudioGuide.currentStep > 0) {
+                currentAudioGuide.currentStep--;
+                updateAudioGuideStep();
+            }
+        }
+
+        function closeAudioGuide() {
+            if (!currentAudioGuide) return;
+            
+            const guide = currentAudioGuide.guide;
+            const step = guide.steps[currentAudioGuide.currentStep];
+            if (step.cleanup) step.cleanup();
+            
+            const guideWindow = document.getElementById('audio-guide-window');
+            if (guideWindow) guideWindow.style.display = 'none';
+            
+            currentAudioGuide = null;
+        }
+    </script>
+

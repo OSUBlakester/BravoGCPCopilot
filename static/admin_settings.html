@@ -7,7 +7,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="/static/interactive-guide.js"></script>
-    <script src="/static/admin-settings-guide.js"></script>
      <!-- Ensure mood-selection.js is loaded before admin_settings.js -->
     <script src="/static/mood-selection.js" defer></script>
     <!-- Ensure admin_settings.js is loaded with defer -->
@@ -569,6 +568,37 @@
         </div>
     </div>
 
+    <!-- User Settings Help Modal -->
+    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1000] flex items-center justify-center p-4" style="z-index: 1000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50 flex justify-between items-center">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    <i class="fas fa-cog text-[#FB4F14] mr-2"></i>User Settings Guide
+                </h2>
+                <button id="help-modal-close" class="text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Help">&times;</button>
+            </div>
+            <div id="help-modal-content" class="flex-1 overflow-y-auto p-6">
+                <!-- Content will be dynamically inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Support Modal -->
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
+            <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
+            <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
+            <form id="contact-support-form" class="space-y-2" method="POST" action="https://formspree.io/f/myzpzero">
+                <input type="text" id="support-name" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                <input type="email" id="support-email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
+                <textarea id="support-message" name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>
+                <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md hover:bg-green-700">Send to Support</button>
+            </form>
+            <div id="support-success" class="hidden text-green-600 mt-2">Thank you! Your message has been sent.</div>
+            <div id="support-error" class="hidden text-red-600 mt-2">There was an error sending your message. Please try again or email admin@talkwithbravo.com.</div>
+        </div>
+    </div>
+
     <!-- Interactive Step-by-Step Guide Window -->
     <div id="interactive-guide" class="fixed bg-white rounded-lg shadow-2xl border-2 border-blue-500 hidden" style="width: 400px; max-height: 600px; z-index: 9999;">
         <!-- Draggable Header -->
@@ -636,6 +666,26 @@
             50% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
         }
         
+        /* Guide highlighting animation */
+        @keyframes guidePulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(251, 79, 20, 0.7), 0 0 20px rgba(251, 79, 20, 0.4);
+                border-color: #FB4F14;
+            }
+            50% {
+                box-shadow: 0 0 0 10px rgba(251, 79, 20, 0), 0 0 30px rgba(251, 79, 20, 0.6);
+                border-color: #F97316;
+            }
+        }
+        
+        .guide-highlight-target {
+            animation: guidePulse 2s ease-in-out infinite;
+            position: relative;
+            z-index: 1000;
+            border: 3px solid #FB4F14 !important;
+            border-radius: 8px !important;
+        }
+        
         .step-dot {
             width: 10px;
             height: 10px;
@@ -653,6 +703,907 @@
             background-color: #10b981;
         }
     </style>
+
+    <script>
+    // User Settings Help Guide System
+    const helpIcon = document.getElementById('help-icon');
+    const helpModal = document.getElementById('help-modal');
+    const helpModalClose = document.getElementById('help-modal-close');
+    const helpModalContent = document.getElementById('help-modal-content');
+    const contactModal = document.getElementById('contact-modal');
+    const contactModalClose = document.getElementById('contact-modal-close');
+    
+    function openHelpModal() {
+        console.log('📘 Opening User Settings Guide');
+        showUserSettingsGuide();
+    }
+    
+    function closeHelpModal() {
+        helpModal.classList.add('hidden');
+    }
+    
+    function openContactSupportModal() {
+        contactModal.classList.remove('hidden');
+    }
+    
+    function closeContactSupportModal() {
+        contactModal.classList.add('hidden');
+    }
+    
+    function showUserSettingsGuide() {
+        helpModal.classList.remove('hidden');
+        
+        helpModalContent.innerHTML = `
+            <div class="p-6">
+                <div class="mb-6 bg-gradient-to-r from-orange-50 to-red-50 p-4 rounded-lg border-l-4 border-[#FB4F14]">
+                    <h3 class="text-lg font-bold text-gray-900 mb-2">
+                        <i class="fas fa-cog text-[#FB4F14] mr-2"></i>User Settings Guide
+                    </h3>
+                    <p class="text-sm text-gray-700">
+                        Configure how Bravo works for this user. These settings control interface behavior, AI responses, audio output, display preferences, and scanning options.
+                    </p>
+                </div>
+
+                <!-- Guide Sections -->
+                <div class="space-y-3">
+                    
+                    <!-- Security Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-shield-alt text-red-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Security Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('security');" class="px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Admin Toolbar PIN:</strong> Set a PIN code (4-10 digits) to prevent unauthorized access to admin features.</p>
+                                        <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>⚠️ Important:</strong> Choose a PIN that the user cannot easily guess. This protects your configuration from being changed accidentally or intentionally.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- User Interface Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-user-cog text-indigo-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">User Interface Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('interface');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Interface Mode:</strong> Choose between two main interface types:</p>
+                                        <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-indigo-900 mb-1">Interface Options:</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Auditory Scanning:</strong> Grid layout with automatic button highlighting and audio announcements. Best for users with limited mobility who use switches or scanning.</li>
+                                                <li>• <strong>Tap Screen:</strong> Direct touch interface optimized for touchscreen devices. Best for users who can tap or touch buttons directly.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-robot text-blue-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">AI Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('ai-settings');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Wake Word:</strong> The phrase used to activate voice commands (e.g., "Hey Bravo"). Set both the interjection (Hey) and name (Bravo).</p>
+                                        <p><strong>Number of AI Options:</strong> How many response choices AI provides when generating dynamic content. Higher numbers give more variety but take longer to scan through.</p>
+                                        <p><strong>Freestyle Word Options:</strong> Number of word suggestions AI provides in freestyle communication mode.</p>
+                                        <p><strong>Turn off Button Summary:</strong> When enabled, buttons show full speech text instead of summarized versions.</p>
+                                        <p><strong>Auto Clean in Freestyle:</strong> Automatically formats and cleans text before speaking in freestyle mode.</p>
+                                        <p><strong>Enable Mood Selection:</strong> Shows a mood selection screen at session start to personalize AI responses based on the user's current emotional state.</p>
+                                        <p><strong>Location:</strong> Set the 2-letter country code (e.g., US, UK, CA) to provide location-relevant information.</p>
+                                        <p><strong>AI Provider:</strong> Choose between Google Gemini or OpenAI ChatGPT for AI-generated responses.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Audio Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-volume-up text-green-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Audio Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('audio');" class="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Announcement Speech Rate:</strong> Speed of server-side announcements in words per minute (100-300 WPM, default ~180).</p>
+                                        <p><strong>Text to Speech Voice:</strong> Select the voice used for speaking text. Test different voices to find the most natural-sounding option for your user.</p>
+                                        <p><strong>Application Volume:</strong> Sets the system volume level when the app loads (0-10, where 10 is maximum).</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Display Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-desktop text-purple-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Display Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('display');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Button Size:</strong> Slider controls button size by adjusting grid columns (2 = largest buttons, 18 = smallest buttons).</p>
+                                        <p><strong>Enable Pictograms:</strong> Shows images on buttons. Only applies to Auditory Scanning interface (Tap Interface always shows images).</p>
+                                        <p><strong>Enable Sight Word Logic:</strong> Uses Dolch sight word lists to show common words as text-only (no images).</p>
+                                        <p><strong>Sight Words Grade Level:</strong> Choose which grade level of sight words to display as text-only. Higher grades include all lower grade words.</p>
+                                        <p><strong>Spell Page Letter Order:</strong> How letters are arranged on the spelling page (Alphabetical, QWERTY, or Frequency-based).</p>
+                                        <p><strong>Display Splash Screen:</strong> Shows a speech bubble displaying text being announced.</p>
+                                        <p><strong>Splash Screen Duration:</strong> How long the splash screen displays (500-10000 milliseconds).</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Auditory Scanning Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-search text-orange-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Auditory Scanning Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('scanning');" class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Auditory Scan Speed:</strong> Time in milliseconds between button highlights during scanning. Lower = faster, higher = slower.</p>
+                                        <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
+                                        <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
+                                        <div class="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>💡 Tip:</strong> Start with slower scan speeds and gradually increase as the user becomes more comfortable with the interface.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Help Footer -->
+                <div class="mt-6 p-4 bg-gray-100 rounded-lg text-center">
+                    <p class="text-sm text-gray-600 mb-2">Need more help?</p>
+                    <button onclick="openContactSupportModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                        <i class="fas fa-envelope mr-2"></i>Contact Support
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    function toggleSettingsGuideDetails(element) {
+        const details = element.querySelector('.guide-details');
+        const icon = element.querySelector('.fa-chevron-down');
+        
+        if (details.classList.contains('hidden')) {
+            details.classList.remove('hidden');
+            icon.style.transform = 'rotate(180deg)';
+        } else {
+            details.classList.add('hidden');
+            icon.style.transform = 'rotate(0deg)';
+        }
+    }
+    
+    // Start settings guide function
+    function startSettingsGuide(guideId) {
+        console.log('Starting settings guide for:', guideId);
+        
+        // Close help modal
+        closeHelpModal();
+        
+        // Map guide IDs to guide objects
+        const guides = {
+            'security': securityGuide,
+            'interface': interfaceGuide,
+            'ai-settings': aiSettingsGuide,
+            'audio': audioGuide,
+            'display': displayGuide,
+            'scanning': scanningGuide
+        };
+        
+        const guide = guides[guideId];
+        if (guide) {
+            currentSettingsGuide = {
+                guide: guide,
+                currentStep: 0
+            };
+            showSettingsGuideWindow();
+        } else {
+            alert('Interactive guide for ' + guideId + ' will be available soon.');
+        }
+    }
+    
+    // Settings Guide Objects
+    let currentSettingsGuide = null;
+    
+    const securityGuide = {
+        id: 'security',
+        steps: [
+            {
+                title: 'Admin Toolbar PIN',
+                content: 'Set a PIN code (4-10 digits) to protect admin features. This prevents unauthorized users from accessing configuration settings.',
+                highlight: '#toolbarPIN',
+                action: function() {
+                    const input = document.getElementById('toolbarPIN');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('toolbarPIN');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    const interfaceGuide = {
+        id: 'interface',
+        steps: [
+            {
+                title: 'Interface Mode Selection',
+                content: 'Choose between Auditory Scanning (grid with audio cues) or Tap Screen (direct touch interface). Select the mode that best fits your user\'s abilities.',
+                highlight: '#interfaceAuditory',
+                action: function() {
+                    const radio = document.getElementById('interfaceAuditory');
+                    const parent = radio?.closest('.flex.items-center.space-x-6');
+                    if (parent) {
+                        parent.classList.add('guide-highlight-target');
+                        parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const radio = document.getElementById('interfaceAuditory');
+                    const parent = radio?.closest('.flex.items-center.space-x-6');
+                    if (parent) parent.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    const aiSettingsGuide = {
+        id: 'ai-settings',
+        steps: [
+            {
+                title: 'Wake Word Configuration',
+                content: 'Set the phrase that activates voice commands. Enter an interjection (like "Hey") and a name (like "Friend"). The user will say this phrase before voice commands.',
+                highlight: '#wakeWordInterjection',
+                action: function() {
+                    const container = document.querySelector('#wakeWordInterjection')?.closest('.flex.space-x-2');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const container = document.querySelector('#wakeWordInterjection')?.closest('.flex.space-x-2');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Number of AI Options',
+                content: 'Set how many response options the AI will generate. More options give more choices but take longer to scan through. Use #LLMOptions placeholder in button queries to reference this number.',
+                highlight: '#LLMOptions',
+                action: function() {
+                    const input = document.getElementById('LLMOptions');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('LLMOptions');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Freestyle Word Options',
+                content: 'Number of word suggestions AI provides in freestyle communication mode. Higher numbers offer more word choices for sentence building.',
+                highlight: '#FreestyleOptions',
+                action: function() {
+                    const input = document.getElementById('FreestyleOptions');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('FreestyleOptions');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Turn off Button Summary',
+                content: 'When enabled, buttons will show the full speech option instead of a summary. Useful when you want users to see exactly what will be spoken.',
+                highlight: '#SummaryOff',
+                action: function() {
+                    const checkbox = document.getElementById('SummaryOff');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('SummaryOff');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Auto Clean in Freestyle',
+                content: 'Transforms selected words into more conversational sentences before speaking. For example, "want park" becomes "I want to go to the park" for more natural communication.',
+                highlight: '#autoClean',
+                action: function() {
+                    const checkbox = document.getElementById('autoClean');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('autoClean');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Enable Mood Selection',
+                content: 'When enabled, users select their mood at session start. The AI uses this to personalize responses based on emotional state.',
+                highlight: '#enableMoodSelection',
+                action: function() {
+                    const checkbox = document.getElementById('enableMoodSelection');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('enableMoodSelection');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Location Country Code',
+                content: 'Enter your 2-letter country code (e.g., US, UK, CA) to provide location context for AI responses. This helps the AI provide locally relevant information.',
+                highlight: '#CountryCode',
+                action: function() {
+                    const input = document.getElementById('CountryCode');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('CountryCode');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'AI Provider',
+                content: 'Choose between Google Gemini or OpenAI ChatGPT for AI responses. Both provide high-quality results with different strengths.',
+                highlight: '#llmProvider',
+                action: function() {
+                    const select = document.getElementById('llmProvider');
+                    if (select) {
+                        select.classList.add('guide-highlight-target');
+                        select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const select = document.getElementById('llmProvider');
+                    if (select) select.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    const audioGuide = {
+        id: 'audio',
+        steps: [
+            {
+                title: 'Speech Rate',
+                content: 'Set how fast server-side announcements are spoken, measured in words per minute. Range: 100-300 WPM (default ~180). Adjust based on user comprehension speed.',
+                highlight: '#speechRate',
+                action: function() {
+                    const input = document.getElementById('speechRate');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('speechRate');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Text to Speech Voice',
+                content: 'Select the voice used for speaking text. Test different voices to find the most natural-sounding option. Click "Test Voice" to hear a sample.',
+                highlight: '#ttsVoiceSelect',
+                action: function() {
+                    const select = document.getElementById('ttsVoiceSelect');
+                    const container = select?.closest('.flex.rounded-md');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const select = document.getElementById('ttsVoiceSelect');
+                    const container = select?.closest('.flex.rounded-md');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Application Volume',
+                content: 'Sets the system volume level when the app loads (0-10, where 10 is maximum). This ensures consistent volume across sessions.',
+                highlight: '#applicationVolume',
+                action: function() {
+                    const slider = document.getElementById('applicationVolume');
+                    const container = slider?.closest('.flex.items-center.space-x-4');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const slider = document.getElementById('applicationVolume');
+                    const container = slider?.closest('.flex.items-center.space-x-4');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    const displayGuide = {
+        id: 'display',
+        steps: [
+            {
+                title: 'Button Size',
+                content: 'Adjust button size by changing grid columns. Move left for larger buttons (2 columns) or right for smaller buttons (18 columns). Find the size that works best for your user\'s vision and motor skills.',
+                highlight: '#gridColumnsSlider',
+                action: function() {
+                    const slider = document.getElementById('gridColumnsSlider');
+                    const container = slider?.closest('.flex.items-center.space-x-4');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const slider = document.getElementById('gridColumnsSlider');
+                    const container = slider?.closest('.flex.items-center.space-x-4');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Enable Pictograms',
+                content: 'Show images on buttons to aid recognition. Note: This only applies to Auditory Scanning interface. Tap Interface always shows images.',
+                highlight: '#enablePictograms',
+                action: function() {
+                    const checkbox = document.getElementById('enablePictograms');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('enablePictograms');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Sight Word Logic',
+                content: 'Use Dolch sight word lists to show common words as text-only (no images). Helps reading development by displaying frequently-used words as text.',
+                highlight: '#enableSightWords',
+                action: function() {
+                    const checkbox = document.getElementById('enableSightWords');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('enableSightWords');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Sight Words Grade Level',
+                content: 'Choose which grade level of sight words display as text-only. Selection is cumulative - higher grades include all lower grade words.',
+                highlight: '#sightWordGradeLevel',
+                action: function() {
+                    const select = document.getElementById('sightWordGradeLevel');
+                    if (select) {
+                        select.classList.add('guide-highlight-target');
+                        select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const select = document.getElementById('sightWordGradeLevel');
+                    if (select) select.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Spell Page Letter Order',
+                content: 'Choose how letters are arranged on the Spell page in Tap Interface: Alphabetical (A-Z), QWERTY (keyboard layout), or Frequency-Based (most common letters first).',
+                highlight: '#spellLetterOrder',
+                action: function() {
+                    const select = document.getElementById('spellLetterOrder');
+                    if (select) {
+                        select.classList.add('guide-highlight-target');
+                        select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const select = document.getElementById('spellLetterOrder');
+                    if (select) select.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Display Splash Screen',
+                content: 'Shows a speech bubble displaying text being announced. Provides visual feedback for what Bravo is saying.',
+                highlight: '#displaySplash',
+                action: function() {
+                    const checkbox = document.getElementById('displaySplash');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('displaySplash');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Splash Screen Duration',
+                content: 'Set how long the speech bubble displays (500-10000 milliseconds, default 3000). Adjust based on how much time users need to read the text.',
+                highlight: '#displaySplashTime',
+                action: function() {
+                    const input = document.getElementById('displaySplashTime');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('displaySplashTime');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    const scanningGuide = {
+        id: 'scanning',
+        steps: [
+            {
+                title: 'Auditory Scan Speed',
+                content: 'Time in milliseconds between button highlights during scanning. Lower values = faster scanning, higher values = slower. Start slow and increase speed as user becomes comfortable.',
+                highlight: '#scanDelay',
+                action: function() {
+                    const input = document.getElementById('scanDelay');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('scanDelay');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Scan Loop Limit',
+                content: 'Number of complete scan cycles before pausing. Set to 0 for unlimited scanning, or 1-10 to limit cycles. Limiting cycles can help prevent fatigue.',
+                highlight: '#scanLoopLimit',
+                action: function() {
+                    const input = document.getElementById('scanLoopLimit');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('scanLoopLimit');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Disable Auditory Scanning',
+                content: 'Turns off automatic scanning completely. User must manually navigate buttons using keyboard, switch, or other input device.',
+                highlight: '#ScanningOff',
+                action: function() {
+                    const checkbox = document.getElementById('ScanningOff');
+                    const container = checkbox?.closest('.flex.items-center');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('ScanningOff');
+                    const container = checkbox?.closest('.flex.items-center');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    // Settings Guide Window Functions
+    function showSettingsGuideWindow() {
+        if (!currentSettingsGuide) return;
+        
+        // Create guide window if it doesn't exist
+        let guideWindow = document.getElementById('settings-guide-window');
+        if (!guideWindow) {
+            guideWindow = document.createElement('div');
+            guideWindow.id = 'settings-guide-window';
+            guideWindow.style.cssText = 'position: fixed; bottom: 20px; right: 20px; width: 400px; max-height: 500px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 9999; display: flex; flex-direction: column;';
+            
+            guideWindow.innerHTML = `
+                <div style="background: linear-gradient(135deg, #FB4F14 0%, #F97316 100%); color: white; padding: 16px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <div id="settings-guide-title" style="font-weight: bold; font-size: 18px;"></div>
+                        <div id="settings-guide-progress" style="font-size: 12px; opacity: 0.9; margin-top: 4px;"></div>
+                    </div>
+                    <button id="settings-guide-close" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
+                </div>
+                <div id="settings-guide-content" style="padding: 20px; flex: 1; overflow-y: auto;"></div>
+                <div style="border-top: 1px solid #e5e7eb; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 0 0 12px 12px;">
+                    <button id="settings-guide-prev" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                        <i class="fas fa-arrow-left"></i> Previous
+                    </button>
+                    <div id="settings-guide-step-indicator" style="display: flex; gap: 8px;"></div>
+                    <button id="settings-guide-next" style="padding: 8px 16px; background: #FB4F14; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                        Next <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+            `;
+            
+            document.body.appendChild(guideWindow);
+            
+            // Event listeners
+            document.getElementById('settings-guide-close').addEventListener('click', closeSettingsGuide);
+            document.getElementById('settings-guide-prev').addEventListener('click', previousSettingsGuideStep);
+            document.getElementById('settings-guide-next').addEventListener('click', nextSettingsGuideStep);
+        }
+        
+        guideWindow.style.display = 'flex';
+        updateSettingsGuideStep();
+    }
+    
+    function updateSettingsGuideStep() {
+        if (!currentSettingsGuide) return;
+        
+        const guide = currentSettingsGuide.guide;
+        const step = guide.steps[currentSettingsGuide.currentStep];
+        
+        // Update title and progress
+        document.getElementById('settings-guide-title').textContent = step.title;
+        const progressText = `Step ${currentSettingsGuide.currentStep + 1} of ${guide.steps.length}`;
+        document.getElementById('settings-guide-progress').textContent = progressText;
+        
+        // Update content
+        document.getElementById('settings-guide-content').innerHTML = `<p style="color: #374151; line-height: 1.6;">${step.content}</p>`;
+        
+        // Update step indicators
+        const indicatorContainer = document.getElementById('settings-guide-step-indicator');
+        indicatorContainer.innerHTML = '';
+        for (let i = 0; i < guide.steps.length; i++) {
+            const dot = document.createElement('div');
+            dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s;';
+            if (i < currentSettingsGuide.currentStep) {
+                dot.style.background = '#10b981'; // completed
+            } else if (i === currentSettingsGuide.currentStep) {
+                dot.style.background = '#FB4F14'; // active
+                dot.style.transform = 'scale(1.3)';
+            } else {
+                dot.style.background = '#d1d5db'; // upcoming
+            }
+            indicatorContainer.appendChild(dot);
+        }
+        
+        // Update button states
+        const prevBtn = document.getElementById('settings-guide-prev');
+        const nextBtn = document.getElementById('settings-guide-next');
+        
+        prevBtn.disabled = currentSettingsGuide.currentStep === 0;
+        prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+        prevBtn.style.cursor = prevBtn.disabled ? 'not-allowed' : 'pointer';
+        
+        const isLastStep = currentSettingsGuide.currentStep === guide.steps.length - 1;
+        nextBtn.innerHTML = isLastStep ? 'Complete <i class="fas fa-check"></i>' : 'Next <i class="fas fa-arrow-right"></i>';
+        
+        // Execute step action
+        if (step.action) {
+            // Clean up previous step
+            if (currentSettingsGuide.currentStep > 0) {
+                const prevStep = guide.steps[currentSettingsGuide.currentStep - 1];
+                if (prevStep.cleanup) prevStep.cleanup();
+            }
+            step.action();
+        }
+    }
+    
+    function nextSettingsGuideStep() {
+        if (!currentSettingsGuide) return;
+        
+        const guide = currentSettingsGuide.guide;
+        
+        if (currentSettingsGuide.currentStep < guide.steps.length - 1) {
+            currentSettingsGuide.currentStep++;
+            updateSettingsGuideStep();
+        } else {
+            // Complete guide
+            closeSettingsGuide();
+        }
+    }
+    
+    function previousSettingsGuideStep() {
+        if (!currentSettingsGuide) return;
+        
+        if (currentSettingsGuide.currentStep > 0) {
+            currentSettingsGuide.currentStep--;
+            updateSettingsGuideStep();
+        }
+    }
+    
+    function closeSettingsGuide() {
+        if (!currentSettingsGuide) return;
+        
+        // Clean up current step
+        const guide = currentSettingsGuide.guide;
+        const step = guide.steps[currentSettingsGuide.currentStep];
+        if (step.cleanup) step.cleanup();
+        
+        // Hide window
+        const guideWindow = document.getElementById('settings-guide-window');
+        if (guideWindow) guideWindow.style.display = 'none';
+        
+        currentSettingsGuide = null;
+    }
+    
+    // Event listeners
+    if (helpIcon) {
+        helpIcon.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            openHelpModal();
+        }, true); // Use capture phase to fire before other handlers
+    }
+    
+    if (helpModalClose) {
+        helpModalClose.addEventListener('click', closeHelpModal);
+    }
+    
+    if (contactModalClose) {
+        contactModalClose.addEventListener('click', closeContactSupportModal);
+    }
+    
+    // Close modals on backdrop click
+    helpModal?.addEventListener('click', (e) => {
+        if (e.target === helpModal) closeHelpModal();
+    });
+    
+    contactModal?.addEventListener('click', (e) => {
+        if (e.target === contactModal) closeContactSupportModal();
+    });
+    
+    // Contact form submission
+    document.getElementById('contact-support-form')?.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const form = e.target;
+        const formData = new FormData(form);
+        
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                document.getElementById('support-success').classList.remove('hidden');
+                document.getElementById('support-error').classList.add('hidden');
+                form.reset();
+                setTimeout(() => {
+                    closeContactSupportModal();
+                    document.getElementById('support-success').classList.add('hidden');
+                }, 3000);
+            } else {
+                throw new Error('Form submission failed');
+            }
+        } catch (error) {
+            document.getElementById('support-error').classList.remove('hidden');
+            document.getElementById('support-success').classList.add('hidden');
+        }
+    });
+    </script>
 
     <script>
     // Interactive Guide System (shared with gridpage)
