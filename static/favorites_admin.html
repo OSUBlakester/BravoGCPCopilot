@@ -6,8 +6,6 @@
   <title>Admin - Manage Favorites</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-  <script src="/static/interactive-guide.js"></script>
-  <script src="/static/favorites-admin-guide.js"></script>
   <script src="/static/favorites_admin.js" defer></script>
   <style>
     /* Custom base styles */
@@ -612,5 +610,728 @@
         });
     })();
   </script>
-</body>
-</html>
+
+  <!-- Favorites Help Modal -->
+  <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1000] flex items-center justify-center p-4" style="z-index: 1000;">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50 flex justify-between items-center">
+        <h2 class="text-2xl font-bold text-gray-800">
+          <i class="fas fa-star text-[#FB4F14] mr-2"></i>Event Sources & Topics Guide
+        </h2>
+        <button id="close-help-modal" class="text-gray-500 hover:text-gray-700 transition-colors">
+          <i class="fas fa-times text-2xl"></i>
+        </button>
+      </div>
+      
+      <div class="flex-1 overflow-y-auto p-6">
+        <div class="prose max-w-none">
+          <p class="text-gray-700 mb-6">
+            The Event Sources page helps you manage favorite conversation topics and configure automatic content feeds from websites. This keeps conversations fresh with current events, news, sports scores, and other timely information.
+          </p>
+          
+          <div class="space-y-3">
+            <!-- Topic Grid -->
+            <div class="settings-guide-item cursor-pointer" onclick="toggleFavoritesGuideDetails(this)">
+              <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                <div class="flex-shrink-0 mt-1">
+                  <i class="fas fa-th text-blue-600 text-lg"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                  <div class="flex items-center justify-between">
+                    <div class="font-semibold text-gray-900">Topic Grid Management</div>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="event.stopPropagation(); startFavoritesGuide('grid');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
+                        <i class="fas fa-route mr-1"></i>Guide Me
+                      </button>
+                      <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </div>
+                  </div>
+                  <div class="guide-details hidden mt-2">
+                    <div class="text-sm text-gray-700 space-y-2">
+                      <p><strong>Purpose:</strong> Organize and manage favorite conversation topics that users can select from.</p>
+                      <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                        <p class="text-sm font-semibold text-blue-900 mb-1">Working with the Grid:</p>
+                        <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                          <li>• <strong>View Topics:</strong> See all configured favorite topics in a visual grid layout</li>
+                          <li>• <strong>Add New:</strong> Click any empty cell to create a new topic</li>
+                          <li>• <strong>Edit Existing:</strong> Click a filled cell to modify its settings</li>
+                          <li>• <strong>Drag & Drop:</strong> Reorganize topics by dragging them to different positions</li>
+                          <li>• <strong>Visual Feedback:</strong> Filled cells show active topics, empty cells are available slots</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Creating Topics -->
+            <div class="settings-guide-item cursor-pointer" onclick="toggleFavoritesGuideDetails(this)">
+              <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                <div class="flex-shrink-0 mt-1">
+                  <i class="fas fa-plus-circle text-green-600 text-lg"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                  <div class="flex items-center justify-between">
+                    <div class="font-semibold text-gray-900">Creating & Editing Topics</div>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="event.stopPropagation(); startFavoritesGuide('creating');" class="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition flex items-center">
+                        <i class="fas fa-route mr-1"></i>Guide Me
+                      </button>
+                      <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </div>
+                  </div>
+                  <div class="guide-details hidden mt-2">
+                    <div class="text-sm text-gray-700 space-y-2">
+                      <p><strong>Purpose:</strong> Set up topic names and optional speech phrases for natural communication.</p>
+                      <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+                        <p class="text-sm font-semibold text-green-900 mb-1">Topic Configuration:</p>
+                        <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                          <li>• <strong>Topic Name:</strong> Clear, descriptive title (e.g., "Denver Broncos", "Disney Movies")</li>
+                          <li>• <strong>Speech Phrase:</strong> Optional phrase to say before reading content (e.g., "Let me get the latest Denver Broncos news")</li>
+                          <li>• <strong>Save Changes:</strong> Click Save to store the topic configuration</li>
+                          <li>• <strong>Delete Topic:</strong> Remove topics that are no longer needed</li>
+                        </ul>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> Choose topics that match the user's interests for more engaging conversations.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Web Scraping -->
+            <div class="settings-guide-item cursor-pointer" onclick="toggleFavoritesGuideDetails(this)">
+              <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                <div class="flex-shrink-0 mt-1">
+                  <i class="fas fa-globe text-purple-600 text-lg"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                  <div class="flex items-center justify-between">
+                    <div class="font-semibold text-gray-900">Web Scraping Configuration</div>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="event.stopPropagation(); startFavoritesGuide('scraping');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
+                        <i class="fas fa-route mr-1"></i>Guide Me
+                      </button>
+                      <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </div>
+                  </div>
+                  <div class="guide-details hidden mt-2">
+                    <div class="text-sm text-gray-700 space-y-2">
+                      <p><strong>Purpose:</strong> Automatically pull current content from websites for topics like news, sports, weather, and entertainment.</p>
+                      <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                        <p class="text-sm font-semibold text-purple-900 mb-1">Setting Up Web Scraping:</p>
+                        <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                          <li>• <strong>Popular Sites:</strong> Choose from pre-configured news sources (CNN, BBC, ESPN, Reddit)</li>
+                          <li>• <strong>Custom URL:</strong> Enter any website URL and let AI analyze it</li>
+                          <li>• <strong>Keywords:</strong> Filter content with relevant keywords (e.g., "Broncos, Denver, NFL")</li>
+                          <li>• <strong>Smart Analysis:</strong> AI learns website structure automatically</li>
+                          <li>• <strong>Test Configuration:</strong> Verify scraping works before saving</li>
+                        </ul>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-purple-500 mr-1"></i>Web scraping keeps topics updated with fresh, relevant content automatically.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Saving Changes -->
+            <div class="settings-guide-item cursor-pointer" onclick="toggleFavoritesGuideDetails(this)">
+              <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                <div class="flex-shrink-0 mt-1">
+                  <i class="fas fa-save text-indigo-600 text-lg"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                  <div class="flex items-center justify-between">
+                    <div class="font-semibold text-gray-900">Saving & Managing Changes</div>
+                    <div class="flex items-center space-x-2">
+                      <button onclick="event.stopPropagation(); startFavoritesGuide('saving');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
+                        <i class="fas fa-route mr-1"></i>Guide Me
+                      </button>
+                      <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </div>
+                  </div>
+                  <div class="guide-details hidden mt-2">
+                    <div class="text-sm text-gray-700 space-y-2">
+                      <p><strong>Purpose:</strong> Apply your changes and manage the topic grid.</p>
+                      <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
+                        <p class="text-sm font-semibold text-indigo-900 mb-1">Managing the Grid:</p>
+                        <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                          <li>• <strong>Save Changes:</strong> Click to permanently save all topic configurations and grid layout</li>
+                          <li>• <strong>Clear All:</strong> Remove all topics from the grid (use with caution)</li>
+                          <li>• <strong>Status Messages:</strong> Watch for confirmation messages after saving</li>
+                          <li>• <strong>Auto-save in Editor:</strong> Individual topic edits save when you click Save in the modal</li>
+                        </ul>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-exclamation-triangle text-red-500 mr-1"></i><strong>Warning:</strong> Always click "Save Changes" after reorganizing the grid to preserve your layout.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Best Practices -->
+            <div class="settings-guide-item cursor-pointer" onclick="toggleFavoritesGuideDetails(this)">
+              <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                <div class="flex-shrink-0 mt-1">
+                  <i class="fas fa-lightbulb text-yellow-600 text-lg"></i>
+                </div>
+                <div class="ml-3 flex-1">
+                  <div class="flex items-center justify-between">
+                    <div class="font-semibold text-gray-900">Best Practices & Tips</div>
+                    <div class="flex items-center space-x-2">
+                      <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                    </div>
+                  </div>
+                  <div class="guide-details hidden mt-2">
+                    <div class="text-sm text-gray-700 space-y-2">
+                      <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                        <p class="text-sm font-semibold text-yellow-900 mb-1">Tips for Effective Topics:</p>
+                        <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                          <li>• <strong>User Interests:</strong> Focus on topics the user genuinely cares about</li>
+                          <li>• <strong>Variety:</strong> Mix different types (sports, entertainment, local news, hobbies)</li>
+                          <li>• <strong>Update Frequency:</strong> Set up web scraping for time-sensitive topics like sports scores</li>
+                          <li>• <strong>Clear Names:</strong> Use recognizable names that users can easily identify</li>
+                          <li>• <strong>Seasonal Topics:</strong> Update topics based on seasons (football in fall, baseball in summer)</li>
+                          <li>• <strong>Test Scraping:</strong> Always test web scraping configurations before saving</li>
+                          <li>• <strong>Keywords Matter:</strong> Good keywords filter out irrelevant content</li>
+                        </ul>
+                      </div>
+                      <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-blue-500 mr-1"></i>Well-chosen topics make conversations more engaging and give users more control over what they discuss.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+        <button id="contact-support-btn" class="text-sm text-[#FB4F14] hover:text-orange-600 transition-colors flex items-center">
+          <i class="fas fa-envelope mr-2"></i>Contact Support
+        </button>
+        <button id="close-help-modal-footer" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contact Support Modal -->
+  <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1001] flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+      <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50">
+        <h3 class="text-xl font-bold text-gray-800">
+          <i class="fas fa-envelope text-[#FB4F14] mr-2"></i>Contact Support
+        </h3>
+      </div>
+      
+      <div class="p-6">
+        <form id="contact-form" action="https://formspree.io/f/xnnqkvqj" method="POST">
+          <div class="space-y-4">
+            <div>
+              <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-1">Your Email</label>
+              <input type="email" id="contact-email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+            </div>
+            <div>
+              <label for="contact-message" class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+              <textarea id="contact-message" name="message" rows="4" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"></textarea>
+            </div>
+          </div>
+          
+          <div class="flex gap-3 mt-6">
+            <button type="button" id="cancel-contact" class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" class="flex-1 px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
+              Send Message
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* Guide highlighting animation */
+    @keyframes guidePulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(251, 79, 20, 0.7), 0 0 20px rgba(251, 79, 20, 0.4);
+        border-color: #FB4F14;
+      }
+      50% {
+        box-shadow: 0 0 0 10px rgba(251, 79, 20, 0), 0 0 30px rgba(251, 79, 20, 0.6);
+        border-color: #F97316;
+      }
+    }
+    
+    .guide-highlight-target {
+      animation: guidePulse 2s ease-in-out infinite;
+      position: relative;
+      z-index: 1000;
+      border: 3px solid #FB4F14 !important;
+      border-radius: 8px !important;
+    }
+  </style>
+
+  <script>
+    // Toggle guide details
+    function toggleFavoritesGuideDetails(element) {
+      const details = element.querySelector('.guide-details');
+      const chevron = element.querySelector('.fa-chevron-down');
+      
+      if (details.classList.contains('hidden')) {
+        details.classList.remove('hidden');
+        chevron.style.transform = 'rotate(180deg)';
+      } else {
+        details.classList.add('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+      }
+    }
+
+    // Help modal controls
+    const helpIcon = document.getElementById('help-icon');
+    const helpModal = document.getElementById('help-modal');
+    const closeHelpModal = document.getElementById('close-help-modal');
+    const closeHelpModalFooter = document.getElementById('close-help-modal-footer');
+    const contactSupportBtn = document.getElementById('contact-support-btn');
+    const contactModal = document.getElementById('contact-modal');
+    const cancelContact = document.getElementById('cancel-contact');
+
+    function openHelpModal() {
+      helpModal.classList.remove('hidden');
+    }
+
+    function closeHelpModalFunc() {
+      helpModal.classList.add('hidden');
+    }
+
+    function openContactModal() {
+      contactModal.classList.remove('hidden');
+      helpModal.classList.add('hidden');
+    }
+
+    function closeContactModal() {
+      contactModal.classList.add('hidden');
+    }
+
+    helpIcon?.addEventListener('click', openHelpModal, true);
+    closeHelpModal?.addEventListener('click', closeHelpModalFunc);
+    closeHelpModalFooter?.addEventListener('click', closeHelpModalFunc);
+    contactSupportBtn?.addEventListener('click', openContactModal);
+    cancelContact?.addEventListener('click', closeContactModal);
+
+    // Close modals on outside click
+    helpModal?.addEventListener('click', function(e) {
+      if (e.target === helpModal) closeHelpModalFunc();
+    });
+    contactModal?.addEventListener('click', function(e) {
+      if (e.target === contactModal) closeContactModal();
+    });
+
+    // Contact form submission
+    const contactForm = document.getElementById('contact-form');
+    contactForm?.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      try {
+        const response = await fetch(contactForm.action, {
+          method: 'POST',
+          body: new FormData(contactForm),
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.ok) {
+          alert('Thank you for contacting support! We\'ll get back to you soon.');
+          contactForm.reset();
+          closeContactModal();
+        } else {
+          alert('There was a problem sending your message. Please try again.');
+        }
+      } catch (error) {
+        alert('There was a problem sending your message. Please try again.');
+      }
+    });
+
+    // Interactive Guide Objects
+    let currentFavoritesGuide = null;
+
+    const gridGuide = {
+      id: 'grid',
+      steps: [
+        {
+          title: 'Topic Grid Overview',
+          content: 'This grid displays all your favorite conversation topics. Each cell can hold one topic. Click on any cell to add or edit a topic.',
+          highlight: '#buttonGrid',
+          action: function() {
+            const grid = document.getElementById('buttonGrid');
+            if (grid) {
+              grid.classList.add('guide-highlight-target');
+              grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const grid = document.getElementById('buttonGrid');
+            if (grid) grid.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Adding New Topics',
+          content: 'Click any empty cell (showing "Empty") to create a new topic. This will open the topic editor where you can configure the topic name and web scraping.',
+          highlight: '#buttonGrid',
+          action: function() {
+            const grid = document.getElementById('buttonGrid');
+            if (grid) {
+              grid.classList.add('guide-highlight-target');
+              grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const grid = document.getElementById('buttonGrid');
+            if (grid) grid.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Editing Existing Topics',
+          content: 'Click any filled cell to edit that topic. You can change the name, speech phrase, or web scraping configuration.',
+          highlight: '#buttonGrid',
+          action: function() {
+            const grid = document.getElementById('buttonGrid');
+            if (grid) {
+              grid.classList.add('guide-highlight-target');
+              grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const grid = document.getElementById('buttonGrid');
+            if (grid) grid.classList.remove('guide-highlight-target');
+          }
+        }
+      ]
+    };
+
+    const creatingGuide = {
+      id: 'creating',
+      steps: [
+        {
+          title: 'Topic Name',
+          content: 'Enter a clear, descriptive name for the topic. Examples: "Denver Broncos", "Disney Movies", "Local Weather". This is what users will see when selecting topics.',
+          highlight: '#buttonText',
+          action: function() {
+            const input = document.getElementById('buttonText');
+            if (input) {
+              input.classList.add('guide-highlight-target');
+              input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const input = document.getElementById('buttonText');
+            if (input) input.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Speech Phrase (Optional)',
+          content: 'Add a phrase that Bravo will say before retrieving content. Example: "Let me get the latest Denver Broncos news". This makes the interaction more natural.',
+          highlight: '#speechPhrase',
+          action: function() {
+            const input = document.getElementById('speechPhrase');
+            if (input) {
+              input.classList.add('guide-highlight-target');
+              input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const input = document.getElementById('speechPhrase');
+            if (input) input.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Configure Web Scraping',
+          content: 'Click this button to set up automatic content retrieval from websites. This allows the topic to pull fresh news, scores, or other current information.',
+          highlight: '#configureScrapingBtn',
+          action: function() {
+            const btn = document.getElementById('configureScrapingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('configureScrapingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        }
+      ]
+    };
+
+    const scrapingGuide = {
+      id: 'scraping',
+      steps: [
+        {
+          title: 'Choose News Source',
+          content: 'Select from popular pre-configured sites (CNN, BBC, ESPN, Reddit) or enter any custom website URL. Popular sites have templates ready to use.',
+          highlight: '#wizardStep1',
+          action: function() {
+            const step = document.getElementById('wizardStep1');
+            if (step) {
+              step.classList.add('guide-highlight-target');
+              step.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const step = document.getElementById('wizardStep1');
+            if (step) step.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Enter Custom URL',
+          content: 'If not using a popular site, paste any news section URL here. The AI will analyze the page structure and learn how to read articles from it automatically.',
+          highlight: '#anyWebsiteUrl',
+          action: function() {
+            const input = document.getElementById('anyWebsiteUrl');
+            if (input) {
+              input.classList.add('guide-highlight-target');
+              input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const input = document.getElementById('anyWebsiteUrl');
+            if (input) input.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Add Keywords',
+          content: 'Enter keywords to filter content (comma-separated). Example: "Broncos, Denver, NFL" will only show articles containing these words. This helps focus on relevant content.',
+          highlight: '#step1Keywords',
+          action: function() {
+            const input = document.getElementById('step1Keywords');
+            if (input) {
+              input.classList.add('guide-highlight-target');
+              input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const input = document.getElementById('step1Keywords');
+            if (input) input.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Smart Analysis',
+          content: 'Click this button to let AI visit the website and automatically figure out how to read articles. This uses machine learning to understand page structure.',
+          highlight: '#smartAnalyzeBtn',
+          action: function() {
+            const btn = document.getElementById('smartAnalyzeBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('smartAnalyzeBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Test Configuration',
+          content: 'After configuration, always test it to verify the scraping works correctly before saving. This ensures content will be retrieved properly.',
+          highlight: '#testScrapingBtn',
+          action: function() {
+            const btn = document.getElementById('testScrapingBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('testScrapingBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        }
+      ]
+    };
+
+    const savingGuide = {
+      id: 'saving',
+      steps: [
+        {
+          title: 'Save Changes Button',
+          content: 'Click this button to save all changes to the topic grid layout. This preserves any reorganization you\'ve done with drag-and-drop.',
+          highlight: '#saveChangesBtn',
+          action: function() {
+            const btn = document.getElementById('saveChangesBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('saveChangesBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        },
+        {
+          title: 'Clear All Button',
+          content: 'This removes ALL topics from the grid at once. Use with caution as this action will clear your entire configuration. Confirm before clicking.',
+          highlight: '#clearAllBtn',
+          action: function() {
+            const btn = document.getElementById('clearAllBtn');
+            if (btn) {
+              btn.classList.add('guide-highlight-target');
+              btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          },
+          cleanup: function() {
+            const btn = document.getElementById('clearAllBtn');
+            if (btn) btn.classList.remove('guide-highlight-target');
+          }
+        }
+      ]
+    };
+
+    // Start guide function
+    function startFavoritesGuide(guideId) {
+      console.log('Starting favorites guide for:', guideId);
+      
+      closeHelpModalFunc();
+      
+      const guides = {
+        'grid': gridGuide,
+        'creating': creatingGuide,
+        'scraping': scrapingGuide,
+        'saving': savingGuide
+      };
+      
+      const guide = guides[guideId];
+      if (guide) {
+        currentFavoritesGuide = {
+          guide: guide,
+          currentStep: 0
+        };
+        showFavoritesGuideWindow();
+      }
+    }
+
+    // Guide window functions
+    function showFavoritesGuideWindow() {
+      if (!currentFavoritesGuide) return;
+      
+      let guideWindow = document.getElementById('favorites-guide-window');
+      if (!guideWindow) {
+        guideWindow = document.createElement('div');
+        guideWindow.id = 'favorites-guide-window';
+        guideWindow.style.cssText = 'position: fixed; bottom: 20px; right: 20px; width: 400px; max-height: 500px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 9999; display: flex; flex-direction: column;';
+        
+        guideWindow.innerHTML = `
+          <div style="background: linear-gradient(135deg, #FB4F14 0%, #F97316 100%); color: white; padding: 16px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div id="favorites-guide-title" style="font-weight: bold; font-size: 18px;"></div>
+              <div id="favorites-guide-progress" style="font-size: 12px; opacity: 0.9; margin-top: 4px;"></div>
+            </div>
+            <button id="favorites-guide-close" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
+          </div>
+          <div id="favorites-guide-content" style="padding: 20px; flex: 1; overflow-y: auto;"></div>
+          <div style="border-top: 1px solid #e5e7eb; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 0 0 12px 12px;">
+            <button id="favorites-guide-prev" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+              <i class="fas fa-arrow-left"></i> Previous
+            </button>
+            <div id="favorites-guide-step-indicator" style="display: flex; gap: 8px;"></div>
+            <button id="favorites-guide-next" style="padding: 8px 16px; background: #FB4F14; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+              Next <i class="fas fa-arrow-right"></i>
+            </button>
+          </div>
+        `;
+        
+        document.body.appendChild(guideWindow);
+        
+        document.getElementById('favorites-guide-close').addEventListener('click', closeFavoritesGuide);
+        document.getElementById('favorites-guide-prev').addEventListener('click', previousFavoritesGuideStep);
+        document.getElementById('favorites-guide-next').addEventListener('click', nextFavoritesGuideStep);
+      }
+      
+      guideWindow.style.display = 'flex';
+      updateFavoritesGuideStep();
+    }
+
+    function updateFavoritesGuideStep() {
+      if (!currentFavoritesGuide) return;
+      
+      const guide = currentFavoritesGuide.guide;
+      const step = guide.steps[currentFavoritesGuide.currentStep];
+      
+      document.getElementById('favorites-guide-title').textContent = step.title;
+      document.getElementById('favorites-guide-progress').textContent = `Step ${currentFavoritesGuide.currentStep + 1} of ${guide.steps.length}`;
+      document.getElementById('favorites-guide-content').innerHTML = `<p style="color: #374151; line-height: 1.6;">${step.content}</p>`;
+      
+      const indicatorContainer = document.getElementById('favorites-guide-step-indicator');
+      indicatorContainer.innerHTML = '';
+      for (let i = 0; i < guide.steps.length; i++) {
+        const dot = document.createElement('div');
+        dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s;';
+        if (i < currentFavoritesGuide.currentStep) {
+          dot.style.background = '#10b981';
+        } else if (i === currentFavoritesGuide.currentStep) {
+          dot.style.background = '#FB4F14';
+          dot.style.transform = 'scale(1.3)';
+        } else {
+          dot.style.background = '#d1d5db';
+        }
+        indicatorContainer.appendChild(dot);
+      }
+      
+      const prevBtn = document.getElementById('favorites-guide-prev');
+      const nextBtn = document.getElementById('favorites-guide-next');
+      
+      prevBtn.disabled = currentFavoritesGuide.currentStep === 0;
+      prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+      prevBtn.style.cursor = prevBtn.disabled ? 'not-allowed' : 'pointer';
+      
+      const isLastStep = currentFavoritesGuide.currentStep === guide.steps.length - 1;
+      nextBtn.innerHTML = isLastStep ? 'Complete <i class="fas fa-check"></i>' : 'Next <i class="fas fa-arrow-right"></i>';
+      
+      if (step.action) {
+        if (currentFavoritesGuide.currentStep > 0) {
+          const prevStep = guide.steps[currentFavoritesGuide.currentStep - 1];
+          if (prevStep.cleanup) prevStep.cleanup();
+        }
+        step.action();
+      }
+    }
+
+    function nextFavoritesGuideStep() {
+      if (!currentFavoritesGuide) return;
+      
+      const guide = currentFavoritesGuide.guide;
+      
+      if (currentFavoritesGuide.currentStep < guide.steps.length - 1) {
+        currentFavoritesGuide.currentStep++;
+        updateFavoritesGuideStep();
+      } else {
+        closeFavoritesGuide();
+      }
+    }
+
+    function previousFavoritesGuideStep() {
+      if (!currentFavoritesGuide) return;
+      
+      if (currentFavoritesGuide.currentStep > 0) {
+        currentFavoritesGuide.currentStep--;
+        updateFavoritesGuideStep();
+      }
+    }
+
+    function closeFavoritesGuide() {
+      if (!currentFavoritesGuide) return;
+      
+      const guide = currentFavoritesGuide.guide;
+      const step = guide.steps[currentFavoritesGuide.currentStep];
+      if (step.cleanup) step.cleanup();
+      
+      const guideWindow = document.getElementById('favorites-guide-window');
+      if (guideWindow) guideWindow.style.display = 'none';
+      
+      currentFavoritesGuide = null;
+    }
+  </script>
+

@@ -7,7 +7,27 @@ let isLLMProcessing = false; // Flag to detect if LLM query is running
 const clickDebounceDelay = 300; // Debounce for button clicks (adjust as needed)
 let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from settings
 let currentQuestion = null; // Stores the current question context for LLM
+let currentOptions = []; // Stores the current LLM-generated options for Something Else functionality
 let scanningInterval; // Holds the interval ID for scanning
+
+// Restore querytype and currentQuestion from localStorage if available
+if (localStorage.getItem('llm_currentQueryType')) {
+    querytype = localStorage.getItem('llm_currentQueryType');
+    console.log('Restored querytype from storage:', querytype);
+}
+if (localStorage.getItem('llm_currentQuestion')) {
+    currentQuestion = localStorage.getItem('llm_currentQuestion');
+    console.log('Restored currentQuestion from storage:', currentQuestion);
+}
+if (localStorage.getItem('llm_currentOptions')) {
+    try {
+        currentOptions = JSON.parse(localStorage.getItem('llm_currentOptions'));
+        console.log('Restored currentOptions from storage:', currentOptions.length, 'options');
+    } catch (e) {
+        console.warn('Failed to parse currentOptions from storage:', e);
+        currentOptions = [];
+    }
+}
 let currentButtonIndex = -1; // Tracks the index for scanning
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
@@ -20,6 +40,7 @@ let wakeWordInterjection = "hey"; // Default interjection (lowercase)
 let wakeWordName = "bravo";       // Default name (lowercase)
 let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
+let waitForSwitchToScan = false; // Default wait for switch state
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
 const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
@@ -546,9 +567,11 @@ async function loadScanSettings() {
 
         // Load booleans
         ScanningOff = settings.ScanningOff === true;
+        waitForSwitchToScan = settings.waitForSwitchToScan === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
         console.log('🔍 DEBUG enablePictograms loaded from settings:', settings.enablePictograms, '-> final value:', enablePictograms);
+        console.log('🔍 DEBUG waitForSwitchToScan loaded from settings:', settings.waitForSwitchToScan, '-> final value:', waitForSwitchToScan);
         
         // Update sight word service with new settings
         if (window.updateSightWordSettings) {
@@ -1266,7 +1289,26 @@ async function generateGrid(page, container) {
 
     // Delay scanning until after the page is rendered
     setTimeout(() => {
-        startAuditoryScanning();
+        // Check if we should wait for switch press before starting (only on first visit to this page)
+        const scanningHasStarted = sessionStorage.getItem('bravoScanningStarted_grid') === 'true';
+        
+        console.log('🔍 GRIDPAGE SCANNING INIT DEBUG:');
+        console.log('  ScanningOff:', ScanningOff);
+        console.log('  waitForSwitchToScan:', waitForSwitchToScan);
+        console.log('  scanningHasStarted:', scanningHasStarted);
+        console.log('  Should wait?', !ScanningOff && waitForSwitchToScan && !scanningHasStarted);
+        
+        if (!ScanningOff && waitForSwitchToScan && !scanningHasStarted) {
+            console.log('✋ Waiting for switch press to begin scanning on gridpage...');
+            window.waitingForInitialSwitch = true;
+            // Play prompt in personal speaker
+            announce("Press switch to begin scanning", "personal", false, false);
+        } else if (!ScanningOff) {
+            console.log('▶️ Starting auditory scanning automatically');
+            startAuditoryScanning();
+        } else {
+            console.log('🔇 Scanning is disabled (ScanningOff=true)');
+        }
     }, defaultDelay);
 }
 
@@ -1292,12 +1334,18 @@ async function handleButtonClick(buttonData) {
     const pageInfo = getCurrentPageInfo();
     debugTimes.pageInfo = performance.now();
 
-    const localQueryType = buttonData.queryType || '';
+    let localQueryType = buttonData.queryType || '';
     const llmQuery = buttonData.LLMQuery || '';
     const targetPage = buttonData.targetPage || '';
     const navigationType = buttonData.navigationType || '';
     const speechPhrase = buttonData.speechPhrase || '';
     const customAudioFile = buttonData.customAudioFile || null;
+
+    // If we have an LLMQuery but no queryType, default to "options"
+    if (llmQuery && !localQueryType) {
+        localQueryType = 'options';
+        console.log('🔧 Auto-set queryType to "options" for button with LLMQuery');
+    }
 
     console.log('🎯 GRIDPAGE Button clicked:', { 
         text: buttonData.text || buttonData.option, 
@@ -1413,11 +1461,20 @@ async function handleButtonClick(buttonData) {
 
             isLLMProcessing = true;
             querytype = localQueryType;
+            if (localQueryType) { // Only save if we have a valid queryType
+                localStorage.setItem('llm_currentQueryType', localQueryType);
+                console.log('Saved querytype to localStorage:', localQueryType);
+            }
             activeOriginatingButtonText = buttonLabel;
             activeLLMPromptForContext = llmQuery;
 
             // Note: #LLMOptions replacement now handled on server side
             currentQuestion = llmQuery;
+            if (llmQuery) { // Only save if we have a valid question
+                localStorage.setItem('llm_currentQuestion', llmQuery);
+                console.log('Saved currentQuestion to localStorage:', llmQuery);
+            }
+            sessionStorage.setItem('currentQuestion', llmQuery);
 
             const summaryInstruction = SummaryOff ?
                 'The "summary" key should contain the exact same FULL text as the "option" key.' :
@@ -2704,6 +2761,7 @@ async function generateLlmButtons(options) {
     updateGridLayout();
     
     currentOptions = options;
+    localStorage.setItem('llm_currentOptions', JSON.stringify(options));
     let isAnnouncing = false;
     console.log("Generating buttons for options:", options);
 
@@ -2908,9 +2966,67 @@ async function generateLlmButtons(options) {
     // --- Generate Special Buttons ---
     // (Ensure these also have the base class and appropriate color classes)
     const somethingElseButton = document.createElement('button');
-    somethingElseButton.textContent = 'Something Else';
     // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
     somethingElseButton.className = '';
+    
+    // Apply image matching to Something Else button
+    const somethingElseImageUrl = await getSymbolImageForText('Something Else', ['refresh', 'more', 'other']);
+    if (somethingElseImageUrl) {
+        const buttonContent = document.createElement('div');
+        buttonContent.style.position = 'relative';
+        buttonContent.style.width = '100%';
+        buttonContent.style.height = '100%';
+        buttonContent.style.display = 'flex';
+        buttonContent.style.flexDirection = 'column';
+        
+        const imageContainer = document.createElement('div');
+        imageContainer.style.flex = '1';
+        imageContainer.style.width = '100%';
+        imageContainer.style.overflow = 'hidden';
+        imageContainer.style.borderRadius = '8px 8px 0 0';
+        imageContainer.style.display = 'flex';
+        imageContainer.style.alignItems = 'center';
+        imageContainer.style.justifyContent = 'center';
+        
+        const imageElement = document.createElement('img');
+        imageElement.src = somethingElseImageUrl;
+        imageElement.alt = 'Something Else';
+        imageElement.style.width = '100%';
+        imageElement.style.height = '100%';
+        imageElement.style.objectFit = 'cover';
+        imageElement.onerror = () => {
+            somethingElseButton.textContent = 'Something Else';
+        };
+        
+        const textFooter = document.createElement('div');
+        textFooter.style.height = '28px';
+        textFooter.style.width = '100%';
+        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        textFooter.style.color = 'white';
+        textFooter.style.display = 'flex';
+        textFooter.style.alignItems = 'center';
+        textFooter.style.justifyContent = 'center';
+        textFooter.style.padding = '2px 4px';
+        textFooter.style.position = 'absolute';
+        textFooter.style.bottom = '0';
+        textFooter.style.left = '0';
+        textFooter.style.right = '0';
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = 'Something Else';
+        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontWeight = 'bold';
+        textSpan.style.textAlign = 'center';
+        textSpan.style.lineHeight = '1.1';
+        
+        imageContainer.appendChild(imageElement);
+        textFooter.appendChild(textSpan);
+        buttonContent.appendChild(imageContainer);
+        buttonContent.appendChild(textFooter);
+        somethingElseButton.appendChild(buttonContent);
+    } else {
+        somethingElseButton.textContent = 'Something Else';
+    }
     somethingElseButton.addEventListener('click', async () => {
         stopAuditoryScanning(); // Stop scanning before fetching new options
         console.log("Something Else button clicked. Query Type:", querytype, "Current Question context:", currentQuestion);
@@ -3001,10 +3117,68 @@ async function generateLlmButtons(options) {
 
     // Add Free Style button
     const freeStyleButton = document.createElement('button');
-    freeStyleButton.textContent = 'Free Style';
     freeStyleButton.id = 'freeStyleButton';
     // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
     freeStyleButton.className = '';
+    
+    // Apply image matching to Free Style button
+    const freeStyleImageUrl = await getSymbolImageForText('Free Style', ['freestyle', 'spell', 'keyboard', 'type']);
+    if (freeStyleImageUrl) {
+        const buttonContent = document.createElement('div');
+        buttonContent.style.position = 'relative';
+        buttonContent.style.width = '100%';
+        buttonContent.style.height = '100%';
+        buttonContent.style.display = 'flex';
+        buttonContent.style.flexDirection = 'column';
+        
+        const imageContainer = document.createElement('div');
+        imageContainer.style.flex = '1';
+        imageContainer.style.width = '100%';
+        imageContainer.style.overflow = 'hidden';
+        imageContainer.style.borderRadius = '8px 8px 0 0';
+        imageContainer.style.display = 'flex';
+        imageContainer.style.alignItems = 'center';
+        imageContainer.style.justifyContent = 'center';
+        
+        const imageElement = document.createElement('img');
+        imageElement.src = freeStyleImageUrl;
+        imageElement.alt = 'Free Style';
+        imageElement.style.width = '100%';
+        imageElement.style.height = '100%';
+        imageElement.style.objectFit = 'cover';
+        imageElement.onerror = () => {
+            freeStyleButton.textContent = 'Free Style';
+        };
+        
+        const textFooter = document.createElement('div');
+        textFooter.style.height = '28px';
+        textFooter.style.width = '100%';
+        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        textFooter.style.color = 'white';
+        textFooter.style.display = 'flex';
+        textFooter.style.alignItems = 'center';
+        textFooter.style.justifyContent = 'center';
+        textFooter.style.padding = '2px 4px';
+        textFooter.style.position = 'absolute';
+        textFooter.style.bottom = '0';
+        textFooter.style.left = '0';
+        textFooter.style.right = '0';
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = 'Free Style';
+        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontWeight = 'bold';
+        textSpan.style.textAlign = 'center';
+        textSpan.style.lineHeight = '1.1';
+        
+        imageContainer.appendChild(imageElement);
+        textFooter.appendChild(textSpan);
+        buttonContent.appendChild(imageContainer);
+        buttonContent.appendChild(textFooter);
+        freeStyleButton.appendChild(buttonContent);
+    } else {
+        freeStyleButton.textContent = 'Free Style';
+    }
     freeStyleButton.addEventListener('click', () => {
         stopAuditoryScanning();
         console.log('DEBUG: LLM-generated Free Style clicked - preserving context');
@@ -3072,12 +3246,73 @@ async function generateLlmButtons(options) {
     }
 
     const goBackButton = document.createElement('button');
-    goBackButton.textContent = 'Go Back';
     // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
     goBackButton.className = '';
+    
+    // Apply image matching to Go Back button
+    const goBackImageUrl = await getSymbolImageForText('Go Back', ['back', 'return', 'previous', 'arrow']);
+    if (goBackImageUrl) {
+        const buttonContent = document.createElement('div');
+        buttonContent.style.position = 'relative';
+        buttonContent.style.width = '100%';
+        buttonContent.style.height = '100%';
+        buttonContent.style.display = 'flex';
+        buttonContent.style.flexDirection = 'column';
+        
+        const imageContainer = document.createElement('div');
+        imageContainer.style.flex = '1';
+        imageContainer.style.width = '100%';
+        imageContainer.style.overflow = 'hidden';
+        imageContainer.style.borderRadius = '8px 8px 0 0';
+        imageContainer.style.display = 'flex';
+        imageContainer.style.alignItems = 'center';
+        imageContainer.style.justifyContent = 'center';
+        
+        const imageElement = document.createElement('img');
+        imageElement.src = goBackImageUrl;
+        imageElement.alt = 'Go Back';
+        imageElement.style.width = '100%';
+        imageElement.style.height = '100%';
+        imageElement.style.objectFit = 'cover';
+        imageElement.onerror = () => {
+            goBackButton.textContent = 'Go Back';
+        };
+        
+        const textFooter = document.createElement('div');
+        textFooter.style.height = '28px';
+        textFooter.style.width = '100%';
+        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        textFooter.style.color = 'white';
+        textFooter.style.display = 'flex';
+        textFooter.style.alignItems = 'center';
+        textFooter.style.justifyContent = 'center';
+        textFooter.style.padding = '2px 4px';
+        textFooter.style.position = 'absolute';
+        textFooter.style.bottom = '0';
+        textFooter.style.left = '0';
+        textFooter.style.right = '0';
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = 'Go Back';
+        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontWeight = 'bold';
+        textSpan.style.textAlign = 'center';
+        textSpan.style.lineHeight = '1.1';
+        
+        imageContainer.appendChild(imageElement);
+        textFooter.appendChild(textSpan);
+        buttonContent.appendChild(imageContainer);
+        buttonContent.appendChild(textFooter);
+        goBackButton.appendChild(buttonContent);
+    } else {
+        goBackButton.textContent = 'Go Back';
+    }
     goBackButton.addEventListener('click', () => {
         activeOriginatingButtonText = null; // Reset on navigation
         activeLLMPromptForContext = null; // Clear context on navigation
+        localStorage.removeItem('llm_currentQueryType');
+        localStorage.removeItem('llm_currentQuestion');
+        localStorage.removeItem('llm_currentOptions');
         window.location.reload(true);
     })
     gridContainer.appendChild(goBackButton);
@@ -3098,14 +3333,27 @@ async function generateLlmButtons(options) {
  */
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
-        if (event.code === 'Space' && !isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
+        if (event.code === 'Space') {
             event.preventDefault();
-            const buttonToActivate = currentlyScannedButton; // Capture the button reference
-            console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
-            buttonToActivate.click();
-            buttonToActivate.classList.add('active');
-            // Use the captured reference in the timeout as well
-            setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+            
+            // Check if we're waiting for initial switch press
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
+                window.waitingForInitialSwitch = false;
+                sessionStorage.setItem('bravoScanningStarted_grid', 'true');
+                startAuditoryScanning();
+                return;
+            }
+            
+            // Normal scanning behavior
+            if (!isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
+                const buttonToActivate = currentlyScannedButton; // Capture the button reference
+                console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
+                buttonToActivate.click();
+                buttonToActivate.classList.add('active');
+                // Use the captured reference in the timeout as well
+                setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+            }
         }
     });
     console.log("Keyboard listener (Spacebar) set up.");
@@ -3151,6 +3399,19 @@ function startGamepadPolling() {
         if (currentButtonState && !lastButtonState) {
              const now = Date.now();
              if (now - lastGamepadInputTime > 300) { // Rate limit
+                // Check if we're waiting for initial switch press
+                if (window.waitingForInitialSwitch) {
+                    console.log('Initial switch detected (gamepad) - starting scanning on gridpage');
+                    window.waitingForInitialSwitch = false;
+                    sessionStorage.setItem('bravoScanningStarted_grid', 'true');
+                    startAuditoryScanning();
+                    lastGamepadInputTime = now;
+                    lastButtonState = currentButtonState;
+                    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                    return;
+                }
+                
+                // Normal scanning behavior
                 if (!isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
                     const buttonToActivate = currentlyScannedButton; // Capture the button reference
                     console.log("Gamepad button 0 pressed, activating button:", buttonToActivate.textContent);

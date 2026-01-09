@@ -225,6 +225,12 @@
                     <input type="date" id="date" name="date" required class="max-w-xs">
                 </div>
 
+                <div class="flex justify-start mb-4">
+                    <button type="button" id="dictationButton" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center">
+                         <i class="fas fa-microphone-alt mr-2"></i> Start Dictation
+                    </button>
+                </div>
+
                 <div>
                     <label for="entry">Entry:</label>
                     <textarea id="entry" name="entry" placeholder="Enter diary details here..." required class="w-full"></textarea>
@@ -232,11 +238,8 @@
             </div>
 
             <div class="flex flex-wrap gap-4">
-                <button type="button" id="dictationButton" class="button-success">
-                     <i class="fas fa-microphone-alt mr-2"></i> Start Dictation
-                </button>
-                <button type="button" id="saveButton" class="button-primary">
-                     <i class="fas fa-save mr-2"></i> Save Entry
+                <button type="button" id="saveButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center">
+                     <i class="fas fa-save mr-3 text-xl"></i> Save Entry
                 </button>
             </div>
              <p id="save-status" class="text-sm text-green-600 mt-4 h-4"></p> <div id="diaryEntries">
@@ -256,5 +259,604 @@
         });
     </script>
 
-</body>
-</html>
+    <!-- User Diary Help Modal -->
+    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1000] flex items-center justify-center p-4" style="z-index: 1000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50 flex justify-between items-center">
+                <h2 class="text-2xl font-bold text-gray-800">
+                    <i class="fas fa-book-open text-[#FB4F14] mr-2"></i>User Diary Guide
+                </h2>
+                <button id="close-help-modal" class="text-gray-500 hover:text-gray-700 transition-colors">
+                    <i class="fas fa-times text-2xl"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-6">
+                <div class="prose max-w-none">
+                    <p class="text-gray-700 mb-6">
+                        The User Diary allows you to record daily events, activities, and important moments in the user's life. These entries can be referenced later to provide context for conversations and help build a personalized history.
+                    </p>
+                    
+                    <div class="space-y-3">
+                        <!-- Creating Entries -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleDiaryGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-plus-circle text-green-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Creating Diary Entries</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startDiaryGuide('creating');" class="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> Document daily events, activities, and important moments in the user's life.</p>
+                                            <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-green-900 mb-1">How to Create:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Select Date:</strong> Choose the date for the diary entry</li>
+                                                    <li>• <strong>Enter Text:</strong> Type or dictate the diary entry content</li>
+                                                    <li>• <strong>Use Dictation:</strong> Click "Start Dictation" to use voice input for faster entry</li>
+                                                    <li>• <strong>Save Entry:</strong> Click "Save Entry" to store the diary entry</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-green-500 mr-1"></i><strong>Note:</strong> Saving an entry for an existing date will overwrite the previous entry for that date.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dictation -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleDiaryGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-microphone text-purple-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Voice Dictation</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startDiaryGuide('dictation');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> Use voice input to quickly create diary entries without typing.</p>
+                                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-purple-900 mb-1">Using Dictation:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• Click the "Start Dictation" button to begin voice recording</li>
+                                                    <li>• Speak clearly and naturally about the day's events</li>
+                                                    <li>• Pause briefly between sentences for better accuracy</li>
+                                                    <li>• The text will automatically appear in the entry field</li>
+                                                    <li>• You can edit the dictated text before saving</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> Dictation is especially useful for longer entries or when you want to quickly capture thoughts.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Viewing & Managing -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleDiaryGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-list text-blue-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Viewing & Managing Entries</div>
+                                        <div class="flex items-center space-x-2">
+                                            <button onclick="event.stopPropagation(); startDiaryGuide('viewing');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
+                                                <i class="fas fa-route mr-1"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <p><strong>Purpose:</strong> View, edit, or delete existing diary entries.</p>
+                                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-blue-900 mb-1">Managing Entries:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>View All:</strong> Scroll down to see all diary entries listed by date (most recent first)</li>
+                                                    <li>• <strong>Edit Entry:</strong> Click on an existing entry to load it into the form, make changes, and save</li>
+                                                    <li>• <strong>Delete Entry:</strong> Click the delete button (X) on any entry to remove it permanently</li>
+                                                    <li>• <strong>Search by Date:</strong> Entries are organized chronologically for easy navigation</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-exclamation-triangle text-red-500 mr-1"></i><strong>Warning:</strong> Deleting an entry is permanent and cannot be undone.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Best Practices -->
+                        <div class="settings-guide-item cursor-pointer" onclick="toggleDiaryGuideDetails(this)">
+                            <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                                <div class="flex-shrink-0 mt-1">
+                                    <i class="fas fa-lightbulb text-yellow-600 text-lg"></i>
+                                </div>
+                                <div class="ml-3 flex-1">
+                                    <div class="flex items-center justify-between">
+                                        <div class="font-semibold text-gray-900">Best Practices & Tips</div>
+                                        <div class="flex items-center space-x-2">
+                                            <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details hidden mt-2">
+                                        <div class="text-sm text-gray-700 space-y-2">
+                                            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                                <p class="text-sm font-semibold text-yellow-900 mb-1">Tips for Effective Diary Entries:</p>
+                                                <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                    <li>• <strong>Be Specific:</strong> Include details about events, people, and activities</li>
+                                                    <li>• <strong>Regular Updates:</strong> Try to add entries daily or after significant events</li>
+                                                    <li>• <strong>Include Context:</strong> Note who was present, where things happened, and how the user felt</li>
+                                                    <li>• <strong>Capture Achievements:</strong> Document milestones, progress, and special moments</li>
+                                                    <li>• <strong>Note Challenges:</strong> Record any difficulties or concerns for future reference</li>
+                                                    <li>• <strong>Use for Reference:</strong> Diary entries can help with therapy sessions, IEP meetings, and care planning</li>
+                                                </ul>
+                                            </div>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-blue-500 mr-1"></i>These entries create a valuable record of the user's journey and can help caregivers, therapists, and educators provide better support.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-6 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
+                <button id="contact-support-btn" class="text-sm text-[#FB4F14] hover:text-orange-600 transition-colors flex items-center">
+                    <i class="fas fa-envelope mr-2"></i>Contact Support
+                </button>
+                <button id="close-help-modal-footer" class="px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Support Modal -->
+    <div id="contact-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1001] flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div class="p-6 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-red-50">
+                <h3 class="text-xl font-bold text-gray-800">
+                    <i class="fas fa-envelope text-[#FB4F14] mr-2"></i>Contact Support
+                </h3>
+            </div>
+            
+            <div class="p-6">
+                <form id="contact-form" action="https://formspree.io/f/xnnqkvqj" method="POST">
+                    <div class="space-y-4">
+                        <div>
+                            <label for="contact-email" class="block text-sm font-medium text-gray-700 mb-1">Your Email</label>
+                            <input type="email" id="contact-email" name="email" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500">
+                        </div>
+                        <div>
+                            <label for="contact-message" class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+                            <textarea id="contact-message" name="message" rows="4" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-6">
+                        <button type="button" id="cancel-contact" class="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                            Cancel
+                        </button>
+                        <button type="submit" class="flex-1 px-4 py-2 bg-[#FB4F14] text-white rounded-lg hover:bg-orange-600 transition-colors">
+                            Send Message
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Guide highlighting animation */
+        @keyframes guidePulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(251, 79, 20, 0.7), 0 0 20px rgba(251, 79, 20, 0.4);
+                border-color: #FB4F14;
+            }
+            50% {
+                box-shadow: 0 0 0 10px rgba(251, 79, 20, 0), 0 0 30px rgba(251, 79, 20, 0.6);
+                border-color: #F97316;
+            }
+        }
+        
+        .guide-highlight-target {
+            animation: guidePulse 2s ease-in-out infinite;
+            position: relative;
+            z-index: 1000;
+            border: 3px solid #FB4F14 !important;
+            border-radius: 8px !important;
+        }
+    </style>
+
+    <script>
+        // Toggle guide details
+        function toggleDiaryGuideDetails(element) {
+            const details = element.querySelector('.guide-details');
+            const chevron = element.querySelector('.fa-chevron-down');
+            
+            if (details.classList.contains('hidden')) {
+                details.classList.remove('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                details.classList.add('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // Help modal controls
+        const helpIcon = document.getElementById('help-icon');
+        const helpModal = document.getElementById('help-modal');
+        const closeHelpModal = document.getElementById('close-help-modal');
+        const closeHelpModalFooter = document.getElementById('close-help-modal-footer');
+        const contactSupportBtn = document.getElementById('contact-support-btn');
+        const contactModal = document.getElementById('contact-modal');
+        const cancelContact = document.getElementById('cancel-contact');
+
+        function openHelpModal() {
+            helpModal.classList.remove('hidden');
+        }
+
+        function closeHelpModalFunc() {
+            helpModal.classList.add('hidden');
+        }
+
+        function openContactModal() {
+            contactModal.classList.remove('hidden');
+            helpModal.classList.add('hidden');
+        }
+
+        function closeContactModal() {
+            contactModal.classList.add('hidden');
+        }
+
+        helpIcon?.addEventListener('click', openHelpModal, true);
+        closeHelpModal?.addEventListener('click', closeHelpModalFunc);
+        closeHelpModalFooter?.addEventListener('click', closeHelpModalFunc);
+        contactSupportBtn?.addEventListener('click', openContactModal);
+        cancelContact?.addEventListener('click', closeContactModal);
+
+        // Close modals on outside click
+        helpModal?.addEventListener('click', function(e) {
+            if (e.target === helpModal) closeHelpModalFunc();
+        });
+        contactModal?.addEventListener('click', function(e) {
+            if (e.target === contactModal) closeContactModal();
+        });
+
+        // Contact form submission
+        const contactForm = document.getElementById('contact-form');
+        contactForm?.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            try {
+                const response = await fetch(contactForm.action, {
+                    method: 'POST',
+                    body: new FormData(contactForm),
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    alert('Thank you for contacting support! We\'ll get back to you soon.');
+                    contactForm.reset();
+                    closeContactModal();
+                } else {
+                    alert('There was a problem sending your message. Please try again.');
+                }
+            } catch (error) {
+                alert('There was a problem sending your message. Please try again.');
+            }
+        });
+
+        // Interactive Guide Objects
+        let currentDiaryGuide = null;
+
+        const creatingGuide = {
+            id: 'creating',
+            steps: [
+                {
+                    title: 'Select Date',
+                    content: 'Choose the date for this diary entry. Click in the date field to open the calendar picker and select the appropriate date.',
+                    highlight: '#date',
+                    action: function() {
+                        const input = document.getElementById('date');
+                        if (input) {
+                            input.classList.add('guide-highlight-target');
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const input = document.getElementById('date');
+                        if (input) input.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Entry Text Area',
+                    content: 'Type or paste the diary entry content here. You can include details about the day\'s events, activities, people present, achievements, challenges, and any other noteworthy information.',
+                    highlight: '#entry',
+                    action: function() {
+                        const textarea = document.getElementById('entry');
+                        if (textarea) {
+                            textarea.classList.add('guide-highlight-target');
+                            textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const textarea = document.getElementById('entry');
+                        if (textarea) textarea.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Save Entry',
+                    content: 'Click this button to save the diary entry. If an entry already exists for the selected date, it will be overwritten with the new content.',
+                    highlight: '#saveButton',
+                    action: function() {
+                        const btn = document.getElementById('saveButton');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('saveButton');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const dictationGuide = {
+            id: 'dictation',
+            steps: [
+                {
+                    title: 'Start Dictation Button',
+                    content: 'Click this button to begin voice dictation. Your browser will request microphone permission if not already granted. Speak clearly about the diary entry content.',
+                    highlight: '#dictationButton',
+                    action: function() {
+                        const btn = document.getElementById('dictationButton');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('dictationButton');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Review Dictated Text',
+                    content: 'After dictation, the text will appear in the entry field below. Review it for accuracy and make any necessary edits before saving.',
+                    highlight: '#entry',
+                    action: function() {
+                        const textarea = document.getElementById('entry');
+                        if (textarea) {
+                            textarea.classList.add('guide-highlight-target');
+                            textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const textarea = document.getElementById('entry');
+                        if (textarea) textarea.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const viewingGuide = {
+            id: 'viewing',
+            steps: [
+                {
+                    title: 'Diary Entries List',
+                    content: 'Scroll down to view all saved diary entries. Entries are displayed in reverse chronological order (most recent first) with the date and content clearly shown.',
+                    highlight: '#diaryEntries',
+                    action: function() {
+                        const section = document.getElementById('diaryEntries');
+                        if (section) {
+                            section.classList.add('guide-highlight-target');
+                            section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const section = document.getElementById('diaryEntries');
+                        if (section) section.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Editing Entries',
+                    content: 'To edit an existing entry, click on it in the list below. The entry will load into the date and text fields above, where you can make changes and save.',
+                    highlight: '#diaryEntries',
+                    action: function() {
+                        const section = document.getElementById('diaryEntries');
+                        if (section) {
+                            section.classList.add('guide-highlight-target');
+                            section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const section = document.getElementById('diaryEntries');
+                        if (section) section.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Deleting Entries',
+                    content: 'Each entry has a delete button (X) in the top-right corner. Click it to permanently remove that entry. This action cannot be undone, so use with caution.',
+                    highlight: '#diaryEntries',
+                    action: function() {
+                        const section = document.getElementById('diaryEntries');
+                        if (section) {
+                            section.classList.add('guide-highlight-target');
+                            section.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const section = document.getElementById('diaryEntries');
+                        if (section) section.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        // Start guide function
+        function startDiaryGuide(guideId) {
+            console.log('Starting diary guide for:', guideId);
+            
+            closeHelpModalFunc();
+            
+            const guides = {
+                'creating': creatingGuide,
+                'dictation': dictationGuide,
+                'viewing': viewingGuide
+            };
+            
+            const guide = guides[guideId];
+            if (guide) {
+                currentDiaryGuide = {
+                    guide: guide,
+                    currentStep: 0
+                };
+                showDiaryGuideWindow();
+            }
+        }
+
+        // Guide window functions
+        function showDiaryGuideWindow() {
+            if (!currentDiaryGuide) return;
+            
+            let guideWindow = document.getElementById('diary-guide-window');
+            if (!guideWindow) {
+                guideWindow = document.createElement('div');
+                guideWindow.id = 'diary-guide-window';
+                guideWindow.style.cssText = 'position: fixed; bottom: 20px; right: 20px; width: 400px; max-height: 500px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 9999; display: flex; flex-direction: column;';
+                
+                guideWindow.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #FB4F14 0%, #F97316 100%); color: white; padding: 16px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div id="diary-guide-title" style="font-weight: bold; font-size: 18px;"></div>
+                            <div id="diary-guide-progress" style="font-size: 12px; opacity: 0.9; margin-top: 4px;"></div>
+                        </div>
+                        <button id="diary-guide-close" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
+                    </div>
+                    <div id="diary-guide-content" style="padding: 20px; flex: 1; overflow-y: auto;"></div>
+                    <div style="border-top: 1px solid #e5e7eb; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 0 0 12px 12px;">
+                        <button id="diary-guide-prev" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <div id="diary-guide-step-indicator" style="display: flex; gap: 8px;"></div>
+                        <button id="diary-guide-next" style="padding: 8px 16px; background: #FB4F14; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                `;
+                
+                document.body.appendChild(guideWindow);
+                
+                document.getElementById('diary-guide-close').addEventListener('click', closeDiaryGuide);
+                document.getElementById('diary-guide-prev').addEventListener('click', previousDiaryGuideStep);
+                document.getElementById('diary-guide-next').addEventListener('click', nextDiaryGuideStep);
+            }
+            
+            guideWindow.style.display = 'flex';
+            updateDiaryGuideStep();
+        }
+
+        function updateDiaryGuideStep() {
+            if (!currentDiaryGuide) return;
+            
+            const guide = currentDiaryGuide.guide;
+            const step = guide.steps[currentDiaryGuide.currentStep];
+            
+            document.getElementById('diary-guide-title').textContent = step.title;
+            document.getElementById('diary-guide-progress').textContent = `Step ${currentDiaryGuide.currentStep + 1} of ${guide.steps.length}`;
+            document.getElementById('diary-guide-content').innerHTML = `<p style="color: #374151; line-height: 1.6;">${step.content}</p>`;
+            
+            const indicatorContainer = document.getElementById('diary-guide-step-indicator');
+            indicatorContainer.innerHTML = '';
+            for (let i = 0; i < guide.steps.length; i++) {
+                const dot = document.createElement('div');
+                dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s;';
+                if (i < currentDiaryGuide.currentStep) {
+                    dot.style.background = '#10b981';
+                } else if (i === currentDiaryGuide.currentStep) {
+                    dot.style.background = '#FB4F14';
+                    dot.style.transform = 'scale(1.3)';
+                } else {
+                    dot.style.background = '#d1d5db';
+                }
+                indicatorContainer.appendChild(dot);
+            }
+            
+            const prevBtn = document.getElementById('diary-guide-prev');
+            const nextBtn = document.getElementById('diary-guide-next');
+            
+            prevBtn.disabled = currentDiaryGuide.currentStep === 0;
+            prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+            prevBtn.style.cursor = prevBtn.disabled ? 'not-allowed' : 'pointer';
+            
+            const isLastStep = currentDiaryGuide.currentStep === guide.steps.length - 1;
+            nextBtn.innerHTML = isLastStep ? 'Complete <i class="fas fa-check"></i>' : 'Next <i class="fas fa-arrow-right"></i>';
+            
+            if (step.action) {
+                if (currentDiaryGuide.currentStep > 0) {
+                    const prevStep = guide.steps[currentDiaryGuide.currentStep - 1];
+                    if (prevStep.cleanup) prevStep.cleanup();
+                }
+                step.action();
+            }
+        }
+
+        function nextDiaryGuideStep() {
+            if (!currentDiaryGuide) return;
+            
+            const guide = currentDiaryGuide.guide;
+            
+            if (currentDiaryGuide.currentStep < guide.steps.length - 1) {
+                currentDiaryGuide.currentStep++;
+                updateDiaryGuideStep();
+            } else {
+                closeDiaryGuide();
+            }
+        }
+
+        function previousDiaryGuideStep() {
+            if (!currentDiaryGuide) return;
+            
+            if (currentDiaryGuide.currentStep > 0) {
+                currentDiaryGuide.currentStep--;
+                updateDiaryGuideStep();
+            }
+        }
+
+        function closeDiaryGuide() {
+            if (!currentDiaryGuide) return;
+            
+            const guide = currentDiaryGuide.guide;
+            const step = guide.steps[currentDiaryGuide.currentStep];
+            if (step.cleanup) step.cleanup();
+            
+            const guideWindow = document.getElementById('diary-guide-window');
+            if (guideWindow) guideWindow.style.display = 'none';
+            
+            currentDiaryGuide = null;
+        }
+    </script>
+

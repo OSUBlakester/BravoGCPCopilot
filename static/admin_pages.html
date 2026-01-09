@@ -176,6 +176,33 @@
         background-color: #e0e0e0; /* Separator color */
         margin: 5px 0;
     }
+    
+    /* Guide highlight animation */
+    @keyframes guidePulse {
+        0%, 100% {
+            box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.7), 0 0 20px rgba(79, 70, 229, 0.4);
+            border-color: #4f46e5;
+        }
+        50% {
+            box-shadow: 0 0 0 10px rgba(79, 70, 229, 0), 0 0 30px rgba(79, 70, 229, 0.6);
+            border-color: #6366f1;
+        }
+    }
+    
+    .guide-highlight-target {
+        animation: guidePulse 2s ease-in-out infinite;
+        position: relative;
+        z-index: 1000;
+        border: 3px solid #4f46e5 !important;
+        border-radius: 8px !important;
+        transition: all 0.3s ease;
+    }
+    
+    .guide-highlight-target:focus,
+    .guide-highlight-target:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.3);
+    }
   </style>
 </head>
 <body>
@@ -339,9 +366,8 @@
     <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] h-[90vh] max-w-5xl max-h-[90vh] mx-2 relative flex flex-col">
             <button id="help-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Help">&times;</button>
-            <div class="flex justify-between items-center mb-2">
+            <div class="mb-2">
                 <h2 class="text-2xl font-bold text-gray-800">Help &amp; User Guide</h2>
-                <a href="https://docs.google.com/document/d/e/2PACX-1vTartmB8DUzCYfFOkZtCaaZxD8TJMEMYThAEwM1v6_ccYgZOReamVGpG2XE0XdzJ5NTyw9aJLm5Yh6G/pub" target="_blank" rel="noopener" class="bg-green-100 text-green-700 px-4 py-2 rounded-md font-semibold hover:bg-green-200 transition">View Full Help</a>
             </div>
             <div id="help-modal-content" class="overflow-y-auto flex-1 px-0 py-0">
                 <!-- Help content will be loaded here dynamically -->
@@ -378,52 +404,1331 @@
     const helpLoading = document.getElementById('help-loading');
 
     function openHelpModal() {
-        console.log('🔍 DEBUG: openHelpModal called');
-        console.log('🔍 DEBUG: window.guideInstance exists?', !!window.guideInstance);
-        console.log('🔍 DEBUG: window.guideInstance type:', typeof window.guideInstance);
-        if (window.guideInstance) {
-            console.log('🔍 DEBUG: guideInstance methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(window.guideInstance)));
-            console.log('🔍 DEBUG: startComprehensiveGuide exists?', typeof window.guideInstance.startComprehensiveGuide);
-            console.log('🔍 DEBUG: smartHelp exists?', !!window.guideInstance.smartHelp);
-            console.log('🔍 DEBUG: multimedia exists?', !!window.guideInstance.multimedia);
-        }
+        console.log('� Opening Admin Pages Guide');
+        // Always show the new simplified guide structure
+        showAdminPagesGuide();
+    }
+    
+    function showAdminPagesGuide() {
+        console.log('📋 Showing Admin Pages Guide');
+        helpModal.classList.remove('hidden');
+        helpLoading.style.display = 'none';
         
-        // Try to use comprehensive guide first
-        if (window.guideInstance && typeof window.guideInstance.startComprehensiveGuide === 'function') {
-            console.log('🚀 Attempting to start comprehensive guide...');
-            // Check if the guide is fully initialized
-            if (window.guideInstance.smartHelp && window.guideInstance.multimedia) {
-                console.log('✅ Guide fully initialized, starting comprehensive guide');
-                window.guideInstance.startComprehensiveGuide();
-                return;
-            } else {
-                // Wait a bit for initialization to complete
-                console.log('⏳ Waiting for comprehensive guide to initialize...');
-                setTimeout(() => {
-                    if (window.guideInstance && window.guideInstance.smartHelp && window.guideInstance.multimedia) {
-                        console.log('✅ Guide initialized after wait, starting comprehensive guide');
-                        window.guideInstance.startComprehensiveGuide();
-                    } else {
-                        console.warn('❌ Comprehensive guide still not ready after wait, falling back to old help modal');
-                        showOldHelpModal();
-                    }
-                }, 500);
-                return;
-            }
+        // Create Admin Pages Guide similar to New User Setup Guide
+        helpModalContent.innerHTML = `
+            <div class="p-6">
+                <div class="mb-6 bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-lg border-l-4 border-indigo-500">
+                    <h3 class="text-lg font-bold text-indigo-900 mb-2">
+                        <i class="fas fa-th text-indigo-600 mr-2"></i>Page & Button Administration Guide
+                    </h3>
+                    <p class="text-sm text-gray-700">
+                        This guide will help you understand and use all the features of the Page & Button Administration interface.
+                        Click on any section below to learn more, then use the "Guide Me" button for step-by-step instructions.
+                    </p>
+                </div>
+
+                <!-- Guide Sections -->
+                <div class="space-y-3">
+                    
+                    <!-- Page Selection & Management -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-file-alt text-indigo-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Page Selection & Management</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startAdminGuide('page-management');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Purpose:</strong> Select which page to view and edit, create new pages, or manage existing pages.</p>
+                                        <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-indigo-900 mb-1">What You Can Do:</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• <strong>Select Page:</strong> Choose from the dropdown to view different pages</li>
+                                                <li>• <strong>Create New Page:</strong> Add a new communication page to your grid</li>
+                                                <li>• <strong>Update Page:</strong> Change the display name of the current page</li>
+                                                <li>• <strong>Delete Page:</strong> Remove pages you no longer need</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Button Grid -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-th text-purple-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Button Grid Overview</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startAdminGuide('button-grid');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Purpose:</strong> The 10x10 grid displays all communication buttons for the selected page.</p>
+                                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-purple-900 mb-2">💡 Pro Tip:</p>
+                                            <p class="text-xs text-gray-700">Organize frequently used buttons in easily accessible positions. Users will find it easier to navigate if related concepts are grouped together.</p>
+                                        </div>
+                                        <div class="bg-gray-100 p-3 rounded">
+                                            <p class="text-sm font-semibold text-gray-900 mb-1">Grid Features:</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• Click any button to edit its configuration</li>
+                                                <li>• Drag and drop buttons to rearrange them</li>
+                                                <li>• Color indicators show button types (see Button Types below)</li>
+                                                <li>• Empty cells can be filled with new buttons</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Button Types & Colors -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-palette text-pink-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Understanding Button Types & Colors</div>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-3">
+                                        <p><strong>Purpose:</strong> Buttons are automatically color-coded to help you quickly identify their function.</p>
+                                        
+                                        <div class="space-y-2">
+                                            <div class="bg-gradient-to-r from-purple-100 to-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                                <div class="flex items-center gap-2 mb-1">
+                                                    <div class="w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs">AI</div>
+                                                    <span class="font-semibold text-purple-900">🤖 AI Buttons (Purple)</span>
+                                                </div>
+                                                <p class="text-xs text-gray-700 ml-6">Contains AI Query for dynamic, context-aware responses. These buttons generate different outputs based on the situation.</p>
+                                            </div>
+                                            
+                                            <div class="bg-gradient-to-r from-orange-100 to-orange-50 border-l-4 border-orange-500 p-3 rounded">
+                                                <div class="flex items-center gap-2 mb-1">
+                                                    <div class="w-4 h-4 rounded-full bg-orange-600 text-white flex items-center justify-center text-xs">→</div>
+                                                    <span class="font-semibold text-orange-900">🧭 Navigation Buttons (Orange)</span>
+                                                </div>
+                                                <p class="text-xs text-gray-700 ml-6">Links to another page. Clicking this button takes the user to a different communication grid.</p>
+                                            </div>
+                                            
+                                            <div class="bg-gradient-to-r from-green-100 to-green-50 border-l-4 border-green-500 p-3 rounded">
+                                                <div class="flex items-center gap-2 mb-1">
+                                                    <div class="w-4 h-4 rounded-full bg-green-600 text-white flex items-center justify-center text-xs">♪</div>
+                                                    <span class="font-semibold text-green-900">💬 Speech Buttons (Green)</span>
+                                                </div>
+                                                <p class="text-xs text-gray-700 ml-6">Has a custom speech phrase. Says exactly what you configure every time.</p>
+                                            </div>
+                                            
+                                            <div class="bg-gray-100 border-l-4 border-gray-400 p-3 rounded opacity-70">
+                                                <div class="flex items-center gap-2 mb-1">
+                                                    <span class="font-semibold text-gray-700">🫥 Hidden Buttons (Faded)</span>
+                                                </div>
+                                                <p class="text-xs text-gray-600 ml-6">Not visible to users - admin only. Appears faded with reduced opacity in the grid.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Button Editor -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-edit text-blue-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Button Editor</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startAdminGuide('button-editor');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Purpose:</strong> Configure all aspects of a button including its label, speech output, navigation target, and AI behavior.</p>
+                                        
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-blue-900 mb-2">Button Properties:</p>
+                                            <ul class="text-xs text-gray-700 space-y-1">
+                                                <li>• <strong>Label Text:</strong> What appears on the button</li>
+                                                <li>• <strong>Speech Output:</strong> What Bravo says when pressed (optional - defaults to label)</li>
+                                                <li>• <strong>Target Page:</strong> Which page to navigate to (for navigation buttons)</li>
+                                                <li>• <strong>AI Query:</strong> Prompt for dynamic content generation (for AI buttons)</li>
+                                                <li>• <strong>Image:</strong> Optional visual icon or picture for the button</li>
+                                                <li>• <strong>Hidden:</strong> Make button invisible to users (admin only)</li>
+                                            </ul>
+                                        </div>
+
+                                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-yellow-900 mb-1">🔒 Static vs 🤖 Dynamic Buttons:</p>
+                                            <div class="text-xs text-gray-700 space-y-2 mt-2">
+                                                <div class="bg-white p-2 rounded">
+                                                    <p class="font-semibold">Static Buttons:</p>
+                                                    <p>Always say the same predefined message. Perfect for routine phrases like "I need help" or "Thank you".</p>
+                                                </div>
+                                                <div class="bg-white p-2 rounded">
+                                                    <p class="font-semibold">Dynamic (AI) Buttons:</p>
+                                                    <p>Use AI to generate contextual responses. Great for "Tell me about..." or situation-specific communication.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Button Wizard -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-magic text-green-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">New Button Wizard</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startAdminGuide('button-wizard');" class="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Purpose:</strong> Guided step-by-step process for creating new buttons quickly and easily.</p>
+                                        <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-green-900 mb-1">When to Use the Wizard:</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• Creating multiple similar buttons</li>
+                                                <li>• Quick setup for standard communication phrases</li>
+                                                <li>• When you want guided prompts for each field</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-blue-900 mb-1">🤖 AI Query Help:</p>
+                                            <p class="text-xs text-gray-700 mb-2">The wizard helps you create effective AI queries by translating simple requests into optimized prompts.</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• Translates simple requests into AI-ready queries</li>
+                                                <li>• Shows data previews for quick testing</li>
+                                                <li>• Allows quick adjustments to fine-tune responses</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-gray-100 p-3 rounded">
+                                            <p class="text-xs text-gray-700"><strong>Tip:</strong> The wizard creates buttons faster, but manual editing gives you more control over advanced features.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Import/Migration -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-exchange-alt text-purple-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Migrate User Data</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startAdminGuide('migration');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Purpose:</strong> Import pages and buttons from other AAC devices or previous Bravo configurations.</p>
+                                        <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
+                                            <p class="text-sm font-semibold text-purple-900 mb-1">Supported Import Sources:</p>
+                                            <ul class="text-xs text-gray-700 ml-4 space-y-1">
+                                                <li>• Accent devices (MTI export files)</li>
+                                                <li>• Bravo backup files (coming soon)</li>
+                                                <li>• Other AAC device exports (coming soon)</li>
+                                            </ul>
+                                        </div>
+                                        <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 rounded mt-2">
+                                            <p class="text-xs text-gray-700"><strong>⚠️ Note:</strong> Importing data will add to your existing pages. Review imported content before making it visible to users.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Save Changes -->
+                    <div class="admin-guide-item cursor-pointer" onclick="toggleAdminGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-save text-red-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Saving Your Changes</div>
+                                    <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                                            <p class="text-sm font-bold text-red-900 mb-2">💾 IMPORTANT: Always Save Your Work!</p>
+                                            <p class="text-xs text-gray-700 mb-2">Changes to buttons are NOT saved automatically. You must click the <strong>"Save Button Changes"</strong> button after making any modifications.</p>
+                                            <div class="bg-white p-2 rounded mt-2">
+                                                <p class="text-xs text-gray-700"><strong>What gets saved:</strong></p>
+                                                <ul class="text-xs text-gray-600 ml-4 mt-1">
+                                                    <li>• Button labels and speech output</li>
+                                                    <li>• Button positions (drag & drop changes)</li>
+                                                    <li>• AI queries and navigation targets</li>
+                                                    <li>• Hidden/visible status</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Help Footer -->
+                <div class="mt-6 p-4 bg-gray-100 rounded-lg text-center">
+                    <p class="text-sm text-gray-600 mb-2">Need more help?</p>
+                    <button onclick="openContactSupportModal()" class="inline-block bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                        <i class="fas fa-envelope mr-2"></i>Contact Support
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Toggle function for guide details
+    function toggleAdminGuideDetails(element) {
+        const details = element.querySelector('.guide-details');
+        const icon = element.querySelector('.fa-chevron-down');
+        
+        if (details.classList.contains('hidden')) {
+            details.classList.remove('hidden');
+            icon.style.transform = 'rotate(180deg)';
         } else {
-            // Fallback to old help modal if comprehensive guide is not available
-            console.warn('❌ Comprehensive guide not available, falling back to old help modal');
-            console.log('🔍 DEBUG: Reason - guideInstance exists?', !!window.guideInstance, 'startComprehensiveGuide function?', !!(window.guideInstance && typeof window.guideInstance.startComprehensiveGuide === 'function'));
-            showOldHelpModal();
+            details.classList.add('hidden');
+            icon.style.transform = 'rotate(0deg)';
         }
     }
     
-    function showOldHelpModal() {
-        console.log('📋 Showing old help modal as fallback');
-        helpModal.classList.remove('hidden');
-        helpLoading.style.display = '';
-        // Load static help for this page (customize as needed)
-        helpModalContent.innerHTML = `<div class='p-4'><h3 class='text-lg font-bold mb-2'>Admin Pages Help</h3><p>This page allows you to manage the grid of pages and buttons. Select a page, edit its details, and configure the button grid. For more help, contact support.</p></div>`;
+    // Start admin guide function
+    function startAdminGuide(guideId) {
+        console.log('Starting admin guide for:', guideId);
+        
+        // Close help modal
+        closeHelpModal();
+        
+        // Start the appropriate guide
+        if (guideId === 'page-management') {
+            startPageManagementGuide();
+        } else if (guideId === 'button-grid') {
+            startButtonGridGuide();
+        } else if (guideId === 'button-editor') {
+            startButtonEditorGuide();
+        } else if (guideId === 'button-wizard') {
+            startButtonWizardGuide();
+        } else if (guideId === 'migration') {
+            startMigrationGuide();
+        } else {
+            // Other guides to be implemented
+            alert('Interactive guide for ' + guideId + ' will be available soon. For now, please refer to the section details in the help guide.');
+        }
+    }
+    
+    // Page Management Guide
+    let currentAdminGuide = null;
+    
+    const pageManagementGuide = {
+        id: 'page-management',
+        steps: [
+            {
+                title: 'Page Selection Dropdown',
+                content: 'This dropdown shows all available pages in your communication system. Select any page to view and edit its buttons.',
+                highlight: '#selectPage',
+                action: function() {
+                    const selectPage = document.getElementById('selectPage');
+                    if (selectPage) {
+                        selectPage.classList.add('guide-highlight-target');
+                        selectPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const selectPage = document.getElementById('selectPage');
+                    if (selectPage) selectPage.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Switch Between Pages',
+                content: 'Click on the dropdown to see all your pages. When you select a different page, the button grid below will update to show that page\'s buttons.',
+                highlight: '#selectPage',
+                action: function() {
+                    const selectPage = document.getElementById('selectPage');
+                    if (selectPage) {
+                        selectPage.classList.add('guide-highlight-target');
+                        selectPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const selectPage = document.getElementById('selectPage');
+                    if (selectPage) selectPage.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Create New Page',
+                content: 'Click the "Create New Page" button to add a new communication page to your system. You\'ll be prompted to enter a name for the new page.',
+                highlight: '#createNewPageBtn',
+                action: function() {
+                    const createBtn = document.getElementById('createNewPageBtn');
+                    if (createBtn) {
+                        createBtn.classList.add('guide-highlight-target');
+                        createBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const createBtn = document.getElementById('createNewPageBtn');
+                    if (createBtn) createBtn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Page Details Form',
+                content: 'This form shows the details of the currently selected page. You can update the display name, which appears in menus and the page banner.',
+                highlight: '#pageForm',
+                action: function() {
+                    const pageForm = document.getElementById('pageForm');
+                    if (pageForm) {
+                        pageForm.classList.add('guide-highlight-target');
+                        pageForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const pageForm = document.getElementById('pageForm');
+                    if (pageForm) pageForm.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Update Page Name',
+                content: 'Enter a new display name in this field, then click "Update Page" to save the change. The new name will appear in the page selector and navigation.',
+                highlight: '#newPageDisplayName',
+                action: function() {
+                    const nameInput = document.getElementById('newPageDisplayName');
+                    if (nameInput) {
+                        nameInput.classList.add('guide-highlight-target');
+                        nameInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const nameInput = document.getElementById('newPageDisplayName');
+                    if (nameInput) nameInput.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Update Page Button',
+                content: 'After changing the page name, click this button to save your changes. The updated name will be reflected throughout the system.',
+                highlight: '#updatePageBtn',
+                action: function() {
+                    const updateBtn = document.getElementById('updatePageBtn');
+                    if (updateBtn) {
+                        updateBtn.classList.add('guide-highlight-target');
+                        updateBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const updateBtn = document.getElementById('updatePageBtn');
+                    if (updateBtn) updateBtn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Delete Page',
+                content: 'Use this button carefully! Clicking "Delete Page" will permanently remove the current page and all its buttons. You\'ll be asked to confirm before deletion.',
+                highlight: '#deletePage',
+                action: function() {
+                    const deleteBtn = document.getElementById('deletePage');
+                    if (deleteBtn) {
+                        deleteBtn.classList.add('guide-highlight-target');
+                        deleteBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const deleteBtn = document.getElementById('deletePage');
+                    if (deleteBtn) deleteBtn.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    function startPageManagementGuide() {
+        currentAdminGuide = {
+            guide: pageManagementGuide,
+            currentStep: 0
+        };
+        showAdminGuideWindow();
+    }
+    
+    // Button Grid Guide
+    const buttonGridGuide = {
+        id: 'button-grid',
+        steps: [
+            {
+                title: 'Button Grid Overview',
+                content: 'This 10x10 grid displays all communication buttons for the currently selected page. Each cell can contain a button with text, images, and actions.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) grid.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Click to Edit Buttons',
+                content: 'Click on any button in the grid to open the Button Editor. You can edit the button\'s text, speech output, images, and other properties.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) grid.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Purple Buttons = AI',
+                content: 'Buttons with a purple gradient background and "AI" badge contain AI queries. These generate dynamic, context-aware responses when pressed.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        // Try to find and highlight a purple AI button if it exists
+                        const aiButton = grid.querySelector('.visual-button.has-ai');
+                        if (aiButton) {
+                            aiButton.classList.add('guide-highlight-target');
+                            aiButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.remove('guide-highlight-target');
+                        const aiButton = grid.querySelector('.visual-button.has-ai');
+                        if (aiButton) aiButton.classList.remove('guide-highlight-target');
+                    }
+                }
+            },
+            {
+                title: 'Orange Buttons = Navigation',
+                content: 'Buttons with an orange/yellow gradient and arrow icon are navigation buttons. They take users to different pages when clicked.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        const navButton = grid.querySelector('.visual-button.has-navigation');
+                        if (navButton) {
+                            navButton.classList.add('guide-highlight-target');
+                            navButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        } else {
+                            grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.remove('guide-highlight-target');
+                        const navButton = grid.querySelector('.visual-button.has-navigation');
+                        if (navButton) navButton.classList.remove('guide-highlight-target');
+                    }
+                }
+            },
+            {
+                title: 'Green Accent = Custom Speech',
+                content: 'Buttons with a green border or music note icon have custom speech phrases configured. They say exactly what you\'ve programmed every time.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) grid.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Faded Buttons = Hidden',
+                content: 'Buttons that appear faded or with reduced opacity are hidden from users. Only admins can see them in this view.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) grid.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Drag & Drop to Rearrange',
+                content: 'You can drag buttons to different positions on the grid to reorganize them. This helps you group related concepts and place frequently used buttons in accessible positions.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) grid.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Save Your Changes',
+                content: 'After making changes to buttons or rearranging them, always click the "Save Button Changes" button to save your work. Changes are not saved automatically!',
+                highlight: '#saveButtonsBtn',
+                action: function() {
+                    const saveBtn = document.getElementById('saveButtonsBtn');
+                    if (saveBtn) {
+                        saveBtn.classList.add('guide-highlight-target');
+                        saveBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const saveBtn = document.getElementById('saveButtonsBtn');
+                    if (saveBtn) saveBtn.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    function startButtonGridGuide() {
+        currentAdminGuide = {
+            guide: buttonGridGuide,
+            currentStep: 0
+        };
+        showAdminGuideWindow();
+    }
+    
+    // Button Editor Guide
+    const buttonEditorGuide = {
+        id: 'button-editor',
+        steps: [
+            {
+                title: 'Opening the Button Editor',
+                content: 'Click on any button in the grid to open the Button Editor modal. This is where you configure all properties of a button.',
+                highlight: '#buttonGrid',
+                action: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) {
+                        grid.classList.add('guide-highlight-target');
+                        grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const grid = document.getElementById('buttonGrid');
+                    if (grid) grid.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Button Text',
+                content: 'This is the label that appears on the button. Enter clear, concise text that the user will see and understand.',
+                highlight: '#buttonText',
+                action: function() {
+                    // Open the editor modal for demonstration
+                    const modal = document.getElementById('buttonEditorModal');
+                    const buttonText = document.getElementById('buttonText');
+                    if (modal && modal.classList.contains('hidden')) {
+                        modal.classList.remove('hidden');
+                    }
+                    if (buttonText) {
+                        setTimeout(() => {
+                            buttonText.classList.add('guide-highlight-target');
+                            buttonText.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const buttonText = document.getElementById('buttonText');
+                    if (buttonText) buttonText.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Button Image',
+                content: 'Assign a specific image from your BravoImages collection. Images help users identify buttons quickly, especially for non-readers.',
+                highlight: '#browseImagesBtn',
+                action: function() {
+                    const browseBtn = document.getElementById('browseImagesBtn');
+                    if (browseBtn) {
+                        browseBtn.classList.add('guide-highlight-target');
+                        browseBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const browseBtn = document.getElementById('browseImagesBtn');
+                    if (browseBtn) browseBtn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Speech Phrase',
+                content: 'Set a custom phrase that Bravo will say when this button is pressed.',
+                highlight: '#speechPhrase',
+                action: function() {
+                    const speechPhrase = document.getElementById('speechPhrase');
+                    if (speechPhrase) {
+                        speechPhrase.classList.add('guide-highlight-target');
+                        speechPhrase.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const speechPhrase = document.getElementById('speechPhrase');
+                    if (speechPhrase) speechPhrase.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Target Page (Navigation)',
+                content: 'Select a page to navigate to when this button is pressed. This creates an orange navigation button. If a Speech Phrase is set, Bravo will announce it first, then navigate to the selected page.',
+                highlight: '#targetPage',
+                action: function() {
+                    const targetPage = document.getElementById('targetPage');
+                    if (targetPage) {
+                        targetPage.classList.add('guide-highlight-target');
+                        targetPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const targetPage = document.getElementById('targetPage');
+                    if (targetPage) targetPage.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'AI Query',
+                content: 'Enter a prompt for AI to generate dynamic responses. This creates a purple AI button that provides context-aware, intelligent responses. Tip: Include the placeholder #LLMOptions in your query text, which will be automatically replaced by the number of options set in the User Settings page.',
+                highlight: '#llmQuery',
+                action: function() {
+                    const llmQuery = document.getElementById('llmQuery');
+                    if (llmQuery) {
+                        llmQuery.classList.add('guide-highlight-target');
+                        llmQuery.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const llmQuery = document.getElementById('llmQuery');
+                    if (llmQuery) llmQuery.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Hide Button',
+                content: 'Check this box to hide the button from users. Hidden buttons appear faded in the admin view but are invisible to regular users.',
+                highlight: '#buttonHidden',
+                action: function() {
+                    const hiddenCheckbox = document.getElementById('buttonHidden');
+                    if (hiddenCheckbox) {
+                        const parent = hiddenCheckbox.parentElement;
+                        if (parent) {
+                            parent.classList.add('guide-highlight-target');
+                            parent.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    }
+                },
+                cleanup: function() {
+                    const hiddenCheckbox = document.getElementById('buttonHidden');
+                    if (hiddenCheckbox) {
+                        const parent = hiddenCheckbox.parentElement;
+                        if (parent) parent.classList.remove('guide-highlight-target');
+                    }
+                }
+            },
+            {
+                title: 'Button Preview',
+                content: 'This preview shows how your button will look on the grid. You can see the text, image, and any special indicators (AI badge, navigation arrow, etc.).',
+                highlight: '#buttonPreview',
+                action: function() {
+                    const preview = document.getElementById('buttonPreview');
+                    if (preview) {
+                        preview.classList.add('guide-highlight-target');
+                        preview.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const preview = document.getElementById('buttonPreview');
+                    if (preview) preview.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Save Your Button',
+                content: 'Click "Save Button" to save all your changes. The button will be updated in the grid, but remember to also click "Save Button Changes" on the main page to persist to the database!',
+                highlight: '#saveButtonEdit',
+                action: function() {
+                    const saveBtn = document.getElementById('saveButtonEdit');
+                    if (saveBtn) {
+                        saveBtn.classList.add('guide-highlight-target');
+                        saveBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const saveBtn = document.getElementById('saveButtonEdit');
+                    if (saveBtn) {
+                        saveBtn.classList.remove('guide-highlight-target');
+                        // Close the modal at the end
+                        const modal = document.getElementById('buttonEditorModal');
+                        if (modal) modal.classList.add('hidden');
+                    }
+                }
+            }
+        ]
+    };
+    
+    function startButtonEditorGuide() {
+        currentAdminGuide = {
+            guide: buttonEditorGuide,
+            currentStep: 0
+        };
+        showAdminGuideWindow();
+    }
+    
+    // Button Wizard Guide
+    const buttonWizardGuide = {
+        id: 'button-wizard',
+        steps: [
+            {
+                title: 'Opening the Button Wizard',
+                content: 'Click the "New Button Wizard" button to start the guided button creation process. The wizard helps you create buttons step-by-step without needing to know all the technical details.',
+                highlight: '#helpWizardBtn',
+                action: function() {
+                    const wizardBtn = document.getElementById('helpWizardBtn');
+                    if (wizardBtn) {
+                        wizardBtn.classList.add('guide-highlight-target');
+                        wizardBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const wizardBtn = document.getElementById('helpWizardBtn');
+                    if (wizardBtn) wizardBtn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Step 1: Button Name',
+                content: 'Enter the text that will appear on the button. This is what users will see and read. Choose clear, simple text that describes what the button does.',
+                highlight: '#wizardButtonName',
+                action: function() {
+                    // Open the wizard modal
+                    const modal = document.getElementById('helpWizardModal');
+                    const input = document.getElementById('wizardButtonName');
+                    if (modal && modal.classList.contains('hidden')) {
+                        modal.classList.remove('hidden');
+                    }
+                    if (input) {
+                        setTimeout(() => {
+                            input.classList.add('guide-highlight-target');
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('wizardButtonName');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Step 2: Speech Phrase (Optional)',
+                content: 'Enter a custom phrase that Bravo will say when this button is pressed. This is optional - you can leave it blank if you just want navigation or AI actions.',
+                highlight: '#wizardSpeechPhrase',
+                action: function() {
+                    const input = document.getElementById('wizardSpeechPhrase');
+                    const step2 = document.getElementById('wizardStep2');
+                    if (step2) step2.classList.remove('hidden');
+                    const step1 = document.getElementById('wizardStep1');
+                    if (step1) step1.classList.add('hidden');
+                    if (input) {
+                        setTimeout(() => {
+                            input.classList.add('guide-highlight-target');
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('wizardSpeechPhrase');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Step 3: Target Page (Optional)',
+                content: 'Select a page to navigate to when this button is pressed. Choose "No, stay on current page" if you don\'t want navigation. If you set a Speech Phrase, Bravo will announce it first, then navigate.',
+                highlight: '#wizardTargetPage',
+                action: function() {
+                    const select = document.getElementById('wizardTargetPage');
+                    const step3 = document.getElementById('wizardStep3');
+                    if (step3) step3.classList.remove('hidden');
+                    const step2 = document.getElementById('wizardStep2');
+                    if (step2) step2.classList.add('hidden');
+                    if (select) {
+                        setTimeout(() => {
+                            select.classList.add('guide-highlight-target');
+                            select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const select = document.getElementById('wizardTargetPage');
+                    if (select) select.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Step 4: AI Generation (Optional)',
+                content: 'Describe what you want the AI to help with in simple terms. The wizard will convert your description into an optimized AI query. Remember to use the #LLMOptions placeholder if you want to control how many response options the AI provides.',
+                highlight: '#wizardAiDescription',
+                action: function() {
+                    const textarea = document.getElementById('wizardAiDescription');
+                    const step4 = document.getElementById('wizardStep4');
+                    if (step4) step4.classList.remove('hidden');
+                    const step3 = document.getElementById('wizardStep3');
+                    if (step3) step3.classList.add('hidden');
+                    if (textarea) {
+                        setTimeout(() => {
+                            textarea.classList.add('guide-highlight-target');
+                            textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const textarea = document.getElementById('wizardAiDescription');
+                    if (textarea) textarea.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Preview Your Button',
+                content: 'Review how your button will look and behave. Check the button preview and configuration details to make sure everything is correct before accepting.',
+                highlight: '#wizardButtonPreview',
+                action: function() {
+                    const preview = document.getElementById('wizardButtonPreview');
+                    const previewStep = document.getElementById('wizardPreview');
+                    if (previewStep) previewStep.classList.remove('hidden');
+                    const step4 = document.getElementById('wizardStep4');
+                    if (step4) step4.classList.add('hidden');
+                    if (preview) {
+                        setTimeout(() => {
+                            preview.classList.add('guide-highlight-target');
+                            preview.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const preview = document.getElementById('wizardButtonPreview');
+                    if (preview) preview.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Accept or Reject',
+                content: 'If the button looks good, click "Accept" to add it to your page. If you want to make changes, click "Reject" to go back and adjust the settings. You can also click "Previous" to step backward through the wizard.',
+                highlight: '#wizardAcceptBtn',
+                action: function() {
+                    const acceptBtn = document.getElementById('wizardAcceptBtn');
+                    if (acceptBtn) {
+                        acceptBtn.classList.add('guide-highlight-target');
+                        acceptBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const acceptBtn = document.getElementById('wizardAcceptBtn');
+                    if (acceptBtn) {
+                        acceptBtn.classList.remove('guide-highlight-target');
+                        // Close the wizard modal at the end
+                        const modal = document.getElementById('helpWizardModal');
+                        if (modal) modal.classList.add('hidden');
+                    }
+                }
+            }
+        ]
+    };
+    
+    function startButtonWizardGuide() {
+        currentAdminGuide = {
+            guide: buttonWizardGuide,
+            currentStep: 0
+        };
+        showAdminGuideWindow();
+    }
+    
+    // Migration Guide
+    const migrationGuide = {
+        id: 'migration',
+        steps: [
+            {
+                title: 'Opening Migration',
+                content: 'Click the "Migrate User Data" button to start importing pages and buttons from other AAC devices. This is located at the top-right of the Page Management interface.',
+                highlight: '#openMigrationBtn',
+                action: function() {
+                    const btn = document.getElementById('openMigrationBtn');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('openMigrationBtn');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Select Migration Source',
+                content: 'Choose where you want to import data from. Currently, Accent device (.mti files) are supported. Other AAC device formats will be available soon.',
+                highlight: '#sourceSelection',
+                action: function() {
+                    const modal = document.getElementById('migrationModal');
+                    const sourceSelection = document.getElementById('sourceSelection');
+                    if (modal && modal.classList.contains('hidden')) {
+                        modal.classList.remove('hidden');
+                    }
+                    if (sourceSelection) {
+                        setTimeout(() => {
+                            sourceSelection.classList.add('guide-highlight-target');
+                            sourceSelection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const sourceSelection = document.getElementById('sourceSelection');
+                    if (sourceSelection) sourceSelection.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Accent Device Import',
+                content: 'Click on "Accent Device" to import pages and buttons from an Accent .mti export file. This will open the Accent migration interface where you can upload and preview your data.',
+                highlight: '#selectAccentSource',
+                action: function() {
+                    const btn = document.getElementById('selectAccentSource');
+                    if (btn) {
+                        btn.classList.add('guide-highlight-target');
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const btn = document.getElementById('selectAccentSource');
+                    if (btn) btn.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Upload MTI File',
+                content: 'The Accent migration interface loads in an iframe. Click the upload zone or "Browse Files" to select your .mti export file from your Accent device.',
+                highlight: '#accentMigrationFrame',
+                action: function() {
+                    const sourceSelection = document.getElementById('sourceSelection');
+                    const migrationInterface = document.getElementById('accentMigrationInterface');
+                    if (sourceSelection) sourceSelection.classList.add('hidden');
+                    if (migrationInterface) {
+                        migrationInterface.classList.remove('hidden');
+                        setTimeout(() => {
+                            const iframe = document.getElementById('accentMigrationFrame');
+                            if (iframe) {
+                                iframe.classList.add('guide-highlight-target');
+                                iframe.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) iframe.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Select a Page to Import',
+                content: 'After uploading, a dropdown will appear with all pages found in your .mti file. Select the page you want to import buttons from. The interface will show statistics about how many pages and buttons are available.',
+                highlight: '#accentMigrationFrame',
+                action: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) {
+                        iframe.classList.add('guide-highlight-target');
+                        // Note: We can't directly highlight elements inside iframe due to cross-origin restrictions
+                        // The iframe highlighting serves as a general indicator
+                    }
+                },
+                cleanup: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) iframe.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Review Button List',
+                content: 'After selecting a page, you\'ll see a list of all buttons on that page. Each button shows its text, speech phrase, navigation target, and grid position. Review the buttons to understand what will be imported.',
+                highlight: '#accentMigrationFrame',
+                action: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) {
+                        iframe.classList.add('guide-highlight-target');
+                    }
+                },
+                cleanup: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) iframe.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Select Buttons to Import',
+                content: 'Click on individual buttons to select them, or use "Select All" to choose all buttons on the page. You can also use "Deselect All" to start over. The statistics card will show how many buttons you\'ve selected.',
+                highlight: '#accentMigrationFrame',
+                action: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) {
+                        iframe.classList.add('guide-highlight-target');
+                    }
+                },
+                cleanup: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) iframe.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Choose Destination Page',
+                content: 'Decide whether to create a new page for these buttons or add them to an existing page. Enter a name for the new page, or select an existing page from the dropdown. The preview section will show what will happen.',
+                highlight: '#accentMigrationFrame',
+                action: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) {
+                        iframe.classList.add('guide-highlight-target');
+                    }
+                },
+                cleanup: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) iframe.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Execute Migration',
+                content: 'Once you\'ve selected your buttons and chosen a destination page, click "Execute Migration" to import the buttons into Bravo. A success message will confirm when the migration is complete.',
+                highlight: '#accentMigrationFrame',
+                action: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) {
+                        iframe.classList.add('guide-highlight-target');
+                    }
+                },
+                cleanup: function() {
+                    const iframe = document.getElementById('accentMigrationFrame');
+                    if (iframe) iframe.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Review Imported Data',
+                content: 'After migration completes, close the migration modal and return to Page Management. The new or updated page will appear in your page list. Review the imported buttons and make any necessary adjustments using the Button Editor.',
+                highlight: '#selectPage',
+                action: function() {
+                    const modal = document.getElementById('migrationModal');
+                    if (modal) modal.classList.add('hidden');
+                    const selectPage = document.getElementById('selectPage');
+                    if (selectPage) {
+                        setTimeout(() => {
+                            selectPage.classList.add('guide-highlight-target');
+                            selectPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                    }
+                },
+                cleanup: function() {
+                    const selectPage = document.getElementById('selectPage');
+                    if (selectPage) selectPage.classList.remove('guide-highlight-target');
+                }
+            }
+        ]
+    };
+    
+    function startMigrationGuide() {
+        currentAdminGuide = {
+            guide: migrationGuide,
+            currentStep: 0
+        };
+        showAdminGuideWindow();
+    }
+    
+    function showAdminGuideWindow() {
+        if (!currentAdminGuide) return;
+        
+        // Create guide window if it doesn't exist
+        let guideWindow = document.getElementById('admin-guide-window');
+        if (!guideWindow) {
+            guideWindow = document.createElement('div');
+            guideWindow.id = 'admin-guide-window';
+            guideWindow.className = 'fixed bottom-6 right-6 bg-white rounded-lg shadow-2xl border-2 border-indigo-500';
+            guideWindow.style.width = '400px';
+            guideWindow.style.maxHeight = '500px';
+            guideWindow.style.zIndex = '9999';
+            guideWindow.innerHTML = `
+                <div class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
+                    <div>
+                        <h3 id="admin-guide-title" class="font-bold text-lg"></h3>
+                        <p id="admin-guide-progress" class="text-xs opacity-90"></p>
+                    </div>
+                    <button id="admin-guide-close" class="text-white hover:text-gray-200 text-2xl font-bold">&times;</button>
+                </div>
+                <div id="admin-guide-content" class="p-6 overflow-y-auto" style="max-height: 300px;">
+                    <p id="admin-guide-text" class="text-gray-700 mb-4"></p>
+                </div>
+                <div class="border-t p-4 flex justify-between items-center bg-gray-50 rounded-b-lg">
+                    <button id="admin-guide-prev" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition">
+                        <i class="fas fa-arrow-left mr-2"></i>Previous
+                    </button>
+                    <div id="admin-guide-step-indicator" class="text-sm text-gray-600"></div>
+                    <button id="admin-guide-next" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">
+                        Next<i class="fas fa-arrow-right ml-2"></i>
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(guideWindow);
+            
+            // Add event listeners
+            document.getElementById('admin-guide-close').addEventListener('click', closeAdminGuide);
+            document.getElementById('admin-guide-prev').addEventListener('click', previousAdminGuideStep);
+            document.getElementById('admin-guide-next').addEventListener('click', nextAdminGuideStep);
+        }
+        
+        updateAdminGuideStep();
+    }
+    
+    function updateAdminGuideStep() {
+        if (!currentAdminGuide) return;
+        
+        const guide = currentAdminGuide.guide;
+        const stepIndex = currentAdminGuide.currentStep;
+        const step = guide.steps[stepIndex];
+        
+        // Determine progress text based on guide ID
+        let progressText = '';
+        if (guide.id === 'page-management') {
+            progressText = 'Page Management Guide';
+        } else if (guide.id === 'button-grid') {
+            progressText = 'Button Grid Guide';
+        } else if (guide.id === 'button-editor') {
+            progressText = 'Button Editor Guide';
+        }
+        
+        // Update window content
+        document.getElementById('admin-guide-title').textContent = step.title;
+        document.getElementById('admin-guide-progress').textContent = progressText;
+        document.getElementById('admin-guide-text').textContent = step.content;
+        document.getElementById('admin-guide-step-indicator').textContent = `Step ${stepIndex + 1} of ${guide.steps.length}`;
+        
+        // Update button states
+        const prevBtn = document.getElementById('admin-guide-prev');
+        const nextBtn = document.getElementById('admin-guide-next');
+        
+        prevBtn.disabled = stepIndex === 0;
+        prevBtn.style.opacity = stepIndex === 0 ? '0.5' : '1';
+        prevBtn.style.cursor = stepIndex === 0 ? 'not-allowed' : 'pointer';
+        
+        if (stepIndex === guide.steps.length - 1) {
+            nextBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Complete';
+        } else {
+            nextBtn.innerHTML = 'Next<i class="fas fa-arrow-right ml-2"></i>';
+        }
+        
+        // Run step action
+        if (step.action) {
+            setTimeout(() => step.action(), 100);
+        }
+    }
+    
+    function nextAdminGuideStep() {
+        if (!currentAdminGuide) return;
+        
+        const guide = currentAdminGuide.guide;
+        const stepIndex = currentAdminGuide.currentStep;
+        const step = guide.steps[stepIndex];
+        
+        // Cleanup current step
+        if (step.cleanup) step.cleanup();
+        
+        // Move to next step or complete
+        if (stepIndex < guide.steps.length - 1) {
+            currentAdminGuide.currentStep++;
+            updateAdminGuideStep();
+        } else {
+            // Guide complete
+            closeAdminGuide();
+        }
+    }
+    
+    function previousAdminGuideStep() {
+        if (!currentAdminGuide) return;
+        
+        const guide = currentAdminGuide.guide;
+        const stepIndex = currentAdminGuide.currentStep;
+        const step = guide.steps[stepIndex];
+        
+        if (stepIndex > 0) {
+            // Cleanup current step
+            if (step.cleanup) step.cleanup();
+            
+            // Move to previous step
+            currentAdminGuide.currentStep--;
+            updateAdminGuideStep();
+        }
+    }
+    
+    function closeAdminGuide() {
+        if (!currentAdminGuide) return;
+        
+        // Cleanup current step
+        const step = currentAdminGuide.guide.steps[currentAdminGuide.currentStep];
+        if (step.cleanup) step.cleanup();
+        
+        // Remove guide window
+        const guideWindow = document.getElementById('admin-guide-window');
+        if (guideWindow) guideWindow.remove();
+        
+        currentAdminGuide = null;
     }
     
     function closeHelpModal() {
@@ -437,6 +1742,64 @@
     helpModal.addEventListener('mousedown', (e) => {
         if (e.target === helpModal) closeHelpModal();
     });
+    
+    // --- Contact Support Modal Logic ---
+    const contactModal = document.getElementById('contact-modal');
+    const contactModalClose = document.getElementById('contact-modal-close');
+    const contactSupportForm = document.getElementById('contact-support-form');
+    const supportSuccess = document.getElementById('support-success');
+    const supportError = document.getElementById('support-error');
+    
+    function openContactSupportModal() {
+        console.log('Opening Contact Support modal');
+        contactModal.classList.remove('hidden');
+        // Close help modal if open
+        if (helpModal && !helpModal.classList.contains('hidden')) {
+            closeHelpModal();
+        }
+    }
+    
+    function closeContactModal() {
+        contactModal.classList.add('hidden');
+        supportSuccess.classList.add('hidden');
+        supportError.classList.add('hidden');
+        contactSupportForm.reset();
+    }
+    
+    if (contactModalClose) contactModalClose.addEventListener('click', closeContactModal);
+    contactModal.addEventListener('mousedown', (e) => {
+        if (e.target === contactModal) closeContactModal();
+    });
+    
+    // Handle form submission
+    if (contactSupportForm) {
+        contactSupportForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(contactSupportForm);
+            
+            fetch(contactSupportForm.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'Accept': 'application/json'
+                }
+            }).then(response => {
+                if (response.ok) {
+                    supportSuccess.classList.remove('hidden');
+                    supportError.classList.add('hidden');
+                    contactSupportForm.reset();
+                    setTimeout(closeContactModal, 3000);
+                } else {
+                    supportSuccess.classList.add('hidden');
+                    supportError.classList.remove('hidden');
+                }
+            }).catch(error => {
+                console.error('Error submitting form:', error);
+                supportSuccess.classList.add('hidden');
+                supportError.classList.remove('hidden');
+            });
+        });
+    }
     </script>
 
     <!-- --- Page Management Form --- -->
@@ -492,7 +1855,7 @@
     </main>
 
     <!-- Button Editor Modal -->
-    <div id="buttonEditorModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+    <div id="buttonEditorModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5000;">
         <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-lg font-bold text-gray-900">Edit Button</h3>
@@ -807,6 +2170,298 @@
             if (e.target === migrationModal) {
                 migrationModal.classList.add('hidden');
             }
+        });
+    </script>
+
+    <script>
+        // Guide resumption logic for cross-page guides
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Admin Pages loaded, checking for active guide...');
+            
+            // Initialize the guide system if not already present
+            if (!window.pageGuide) {
+                window.pageGuide = {
+                    guideData: {
+                        'customize-pages': {
+                            title: 'Customize Pages and Buttons',
+                            steps: [
+                                {
+                                    title: 'Unlock Admin Toolbar',
+                                    icon: 'fa-unlock',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access Page Management.</p>
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                            <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                            <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                            <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
+                                        </div>
+                                        <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                            <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                                        </div>
+                                    `
+                                },
+                                {
+                                    title: 'Open Page Management',
+                                    icon: 'fa-th',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">Navigate to the Page Management interface.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>Click the <strong>grid icon</strong> <i class="fas fa-th text-rose-600"></i> in the Admin toolbar</p>
+                                        </div>
+                                        <p class="text-sm text-gray-600">This opens the page where you can customize pages and buttons.</p>
+                                    `
+                                },
+                                {
+                                    title: 'Select Content to Customize',
+                                    icon: 'fa-mouse-pointer',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">Choose which pages or buttons to edit.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>You can:</p>
+                                            <ul class="text-xs text-gray-600 ml-4 mt-1 space-y-1">
+                                                <li>• Edit existing pages and buttons</li>
+                                                <li>• Change labels and images</li>
+                                                <li>• Reorganize button layout</li>
+                                                <li>• Import user data from other AAC devices</li>
+                                            </ul>
+                                        </div>
+                                        <p class="text-sm text-gray-600">The Page Management interface lets you customize all aspects of your communication grid.</p>
+                                    `
+                                },
+                                {
+                                    title: 'Make Customizations',
+                                    icon: 'fa-edit',
+                                    content: `
+                                        <p class="text-gray-700 mb-3">Customize labels, images, and content as needed.</p>
+                                        <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
+                                            <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>Edit the content to match the user's needs</p>
+                                        </div>
+                                        <div class="bg-blue-50 border-l-4 border-blue-500 p-3">
+                                            <p class="text-xs text-gray-600"><i class="fas fa-question-circle text-blue-600 mr-2"></i>For more details on making changes, refer to the Help menu on the Page & Button Administration page</p>
+                                        </div>
+                                    `
+                                }
+                            ]
+                        }
+                    },
+                    
+                    start: function(taskId, stepIndex = 0) {
+                        console.log('pageGuide.start called:', taskId, stepIndex);
+                        const task = this.guideData[taskId];
+                        if (!task) {
+                            console.error('Task not found:', taskId);
+                            return;
+                        }
+                        
+                        this.currentTask = taskId;
+                        this.currentStep = stepIndex;
+                        
+                        // Show or create the guide window
+                        this.showGuideWindow(task);
+                    },
+                    
+                    showGuideWindow: function(task) {
+                        console.log('showGuideWindow called for task:', task.title);
+                        let guideWindow = document.getElementById('page-setup-guide');
+                        console.log('Existing guide window:', !!guideWindow);
+                        
+                        // Create guide window if it doesn't exist
+                        if (!guideWindow) {
+                            console.log('Creating new guide window...');
+                            guideWindow = document.createElement('div');
+                            guideWindow.id = 'page-setup-guide';
+                            guideWindow.className = 'fixed top-20 right-4 w-96 bg-white rounded-lg shadow-2xl border-2 border-blue-500 z-50';
+                            guideWindow.innerHTML = `
+                                <div class="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg">
+                                    <div class="flex items-center justify-between">
+                                        <h3 id="page-guide-title" class="text-lg font-bold"></h3>
+                                        <button id="page-guide-close" class="text-white hover:text-gray-200">
+                                            <i class="fas fa-times"></i>
+                                        </button>
+                                    </div>
+                                    <div id="page-guide-progress" class="text-sm opacity-90 mt-1"></div>
+                                </div>
+                                <div class="p-6">
+                                    <div id="page-guide-step-indicator" class="flex gap-2 mb-4"></div>
+                                    <div id="page-guide-content" class="mb-6"></div>
+                                    <div class="flex gap-3">
+                                        <button id="page-guide-prev" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+                                            <i class="fas fa-arrow-left mr-1"></i> Previous
+                                        </button>
+                                        <button id="page-guide-next" class="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                                            Next <i class="fas fa-arrow-right ml-1"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                            document.body.appendChild(guideWindow);
+                            console.log('Guide window created and appended');
+                            
+                            // Add event listeners with proper binding
+                            const self = this;
+                            setTimeout(() => {
+                                const closeBtn = document.getElementById('page-guide-close');
+                                const prevBtn = document.getElementById('page-guide-prev');
+                                const nextBtn = document.getElementById('page-guide-next');
+                                
+                                console.log('Attaching event listeners - closeBtn:', !!closeBtn, 'prevBtn:', !!prevBtn, 'nextBtn:', !!nextBtn);
+                                
+                                if (closeBtn) closeBtn.addEventListener('click', () => self.close());
+                                if (prevBtn) prevBtn.addEventListener('click', () => self.previousStep());
+                                if (nextBtn) nextBtn.addEventListener('click', () => self.nextStep());
+                                
+                                console.log('Event listeners attached');
+                            }, 100);
+                        }
+                        
+                        // Update the guide window
+                        guideWindow.classList.remove('hidden');
+                        guideWindow.style.display = 'block';
+                        
+                        // Wait for DOM to be ready, then update content
+                        setTimeout(() => {
+                            const titleEl = document.getElementById('page-guide-title');
+                            if (titleEl) {
+                                titleEl.textContent = task.title;
+                                console.log('Title set to:', task.title);
+                            }
+                            this.showStep();
+                        }, 150);
+                    },
+                    
+                    showStep: function() {
+                        console.log('showStep called - currentTask:', this.currentTask, 'currentStep:', this.currentStep);
+                        const task = this.guideData[this.currentTask];
+                        const step = task.steps[this.currentStep];
+                        console.log('Step data:', step);
+                        
+                        // Update progress
+                        const progressEl = document.getElementById('page-guide-progress');
+                        console.log('Progress element:', !!progressEl);
+                        if (progressEl) {
+                            progressEl.textContent = `Step ${this.currentStep + 1} of ${task.steps.length}`;
+                        }
+                        
+                        // Update content
+                        const contentEl = document.getElementById('page-guide-content');
+                        console.log('Content element:', !!contentEl);
+                        if (contentEl) {
+                            contentEl.innerHTML = `
+                                <div class="flex items-center gap-3 mb-4">
+                                    <div class="w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center text-white">
+                                        <i class="fas ${step.icon} text-xl"></i>
+                                    </div>
+                                    <h4 class="text-lg font-semibold text-gray-800">${step.title}</h4>
+                                </div>
+                                ${step.content}
+                            `;
+                            console.log('Content updated');
+                        }
+                        
+                        // Update step indicators
+                        const container = document.getElementById('page-guide-step-indicator');
+                        console.log('Step indicator container:', !!container);
+                        if (container) {
+                            container.innerHTML = '';
+                            for (let i = 0; i < task.steps.length; i++) {
+                                const dot = document.createElement('div');
+                                dot.className = 'w-3 h-3 rounded-full ' + 
+                                    (i === this.currentStep ? 'bg-blue-500' : 
+                                     i < this.currentStep ? 'bg-green-500' : 'bg-gray-300');
+                                container.appendChild(dot);
+                            }
+                        }
+                        
+                        // Update buttons
+                        const prevBtn = document.getElementById('page-guide-prev');
+                        if (prevBtn) {
+                            prevBtn.style.display = this.currentStep === 0 ? 'none' : 'block';
+                        }
+                        
+                        const nextBtn = document.getElementById('page-guide-next');
+                        if (nextBtn) {
+                            if (this.currentStep === task.steps.length - 1) {
+                                nextBtn.innerHTML = '<i class="fas fa-check mr-1"></i> Complete';
+                            } else {
+                                nextBtn.innerHTML = 'Next <i class="fas fa-arrow-right ml-1"></i>';
+                            }
+                        }
+                        
+                        console.log('showStep completed');
+                        
+                        // Save state
+                        localStorage.setItem('activeGuide', JSON.stringify({
+                            taskId: this.currentTask,
+                            stepIndex: this.currentStep
+                        }));
+                    },
+                    
+                    nextStep: function() {
+                        const task = this.guideData[this.currentTask];
+                        if (this.currentStep < task.steps.length - 1) {
+                            this.currentStep++;
+                            this.showStep();
+                        } else {
+                            this.complete();
+                        }
+                    },
+                    
+                    previousStep: function() {
+                        if (this.currentStep > 0) {
+                            this.currentStep--;
+                            this.showStep();
+                        }
+                    },
+                    
+                    complete: function() {
+                        document.getElementById('guide-content').innerHTML = `
+                            <div class="text-center py-8">
+                                <div class="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center text-white mx-auto mb-4">
+                                    <i class="fas fa-check text-3xl"></i>
+                                </div>
+                                <h4 class="text-xl font-semibold text-gray-800 mb-2">Task Complete!</h4>
+                                <p class="text-gray-600">You've completed customizing pages and buttons.</p>
+                            </div>
+                        `;
+                        
+                        localStorage.removeItem('activeGuide');
+                        
+                        setTimeout(() => {
+                            this.close();
+                        }, 2000);
+                    },
+                    
+                    close: function() {
+                        const guideWindow = document.getElementById('page-setup-guide');
+                        if (guideWindow) {
+                            guideWindow.style.display = 'none';
+                        }
+                        localStorage.removeItem('activeGuide');
+                    }
+                };
+            }
+            
+            // Small delay to ensure guide systems are initialized
+            setTimeout(() => {
+                const savedGuide = localStorage.getItem('activeGuide');
+                console.log('Saved guide state:', savedGuide);
+                
+                if (savedGuide) {
+                    try {
+                        const guideState = JSON.parse(savedGuide);
+                        console.log('Found active guide to resume:', guideState);
+                        
+                        // Check if this is the customize-pages guide
+                        if (guideState.taskId === 'customize-pages') {
+                            console.log('Resuming customize-pages guide on admin_pages');
+                            window.pageGuide.start(guideState.taskId, guideState.stepIndex || 0);
+                        }
+                    } catch (e) {
+                        console.error('Error parsing saved guide:', e);
+                    }
+                }
+            }, 500);
         });
     </script>
 

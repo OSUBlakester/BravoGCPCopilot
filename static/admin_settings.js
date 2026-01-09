@@ -47,6 +47,7 @@ const LLMOptionsInput = document.getElementById('LLMOptions');
 const FreestyleOptionsInput = document.getElementById('FreestyleOptions');
 const scanLoopLimitInput = document.getElementById('scanLoopLimit');
 const ScanningOffInput = document.getElementById('ScanningOff');
+const waitForSwitchToScanInput = document.getElementById('waitForSwitchToScan');
 // const useTapInterfaceInput = document.getElementById('useTapInterface'); // Removed from UI
 const interfaceAuditoryInput = document.getElementById('interfaceAuditory');
 const interfaceTapInput = document.getElementById('interfaceTap');
@@ -124,13 +125,29 @@ async function loadVoices() {
         const response = await window.authenticatedFetch('/api/tts-voices'); // Using authenticatedFetch
         if (!response.ok) throw new Error(`Failed to load voices: ${response.statusText}`);
         availableVoices = await response.json();
+        
+        // Filter to only include US English voices (en-US, en_US, us-en variations)
+        const usEnVoices = availableVoices.filter(voice => {
+            if (!voice.name) return false;
+            const nameLower = voice.name.toLowerCase();
+            return nameLower.includes('en-us') || 
+                   nameLower.includes('en_us') || 
+                   nameLower.includes('us-en') ||
+                   nameLower.includes('us_en');
+        });
+        
+        console.log('All available voices:', availableVoices.map(v => v.name));
+        console.log('Filtered US English voices:', usEnVoices.map(v => v.name));
+        
         ttsVoiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>'; // Default option
-        availableVoices.forEach(voice => {
+        usEnVoices.forEach(voice => {
             const option = document.createElement('option');
             option.value = voice.name;
             option.textContent = `${voice.name} (${voice.ssml_gender.toLowerCase()})`;
             ttsVoiceSelect.appendChild(option);
         });
+        
+        console.log(`Loaded ${usEnVoices.length} US English voices out of ${availableVoices.length} total voices`);
     } catch (error) {
         console.error('Error loading TTS voices:', error);
         ttsVoiceSelect.innerHTML = '<option value="">Error loading voices</option>';
@@ -213,6 +230,7 @@ async function loadSettings() {
         // if (useTapInterfaceInput) { useTapInterfaceInput.checked = currentSettings.useTapInterface || false; } // Removed from UI
         if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms !== false; }
         if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; }
+        if (waitForSwitchToScanInput) { waitForSwitchToScanInput.checked = currentSettings.waitForSwitchToScan || false; }
         if (enableSightWordsInput) { enableSightWordsInput.checked = currentSettings.enableSightWords !== false; }
         if (sightWordGradeLevelInput) { sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k'; }
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
@@ -284,6 +302,7 @@ async function saveSettings() {
     // const newUseTapInterface = useTapInterfaceInput.checked; // Removed from UI
     const newEnablePictograms = enablePictogramsInput ? enablePictogramsInput.checked : true;
     const newScanningOff = ScanningOffInput ? ScanningOffInput.checked : false;
+    const newWaitForSwitchToScan = waitForSwitchToScanInput ? waitForSwitchToScanInput.checked : false;
     const newEnableSightWords = enableSightWordsInput.checked;
     const newSightWordGradeLevel = sightWordGradeLevelInput.value;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
@@ -365,6 +384,7 @@ async function saveSettings() {
         FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
         ScanningOff: newScanningOff,    
+        waitForSwitchToScan: newWaitForSwitchToScan,
         SummaryOff: newSummaryOff,
         autoClean: newAutoClean,
         displaySplash: newDisplaySplash,
@@ -416,6 +436,7 @@ async function saveSettings() {
         }
         if (scanLoopLimitInput) scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0;
         if (ScanningOffInput) ScanningOffInput.checked = currentSettings.ScanningOff || false;
+        if (waitForSwitchToScanInput) waitForSwitchToScanInput.checked = currentSettings.waitForSwitchToScan || false;
         if (SummaryOffInput) SummaryOffInput.checked = currentSettings.SummaryOff || false;
         if (autoCleanInput) autoCleanInput.checked = currentSettings.autoClean || false;
         if (displaySplashInput) displaySplashInput.checked = currentSettings.displaySplash || false;
