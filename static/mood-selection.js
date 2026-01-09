@@ -31,10 +31,11 @@ const MOOD_OPTIONS = [
 window.MOOD_OPTIONS = MOOD_OPTIONS;
 
 class MoodSelection {
-    constructor() {
+    constructor(settings = null) {
         this.selectedMood = null;
         this.onComplete = null;
         this.moodOverlay = null;
+        this.settings = settings; // Store provided settings
         
         // Scanning variables (similar to gridpage.js)
         this.scanningInterval = null;
@@ -72,8 +73,12 @@ class MoodSelection {
                 // Try to load avatar config from user data
                 const fetchFunction = window.authenticatedFetch || fetch;
                 try {
+                    const aacUserId = sessionStorage.getItem('aacUserId');
                     const response = await fetchFunction('/api/user-info', {
                         method: 'GET',
+                        headers: {
+                            'X-User-ID': aacUserId
+                        },
                         credentials: 'include'
                     });
                     
@@ -177,7 +182,10 @@ class MoodSelection {
      * @param {Function} onComplete - Callback function called when mood selection is complete
      */
     async show(onComplete) {
-        this.onComplete = onComplete;
+        // Only overwrite onComplete if a new one is provided
+        if (onComplete !== undefined) {
+            this.onComplete = onComplete;
+        }
         
         try {
             // Check if mood selection is enabled in settings
@@ -192,7 +200,10 @@ class MoodSelection {
             const existingMood = sessionStorage.getItem('currentSessionMood');
             if (existingMood) {
                 console.log('Mood already set for this session:', existingMood);
-                if (this.onComplete) this.onComplete(existingMood);
+                // Use setTimeout to ensure onComplete callback is set before calling it
+                setTimeout(() => {
+                    if (this.onComplete) this.onComplete(existingMood);
+                }, 0);
                 return;
             }
 
@@ -212,6 +223,16 @@ class MoodSelection {
      */
     async isMoodSelectionEnabled() {
         try {
+            // Use provided settings if available (from constructor)
+            if (this.settings) {
+                console.log('Using provided settings for mood selection');
+                this.ScanningOff = this.settings.ScanningOff === true;
+                this.waitForSwitchToScan = this.settings.waitForSwitchToScan === true;
+                this.defaultDelay = this.settings.scanDelay || 3500;
+                return this.settings.enableMoodSelection === true;
+            }
+            
+            // Otherwise fetch settings
             // Check if authenticatedFetch is available
             const fetchFunction = window.authenticatedFetch || fetch;
             
@@ -225,6 +246,7 @@ class MoodSelection {
                 
                 // Load scanning settings
                 this.ScanningOff = settings.ScanningOff === true;
+                this.waitForSwitchToScan = settings.waitForSwitchToScan === true;
                 this.defaultDelay = settings.scanDelay || 3500;
                 
                 return settings.enableMoodSelection === true;
@@ -249,8 +271,12 @@ class MoodSelection {
             // Load from settings if not available yet
             try {
                 const fetchFunction = window.authenticatedFetch || fetch;
+                const aacUserId = sessionStorage.getItem('aacUserId');
                 const response = await fetchFunction('/api/settings', {
                     method: 'GET',
+                    headers: {
+                        'X-User-ID': aacUserId
+                    },
                     credentials: 'include'
                 });
                 if (response.ok) {
@@ -528,8 +554,18 @@ class MoodSelection {
 
         // Start scanning if enabled
         if (!this.ScanningOff) {
-            console.log('Starting mood selection scanning...');
-            this.startScanning();
+            // Check if we should wait for switch press before starting (only on first visit to this page)
+            const scanningHasStarted = sessionStorage.getItem('bravoScanningStarted_mood') === 'true';
+            
+            if (this.waitForSwitchToScan && !scanningHasStarted) {
+                console.log('Waiting for switch press to begin scanning...');
+                this.waitingForInitialSwitch = true;
+                // Play prompt in personal speaker
+                this.speakText("Press switch to begin scanning", false, false); // personal speaker, not announcement
+            } else {
+                console.log('Starting mood selection scanning...');
+                this.startScanning();
+            }
         } else {
             // Focus first mood button for accessibility when scanning is off
             const firstButton = moodGrid.querySelector('.mood-button');
@@ -596,8 +632,12 @@ class MoodSelection {
             this.removeMoodInterface();
 
             // Call completion callback
+            console.log('DEBUG: onComplete callback exists?', !!this.onComplete);
             if (this.onComplete) {
+                console.log('DEBUG: Calling onComplete with mood:', this.selectedMood);
                 this.onComplete(this.selectedMood);
+            } else {
+                console.warn('DEBUG: No onComplete callback set!');
             }
         } catch (error) {
             console.error('Error completing mood selection:', error);
@@ -634,10 +674,14 @@ class MoodSelection {
     async saveMoodToSettings(mood) {
         try {
             const fetchFunction = window.authenticatedFetch || fetch;
+            const aacUserId = sessionStorage.getItem('aacUserId');
             
             // First get current user info to preserve it
             const getCurrentResponse = await fetchFunction('/api/user-info', {
                 method: 'GET',
+                headers: {
+                    'X-User-ID': aacUserId
+                },
                 credentials: 'include'
             });
             
@@ -651,7 +695,8 @@ class MoodSelection {
             const response = await fetchFunction('/api/user-info', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-User-ID': aacUserId
                 },
                 body: JSON.stringify({
                     userInfo: currentUserInfo,
@@ -969,7 +1014,16 @@ class MoodSelection {
      */
     handleGamepadInput() {
         console.log('Gamepad input detected in mood selection, ScanningOff:', this.ScanningOff, 'currentlyScannedButton:', this.currentlyScannedButton);
-        
+
+        // If waiting for initial switch press, start scanning now
+        if (this.waitingForInitialSwitch) {
+            console.log('Initial switch press detected - starting scanning on mood page');
+            this.waitingForInitialSwitch = false;
+            sessionStorage.setItem('bravoScanningStarted_mood', 'true');
+            this.startScanning();
+            return;
+        }
+
         if (this.ScanningOff) {
             // Manual selection mode - activate focused button
             const focusedButton = document.activeElement;
@@ -1026,7 +1080,17 @@ class MoodSelection {
         switch (event.code) {
             case 'Space':
                 console.log('Space pressed in mood selection, ScanningOff:', this.ScanningOff, 'currentlyScannedButton:', this.currentlyScannedButton);
-                
+
+                // If waiting for initial switch press, start scanning now
+                if (this.waitingForInitialSwitch) {
+                    console.log('Initial spacebar press detected - starting scanning on mood page');
+                    this.waitingForInitialSwitch = false;
+                    sessionStorage.setItem('bravoScanningStarted_mood', 'true');
+                    this.startScanning();
+                    event.preventDefault();
+                    return;
+                }
+
                 if (this.ScanningOff) {
                     // Manual selection mode
                     const focusedButton = document.activeElement;
