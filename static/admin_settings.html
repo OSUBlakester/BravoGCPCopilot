@@ -387,17 +387,17 @@
                         <input type="text" id="wakeWordInterjection" name="wakeWordInterjection" placeholder="Interjection (e.g., Hey)" class="flex-1">
                         <input type="text" id="wakeWordName" name="wakeWordName" placeholder="Name (e.g., Bravo)" class="flex-1">
                     </div>
-                    <p class="text-xs text-gray-500 mt-1">The phrase used to activate voice commands (e.g., "Hey Bravo").</p>
+                    <p class="text-xs text-gray-500 mt-1">The phrase used to activate voice commands (e.g., "Hey Brady").</p>
                 </div>
                 <div>
                     <label for="LLMOptions" class="block text-lg font-medium text-gray-700 mb-2">Number of AI Options:</label>
                     <input type="number" id="LLMOptions" name="LLMOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 10">
-                    <p class="text-xs text-gray-500 mt-1">Number of options AI will return for user to select</p>
+                    <p class="text-xs text-gray-500 mt-1">Number of AI-generated options for Auditory Scanning pages and Quick Talk in Tap Interface</p>
                 </div>
                 <div>
                     <label for="FreestyleOptions" class="block text-lg font-medium text-gray-700 mb-2">Freestyle Word Options:</label>
                     <input type="number" id="FreestyleOptions" name="FreestyleOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 20">
-                    <p class="text-xs text-gray-500 mt-1">Number of word options AI will return in freestyle communication</p>
+                    <p class="text-xs text-gray-500 mt-1">Number of AI word suggestions for the Freestyle page and Words section in Tap Interface</p>
                 </div>
                 <div>
                     <label for="SummaryOff" class="block text-lg font-medium text-gray-700 mb-2">Turn off Button Summary</label>
@@ -455,14 +455,12 @@
                 </div>
                 <div class="md:col-span-2">
                     <label for="ttsVoiceSelect" class="block text-lg font-medium text-gray-700 mb-2">Text to Speech Voice:</label>
-                    <div class="flex rounded-md shadow-sm max-w-md">
-                        <select id="ttsVoiceSelect" name="ttsVoiceSelect" class="focus:ring-indigo-500 focus:border-indigo-500 flex-1 block w-full rounded-none rounded-l-md sm:text-sm border-gray-300">
-                            <option value="">Loading voices...</option>
-                        </select>
-                        <button type="button" id="testTtsVoiceButton" class="inline-flex items-center px-4 py-2 border border-l-0 border-gray-300 bg-gray-50 text-sm font-medium text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 rounded-r-md">
-                            Test Voice
-                        </button>
-                    </div>
+                    <select id="ttsVoiceSelect" name="ttsVoiceSelect" class="focus:ring-indigo-500 focus:border-indigo-500 block w-full rounded-md sm:text-sm border-gray-300 shadow-sm max-w-md">
+                        <option value="">Loading voices...</option>
+                    </select>
+                    <button type="button" id="testTtsVoiceButton" class="mt-3 inline-flex items-center px-6 py-2.5 border border-transparent text-sm font-semibold rounded-lg shadow-md text-white bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 hover:scale-105">
+                        <i class="fas fa-volume-up mr-2"></i>Test Voice
+                    </button>
                     <p id="tts-voice-status" class="mt-2 text-sm text-gray-500"></p>
                 </div>
                 <div>
@@ -555,6 +553,10 @@
                 <div class="flex items-center">
                     <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
                     <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="waitForSwitchToScan" name="waitForSwitchToScan" class="mr-2 w-5 h-5">
+                    <label for="waitForSwitchToScan" class="text-lg font-medium text-gray-700">Wait For Switch to Start Scanning</label>
                 </div>
             </div>
         </div>
@@ -801,6 +803,9 @@
                                                 <li>• <strong>Tap Screen:</strong> Direct touch interface optimized for touchscreen devices. Best for users who can tap or touch buttons directly.</li>
                                             </ul>
                                         </div>
+                                        <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded mt-2">
+                                            <p class="text-xs text-red-900"><i class="fas fa-exclamation-triangle mr-1"></i><strong>Important:</strong> After changing the User Interface setting, you must log out and log back in to the newly selected interface for the changes to take effect.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -825,7 +830,7 @@
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Wake Word:</strong> The phrase used to activate voice commands (e.g., "Hey Bravo"). Set both the interjection (Hey) and name (Bravo).</p>
+                                        <p><strong>Wake Word:</strong> The phrase used to activate voice commands (e.g., "Hey Brady"). Set both the interjection (Hey) and name (Brady).</p>
                                         <p><strong>Number of AI Options:</strong> How many response choices AI provides when generating dynamic content. Higher numbers give more variety but take longer to scan through.</p>
                                         <p><strong>Freestyle Word Options:</strong> Number of word suggestions AI provides in freestyle communication mode.</p>
                                         <p><strong>Turn off Button Summary:</strong> When enabled, buttons show full speech text instead of summarized versions.</p>
@@ -918,6 +923,7 @@
                                         <p><strong>Auditory Scan Speed:</strong> Time in milliseconds between button highlights during scanning. Lower = faster, higher = slower.</p>
                                         <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
                                         <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
+                                        <p><strong>Wait For Switch to Start Scanning:</strong> When enabled, scanning will not begin automatically. User must press their switch to start scanning on initial page load. After first press, scanning continues normally.</p>
                                         <div class="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
                                             <p class="text-xs text-gray-700"><strong>💡 Tip:</strong> Start with slower scan speeds and gradually increase as the user becomes more comfortable with the interface.</p>
                                         </div>
@@ -1027,6 +1033,13 @@
                     const parent = radio?.closest('.flex.items-center.space-x-6');
                     if (parent) parent.classList.remove('guide-highlight-target');
                 }
+            },
+            {
+                title: 'Important: Logout Required',
+                content: 'After changing the User Interface setting, you MUST log out and log back in to the newly selected interface for the changes to take effect. The interface change will not apply until you do this.',
+                highlight: null,
+                action: function() {},
+                cleanup: function() {}
             }
         ]
     };
@@ -1407,6 +1420,24 @@
                     const container = checkbox?.closest('.flex.items-center');
                     if (container) container.classList.remove('guide-highlight-target');
                 }
+            },
+            {
+                title: 'Wait For Switch to Start Scanning',
+                content: 'When enabled, scanning will wait for the user to press their switch before beginning. Only applies to initial page load. After the first switch press, scanning continues automatically between pages. User will hear "Press switch to begin scanning" prompt.',
+                highlight: '#waitForSwitchToScan',
+                action: function() {
+                    const checkbox = document.getElementById('waitForSwitchToScan');
+                    const container = checkbox?.closest('.flex.items-center');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('waitForSwitchToScan');
+                    const container = checkbox?.closest('.flex.items-center');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
             }
         ]
     };
@@ -1618,11 +1649,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, we need to unlock the Admin toolbar to access settings.</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
                             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner</p>
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">Click the lock icon <i class="fas fa-lock text-gray-600"></i> to unlock it. When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -1703,7 +1739,7 @@
                                 <p class="text-sm"><i class="fas fa-exclamation-triangle text-yellow-600 mr-2"></i><strong>Requirements:</strong> Must be exactly 2 words</p>
                             </div>
                             <p class="text-sm text-gray-600 mb-2"><strong>Default:</strong> "Hey Friend"</p>
-                            <p class="text-sm text-gray-600 mb-3"><strong>Examples:</strong> "Hey Bravo", "Hello Assistant", "Hi Helper"</p>
+                            <p class="text-sm text-gray-600 mb-3"><strong>Examples:</strong> "Hey Brady", "Yo Hannah", "Hello Emma"</p>
                         `,
                         action: function() {
                             const wakeWordInputs = document.querySelectorAll('input[id*="wake"]');
@@ -1746,9 +1782,15 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access settings.</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
                             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
+                            </div>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
                             </div>
                         `,
                         action: function() {
@@ -1793,27 +1835,29 @@
                             <p class="text-sm text-gray-600">Select your preferred mode.</p>
                         `,
                         action: function() {
-                            // Find Interface Mode select or radio buttons
-                            const interfaceInputs = document.querySelectorAll('select[id*="interface"], input[name*="interface"], select[name*="interface"]');
+                            // Find the Interface Mode radio buttons container (not inside guide modal)
+                            const guideModal = document.getElementById('guideModal');
+                            const interfaceInputs = document.querySelectorAll('input[name="interfaceMode"]');
+                            
                             interfaceInputs.forEach(input => {
-                                const container = input.closest('div');
-                                if (container) {
+                                // Skip if this input is inside the guide modal
+                                if (guideModal && guideModal.contains(input)) return;
+                                
+                                // Find the parent container with both radio options
+                                const container = input.closest('.md\\:col-span-2') || input.closest('div.grid');
+                                if (container && (!guideModal || !guideModal.contains(container))) {
                                     container.classList.add('guide-highlight-target');
                                     container.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 }
                             });
-                            
-                            // Also look for labels containing "Interface Mode"
-                            const labels = Array.from(document.querySelectorAll('label, h3, h4')).filter(el => 
-                                el.textContent.toLowerCase().includes('interface') && el.textContent.toLowerCase().includes('mode')
-                            );
-                            labels.forEach(label => {
-                                label.classList.add('guide-highlight-target');
-                            });
                         },
                         cleanup: function() {
+                            // Only remove highlight from elements outside the guide modal
+                            const guideModal = document.getElementById('guideModal');
                             document.querySelectorAll('.guide-highlight-target').forEach(el => {
-                                el.classList.remove('guide-highlight-target');
+                                if (!guideModal || !guideModal.contains(el)) {
+                                    el.classList.remove('guide-highlight-target');
+                                }
                             });
                         }
                     },
@@ -1849,9 +1893,15 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access settings.</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
                             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
+                            </div>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
                             </div>
                         `,
                         action: function() {
@@ -1908,28 +1958,56 @@
                         title: 'Set AI Options Count',
                         icon: 'fa-list-ol',
                         content: `
-                            <p class="text-gray-700 mb-3">Configure how many AI-generated options appear on the Grid page.</p>
+                            <p class="text-gray-700 mb-3">Configure how many AI-generated options appear for Auditory Scanning pages and Quick Talk.</p>
+                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-purple-600 mr-2"></i><strong>Used for:</strong></p>
+                                <p class="text-xs ml-5">• Auditory Scanning pages (dynamically generated button options)</p>
+                                <p class="text-xs ml-5">• Quick Talk in Tap Interface (AI conversation suggestions)</p>
+                            </div>
                             <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 mb-3">
                                 <p class="text-sm"><i class="fas fa-lightbulb text-yellow-600 mr-2"></i><strong>Tip:</strong> Start with 10 options and adjust based on user preference</p>
                             </div>
                         `,
                         action: function() {
                             // Find and highlight AI Options input
-                            const aiOptionsLabel = Array.from(document.querySelectorAll('label')).find(label => 
-                                label.textContent.toLowerCase().includes('ai') && label.textContent.toLowerCase().includes('option')
-                            );
-                            if (aiOptionsLabel) {
-                                const container = aiOptionsLabel.closest('div');
-                                if (container) container.classList.add('guide-highlight-target');
+                            const aiOptionsInput = document.getElementById('LLMOptions');
+                            if (aiOptionsInput) {
+                                const container = aiOptionsInput.closest('div');
+                                if (container) {
+                                    container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
                             }
-                            
+                        },
+                        cleanup: function() {
+                            document.querySelectorAll('.guide-highlight-target').forEach(el => {
+                                el.classList.remove('guide-highlight-target');
+                            });
+                        }
+                    },
+                    {
+                        title: 'Set Freestyle Word Options',
+                        icon: 'fa-keyboard',
+                        content: `
+                            <p class="text-gray-700 mb-3">Configure how many AI word suggestions appear for freestyle communication.</p>
+                            <div class="bg-green-50 border-l-4 border-green-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-green-600 mr-2"></i><strong>Used for:</strong></p>
+                                <p class="text-xs ml-5">• Freestyle page (word suggestions for building sentences)</p>
+                                <p class="text-xs ml-5">• Words section in Tap Interface (word prediction)</p>
+                            </div>
+                            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-lightbulb text-yellow-600 mr-2"></i><strong>Tip:</strong> Higher numbers offer more word choices for sentence building</p>
+                            </div>
+                        `,
+                        action: function() {
                             // Find and highlight Freestyle Options input
-                            const freestyleLabel = Array.from(document.querySelectorAll('label')).find(label => 
-                                label.textContent.toLowerCase().includes('freestyle') && label.textContent.toLowerCase().includes('option')
-                            );
-                            if (freestyleLabel) {
-                                const container = freestyleLabel.closest('div');
-                                if (container) container.classList.add('guide-highlight-target');
+                            const freestyleInput = document.getElementById('FreestyleOptions');
+                            if (freestyleInput) {
+                                const container = freestyleInput.closest('div');
+                                if (container) {
+                                    container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
                             }
                         },
                         cleanup: function() {
@@ -1965,7 +2043,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
+                            </div>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -1992,18 +2079,49 @@
                         }
                     },
                     {
-                        title: 'Find Voice Settings',
+                        title: 'Find Audio Settings',
                         icon: 'fa-volume-up',
                         content: `
-                            <p class="text-gray-700 mb-3">Scroll to the Text-to-Speech or Voice section.</p>
+                            <p class="text-gray-700 mb-3">Scroll to the Audio Settings section.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>Audio Settings</strong> <i class="fas fa-volume-up text-blue-600"></i> heading</p>
+                            </div>
                         `,
                         action: function() {
-                            const labels = document.querySelectorAll('label, h2, h3');
-                            for (const label of labels) {
-                                if (label.textContent.includes('Voice') || label.textContent.includes('TTS') || label.textContent.includes('Speech')) {
-                                    label.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    label.classList.add('guide-highlight-target');
+                            const headers = document.querySelectorAll('h2');
+                            for (const header of headers) {
+                                if (header.textContent.includes('Audio Settings')) {
+                                    header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                    header.classList.add('guide-highlight-target');
                                     break;
+                                }
+                            }
+                        },
+                        cleanup: function() {
+                            document.querySelectorAll('.guide-highlight-target').forEach(el => {
+                                el.classList.remove('guide-highlight-target');
+                            });
+                        }
+                    },
+                    {
+                        title: 'Set Speech Rate',
+                        icon: 'fa-tachometer-alt',
+                        content: `
+                            <p class="text-gray-700 mb-3">Adjust how fast announcements are spoken.</p>
+                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-info-circle text-purple-600 mr-2"></i><strong>Speech Rate (WPM):</strong> Words Per Minute</p>
+                                <p class="text-xs ml-5 mt-1">• 100-150: Slower pace</p>
+                                <p class="text-xs ml-5">• 180: Default (recommended)</p>
+                                <p class="text-xs ml-5">• 200-300: Faster pace</p>
+                            </div>
+                        `,
+                        action: function() {
+                            const speechRateInput = document.getElementById('speechRate');
+                            if (speechRateInput) {
+                                const container = speechRateInput.closest('div');
+                                if (container) {
+                                    container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 }
                             }
                         },
@@ -2018,12 +2136,19 @@
                         icon: 'fa-microphone',
                         content: `
                             <p class="text-gray-700 mb-3">Choose a voice from the dropdown and preview it.</p>
+                            <div class="bg-green-50 border-l-4 border-green-500 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-lightbulb text-green-600 mr-2"></i><strong>Tip:</strong> Click the speaker icon to preview each voice</p>
+                            </div>
                         `,
                         action: function() {
-                            const voiceSelects = document.querySelectorAll('select[id*="voice"], select[id*="tts"]');
-                            voiceSelects.forEach(select => {
-                                if (select.parentElement) select.parentElement.classList.add('guide-highlight-target');
-                            });
+                            const voiceSelect = document.getElementById('ttsVoiceSelect');
+                            if (voiceSelect) {
+                                const container = voiceSelect.closest('div.md\\:col-span-2');
+                                if (container) {
+                                    container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }
                         },
                         cleanup: function() {
                             document.querySelectorAll('.guide-highlight-target').forEach(el => {
@@ -2058,7 +2183,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar.</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
+                            </div>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2088,18 +2222,18 @@
                         title: 'Find Scanning Settings',
                         icon: 'fa-tachometer-alt',
                         content: `
-                            <p class="text-gray-700 mb-3">Locate the Scanning or Auditory Scanning section.</p>
+                            <p class="text-gray-700 mb-3">Scroll to the Auditory Scanning Settings section.</p>
+                            <div class="bg-orange-50 border-l-4 border-orange-500 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-info-circle text-orange-600 mr-2"></i>Look for the <strong>Auditory Scanning Settings</strong> <i class="fas fa-search text-orange-600"></i> heading</p>
+                            </div>
                         `,
                         action: function() {
-                            const labels = document.querySelectorAll('label, h2, h3, h4');
-                            for (const label of labels) {
-                                const text = label.textContent.toLowerCase();
-                                if (text.includes('auditory') && text.includes('scan')) {
-                                    label.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    label.classList.add('guide-highlight-target');
-                                    // Also highlight parent container
-                                    const container = label.closest('.bg-white, .p-6, section, div[class*="border"]');
-                                    if (container) container.classList.add('guide-highlight-target');
+                            // Find the Auditory Scanning Settings section header
+                            const headers = document.querySelectorAll('h2');
+                            for (const header of headers) {
+                                if (header.textContent.includes('Auditory Scanning Settings')) {
+                                    header.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                    header.classList.add('guide-highlight-target');
                                     break;
                                 }
                             }
@@ -2111,30 +2245,56 @@
                         }
                     },
                     {
-                        title: 'Adjust Speed & Loop',
-                        icon: 'fa-sliders-h',
+                        title: 'Set Auditory Scan Speed',
+                        icon: 'fa-tachometer-alt',
                         content: `
-                            <p class="text-gray-700 mb-3">Set the scan speed (2-3 seconds recommended) and loop limit.</p>
+                            <p class="text-gray-700 mb-3">Configure how fast buttons are highlighted during scanning.</p>
+                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-purple-600 mr-2"></i><strong>Value is in milliseconds (ms)</strong></p>
+                                <p class="text-xs ml-5">• 2000 ms (2 seconds) - Moderate pace</p>
+                                <p class="text-xs ml-5">• 3000 ms (3 seconds) - Slower, recommended for beginners</p>
+                                <p class="text-xs ml-5 mt-1">Lower = Faster | Higher = Slower</p>
+                            </div>
                         `,
                         action: function() {
-                            // Find scan speed/delay inputs
-                            const scanInputs = document.querySelectorAll('input[id*="scan"], input[id*="delay"], input[id*="speed"], input[id*="loop"]');
-                            scanInputs.forEach(input => {
-                                const container = input.closest('div');
+                            const scanDelayInput = document.getElementById('scanDelay');
+                            if (scanDelayInput) {
+                                const container = scanDelayInput.closest('div');
                                 if (container) {
                                     container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 }
+                            }
+                        },
+                        cleanup: function() {
+                            document.querySelectorAll('.guide-highlight-target').forEach(el => {
+                                el.classList.remove('guide-highlight-target');
                             });
-                            
-                            // Also find labels
-                            const labels = Array.from(document.querySelectorAll('label')).filter(label => {
-                                const text = label.textContent.toLowerCase();
-                                return text.includes('scan') && (text.includes('speed') || text.includes('delay') || text.includes('loop'));
-                            });
-                            labels.forEach(label => {
-                                const container = label.closest('div');
-                                if (container) container.classList.add('guide-highlight-target');
-                            });
+                        }
+                    },
+                    {
+                        title: 'Set Scan Loop Limit',
+                        icon: 'fa-redo',
+                        content: `
+                            <p class="text-gray-700 mb-3">Control how many times scanning cycles through all buttons before pausing.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-600 mr-2"></i><strong>Loop Limit Options:</strong></p>
+                                <p class="text-xs ml-5"><strong>0</strong> = No limit (scanning continues without pausing)</p>
+                                <p class="text-xs ml-5"><strong>1-10</strong> = Limited cycles (pauses after specified number of complete scans)</p>
+                            </div>
+                            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-lightbulb text-yellow-600 mr-2"></i><strong>Tip:</strong> Set to 0 for continuous scanning, or 2-3 for beginners who need pauses</p>
+                            </div>
+                        `,
+                        action: function() {
+                            const scanLoopInput = document.getElementById('scanLoopLimit');
+                            if (scanLoopInput) {
+                                const container = scanLoopInput.closest('div');
+                                if (container) {
+                                    container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                            }
                         },
                         cleanup: function() {
                             document.querySelectorAll('.guide-highlight-target').forEach(el => {
@@ -2181,7 +2341,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access User Info.</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access User Info.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
+                            </div>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2258,11 +2427,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access settings.</p>
-                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-purple-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2389,11 +2563,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access settings.</p>
-                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-purple-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2544,11 +2723,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access settings.</p>
-                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-purple-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2675,11 +2859,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access settings.</p>
-                            <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-purple-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access settings.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2810,11 +2999,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access User Info.</p>
-                            <div class="bg-orange-50 border-l-4 border-orange-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-orange-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access User Info.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
@@ -2917,11 +3111,16 @@
                         title: 'Unlock Admin Toolbar',
                         icon: 'fa-unlock',
                         content: `
-                            <p class="text-gray-700 mb-3">First, unlock the Admin toolbar to access Page Management.</p>
-                            <div class="bg-rose-50 border-l-4 border-rose-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-rose-500 mr-2"></i>Click the <strong>lock icon</strong> in the top-left corner</p>
+                            <p class="text-gray-700 mb-3">First, ensure the Admin toolbar is unlocked to access Page Management.</p>
+                            <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>lock icon</strong> in the top-left corner.</p>
+                                <p class="text-sm ml-5"><strong>Already unlocked?</strong> If the Admin toolbar buttons (gear, user info, etc.) are visible, the toolbar is already unlocked.</p>
+                                <p class="text-sm ml-5 mt-1"><strong>Locked?</strong> Click the lock icon and enter the PIN to unlock it.</p>
                             </div>
-                            <p class="text-sm text-gray-600">When unlocked, it will show <i class="fas fa-unlock-alt text-green-500"></i></p>
+                            <div class="bg-gray-50 border-l-4 border-gray-400 p-3 mb-3">
+                                <p class="text-sm"><i class="fas fa-key text-gray-600 mr-2"></i><strong>Default PIN:</strong> 1234</p>
+                                <p class="text-sm mt-1">If you don't have the correct PIN, contact <a href="mailto:admin@talkwithbravo.com" class="text-blue-600 hover:underline">admin@talkwithbravo.com</a></p>
+                            </div>
                         `,
                         action: function() {
                             const lockButton = document.getElementById('lock-icon');
