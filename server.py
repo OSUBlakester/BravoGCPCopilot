@@ -287,6 +287,7 @@ template_user_data_paths = {
         "LLMOptions": 10,
         "FreestyleOptions": 20,
         "ScanningOff": False,
+        "waitForSwitchToScan": False,
         "SummaryOff": False,
         "selected_tts_voice_name": "en-US-Neural2-A",
         "gridColumns": 10,
@@ -1499,6 +1500,7 @@ DEFAULT_SETTINGS = {
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
     "FreestyleOptions": 20,  # Default Freestyle Options
     "ScanningOff": False, # Default scanning off
+    "waitForSwitchToScan": False, # Default wait for switch to start scanning
     "SummaryOff": False, # Default summary off
     "selected_tts_voice_name": DEFAULT_TTS_VOICE, # Default TTS voice
     "gridColumns": DEFAULT_COLUMNS, # Default grid columns
@@ -5612,6 +5614,7 @@ class SettingsModel(BaseModel):
     FreestyleOptions: Optional[int] = Field(20, description="Number of word options returned for freestyle communication (e.g., 1-50)", ge=1, le=50)
     llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
+    waitForSwitchToScan: Optional[bool] = Field(None, description="Enable/disable waiting for switch press before starting scanning on initial page load.") # Added waitForSwitchToScan
     SummaryOff: Optional[bool] = Field(None, description="Enable/disable summary generation.") # Added SummaryOff    
     selected_tts_voice_name: Optional[str] = None
     gridColumns: Optional[int] = Field(None, description="Number of columns displayed in grid", ge=2, le=18)
@@ -8251,7 +8254,7 @@ async def _initialize_new_aac_user_profile(account_id: str, aac_user_id: str, di
     await save_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
-        doc_subpath="config/app_settings",
+        doc_subpath="settings/app_settings",
         data_to_save=json.loads(template_user_data_paths["settings.json"])
     )
 
