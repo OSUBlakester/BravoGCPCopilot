@@ -40,6 +40,7 @@ let wakeWordInterjection = "hey"; // Default interjection (lowercase)
 let wakeWordName = "bravo";       // Default name (lowercase)
 let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
+let waitForSwitchToScan = false; // Default wait for switch state
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
 const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
@@ -566,9 +567,11 @@ async function loadScanSettings() {
 
         // Load booleans
         ScanningOff = settings.ScanningOff === true;
+        waitForSwitchToScan = settings.waitForSwitchToScan === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
         console.log('🔍 DEBUG enablePictograms loaded from settings:', settings.enablePictograms, '-> final value:', enablePictograms);
+        console.log('🔍 DEBUG waitForSwitchToScan loaded from settings:', settings.waitForSwitchToScan, '-> final value:', waitForSwitchToScan);
         
         // Update sight word service with new settings
         if (window.updateSightWordSettings) {
@@ -1286,7 +1289,26 @@ async function generateGrid(page, container) {
 
     // Delay scanning until after the page is rendered
     setTimeout(() => {
-        startAuditoryScanning();
+        // Check if we should wait for switch press before starting (only on first visit to this page)
+        const scanningHasStarted = sessionStorage.getItem('bravoScanningStarted_grid') === 'true';
+        
+        console.log('🔍 GRIDPAGE SCANNING INIT DEBUG:');
+        console.log('  ScanningOff:', ScanningOff);
+        console.log('  waitForSwitchToScan:', waitForSwitchToScan);
+        console.log('  scanningHasStarted:', scanningHasStarted);
+        console.log('  Should wait?', !ScanningOff && waitForSwitchToScan && !scanningHasStarted);
+        
+        if (!ScanningOff && waitForSwitchToScan && !scanningHasStarted) {
+            console.log('✋ Waiting for switch press to begin scanning on gridpage...');
+            window.waitingForInitialSwitch = true;
+            // Play prompt in personal speaker
+            announce("Press switch to begin scanning", "personal", false, false);
+        } else if (!ScanningOff) {
+            console.log('▶️ Starting auditory scanning automatically');
+            startAuditoryScanning();
+        } else {
+            console.log('🔇 Scanning is disabled (ScanningOff=true)');
+        }
     }, defaultDelay);
 }
 
@@ -3311,14 +3333,27 @@ async function generateLlmButtons(options) {
  */
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
-        if (event.code === 'Space' && !isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
+        if (event.code === 'Space') {
             event.preventDefault();
-            const buttonToActivate = currentlyScannedButton; // Capture the button reference
-            console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
-            buttonToActivate.click();
-            buttonToActivate.classList.add('active');
-            // Use the captured reference in the timeout as well
-            setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+            
+            // Check if we're waiting for initial switch press
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
+                window.waitingForInitialSwitch = false;
+                sessionStorage.setItem('bravoScanningStarted_grid', 'true');
+                startAuditoryScanning();
+                return;
+            }
+            
+            // Normal scanning behavior
+            if (!isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
+                const buttonToActivate = currentlyScannedButton; // Capture the button reference
+                console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
+                buttonToActivate.click();
+                buttonToActivate.classList.add('active');
+                // Use the captured reference in the timeout as well
+                setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+            }
         }
     });
     console.log("Keyboard listener (Spacebar) set up.");
@@ -3364,6 +3399,19 @@ function startGamepadPolling() {
         if (currentButtonState && !lastButtonState) {
              const now = Date.now();
              if (now - lastGamepadInputTime > 300) { // Rate limit
+                // Check if we're waiting for initial switch press
+                if (window.waitingForInitialSwitch) {
+                    console.log('Initial switch detected (gamepad) - starting scanning on gridpage');
+                    window.waitingForInitialSwitch = false;
+                    sessionStorage.setItem('bravoScanningStarted_grid', 'true');
+                    startAuditoryScanning();
+                    lastGamepadInputTime = now;
+                    lastButtonState = currentButtonState;
+                    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                    return;
+                }
+                
+                // Normal scanning behavior
                 if (!isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
                     const buttonToActivate = currentlyScannedButton; // Capture the button reference
                     console.log("Gamepad button 0 pressed, activating button:", buttonToActivate.textContent);
