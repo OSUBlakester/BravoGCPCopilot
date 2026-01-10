@@ -6,6 +6,7 @@
     <title>Tap Interface - Bravo AAC</title>
     
     <!-- Authentication handled via session storage (set by auth.html) -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="/static/mood-selection.css">
 
@@ -50,14 +51,6 @@
             align-items: center;
             gap: 0.5rem;
             flex-wrap: wrap;
-        }
-
-        /* Custom icon size - 20% larger than previous (21.6px) */
-        .h-5\.4 {
-            height: 1.35rem;
-        }
-        .w-5\.4 {
-            width: 1.35rem;
         }
 
         /* --- Page Banner Styles --- */
@@ -340,7 +333,7 @@
 
         /* Sight Word Styling - distinctive format for sight words */
         .sight-word-button {
-            font-size: 1.65em !important;
+            font-size: 1.32em !important;
             font-weight: 900 !important;
             color: #dc2626 !important;
         }
@@ -401,6 +394,170 @@
         .section-header i {
             margin-right: 6.4px;
             color: #667eea;
+        }
+
+        /* Categories header button styling */
+        .categories-header-btn {
+            width: 100%;
+            background: linear-gradient(145deg, #ffffff, #f0f0f0);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            padding: 10px 12px;
+            margin: 0;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+            box-shadow: 
+                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
+                0 2px 5px -2px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .categories-header-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 
+                0 8px 12px -3px rgba(50, 50, 93, 0.2), 
+                0 4px 8px -3px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+            background: linear-gradient(145deg, #f8f8f8, #e8e8e8);
+        }
+
+        .categories-header-btn:active {
+            transform: translateY(0);
+            box-shadow: 
+                0 2px 4px -1px rgba(50, 50, 93, 0.15), 
+                0 1px 3px -1px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        .categories-header-btn i {
+            margin-right: 6px;
+            color: #667eea;
+        }
+
+        /* Categories Modal */
+        .categories-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .categories-modal.show {
+            display: flex;
+        }
+
+        .categories-modal-content {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            width: 90%;
+            max-width: 800px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .categories-modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .categories-modal-header h2 {
+            margin: 0;
+            font-size: 1.5em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .categories-modal-header i {
+            margin-right: 10px;
+        }
+
+        .categories-modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.8em;
+            cursor: pointer;
+            padding: 0;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .categories-modal-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .categories-modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .categories-modal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        .categories-modal-button {
+            height: 80px;
+            background: linear-gradient(145deg, #ffffff, #f0f0f0);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+            box-shadow: 
+                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
+                0 2px 5px -2px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 6px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .categories-modal-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 
+                0 8px 12px -3px rgba(50, 50, 93, 0.2), 
+                0 4px 8px -3px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        .categories-modal-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: scale(1.02);
         }
 
         /* Section Containers */
@@ -1080,26 +1237,44 @@
 
     <div id="app-container">
     <div class="page-banner">
-        <h1 id="dynamic-page-title"><i class="fas fa-hand-pointer"></i> Tap Interface</h1>
+        <h1 id="dynamic-page-title">Tap Interface</h1>
         <div class="admin-toolbar">
-            <button id="lock-icon" title="Admin Toolbar" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600">
-                <i class="fas fa-lock text-xs"></i>
+            <button id="lock-icon" title="Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100">
+                <i class="fas fa-lock"></i>
             </button>
-            <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-red-100 hover:text-red-600 hidden"><i class="fas fa-lock text-xs"></i></button>
-            <a href="tap_interface_admin.html" title="Tap Interface Admin" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-hand-pointer text-xs"></i></a>
-            <a href="admin_settings.html" title="Global Settings" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-cog text-xs"></i></a>
-            <a href="user_current_admin.html" title="User Current Location" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-map-marker-alt text-xs"></i></a>
-            <a href="user_info_admin.html" title="User Info & Birthdays" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-info-circle text-xs"></i></a>
-            <a href="user_diary_admin.html" title="User Diary" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-book-open text-xs"></i></a>
-            <a href="audio_admin.html" title="Audio Devices" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-volume-up text-xs"></i></a>
-            <a href="favorites_admin.html" title="Favorites Topics" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-star text-xs"></i></a>
-            <a href="admin_audit_report.html" title="Activity Reports" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-clipboard-list text-xs"></i></a>
-            <span class="border-l border-gray-300 h-3 mx-0.5 admin-icon hidden"></span>
-            <button id="switch-user-button" title="Switch User Profile" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-users text-xs"></i></button>
-            <button id="logout-button" title="Logout" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-sign-out-alt text-xs"></i></button>
-            <button id="help-icon" title="Help" aria-label="Help" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full ml-1 transition-colors duration-200 text-xs hover:bg-green-100 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500">
-                <i class="fas fa-question-circle text-xs"></i>
+            <div id="admin-icons" class="hidden flex items-center gap-0.4rem">
+                <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-lock"></i></button>
+                <span class="border-l border-white h-6 mx-1"></span>
+                <a href="tap_interface_admin.html" title="Tap Interface Admin" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-hand-pointer"></i></a>
+                <a href="admin_settings.html" title="Global Settings" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-cog"></i></a>
+                <a href="user_current_admin.html" title="User Current Location" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-map-marker-alt"></i></a>
+                <a href="user_info_admin.html" title="User Info & Birthdays" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-info-circle"></i></a>
+                <a href="user_diary_admin.html" title="User Diary" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-book-open"></i></a>
+                <a href="audio_admin.html" title="Audio Devices" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-volume-up"></i></a>
+                <a href="favorites_admin.html" title="Favorites Topics" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-star"></i></a>
+                <a href="admin_audit_report.html" title="Activity Reports" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-clipboard-list"></i></a>
+                <span class="border-l border-white h-6 mx-1"></span>
+                <button id="switch-user-button" title="Switch User Profile" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-users"></i></button>
+                <button id="logout-button" title="Logout" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+            <button id="help-icon" title="Help" aria-label="Help" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full ml-2 transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <i class="fas fa-question-circle"></i>
             </button>
+        </div>
+    </div>
+
+    <!-- Categories Modal -->
+    <div id="categoriesModal" class="categories-modal">
+        <div class="categories-modal-content">
+            <div class="categories-modal-header">
+                <h2><i class="fas fa-folder-open"></i> All Categories</h2>
+                <button class="categories-modal-close" id="categoriesModalClose">&times;</button>
+            </div>
+            <div class="categories-modal-body">
+                <div class="categories-modal-grid" id="categoriesModalGrid">
+                    <!-- Categories will be loaded dynamically -->
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1161,9 +1336,9 @@
         <div class="main-grid">
             <!-- Categories Column -->
             <div class="categories-column" id="categoriesColumn">
-                <div class="section-header">
-                    <h3><i class="fas fa-folder-open"></i> Categories</h3>
-                </div>
+                <button class="categories-header-btn" id="categoriesHeaderBtn">
+                    <i class="fas fa-folder-open"></i> Categories
+                </button>
                 <div class="categories-content">
                     <!-- Categories will be loaded dynamically -->
                 </div>
@@ -1276,6 +1451,48 @@
             const statusMessageElement = document.getElementById('statusMessage');
             if (statusMessageElement) {
                 statusMessageElement.textContent = message;
+            }
+        }
+
+        // ============ CACHE MANAGEMENT ============
+        const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+        const CACHE_KEYS = {
+            INITIAL_PHRASES: 'tap_initial_phrases',
+            INITIAL_WORDS: 'tap_initial_words'
+        };
+
+        function getCachedData(key) {
+            try {
+                const cached = localStorage.getItem(key);
+                if (!cached) return null;
+                
+                const data = JSON.parse(cached);
+                const now = Date.now();
+                
+                // Check if cache is expired
+                if (now - data.timestamp > CACHE_DURATION) {
+                    localStorage.removeItem(key);
+                    return null;
+                }
+                
+                console.log(`💾 Using cached data for ${key}`);
+                return data.content;
+            } catch (error) {
+                console.error(`Error reading cache for ${key}:`, error);
+                return null;
+            }
+        }
+
+        function setCachedData(key, content) {
+            try {
+                const data = {
+                    content: content,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(key, JSON.stringify(data));
+                console.log(`💾 Cached data for ${key}`);
+            } catch (error) {
+                console.error(`Error writing cache for ${key}:`, error);
             }
         }
 
@@ -1610,9 +1827,17 @@
                 
                 updateStatusMessage('Ready - Say Hey Bravo to start');
                 
-                // Render interface
-                await renderInterface();
-                await loadFreestyleOptions();
+                // Render categories first (synchronous)
+                renderCategories();
+                
+                // Load phrases and words in PARALLEL
+                console.log('⏱️ Starting parallel load of phrases and words at:', Date.now());
+                const phrasesPromise = loadInitialPhrases();
+                const wordsPromise = loadFreestyleOptions();
+                
+                console.log('⏱️ Waiting for both to complete at:', Date.now());
+                await Promise.all([phrasesPromise, wordsPromise]);
+                console.log('⏱️ Both completed at:', Date.now());
                 
                 // Pre-cache images in BACKGROUND (don't await)
                 preCacheCategoryImages();
@@ -1846,20 +2071,133 @@
         }
 
         async function loadInitialPhrases() {
-            console.log('Loading initial generic phrases...');
+            console.log('⏱️ loadInitialPhrases: Starting at:', Date.now());
             try {
                 // Generate generic conversation starters and common phrases
                 const genericPrompt = "Generate general conversation starters and common communication phrases for everyday social interactions";
                 // Store the prompt for Something Else regeneration
                 currentPhrasePrompt = genericPrompt;
+                
+                // Check cache first
+                const cachedPhrases = getCachedData(CACHE_KEYS.INITIAL_PHRASES);
+                if (cachedPhrases) {
+                    console.log('⏱️ loadInitialPhrases: Rendering from cache at:', Date.now());
+                    renderCategoryOptions(cachedPhrases, true); // true = defer images
+                    // Load images after a brief delay to let DOM settle
+                    setTimeout(() => loadImagesForPhrases(cachedPhrases), 50);
+                }
+                
+                // Fetch fresh data in background (even if we have cache)
+                console.log('⏱️ loadInitialPhrases: Fetching fresh phrases at:', Date.now());
                 const options = await generateGridpageLLMOptions(genericPrompt, LLMOptions);
-                console.log('Generated initial phrases:', options);
-                renderCategoryOptions(options);
+                console.log('⏱️ loadInitialPhrases: Got', options.length, 'phrases at:', Date.now());
+                
+                // Update cache
+                setCachedData(CACHE_KEYS.INITIAL_PHRASES, options);
+                
+                // Only re-render if we didn't use cache (to avoid flicker)
+                if (!cachedPhrases) {
+                    console.log('⏱️ loadInitialPhrases: Rendering phrases at:', Date.now());
+                    renderCategoryOptions(options, true); // true = defer images
+                    setTimeout(() => loadImagesForPhrases(options), 50);
+                    console.log('⏱️ loadInitialPhrases: Rendering complete at:', Date.now());
+                }
             } catch (error) {
                 console.error('Error loading initial phrases:', error);
                 // Show empty state if loading fails
                 renderCategoryOptions([]);
             }
+        }
+
+        // ============ DEFERRED IMAGE LOADING ============
+        async function loadImagesForPhrases(options) {
+            console.log('🖼️ Loading images for', options.length, 'phrases');
+            const buttons = llmStaticOptions.querySelectorAll('.option-button');
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image
+                if (btn.querySelector('img')) continue;
+                
+                const speechText = typeof option === 'object' ? option.option : option;
+                const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                
+                // Load image asynchronously
+                const imageUrl = await getSymbolImageForText(speechText, phraseKeywords);
+                if (imageUrl) {
+                    applyImageToButton(btn, imageUrl, btn.textContent);
+                }
+            }
+        }
+
+        async function loadImagesForWords(options) {
+            console.log('🖼️ Loading images for', options.length, 'words');
+            const buttons = freestyleOptions.querySelectorAll('.freestyle-button');
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image or is sight word
+                if (btn.querySelector('img') || btn.classList.contains('sight-word')) continue;
+                
+                const text = typeof option === 'object' ? (option.text || option.option) : option;
+                const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                
+                // Load image asynchronously
+                const imageUrl = await getSymbolImageForText(text, keywords);
+                if (imageUrl) {
+                    applyImageToButton(btn, imageUrl, text);
+                }
+            }
+        }
+
+        function applyImageToButton(btn, imageUrl, text) {
+            // Create image + text layout
+            btn.innerHTML = '';
+            const buttonContent = document.createElement('div');
+            buttonContent.style.position = 'relative';
+            buttonContent.style.width = '100%';
+            buttonContent.style.height = '100%';
+            buttonContent.style.display = 'flex';
+            buttonContent.style.flexDirection = 'column';
+            
+            const imageContainer = document.createElement('div');
+            imageContainer.style.flex = '1';
+            imageContainer.style.width = '100%';
+            imageContainer.style.overflow = 'hidden';
+            imageContainer.style.borderRadius = '8px 8px 0 0';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
+            
+            const imageElement = document.createElement('img');
+            imageElement.src = imageUrl;
+            imageElement.alt = text;
+            imageElement.style.width = '100%';
+            imageElement.style.height = '100%';
+            imageElement.style.objectFit = 'cover';
+            
+            const textFooter = document.createElement('div');
+            textFooter.style.minHeight = '22px';
+            textFooter.style.width = '100%';
+            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+            textFooter.style.backdropFilter = 'blur(4px)';
+            textFooter.style.color = 'white';
+            textFooter.style.display = 'flex';
+            textFooter.style.alignItems = 'center';
+            textFooter.style.justifyContent = 'center';
+            textFooter.style.padding = '2px 4px';
+            textFooter.style.fontSize = '10px';
+            textFooter.style.fontWeight = '600';
+            textFooter.textContent = text;
+            
+            imageContainer.appendChild(imageElement);
+            buttonContent.appendChild(imageContainer);
+            buttonContent.appendChild(textFooter);
+            btn.appendChild(buttonContent);
         }
 
         function renderCategories() {
@@ -2011,6 +2349,173 @@
             });
         }
 
+        // Categories Modal functionality
+        function openCategoriesModal() {
+            const modal = document.getElementById('categoriesModal');
+            const modalGrid = document.getElementById('categoriesModalGrid');
+            
+            if (!modal || !modalGrid) {
+                console.error('Categories modal elements not found');
+                return;
+            }
+            
+            // Clear existing content
+            modalGrid.innerHTML = '';
+            
+            if (!tapConfig || !tapConfig.buttons || tapConfig.buttons.length === 0) {
+                modalGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #666;">No categories configured</div>';
+                modal.classList.add('show');
+                return;
+            }
+            
+            // Render all non-hidden categories in the modal
+            tapConfig.buttons.forEach(button => {
+                if (button.hidden) return;
+                
+                const modalBtn = document.createElement('button');
+                modalBtn.className = 'categories-modal-button';
+                
+                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                
+                if (button.background_color && button.background_color !== '#FFFFFF') {
+                    modalBtn.style.backgroundColor = button.background_color;
+                }
+                
+                if (!isSightWord) {
+                    modalBtn.style.color = button.text_color || '#000000';
+                }
+                
+                // Add image support (matching category button logic)
+                if (!isSightWord) {
+                    getSymbolImageForText(button.label).then(imageUrl => {
+                        if (imageUrl) {
+                            modalBtn.innerHTML = '';
+                            const buttonContent = document.createElement('div');
+                            buttonContent.style.position = 'relative';
+                            buttonContent.style.width = '100%';
+                            buttonContent.style.height = '100%';
+                            buttonContent.style.display = 'flex';
+                            buttonContent.style.flexDirection = 'column';
+                            
+                            const imageContainer = document.createElement('div');
+                            imageContainer.style.flex = '1';
+                            imageContainer.style.width = '100%';
+                            imageContainer.style.overflow = 'hidden';
+                            imageContainer.style.borderRadius = '8px 8px 0 0';
+                            imageContainer.style.display = 'flex';
+                            imageContainer.style.alignItems = 'center';
+                            imageContainer.style.justifyContent = 'center';
+                            
+                            const imageElement = document.createElement('img');
+                            imageElement.src = imageUrl;
+                            imageElement.alt = button.label;
+                            imageElement.style.width = '100%';
+                            imageElement.style.height = '100%';
+                            imageElement.style.objectFit = 'cover';
+                            
+                            const textFooter = document.createElement('div');
+                            textFooter.style.height = '18px';
+                            textFooter.style.width = '100%';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.color = 'white';
+                            textFooter.style.display = 'flex';
+                            textFooter.style.alignItems = 'center';
+                            textFooter.style.justifyContent = 'center';
+                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.position = 'absolute';
+                            textFooter.style.bottom = '0';
+                            textFooter.style.left = '0';
+                            textFooter.style.right = '0';
+                            
+                            const textSpan = document.createElement('span');
+                            textSpan.textContent = button.label;
+                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontWeight = 'bold';
+                            textSpan.style.textAlign = 'center';
+                            
+                            imageContainer.appendChild(imageElement);
+                            textFooter.appendChild(textSpan);
+                            buttonContent.appendChild(imageContainer);
+                            buttonContent.appendChild(textFooter);
+                            modalBtn.appendChild(buttonContent);
+                        }
+                    }).catch(error => {
+                        console.error('Error loading image for modal category button:', error);
+                    });
+                }
+                
+                if (isSightWord) {
+                    modalBtn.classList.add('sight-word-button');
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = button.label;
+                    textSpan.style.fontSize = '1.25em';
+                    textSpan.style.fontWeight = '900';
+                    textSpan.style.color = '#dc2626';
+                    modalBtn.appendChild(textSpan);
+                } else {
+                    modalBtn.textContent = button.label;
+                }
+                
+                // Check if currently active
+                if (currentCategory && currentCategory.label === button.label) {
+                    modalBtn.classList.add('active');
+                }
+                
+                modalBtn.addEventListener('click', async (event) => {
+                    if (button.speech_text && button.speech_text.trim() !== '') {
+                        await announce(button.speech_text, "system", true);
+                    }
+                    
+                    if (button.custom_audio_file) {
+                        try {
+                            await playCustomButtonAudio(button.custom_audio_file);
+                        } catch (error) {
+                            console.error('Error playing button audio:', error);
+                        }
+                    }
+                    
+                    // Close modal and select category
+                    closeCategoriesModal();
+                    selectCategory(button, event);
+                });
+                
+                modalGrid.appendChild(modalBtn);
+            });
+            
+            modal.classList.add('show');
+        }
+
+        function closeCategoriesModal() {
+            const modal = document.getElementById('categoriesModal');
+            if (modal) {
+                modal.classList.remove('show');
+            }
+        }
+
+        // Add event listeners for categories modal
+        document.addEventListener('DOMContentLoaded', function() {
+            const categoriesHeaderBtn = document.getElementById('categoriesHeaderBtn');
+            const categoriesModalClose = document.getElementById('categoriesModalClose');
+            const categoriesModal = document.getElementById('categoriesModal');
+            
+            if (categoriesHeaderBtn) {
+                categoriesHeaderBtn.addEventListener('click', openCategoriesModal);
+            }
+            
+            if (categoriesModalClose) {
+                categoriesModalClose.addEventListener('click', closeCategoriesModal);
+            }
+            
+            if (categoriesModal) {
+                // Close modal when clicking outside content
+                categoriesModal.addEventListener('click', function(e) {
+                    if (e.target === categoriesModal) {
+                        closeCategoriesModal();
+                    }
+                });
+            }
+        });
+
         async function selectCategory(category, event) {
             console.log('Selecting category:', category);
             
@@ -2041,54 +2546,71 @@
             
             console.log('Loading phrases for category:', category.label);
             
-            // Clear existing options
+            // Clear existing options and show loading state for both sections
             llmStaticOptions.innerHTML = '';
+            freestyleOptions.innerHTML = '';
             
-            // Show loading state
+            // Show loading state for phrases
             for (let i = 0; i < LLMOptions; i++) {
                 const btn = document.createElement('button');
                 btn.className = 'option-button loading';
                 btn.textContent = '...';
                 llmStaticOptions.appendChild(btn);
             }
+            
+            // Show loading state for words
+            for (let i = 0; i < FreestyleWordOptions; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'option-button freestyle-button loading';
+                btn.textContent = '...';
+                freestyleOptions.appendChild(btn);
+            }
 
             try {
-                let options = [];
-                
-                // PHRASES SECTION LOGIC
-                if (category.llm_prompt) {
-                    console.log('Generating LLM options with prompt:', category.llm_prompt);
-                    // Generate full phrases using gridpage-style LLM
-                    options = await generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
-                    console.log('Generated options:', options);
-                } else {
-                    // Fallback: Use category label as prompt if no specific prompt is provided
-                    console.log('No llm_prompt found, using category label as prompt:', category.label);
-                    const fallbackPrompt = `Generate phrases related to ${category.label}`;
-                    options = await generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
-                }
-
-                console.log('Final options to render:', options);
-                renderCategoryOptions(options);
-                
-                // WORDS SECTION LOGIC
-                console.log('Updating freestyle options for category:', category.label || category);
-                console.log('Category has words_prompt:', category.words_prompt);
-                console.log('Category has llm_prompt:', category.llm_prompt);
-                
                 // Store the words prompt and instruction prompt globally for word selection
                 currentWordsPrompt = category.words_prompt || null;
                 currentInstructionPrompt = category.llm_prompt || null;
 
+                console.log('⏱️ Starting parallel fetch at:', Date.now());
+
+                // Start both promises immediately - they will execute concurrently
+                let phrasesPromise, wordsPromise;
+                
+                // PHRASES SECTION LOGIC
+                if (category.llm_prompt) {
+                    console.log('⏱️ Starting phrases fetch with prompt at:', Date.now());
+                    phrasesPromise = generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
+                } else {
+                    console.log('⏱️ Starting phrases fetch with fallback prompt at:', Date.now());
+                    const fallbackPrompt = `Generate phrases related to ${category.label}`;
+                    phrasesPromise = generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
+                }
+
+                // WORDS SECTION LOGIC
+                console.log('⏱️ Starting words fetch at:', Date.now());
                 if (category.static_options) {
                     console.log('Using static options for Words section:', category.static_options);
                     const staticWords = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
-                    // Format as objects for renderFreestyleOptions
-                    const wordOptions = staticWords.map(text => ({ text: text, keywords: [] }));
-                    renderFreestyleOptions(wordOptions);
+                    wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
                 } else {
-                    await updateFreestyleOptionsWithContext(category.label || category, true, category.words_prompt, category.llm_prompt);
+                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, 29, category.words_prompt, category.llm_prompt);
                 }
+
+                console.log('⏱️ Waiting for both fetches at:', Date.now());
+                // Wait for both to complete in parallel
+                const [phrasesOptions, wordsOptions] = await Promise.all([phrasesPromise, wordsPromise]);
+
+                console.log('⏱️ Both fetches completed at:', Date.now());
+                console.log('Final phrases options:', phrasesOptions);
+                console.log('Final words options:', wordsOptions);
+                
+                // Render both sections immediately without requestAnimationFrame
+                renderCategoryOptions(phrasesOptions);
+                if (wordsOptions) {
+                    renderFreestyleOptions(wordsOptions);
+                }
+                
+                console.log('⏱️ Rendering completed at:', Date.now());
             } catch (error) {
                 console.error('Error loading category options:', error);
                 renderCategoryOptions([]);
@@ -2500,8 +3022,8 @@
             }
         }
 
-        function renderCategoryOptions(options) {
-            console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0);
+        function renderCategoryOptions(options, deferImages = false) {
+            console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0, 'Defer Images:', deferImages);
             console.log('renderCategoryOptions called with:', options);
             console.log('llmStaticOptions element:', llmStaticOptions);
             
@@ -2534,6 +3056,9 @@
             llmStaticOptions.style.gridTemplateRows = `repeat(${rows}, 110px)`;
             llmStaticOptions.style.height = 'fit-content'; // Ensure container shrinks to fit content
             
+            // Use DocumentFragment for better performance (batch DOM updates)
+            const fragment = document.createDocumentFragment();
+            
             // Fill up to available phrase slots based on LLMOptions setting
             // Reserve one slot for "Something Else" button
             const maxPhraseOptions = Math.max(1, LLMOptions - 1);
@@ -2548,8 +3073,9 @@
                     btn.className = 'option-button';
                     btn.textContent = 'Something Else';
                     
-                    // Apply image matching like other buttons
-                    getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
+                    // Apply image matching like other buttons - skip when deferring
+                    if (!deferImages) {
+                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
                         if (imageUrl) {
                             // Create image + text layout like other buttons
                             btn.innerHTML = '';
@@ -2596,13 +3122,14 @@
                             btn.appendChild(buttonContent);
                         }
                     });
+                    } // End if (!deferImages)
                     
                     btn.onclick = async () => {
                         console.log('🔄 Something Else clicked for phrases');
                         await regeneratePhraseOptions();
                     };
                     
-                    llmStaticOptions.appendChild(btn);
+                    fragment.appendChild(btn);
                     continue;
                 }
                 
@@ -2638,8 +3165,8 @@
                     // Check if displayText is a sight word - if so, skip image loading
                     const isSightWord = window.isSightWord && window.isSightWord(displayText);
                     
-                    // Add Firestore image support (like gridpage) - skip for sight words
-                    if (!isSightWord) {
+                    // Add Firestore image support (like gridpage) - skip for sight words and when deferring
+                    if (!isSightWord && !deferImages) {
                         console.log(`🔍 Attempting image load for phrase: "${speechText}"`);
                         const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
                         getSymbolImageForText(speechText, phraseKeywords).then(imageUrl => {
@@ -2725,23 +3252,45 @@
                     btn.textContent = '—';
                 }
                 
-                llmStaticOptions.appendChild(btn);
+                fragment.appendChild(btn);
             }
+            
+            // Batch append all buttons at once for better performance
+            llmStaticOptions.appendChild(fragment);
         }
 
         async function loadFreestyleOptions() {
-            console.log('🟡 loadFreestyleOptions called - loading initial freestyle options');
+            console.log('⏱️ loadFreestyleOptions: Starting at:', Date.now());
             try {
                 // Clear any current words prompt since we're loading general options
                 currentWordsPrompt = null;
                 // Store a general category for Something Else regeneration
                 currentCategory = { label: 'general' };
+                
+                // Check cache first
+                const cachedWords = getCachedData(CACHE_KEYS.INITIAL_WORDS);
+                if (cachedWords) {
+                    console.log('⏱️ loadFreestyleOptions: Rendering from cache at:', Date.now());
+                    renderFreestyleOptions(cachedWords, true); // true = defer images
+                    // Load images after a brief delay to let DOM settle
+                    setTimeout(() => loadImagesForWords(cachedWords), 50);
+                }
+                
                 // Generate initial freestyle options (general communication words)
-                console.log('🟡 Calling generateFreestyleLLMOptions with null category...');
+                console.log('⏱️ loadFreestyleOptions: Fetching fresh words at:', Date.now());
                 const options = await generateFreestyleLLMOptions(null, 29);
-                console.log('🟢 Generated initial freestyle options:', options);
-                console.log('🟢 Options count:', options ? options.length : 0);
-                renderFreestyleOptions(options);
+                console.log('⏱️ loadFreestyleOptions: Got', options ? options.length : 0, 'words at:', Date.now());
+                
+                // Update cache
+                setCachedData(CACHE_KEYS.INITIAL_WORDS, options);
+                
+                // Only re-render if we didn't use cache (to avoid flicker)
+                if (!cachedWords) {
+                    console.log('⏱️ loadFreestyleOptions: Rendering words at:', Date.now());
+                    renderFreestyleOptions(options, true); // true = defer images
+                    setTimeout(() => loadImagesForWords(options), 50);
+                    console.log('⏱️ loadFreestyleOptions: Rendering complete at:', Date.now());
+                }
             } catch (error) {
                 console.error('🔴 Error loading freestyle options:', error);
                 renderFreestyleOptions([]);
@@ -3387,8 +3936,8 @@
             }
         }
 
-        function renderFreestyleOptions(options = []) {
-            console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length);
+        function renderFreestyleOptions(options = [], deferImages = false) {
+            console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length, 'Defer Images:', deferImages);
             console.log('renderFreestyleOptions called with', options.length, 'options:', options);
             console.log('freestyleOptions element:', freestyleOptions);
             
@@ -3409,6 +3958,9 @@
             const rows = Math.ceil(FreestyleWordOptions / gridColumns);
             freestyleOptions.style.gridTemplateRows = `repeat(${rows}, 110px)`;
             
+            // Use DocumentFragment for better performance (batch DOM updates)
+            const fragment = document.createDocumentFragment();
+            
             // Create freestyle slots based on FreestyleWordOptions setting
             // Reserve one slot for "Something Else" button
             const maxWordOptions = Math.max(1, FreestyleWordOptions - 1);
@@ -3422,8 +3974,9 @@
                     btn.className = 'option-button freestyle-button';
                     btn.textContent = 'Something Else';
                     
-                    // Apply image matching like other buttons
-                    getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
+                    // Apply image matching like other buttons - skip when deferring
+                    if (!deferImages) {
+                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
                         if (imageUrl) {
                             // Create image + text layout like other buttons
                             btn.innerHTML = '';
@@ -3470,13 +4023,14 @@
                             btn.appendChild(buttonContent);
                         }
                     });
+                    } // End if (!deferImages)
                     
                     btn.onclick = async () => {
                         console.log('🔄 Something Else clicked for words');
                         await regenerateWordOptions();
                     };
                     
-                    freestyleOptions.appendChild(btn);
+                    fragment.appendChild(btn);
                     continue;
                 }
                 
@@ -3490,8 +4044,8 @@
                     // Check if this is a sight word - if so, skip image loading
                     const isSightWord = window.isSightWord && window.isSightWord(text);
                     
-                    // Add Firestore image support for words (like gridpage) - skip for sight words
-                    if (!isSightWord) {
+                    // Add Firestore image support for words (like gridpage) - skip for sight words and when deferring
+                    if (!isSightWord && !deferImages) {
                         console.log(`🔍 Attempting image load for word: "${text}"`);
                         getSymbolImageForText(text).then(imageUrl => {
                             console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
@@ -3601,8 +4155,11 @@
                     btn.disabled = true;
                 }
                 
-                freestyleOptions.appendChild(btn);
+                fragment.appendChild(btn);
             }
+            
+            // Batch append all buttons at once for better performance
+            freestyleOptions.appendChild(fragment);
         }
 
         // Removed promptForFreestyleWord function - no longer needed
@@ -4405,7 +4962,7 @@
     <script>
         // Admin toolbar functionality
         const lockButton = document.getElementById('lock-icon');
-        const adminIconElements = document.querySelectorAll('.admin-icon');
+        const adminIconsContainer = document.getElementById('admin-icons');
         const lockToolbarButton = document.getElementById('lock-toolbar-button');
         const pinModal = document.getElementById('pin-modal');
         const pinInput = document.getElementById('pin-input');
@@ -4461,11 +5018,8 @@
 
         // Function to unlock admin toolbar
         function unlockToolbar() {
-            adminIconElements.forEach(icon => {
-                icon.classList.remove('hidden');
-            });
-            if (lockToolbarButton) {
-                lockToolbarButton.classList.remove('hidden');
+            if (adminIconsContainer) {
+                adminIconsContainer.classList.remove('hidden');
             }
             if (lockButton) {
                 lockButton.style.display = 'none';
@@ -4475,11 +5029,8 @@
 
         // Function to lock admin toolbar
         function lockToolbar() {
-            adminIconElements.forEach(icon => {
-                icon.classList.add('hidden');
-            });
-            if (lockToolbarButton) {
-                lockToolbarButton.classList.add('hidden');
+            if (adminIconsContainer) {
+                adminIconsContainer.classList.add('hidden');
             }
             if (lockButton) {
                 lockButton.style.display = 'block';
