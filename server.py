@@ -12899,6 +12899,142 @@ async def button_symbol_search(
             content={"error": "Button search failed", "details": str(e)}
         )
 
+
+@app.post("/api/symbols/batch-search")
+async def batch_symbol_search(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Batch symbol search endpoint - searches for multiple terms in a single request.
+    Returns a map of term -> best matching image URL.
+    Uses parallel Firestore queries for maximum performance.
+    """
+    try:
+        data = await request.json()
+        terms = data.get('terms', [])
+        
+        logging.info(f"🔍 BATCH SEARCH: Received request with {len(terms) if terms else 0} terms")
+        if terms:
+            logging.info(f"🔍 BATCH SEARCH: First 5 terms: {terms[:5]}")
+        
+        if not terms or not isinstance(terms, list):
+            logging.warning("🔍 BATCH SEARCH: No terms provided or invalid format")
+            return JSONResponse(content={"results": {}})
+        
+        # Limit batch size to prevent abuse
+        terms = terms[:50]
+        
+        aac_user_id = current_ids["aac_user_id"]
+        account_id = current_ids["account_id"]
+        
+        logging.info(f"🔍 BATCH SEARCH: User ID: {aac_user_id}, Account ID: {account_id}")
+        
+        # Function to search for a single term (will be run in parallel)
+        def search_single_term(item):
+            if isinstance(item, dict):
+                text = item.get('text', '').strip()
+                keywords = item.get('keywords', [])
+            else:
+                text = str(item).strip()
+                keywords = []
+            
+            if not text:
+                logging.debug(f"🔍 BATCH: Empty text, skipping")
+                return (text, None)
+            
+            logging.info(f"🔍 BATCH: Searching for '{text}' with keywords {keywords}")
+                
+            query_lower = text.lower()
+            
+            # Search BravoImages first
+            images_ref = firestore_db.collection("aac_images")
+            term_variations = [
+                text,                    # Original case (might be "tree", "Tree", etc.)
+                text.lower(),            # All lowercase
+                text.capitalize(),       # First letter capitalized
+                text.title()             # Title case (capitalizes each word)
+            ]
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_variations = []
+            for variation in term_variations:
+                if variation not in seen:
+                    seen.add(variation)
+                    unique_variations.append(variation)
+            term_variations = unique_variations
+            
+            logging.info(f"🔍 BATCH: Trying variations for '{text}': {term_variations}")
+            
+            for variation in term_variations:
+                try:
+                    variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(1)
+                    variation_docs = list(variation_query.stream())
+                    
+                    if variation_docs:
+                        image = variation_docs[0].to_dict()
+                        image_url = image.get('url')
+                        if image_url:
+                            logging.info(f"🔍 BATCH: ✅ Found image for '{text}' (variation '{variation}'): {image_url}")
+                            return (text, image_url)
+                except Exception as e:
+                    logging.error(f"🔍 BATCH: Query failed for variation '{variation}': {e}")
+                    continue
+            
+            logging.info(f"🔍 BATCH: ❌ No image found for '{text}' in BravoImages")
+            
+            # If BravoImages didn't match, try custom images
+            try:
+                custom_ref = firestore_db.collection("accounts").document(account_id).collection("users").document(aac_user_id).collection("custom_images")
+                custom_query = custom_ref.where("status", "==", "active").where("tags", "array_contains", query_lower).limit(1)
+                custom_docs = list(custom_query.stream())
+                
+                if custom_docs:
+                    custom_image = custom_docs[0].to_dict()
+                    image_url = custom_image.get('url')
+                    if image_url:
+                        logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
+                        return (text, image_url)
+            except Exception as e:
+                logging.error(f"🔍 BATCH: Custom search failed for '{query_lower}': {e}")
+            
+            logging.info(f"🔍 BATCH: ❌ No custom image found for '{text}'")
+            return (text, None)
+        
+        # Run all searches in parallel using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import asyncio
+        
+        results = {}
+        
+        # Use ThreadPoolExecutor to parallelize Firestore queries
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # Submit all tasks
+            future_to_term = {executor.submit(search_single_term, item): item for item in terms}
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_term):
+                try:
+                    text, image_url = future.result()
+                    if text:
+                        results[text] = image_url
+                except Exception as e:
+                    logging.error(f"Error in batch search task: {e}")
+        
+        logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results out of {len(terms)} terms")
+        logging.info(f"🔍 BATCH SEARCH: Results summary: {list(results.keys())[:10]}")
+        return JSONResponse(content={"results": results})
+        
+    except Exception as e:
+        logging.error(f"Error in batch symbol search: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Batch search failed", "details": str(e)}
+        )
+
+
 # --- SIMPLIFIED IMAGE GENERATOR ENDPOINTS ---
 import tempfile
 import uuid

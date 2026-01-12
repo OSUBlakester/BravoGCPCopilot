@@ -2110,7 +2110,171 @@
         }
 
         // ============ DEFERRED IMAGE LOADING ============
+        
+        // Batch load images for better performance
+        async function batchLoadImages(terms) {
+            if (!terms || terms.length === 0) return {};
+            
+            try {
+                const response = await authenticatedFetch('/api/symbols/batch-search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ terms: terms })
+                });
+                
+                if (!response.ok) {
+                    console.warn('Batch image load failed, falling back to individual requests');
+                    return {};
+                }
+                
+                const data = await response.json();
+                console.log(`✅ Batch loaded ${Object.keys(data.results || {}).length} images`);
+                
+                // Cache the results
+                if (!window.symbolImageCache) {
+                    window.symbolImageCache = new Map();
+                }
+                
+                for (const [text, imageUrl] of Object.entries(data.results || {})) {
+                    const cacheKey = `tap_${text.trim().toLowerCase()}`;
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: imageUrl,
+                        timestamp: Date.now()
+                    });
+                }
+                
+                return data.results || {};
+            } catch (error) {
+                console.error('Error in batch image load:', error);
+                return {};
+            }
+        }
+        
         async function loadImagesForPhrases(options) {
+            try {
+                console.log('🖼️ Loading images for', options.length, 'phrases');
+                const buttons = llmStaticOptions.querySelectorAll('.option-button');
+                console.log('[BATCH DEBUG] Found', buttons.length, 'buttons for', options.length, 'options');
+                console.log('[BATCH DEBUG] llmStaticOptions element:', llmStaticOptions);
+                console.log('[BATCH DEBUG] First button:', buttons[0]);
+                
+                if (buttons.length === 0) {
+                    console.error('[BATCH DEBUG] ❌ No buttons found! Selector .option-button returned empty');
+                    return;
+                }
+                
+                // Prepare batch request - use first keyword as search term for phrases
+                const terms = options.map(option => {
+                    const speechText = typeof option === 'object' ? option.option : option;
+                    const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    
+                    // For phrases with keywords, use the first keyword as the search term
+                    // (e.g., "I see a tall tree." -> search for "tree")
+                    let searchTerm = (keywords && keywords.length > 0) ? keywords[0] : speechText;
+                    
+                    // Simple de-pluralization: remove trailing 's' for common plural nouns
+                    // (e.g., "trees" -> "tree", "mountains" -> "mountain")
+                    // This handles most common cases where LLM returns plural but DB has singular
+                    if (searchTerm.endsWith('s') && searchTerm.length > 2 && !searchTerm.endsWith('ss')) {
+                        const singular = searchTerm.slice(0, -1);
+                        searchTerm = singular;
+                    }
+                    
+                    return { 
+                        text: searchTerm,  // Search using singularized keyword
+                        keywords: keywords,
+                        originalText: speechText  // Keep original for mapping back
+                    };
+                });
+                
+                console.log('[BATCH DEBUG] Batch request terms:', terms.map(t => `"${t.originalText}" -> search "${t.text}"`));
+                
+                // Batch load all images at once
+                const imageResults = await batchLoadImages(terms);
+                
+                console.log('[BATCH DEBUG] Image results:', imageResults);
+                console.log('[BATCH DEBUG] Number of images loaded:', Object.keys(imageResults).filter(k => imageResults[k] !== null).length);
+                
+                // Apply images to buttons - map results using the search term
+                for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                    const option = options[i];
+                    const btn = buttons[i];
+                    
+                    // Skip if button already has an image
+                    if (btn.querySelector('img')) {
+                        console.log('[BATCH DEBUG] Button', i, 'already has image, skipping');
+                        continue;
+                    }
+                    
+                    const speechText = typeof option === 'object' ? option.option : option;
+                    const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    
+                    // Apply same de-pluralization logic when retrieving results
+                    let searchTerm = (keywords && keywords.length > 0) ? keywords[0] : speechText;
+                    if (searchTerm.endsWith('s') && searchTerm.length > 2 && !searchTerm.endsWith('ss')) {
+                        searchTerm = searchTerm.slice(0, -1);
+                    }
+                    
+                    // Get image using the search term (keyword), not the full sentence
+                    const imageUrl = imageResults[searchTerm];
+                    
+                    console.log('[BATCH DEBUG] Button', i, 'phrase:', speechText, 'searched for:', searchTerm, 'imageUrl:', imageUrl);
+                    
+                    if (imageUrl) {
+                        console.log('[BATCH DEBUG] Calling applyImageToButton for button', i);
+                        applyImageToButton(btn, imageUrl, btn.textContent);
+                    } else {
+                        console.log('[BATCH DEBUG] No imageUrl for button', i);
+                    }
+                }
+                console.log('[BATCH DEBUG] ✅ Finished applying images to phrase buttons');
+            } catch (error) {
+                console.error('[BATCH DEBUG] ❌ Error in loadImagesForPhrases:', error);
+                console.error('[BATCH DEBUG] Error stack:', error.stack);
+            }
+        }
+
+        async function loadImagesForWords(options) {
+            console.log('🖼️ Loading images for', options.length, 'words');
+            const buttons = freestyleOptions.querySelectorAll('.freestyle-button');
+            
+            // Prepare batch request (exclude sight words)
+            const terms = [];
+            const buttonIndices = [];
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image or is sight word
+                if (btn.querySelector('img') || btn.classList.contains('sight-word')) continue;
+                
+                const text = typeof option === 'object' ? (option.text || option.option) : option;
+                const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                
+                terms.push({ text: text, keywords: keywords });
+                buttonIndices.push(i);
+            }
+            
+            // Batch load all images at once
+            const imageResults = await batchLoadImages(terms);
+            
+            // Apply images to buttons
+            for (let i = 0; i < terms.length; i++) {
+                const btnIndex = buttonIndices[i];
+                const btn = buttons[btnIndex];
+                const text = terms[i].text;
+                const imageUrl = imageResults[text];
+                
+                if (imageUrl) {
+                    applyImageToButton(btn, imageUrl, text);
+                }
+            }
+        }
+
+        async function loadImagesForPhrases_OLD(options) {
             console.log('🖼️ Loading images for', options.length, 'phrases');
             const buttons = llmStaticOptions.querySelectorAll('.option-button');
             
@@ -2132,7 +2296,7 @@
             }
         }
 
-        async function loadImagesForWords(options) {
+        async function loadImagesForWords_OLD(options) {
             console.log('🖼️ Loading images for', options.length, 'words');
             const buttons = freestyleOptions.querySelectorAll('.freestyle-button');
             
@@ -2604,11 +2768,16 @@
                 console.log('Final phrases options:', phrasesOptions);
                 console.log('Final words options:', wordsOptions);
                 
-                // Render both sections immediately without requestAnimationFrame
-                renderCategoryOptions(phrasesOptions);
+                // Render both sections with deferred images for batch loading
+                renderCategoryOptions(phrasesOptions, true); // true = defer images
                 if (wordsOptions) {
-                    renderFreestyleOptions(wordsOptions);
+                    renderFreestyleOptions(wordsOptions, true); // true = defer images
+                    // Batch load all images after render
+                    setTimeout(() => loadImagesForWords(wordsOptions), 50);
                 }
+                
+                // Batch load phrase images
+                setTimeout(() => loadImagesForPhrases(phrasesOptions), 50);
                 
                 console.log('⏱️ Rendering completed at:', Date.now());
             } catch (error) {
@@ -2783,7 +2952,10 @@
                     options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
                 }
 
-                renderCategoryOptions(options);
+                renderCategoryOptions(options, true); // Defer images for batch loading
+                
+                // Batch load phrase images after render
+                setTimeout(() => loadImagesForPhrases(options), 50);
 
                 // Also update freestyle options with the selected category context 
                 // IMPORTANT: Use just the subcategory name for API calls, not the full path
@@ -3306,13 +3478,15 @@
                     // categoryOrPath may be an object or a string full path
                     const categoryPath = (typeof categoryOrPath === 'string') ? categoryOrPath : (categoryOrPath.label || '');
                     const options = await generateFreestyleOptionsForCategory(categoryPath, 29, wordsPrompt, instructionPrompt);
-                    renderFreestyleOptions(options);
+                    renderFreestyleOptions(options, true); // Defer images for batch loading
+                    setTimeout(() => loadImagesForWords(options), 50);
                     return;
                 }
 
                 // Otherwise use the freestyle /word-options endpoint which uses navigation/build-space context
                 const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, 29, wordsPrompt);
-                renderFreestyleOptions(options);
+                renderFreestyleOptions(options, true); // Defer images for batch loading
+                setTimeout(() => loadImagesForWords(options), 50);
             } catch (error) {
                 console.error('Error updating freestyle options with context:', error);
             }
