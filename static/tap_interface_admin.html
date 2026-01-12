@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tap Interface Admin - Fixed</title>
+    <title>Tap Interface Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         * {
             margin: 0;
@@ -15,46 +17,6 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: #f5f5f5;
             color: #333;
-        }
-
-        .header {
-            background-color: #2c3e50;
-            color: white;
-            padding: 1rem 2rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .header h1 {
-            margin: 0;
-            font-size: 1.5rem;
-        }
-
-        .header .subtitle {
-            font-size: 0.9rem;
-            opacity: 0.8;
-            margin-top: 0.25rem;
-        }
-
-        .header-actions {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-        }
-
-        .changes-indicator {
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            font-size: 0.9rem;
-            display: none;
-        }
-
-        .changes-indicator.unsaved {
-            background-color: #f39c12;
-            color: white;
-            display: block;
         }
 
         .btn {
@@ -79,24 +41,6 @@
 
         .btn-primary:hover {
             background-color: #2980b9;
-        }
-
-        .btn-success {
-            background-color: #27ae60;
-            color: white;
-        }
-
-        .btn-success:hover {
-            background-color: #229954;
-        }
-
-        .btn-secondary {
-            background-color: #95a5a6;
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background-color: #7f8c8d;
         }
 
         .btn-danger {
@@ -400,20 +344,26 @@
     </style>
 </head>
 <body>
-    <div class="header">
-        <div>
-            <h1>Tap Interface Admin</h1>
-            <div class="subtitle">Configure navigation buttons for the tap interface</div>
+    <div class="page-banner flex items-center justify-between bg-[#002244] text-[#FB4F14] px-4 py-2 shadow">
+        <div class="flex items-center gap-2">
+            <button onclick="window.location.href='tap_interface.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500" title="Home">
+                <i class="fas fa-home"></i>
+            </button>
+            <h1 id="dynamic-page-title" class="ml-2 text-xl font-semibold">Tap Interface Administration</h1>
         </div>
-        <div class="header-actions">
-            <div class="changes-indicator" id="changesIndicator">
+        <div class="admin-toolbar flex items-center gap-2">
+            <div class="changes-indicator" id="changesIndicator" style="display: none; padding: 0.5rem 1rem; background-color: #f39c12; color: white; border-radius: 0.375rem; font-size: 0.875rem; margin-right: 0.5rem;">
                 ⚠️ Unsaved Changes
             </div>
-                        <button class="btn btn-success" id="saveBtn" disabled>
-                Save Changes
+            <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full transition-colors duration-200 text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
+                <i class="fas fa-save mr-1"></i>Save
             </button>
-            <button class="btn btn-secondary" id="cancelBtn" disabled>
-                Cancel Changes
+            <button class="h-10 px-4 flex items-center justify-center text-white bg-gray-500 rounded-full transition-colors duration-200 text-sm hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" id="cancelBtn" disabled>
+                <i class="fas fa-times mr-1"></i>Cancel
+            </button>
+            <span class="border-l border-white h-6 mx-1"></span>
+            <button id="help-icon" title="Help" aria-label="Help" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full ml-2 transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <i class="fas fa-question-circle"></i>
             </button>
         </div>
     </div>
@@ -517,19 +467,163 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="llmPrompt">Phrase Prompt (Optional)</label>
-                            <textarea id="llmPrompt" name="llmPrompt" placeholder="Enter prompt for AI to generate phrase options (e.g., 'Generate greeting phrases for social interactions')"></textarea>
+                            <label for="promptCategory">AI Prompt Category (Optional)</label>
+                            <select id="promptCategory" name="promptCategory" style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem; background-color: white;">
+                                <option value="">None - No AI Generation</option>
+                                
+                                <optgroup label="Social & Communication">
+                                    <option value="current_location">Current Location - Where I am, places nearby</option>
+                                    <option value="generic_greetings">Generic Greetings - Hello, hi, goodbye, see you later</option>
+                                    <option value="jokes">Jokes - Funny stories, humor, puns</option>
+                                    <option value="questions">Questions - Who, what, where, when, why, how</option>
+                                </optgroup>
+                                
+                                <optgroup label="About Me">
+                                    <option value="family">Family - Mom, dad, siblings, relatives</option>
+                                    <option value="interests">Interests - Hobbies, favorites, what I like</option>
+                                    <option value="medical_info">Medical Info - Conditions, medications, allergies</option>
+                                    <option value="personal_info">Personal Info - Name, age, birthday, address</option>
+                                </optgroup>
+                                
+                                <optgroup label="Actions & Requests">
+                                    <option value="actions">Actions - Eat, drink, play, go, help, want, need</option>
+                                    <option value="comfort">Comfort - Too hot, too cold, uncomfortable, adjust</option>
+                                    <option value="emergency">Emergency - Urgent help, call 911, danger</option>
+                                    <option value="help">Help - Need assistance, support, guidance</option>
+                                    <option value="need_assistance">Need Assistance - Can you help, I need help with</option>
+                                </optgroup>
+                                
+                                <optgroup label="Food & Drink">
+                                    <option value="drink">Drink - Water, juice, milk, soda, coffee</option>
+                                    <option value="food">Food - Pizza, burger, chicken, vegetables, snacks</option>
+                                    <option value="food_and_drink">Food and Drink - All food and beverage items</option>
+                                </optgroup>
+                                
+                                <optgroup label="Things & Objects">
+                                    <option value="around_the_house">Around the House - Furniture, appliances, decorations</option>
+                                    <option value="body_parts">Body Parts - Head, hands, feet, arms, legs</option>
+                                    <option value="clothes">Clothes - Shirt, pants, shoes, jacket, hat</option>
+                                    <option value="general_things">General Things - Various common objects</option>
+                                    <option value="in_the_room">In the Room - Items in current location</option>
+                                    <option value="money_and_shopping">Money and Shopping - Dollars, credit card, buy, pay</option>
+                                    <option value="outside">Outside - Trees, grass, sky, park, nature</option>
+                                    <option value="school_and_work">School and Work - Desk, computer, books, pencils</option>
+                                    <option value="sports_and_hobbies">Sports and Hobbies - Basketball, painting, music</option>
+                                    <option value="technology">Technology - Phone, tablet, computer, apps, games</option>
+                                    <option value="tools_and_hardware">Tools and Hardware - Hammer, screwdriver, wrench</option>
+                                    <option value="toys_and_games">Toys and Games - Legos, dolls, board games, puzzles</option>
+                                    <option value="vehicles_and_transportation">Vehicles and Transportation - Car, bus, train, bike</option>
+                                </optgroup>
+                                
+                                <optgroup label="Descriptions">
+                                    <option value="age">Age - Old, new, young, ancient</option>
+                                    <option value="character">Character - Friendly, kind, mean, funny</option>
+                                    <option value="color">Color - Red, blue, green, yellow</option>
+                                    <option value="emotions">Emotions - Happy, sad, angry, excited, scared</option>
+                                    <option value="rating">Rating - Good, bad, great, terrible, okay</option>
+                                    <option value="shape">Shape - Round, square, triangle, oval</option>
+                                    <option value="sight">Sight - Bright, dark, beautiful, ugly</option>
+                                    <option value="size">Size - Big, small, tall, short, heavy, light</option>
+                                    <option value="smell">Smell - Sweet, stinky, fresh, smoky</option>
+                                    <option value="sound">Sound - Loud, quiet, noisy, musical</option>
+                                    <option value="taste">Taste - Sweet, sour, salty, bitter, yummy</option>
+                                    <option value="temperature">Temperature - Hot, cold, warm, freezing</option>
+                                    <option value="touch">Touch - Soft, hard, smooth, rough, sticky</option>
+                                </optgroup>
+                                
+                                <optgroup label="People & Places">
+                                    <option value="people">People - Family, friends, teachers, helpers</option>
+                                    <option value="places">Places - Home, school, park, store, restaurant</option>
+                                </optgroup>
+                                
+                                <optgroup label="Animals">
+                                    <option value="birds">Birds - Eagle, sparrow, duck, chicken</option>
+                                    <option value="fish">Fish - Goldfish, shark, whale, dolphin</option>
+                                    <option value="insects">Insects - Butterfly, bee, ant, spider</option>
+                                    <option value="pets">Pets - Dog, cat, hamster, rabbit</option>
+                                    <option value="reptiles">Reptiles - Snake, turtle, lizard, alligator</option>
+                                    <option value="wild_animals">Wild Animals - Lion, elephant, bear, monkey</option>
+                                </optgroup>
+                                
+                                <optgroup label="Health & Care">
+                                    <option value="health">Health - Doctor, medicine, hurt, sick, bandaid</option>
+                                    <option value="hygiene">Hygiene - Brush teeth, wash hands, shower, soap</option>
+                                </optgroup>
+                                
+                                <optgroup label="Time & Environment">
+                                    <option value="dates_and_times">Dates and Times - Today, tomorrow, Monday, January</option>
+                                    <option value="weather">Weather - Sunny, rainy, cloudy, windy, snow</option>
+                                </optgroup>
+                                
+                                <optgroup label="Entertainment">
+                                    <option value="books">Books - Stories, novels, magazines, comics</option>
+                                    <option value="movies">Movies - Films, theater, watching, Netflix</option>
+                                    <option value="music">Music - Songs, singing, instruments, bands</option>
+                                    <option value="tv_shows">TV Shows - Cartoons, series, episodes, channels</option>
+                                </optgroup>
+                                
+                                <optgroup label="Other">
+                                    <option value="numbers">Numbers - 1, 2, 3, counting, quantities</option>
+                                </optgroup>
+                                
+                                <optgroup label="Custom">
+                                    <option value="custom">Custom... (Create Your Own)</option>
+                                </optgroup>
+                            </select>
+                            <small class="form-text text-muted">Select a category for AI-generated options, or choose Custom to create your own.</small>
                         </div>
 
-                        <div class="form-group">
-                            <label for="wordsPrompt">Words Prompt (Optional)</label>
-                            <textarea id="wordsPrompt" name="wordsPrompt" placeholder="Enter prompt for AI to generate word options (e.g., 'I am hungry for' for food words)"></textarea>
+                        <!-- Custom Wizard - Hidden by default -->
+                        <div id="customWizard" style="display: none; background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 8px; padding: 1.5rem; margin-top: 1rem;">
+                            <h4 style="margin-top: 0; color: #495057; margin-bottom: 1rem;">
+                                <i class="fas fa-magic" style="color: #6f42c1;"></i> Create Custom Prompt
+                            </h4>
+                            
+                            <div class="form-group">
+                                <label for="customTopic">What do you want to talk about? *</label>
+                                <input type="text" id="customTopic" placeholder="e.g., Superheroes, Cooking, Sports" style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem;">
+                                <small class="form-text text-muted">The main topic or theme for this category</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="customExamples">Give 3 or more examples: *</label>
+                                <textarea id="customExamples" placeholder="e.g., Batman, Superman, Spider-man, Wonder Woman" rows="3" style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem;"></textarea>
+                                <small class="form-text text-muted">Comma-separated examples (minimum 3 required)</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="customExclusions">What should be excluded? (Optional)</label>
+                                <textarea id="customExclusions" placeholder="e.g., Anime heroes, villains, graphic violence" rows="2" style="width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem;"></textarea>
+                                <small class="form-text text-muted">Things to avoid or exclude from the generated content</small>
+                            </div>
+
+                            <div style="margin-top: 1rem; padding: 1rem; background: white; border: 1px solid #dee2e6; border-radius: 4px; display: none;" id="promptPreview">
+                                <label style="font-weight: bold; color: #495057; margin-bottom: 0.5rem;">Generated Prompt Preview:</label>
+                                <div id="promptPreviewText" style="color: #6c757d; font-style: italic; white-space: pre-wrap;"></div>
+                            </div>
+
+                            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                                <button type="button" class="btn btn-info" id="previewPromptBtn">
+                                    <i class="fas fa-eye"></i> Preview Prompt
+                                </button>
+                                <button type="button" class="btn btn-secondary" id="cancelCustomBtn">
+                                    <i class="fas fa-times"></i> Cancel
+                                </button>
+                            </div>
                         </div>
 
                         <div class="form-group">
                             <label for="staticOptions">Static Options (Optional)</label>
                             <textarea id="staticOptions" name="staticOptions" placeholder="Enter comma-separated list of options (e.g., 'Hello, Hi there, Good morning, How are you')"></textarea>
-                            <small class="form-text text-muted">Use either Phrase/Words Prompts OR Static Options, not both. Static options will override LLM prompts if provided.</small>
+                            <small class="form-text text-muted">Use either AI Prompt Category OR Static Options, not both. Static options will override AI prompts if provided.</small>
+                            <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
+                                <button type="button" class="btn btn-info" id="populateFromCategoryBtn">
+                                    <i class="fas fa-magic"></i> Populate from Category
+                                </button>
+                                <button type="button" class="btn btn-info" id="populateFromCustomBtn">
+                                    <i class="fas fa-wand-magic-sparkles"></i> Populate from Custom
+                                </button>
+                            </div>
                         </div>
 
                         <div class="form-actions">
@@ -671,11 +765,11 @@
             if (hasUnsavedChanges) {
                 saveBtn.disabled = false;
                 cancelBtn.disabled = false;
-                indicator.classList.add('unsaved');
+                indicator.style.display = 'block';
             } else {
                 saveBtn.disabled = true;
                 cancelBtn.disabled = true;
-                indicator.classList.remove('unsaved');
+                indicator.style.display = 'none';
             }
         }
 
@@ -737,7 +831,10 @@
                 if (currentConfig.buttons) {
                     console.log('[DEBUG] Checking buttons before save:');
                     currentConfig.buttons.forEach(b => {
-                        if (b.words_prompt) console.log(`  - Button '${b.label}' has words_prompt: ${b.words_prompt.substring(0, 20)}...`);
+                        console.log(`[DEBUG] Button '${b.label}':`);
+                        console.log(`  - prompt_category: ${b.prompt_category}`);
+                        console.log(`  - llm_prompt: ${b.llm_prompt ? b.llm_prompt.substring(0, 50) + '...' : 'null'}`);
+                        if (b.words_prompt) console.log(`  - words_prompt: ${b.words_prompt.substring(0, 20)}...`);
                         if (b.children) {
                             b.children.forEach(c => {
                                 if (c.words_prompt) console.log(`    - Child '${c.label}' has words_prompt: ${c.words_prompt.substring(0, 20)}...`);
@@ -862,7 +959,7 @@
 
         // Setup form input listeners
         function setupFormInputs() {
-            const inputs = ['buttonLabel', 'speechText', 'imageUrl', 'llmPrompt', 'wordsPrompt', 'staticOptions', 'specialFunction'];
+            const inputs = ['buttonLabel', 'speechText', 'imageUrl', 'staticOptions', 'specialFunction'];
             inputs.forEach(id => {
                 document.getElementById(id).addEventListener('input', updateButtonFromForm);
             });
@@ -875,6 +972,330 @@
 
             // Setup hidden checkbox listener
             document.getElementById('hidden').addEventListener('change', updateButtonFromForm);
+
+            // Setup prompt category dropdown listener
+            document.getElementById('promptCategory').addEventListener('change', handlePromptCategoryChange);
+            
+            // Setup custom wizard field listeners
+            document.getElementById('customTopic').addEventListener('input', updateButtonFromForm);
+            document.getElementById('customExamples').addEventListener('input', updateButtonFromForm);
+            document.getElementById('customExclusions').addEventListener('input', updateButtonFromForm);
+            
+            // Setup populate static options buttons
+            document.getElementById('populateFromCategoryBtn').addEventListener('click', populateFromCategory);
+            document.getElementById('populateFromCustomBtn').addEventListener('click', populateFromCustom);
+
+            // Setup custom wizard listeners
+            document.getElementById('previewPromptBtn').addEventListener('click', handlePreviewPrompt);
+            document.getElementById('cancelCustomBtn').addEventListener('click', handleCancelCustom);
+            
+            // Track custom wizard field changes
+            ['customTopic', 'customExamples', 'customExclusions'].forEach(id => {
+                document.getElementById(id).addEventListener('input', () => {
+                    hasUnsavedChanges = true;
+                    document.getElementById('promptPreview').style.display = 'none';
+                });
+            });
+        }
+
+        // Handle prompt category dropdown change
+        function handlePromptCategoryChange() {
+            const category = document.getElementById('promptCategory').value;
+            const customWizard = document.getElementById('customWizard');
+            const promptPreview = document.getElementById('promptPreview');
+            
+            if (category === 'custom') {
+                customWizard.style.display = 'block';
+                promptPreview.style.display = 'none';
+            } else {
+                customWizard.style.display = 'none';
+                promptPreview.style.display = 'none';
+                
+                // Clear custom wizard fields
+                document.getElementById('customTopic').value = '';
+                document.getElementById('customExamples').value = '';
+                document.getElementById('customExclusions').value = '';
+            }
+            
+            updateButtonFromForm();
+        }
+
+        // Generate prompt text from category or custom wizard
+        function generatePromptText(category, topic = '', examples = '', exclusions = '') {
+            const categoryPrompts = {
+                // Social & Communication
+                'generic_greetings': 'Generate common greeting phrases and expressions for everyday social interactions',
+                'current_location': 'Generate location-based greetings and conversation starters',
+                'jokes': 'Generate simple, appropriate jokes and funny conversation starters',
+                'questions': 'Generate question words and phrases for asking about things',
+                
+                // About Me
+                'personal_info': 'Generate phrases for sharing personal information and basic details about myself',
+                'family': 'Generate phrases for talking about family members and relationships',
+                'interests': 'Generate phrases for discussing hobbies, interests, and favorite activities',
+                'medical_info': 'Generate phrases for communicating medical needs and health information',
+                
+                // Actions & Requests
+                'actions': 'Generate action words and phrases for common activities. Include verbs like eat, drink, play, go, help, want, need, etc.',
+                'help': 'Generate phrases for requesting help and support',
+                'need_assistance': 'Generate phrases for requesting help and assistance',
+                'emergency': 'Generate emergency communication phrases and urgent requests',
+                'comfort': 'Generate words or phrases to request something related to comfort',
+                
+                // Food & Drink
+                'food': 'Generate options for food, include specific food and restaurant options',
+                'drink': 'Generate options for drinks',
+                'food_and_drink': 'Generate a list of nouns related to food and drinks',
+                
+                // Things & Objects
+                'in_the_room': 'Generate a list of nouns in the current location',
+                'around_the_house': 'Generate a list of nouns that are generally found around the house and phrases to discuss those things',
+                'clothes': 'Generate a list of words related to clothing and phrases related to clothing and getting dressed',
+                'technology': 'Generate list of items related to current electronic devices, applications, games, other technologies and phrases to discuss things related to devices, applications, games, and other technologies',
+                'body_parts': 'Generate a list of nouns for body parts',
+                'school_and_work': 'Generate a list of nouns that are generally found around the school or work and phrases to discuss those things',
+                'outside': 'Generate a list of nouns that are generally found outside and in nature, excluding all animals and weather nouns, and phrases to discuss those things',
+                'toys_and_games': 'Generate a list of nouns for toys and games and phrases to discuss those things',
+                'sports_and_hobbies': 'Generate a list of nouns for sports and hobbies and phrases to discuss those things',
+                'tools_and_hardware': 'Generate a list of nouns for tools and hardware and phrases to discuss those things',
+                'vehicles_and_transportation': 'Generate a list of nouns for vehicles and transportation and phrases to discuss those things',
+                'money_and_shopping': 'Generate a list of nouns for money and shopping and phrases to discuss those things',
+                'general_things': 'Generate words about general nouns, excluding: people, food, drinks, places, animals, things in the current room, things around the house, clothes, things related to dates and times, and items related to technology',
+                
+                // Descriptions
+                'rating': 'Generate words or phrases to rate the general quality of an event or experience, include different variations between positive and negative',
+                'emotions': 'Generate words and phrases for expressing feelings and emotions. Use different varying levels of intensity and positive and negative feelings and emotions.',
+                'touch': 'Generate words or phrases to describe tactile attributes something after touching it',
+                'sight': 'Generate words or phrases to describe visual attributes something after seeing it',
+                'taste': 'Generate words or phrases to describe something after tasting it',
+                'color': 'Generate words or phrases to describe the color of something',
+                'size': 'Generate words or phrases to describe the size, weight or measure of something',
+                'shape': 'Generate words or phrases to describe the shape of something',
+                'age': 'Generate words or phrases to describe the age of something',
+                'smell': 'Generate words or phrases to describe something after smelling it',
+                'character': 'Generate words or phrases to describe the personality or character of someone',
+                'temperature': 'Generate words or phrases to describe the temperature of something',
+                'sound': 'Generate words or phrases to describe the sound of something',
+                
+                // People & Places
+                'people': 'Generate words about people, family, relationships, and social connections and phrases to discuss these people',
+                'places': 'Create a list of different places',
+                
+                // Animals
+                'pets': 'Generate list of words or phrases related to animals that are commonly pets',
+                'insects': 'Generate a list of insects, or phrases that could be used to discuss insects',
+                'reptiles': 'Generate a list of reptiles or phrases that could be used to discuss reptiles',
+                'birds': 'Generate a list of birds or phrases that could be used to discuss birds',
+                'fish': 'Generate a list of fish or sea-living mammals or phrases that could be used to discuss fish or sea-living mammals',
+                'wild_animals': 'Generate a list of wild animals or phrases that could be used to discuss wild animals',
+                
+                // Health & Care
+                'health': 'Generate a list of nouns for health and medicine',
+                'hygiene': 'Generate a list of nouns for hygiene',
+                
+                // Time & Environment
+                'dates_and_times': 'Generate a list of words and phrases to discuss time or dates. Consider current time and date and recent and upcoming holidays and recent and upcoming birthdays.',
+                'weather': 'Generate list of words or phrases related to discussing the weather',
+                
+                // Entertainment
+                'movies': 'Generate a list of movies and items related to movies and phrases about movies',
+                'tv_shows': 'Generate a list of TV Shows and items related to TV Shows and phrases about TV Shows',
+                'music': 'Generate a list of music and items related to music and phrases about music',
+                'books': 'Generate a list of books and items related to books and phrases about books',
+                
+                // Other
+                'numbers': 'Generate a list of numbers, quantities and amounts'
+            };
+
+            if (category && category !== 'custom') {
+                return categoryPrompts[category] || '';
+            }
+
+            if (!topic || !examples) return '';
+
+            const examplesList = examples.split(/[,\n]/).map(e => e.trim()).filter(e => e);
+            if (examplesList.length < 3) return '';
+
+            let prompt = `Generate a list of specific individual items related to ${topic}. The items should be in the same style and format as these examples: ${examplesList.join(', ')}. Generate similar individual names or items, not descriptions or phrases.`;
+            
+            if (exclusions && exclusions.trim()) {
+                const exclusionsList = exclusions.split(/[,\n]/).map(e => e.trim()).filter(e => e);
+                if (exclusionsList.length > 0) {
+                    prompt += ` Do not include anything related to: ${exclusionsList.join(', ')}.`;
+                }
+            }
+            
+            return prompt;
+        }
+
+        // Handle preview button click
+        async function populateFromCategory() {
+            const category = document.getElementById('promptCategory').value;
+            
+            if (!category || category === 'custom') {
+                showNotification('Please select a pre-defined category first', 'error');
+                return;
+            }
+            
+            const prompt = categoryPrompts[category];
+            if (!prompt) {
+                showNotification('No prompt found for this category', 'error');
+                return;
+            }
+            
+            await populateStaticOptions(prompt);
+        }
+        
+        async function populateFromCustom() {
+            const category = document.getElementById('promptCategory').value;
+            
+            if (category !== 'custom') {
+                showNotification('Please select Custom category first', 'error');
+                return;
+            }
+            
+            const topic = document.getElementById('customTopic').value.trim();
+            const examples = document.getElementById('customExamples').value.trim();
+            
+            if (!topic || !examples) {
+                showNotification('Please fill in Topic and Examples fields first', 'error');
+                return;
+            }
+            
+            const exclusions = document.getElementById('customExclusions').value.trim();
+            const prompt = generatePromptText('custom', topic, examples, exclusions);
+            
+            if (!prompt) {
+                showNotification('Unable to generate prompt', 'error');
+                return;
+            }
+            
+            await populateStaticOptions(prompt);
+        }
+        
+        async function populateStaticOptions(prompt) {
+            try {
+                // Fetch the user's settings to get FreestyleOptions
+                let count = 20; // default
+                try {
+                    const settingsResponse = await fetch('/api/settings', {
+                        headers: getAuthHeaders()
+                    });
+                    if (settingsResponse.ok) {
+                        const userInfo = await settingsResponse.json();
+                        console.log('[DEBUG] User settings:', userInfo);
+                        console.log('[DEBUG] FreestyleOptions value:', userInfo.FreestyleOptions);
+                        count = userInfo.FreestyleOptions || 20;
+                        console.log('[DEBUG] Using count:', count);
+                    }
+                } catch (error) {
+                    console.warn('Could not fetch FreestyleOptions, using default of 20:', error);
+                }
+                
+                showNotification(`Generating ${count} options...`, 'info');
+                
+                const response = await fetch('/api/generate-options', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        count: count
+                    })
+                });
+                
+                console.log('[DEBUG] Request sent with count:', count);
+                
+                if (!response.ok) {
+                    throw new Error('Failed to generate options');
+                }
+                
+                const data = await response.json();
+                
+                if (data.options && data.options.length > 0) {
+                    // Populate the static options textarea with comma-separated values
+                    document.getElementById('staticOptions').value = data.options.join(', ');
+                    updateButtonFromForm();
+                    showNotification(`Generated ${data.options.length} options`, 'success');
+                } else {
+                    showNotification('No options generated', 'error');
+                }
+            } catch (error) {
+                console.error('Error generating options:', error);
+                showNotification('Error generating options: ' + error.message, 'error');
+            }
+        }
+        
+        async function handlePreviewPrompt() {
+            const topic = document.getElementById('customTopic').value.trim();
+            const examples = document.getElementById('customExamples').value.trim();
+            const exclusions = document.getElementById('customExclusions').value.trim();
+            
+            if (!topic) {
+                showError('Please enter a topic for your custom prompt');
+                return;
+            }
+            
+            const examplesList = examples.split(/[,\n]/).map(e => e.trim()).filter(e => e);
+            if (examplesList.length < 3) {
+                showError('Please provide at least 3 examples (separated by commas or new lines)');
+                return;
+            }
+            
+            // Generate the prompt
+            const prompt = generatePromptText('custom', topic, examples, exclusions);
+            
+            // Show loading state
+            const previewText = document.getElementById('promptPreviewText');
+            const previewDiv = document.getElementById('promptPreview');
+            previewText.textContent = 'Generating sample results...';
+            previewDiv.style.display = 'block';
+            
+            try {
+                // Call the LLM to get actual sample results
+                const response = await fetch('/api/generate-options', {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        count: 10  // Generate 10 sample options
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to generate preview');
+                }
+                
+                const data = await response.json();
+                
+                // Display the sample results
+                if (data.options && data.options.length > 0) {
+                    previewText.textContent = `Sample results (${data.options.length} items):\n\n${data.options.join(', ')}`;
+                } else {
+                    previewText.textContent = 'No results generated. Please try different examples.';
+                }
+            } catch (error) {
+                console.error('Error generating preview:', error);
+                previewText.textContent = 'Error generating preview. Please try again.';
+                showError('Failed to generate preview: ' + error.message);
+            }
+            
+            hasUnsavedChanges = true;
+        }
+
+        // Handle cancel custom wizard
+        function handleCancelCustom() {
+            document.getElementById('promptCategory').value = '';
+            document.getElementById('customWizard').style.display = 'none';
+            document.getElementById('promptPreview').style.display = 'none';
+            
+            document.getElementById('customTopic').value = '';
+            document.getElementById('customExamples').value = '';
+            document.getElementById('customExclusions').value = '';
+            
+            updateButtonFromForm();
         }
 
         // Handle custom audio file upload
@@ -966,15 +1387,45 @@
             button.text_color = document.getElementById('textColor').value || '#000000';
             button.hidden = document.getElementById('hidden').checked;
             button.special_function = document.getElementById('specialFunction').value || null;
-            button.llm_prompt = document.getElementById('llmPrompt').value || null;
-            
-            // Explicitly capture words_prompt and log it
-            const wordsPromptVal = document.getElementById('wordsPrompt').value;
-            button.words_prompt = wordsPromptVal || null;
-            console.log(`[DEBUG] Updated button '${button.label}' words_prompt to:`, button.words_prompt);
-            
             button.static_options = document.getElementById('staticOptions').value || null;
             button.custom_audio_file = document.getElementById('customAudioFileUrl').value || null;
+
+            // Handle new prompt system
+            const category = document.getElementById('promptCategory').value;
+            
+            console.log('[DEBUG updateButtonFromForm] Category selected:', category);
+            
+            if (category) {
+                button.prompt_category = category;
+                console.log('[DEBUG updateButtonFromForm] Set button.prompt_category to:', button.prompt_category);
+                
+                if (category === 'custom') {
+                    const topic = document.getElementById('customTopic').value.trim();
+                    const examples = document.getElementById('customExamples').value.trim();
+                    const exclusions = document.getElementById('customExclusions').value.trim();
+                    
+                    button.prompt_topic = topic || null;
+                    button.prompt_examples = examples || null;
+                    button.prompt_exclusions = exclusions || null;
+                    
+                    button.llm_prompt = generatePromptText('custom', topic, examples, exclusions) || null;
+                } else {
+                    button.prompt_topic = null;
+                    button.prompt_examples = null;
+                    button.prompt_exclusions = null;
+                    
+                    button.llm_prompt = generatePromptText(category) || null;
+                    console.log('[DEBUG updateButtonFromForm] Generated llm_prompt:', button.llm_prompt);
+                }
+            } else {
+                button.prompt_category = null;
+                button.prompt_topic = null;
+                button.prompt_examples = null;
+                button.prompt_exclusions = null;
+                button.llm_prompt = null;
+            }
+            
+            console.log('[DEBUG updateButtonFromForm] Final button object:', JSON.stringify(button, null, 2));
 
             markAsChanged();
             renderTree();
@@ -1377,10 +1828,42 @@
             document.getElementById('textColorText').value = button.text_color || '#000000';
             document.getElementById('hidden').checked = button.hidden || false;
             document.getElementById('specialFunction').value = button.special_function || '';
-            document.getElementById('llmPrompt').value = button.llm_prompt || '';
-            document.getElementById('wordsPrompt').value = button.words_prompt || '';
             document.getElementById('staticOptions').value = button.static_options || '';
             document.getElementById('customAudioFileUrl').value = button.custom_audio_file || '';
+            
+            // Handle new prompt system
+            console.log('[DEBUG] Loading button:', button.label);
+            console.log('[DEBUG] prompt_category:', button.prompt_category);
+            console.log('[DEBUG] prompt_topic:', button.prompt_topic);
+            console.log('[DEBUG] prompt_examples:', button.prompt_examples);
+            console.log('[DEBUG] prompt_exclusions:', button.prompt_exclusions);
+            
+            if (button.prompt_category) {
+                console.log('[DEBUG] Setting promptCategory to:', button.prompt_category);
+                document.getElementById('promptCategory').value = button.prompt_category;
+                
+                if (button.prompt_category === 'custom') {
+                    document.getElementById('customWizard').style.display = 'block';
+                    document.getElementById('customTopic').value = button.prompt_topic || '';
+                    document.getElementById('customExamples').value = button.prompt_examples || '';
+                    document.getElementById('customExclusions').value = button.prompt_exclusions || '';
+                    
+                    // Don't show preview on load - let admin edit and re-preview if needed
+                    document.getElementById('promptPreview').style.display = 'none';
+                } else {
+                    document.getElementById('customWizard').style.display = 'none';
+                    document.getElementById('promptPreview').style.display = 'none';
+                }
+            } else {
+                console.log('[DEBUG] No prompt_category found');
+                // No category set
+                document.getElementById('promptCategory').value = '';
+                document.getElementById('customWizard').style.display = 'none';
+                document.getElementById('promptPreview').style.display = 'none';
+                document.getElementById('customTopic').value = '';
+                document.getElementById('customExamples').value = '';
+                document.getElementById('customExclusions').value = '';
+            }
             
             // Update audio upload status if audio file exists
             const audioUploadStatus = document.getElementById('audioUploadStatus');
@@ -1420,7 +1903,10 @@
                 hidden: false,
                 special_function: null,
                 llm_prompt: null,
-                words_prompt: null,
+                prompt_category: null,
+                prompt_topic: null,
+                prompt_examples: null,
+                prompt_exclusions: null,
                 static_options: null,
                 custom_audio_file: null,
                 children: []
@@ -1519,5 +2005,726 @@
     <!-- Firebase Authentication -->
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <!-- Tap Interface Admin Help Modal -->
+    <div id="help-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[1000] flex items-center justify-center p-4" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; display: none; align-items: center; justify-content: center; padding: 1rem;">
+        <div style="background: white; border-radius: 1rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); width: 100%; max-width: 56rem; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="padding: 1.5rem; border-bottom: 1px solid #e5e7eb; background: linear-gradient(to right, #fff7ed, #fee2e2); display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="font-size: 1.5rem; font-weight: bold; color: #1f2937; margin: 0;">
+                    <i class="fas fa-hand-pointer" style="color: #FB4F14; margin-right: 0.5rem;"></i>Tap Interface Admin Guide
+                </h2>
+                <button id="close-help-modal" style="color: #6b7280; background: none; border: none; font-size: 1.5rem; cursor: pointer; padding: 0; width: 32px; height: 32px;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <div style="flex: 1; overflow-y: auto; padding: 1.5rem;">
+                <div style="max-width: none;">
+                    <p style="color: #374151; margin-bottom: 1.5rem; line-height: 1.6;">
+                        The Tap Interface Admin page allows you to configure the navigation structure and buttons for the tap-based interface. Create hierarchical button layouts with drag-and-drop organization, customize button properties, and manage the entire tap interface experience.
+                    </p>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <!-- Navigation Structure -->
+                        <div class="settings-guide-item" style="cursor: pointer;" onclick="toggleTapGuideDetails(this)">
+                            <div style="display: flex; align-items: flex-start; padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; transition: background 0.2s;">
+                                <div style="flex-shrink: 0; margin-top: 0.25rem;">
+                                    <i class="fas fa-sitemap" style="color: #10b981; font-size: 1.125rem;"></i>
+                                </div>
+                                <div style="margin-left: 0.75rem; flex: 1;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-weight: 600; color: #111827;">Navigation Structure & Tree View</div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <button onclick="event.stopPropagation(); startTapGuide('navigation');" style="padding: 0.25rem 0.75rem; background: #10b981; color: white; font-size: 0.75rem; border-radius: 0.5rem; border: none; cursor: pointer; display: flex; align-items: center; transition: background 0.2s;">
+                                                <i class="fas fa-route" style="margin-right: 0.25rem;"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down" style="color: #9ca3af; transition: transform 0.3s;"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details" style="display: none; margin-top: 0.5rem;">
+                                        <div style="font-size: 0.875rem; color: #374151;">
+                                            <p style="margin-bottom: 0.5rem;"><strong>Purpose:</strong> Organize buttons in a hierarchical tree structure for logical navigation flow.</p>
+                                            <div style="background: #d1fae5; border-left: 4px solid #10b981; padding: 0.75rem; border-radius: 0.25rem; margin-top: 0.5rem;">
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #065f46; margin-bottom: 0.25rem;">Tree Features:</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5;">
+                                                    <li>• <strong>Parent-Child Hierarchy:</strong> Buttons can contain child buttons for multi-level navigation</li>
+                                                    <li>• <strong>Visual Indentation:</strong> Tree view shows relationships with visual nesting</li>
+                                                    <li>• <strong>Drag & Drop:</strong> Rearrange buttons by dragging to reorder or change hierarchy</li>
+                                                    <li>• <strong>Expand/Collapse:</strong> Click arrows to show or hide child buttons</li>
+                                                    <li>• <strong>Root Level:</strong> Top-level buttons appear on the main tap interface screen</li>
+                                                    <li>• <strong>Quick Actions:</strong> Edit, add child, or delete buttons directly from tree</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Creating & Editing Buttons -->
+                        <div class="settings-guide-item" style="cursor: pointer;" onclick="toggleTapGuideDetails(this)">
+                            <div style="display: flex; align-items: flex-start; padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; transition: background 0.2s;">
+                                <div style="flex-shrink: 0; margin-top: 0.25rem;">
+                                    <i class="fas fa-edit" style="color: #8b5cf6; font-size: 1.125rem;"></i>
+                                </div>
+                                <div style="margin-left: 0.75rem; flex: 1;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-weight: 600; color: #111827;">Creating & Editing Buttons</div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <button onclick="event.stopPropagation(); startTapGuide('buttons');" style="padding: 0.25rem 0.75rem; background: #8b5cf6; color: white; font-size: 0.75rem; border-radius: 0.5rem; border: none; cursor: pointer; display: flex; align-items: center; transition: background 0.2s;">
+                                                <i class="fas fa-route" style="margin-right: 0.25rem;"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down" style="color: #9ca3af; transition: transform 0.3s;"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details" style="display: none; margin-top: 0.5rem;">
+                                        <div style="font-size: 0.875rem; color: #374151;">
+                                            <p style="margin-bottom: 0.5rem;"><strong>Purpose:</strong> Configure button properties including label, speech, appearance, and behavior.</p>
+                                            <div style="background: #ede9fe; border-left: 4px solid #8b5cf6; padding: 0.75rem; border-radius: 0.25rem; margin-top: 0.5rem;">
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #5b21b6; margin-bottom: 0.25rem;">Button Properties:</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5;">
+                                                    <li>• <strong>Label:</strong> Text displayed on the button (shown to user)</li>
+                                                    <li>• <strong>Speech Text:</strong> What the system speaks when button is pressed</li>
+                                                    <li>• <strong>Image URL:</strong> Optional image to display on the button</li>
+                                                    <li>• <strong>Background Color:</strong> Button background color (hex code)</li>
+                                                    <li>• <strong>Text Color:</strong> Color of the label text (hex code)</li>
+                                                    <li>• <strong>Hidden:</strong> Hide button from interface without deleting it</li>
+                                                    <li>• <strong>Special Function:</strong> Navigate to pre-defined special pages (Spell, Games, etc.) - new pages added to dropdown as developed</li>
+                                                    <li>• <strong>LLM Prompt:</strong> AI prompt to generate dynamic responses</li>
+                                                    <li>• <strong>Words Prompt:</strong> AI prompt for word suggestions</li>
+                                                    <li>• <strong>Static Options:</strong> Predefined choices as JSON array</li>
+                                                    <li>• <strong>Custom Audio:</strong> Upload audio file for button press</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Drag & Drop Organization -->
+                        <div class="settings-guide-item" style="cursor: pointer;" onclick="toggleTapGuideDetails(this)">
+                            <div style="display: flex; align-items: flex-start; padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; transition: background 0.2s;">
+                                <div style="flex-shrink: 0; margin-top: 0.25rem;">
+                                    <i class="fas fa-arrows-alt" style="color: #3b82f6; font-size: 1.125rem;"></i>
+                                </div>
+                                <div style="margin-left: 0.75rem; flex: 1;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-weight: 600; color: #111827;">Drag & Drop Organization</div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <button onclick="event.stopPropagation(); startTapGuide('dragdrop');" style="padding: 0.25rem 0.75rem; background: #3b82f6; color: white; font-size: 0.75rem; border-radius: 0.5rem; border: none; cursor: pointer; display: flex; align-items: center; transition: background 0.2s;">
+                                                <i class="fas fa-route" style="margin-right: 0.25rem;"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down" style="color: #9ca3af; transition: transform 0.3s;"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details" style="display: none; margin-top: 0.5rem;">
+                                        <div style="font-size: 0.875rem; color: #374151;">
+                                            <p style="margin-bottom: 0.5rem;"><strong>Purpose:</strong> Reorganize button structure by dragging buttons to new positions or hierarchies.</p>
+                                            <div style="background: #dbeafe; border-left: 4px solid #3b82f6; padding: 0.75rem; border-radius: 0.25rem; margin-top: 0.5rem;">
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #1e40af; margin-bottom: 0.25rem;">Drag & Drop Actions:</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5;">
+                                                    <li>• <strong>Reorder Buttons:</strong> Drag between siblings to change display order</li>
+                                                    <li>• <strong>Add as Child:</strong> Hold Shift while dragging onto another button to make it a child</li>
+                                                    <li>• <strong>Move to Root:</strong> Drag to the "Root Drop Zone" at top to move to top level</li>
+                                                    <li>• <strong>Visual Feedback:</strong> Buttons show orange "Move Here" or green "Add Child" indicators</li>
+                                                    <li>• <strong>Instant Preview:</strong> Changes are immediately reflected in the tree</li>
+                                                    <li>• <strong>Undo Available:</strong> Click "Cancel Changes" to revert all unsaved changes</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Saving & Managing Changes -->
+                        <div class="settings-guide-item" style="cursor: pointer;" onclick="toggleTapGuideDetails(this)">
+                            <div style="display: flex; align-items: flex-start; padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; transition: background 0.2s;">
+                                <div style="flex-shrink: 0; margin-top: 0.25rem;">
+                                    <i class="fas fa-save" style="color: #f59e0b; font-size: 1.125rem;"></i>
+                                </div>
+                                <div style="margin-left: 0.75rem; flex: 1;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-weight: 600; color: #111827;">Saving & Managing Changes</div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <button onclick="event.stopPropagation(); startTapGuide('saving');" style="padding: 0.25rem 0.75rem; background: #f59e0b; color: white; font-size: 0.75rem; border-radius: 0.5rem; border: none; cursor: pointer; display: flex; align-items: center; transition: background 0.2s;">
+                                                <i class="fas fa-route" style="margin-right: 0.25rem;"></i>Guide Me
+                                            </button>
+                                            <i class="fas fa-chevron-down" style="color: #9ca3af; transition: transform 0.3s;"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details" style="display: none; margin-top: 0.5rem;">
+                                        <div style="font-size: 0.875rem; color: #374151;">
+                                            <p style="margin-bottom: 0.5rem;"><strong>Purpose:</strong> Commit changes to the server or discard them without affecting the live interface.</p>
+                                            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75rem; border-radius: 0.25rem; margin-top: 0.5rem;">
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #92400e; margin-bottom: 0.25rem;">Change Management:</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5;">
+                                                    <li>• <strong>Unsaved Changes Indicator:</strong> Orange "⚠️ Unsaved Changes" appears when edits are made</li>
+                                                    <li>• <strong>Save Changes:</strong> Commits all modifications to the server and updates tap interface</li>
+                                                    <li>• <strong>Cancel Changes:</strong> Discards all unsaved edits and reverts to last saved state</li>
+                                                    <li>• <strong>Browser Warning:</strong> Attempting to leave page with unsaved changes triggers confirmation</li>
+                                                    <li>• <strong>Auto-Disable:</strong> Save/Cancel buttons are disabled when no changes exist</li>
+                                                    <li>• <strong>Immediate Effect:</strong> Saved changes update tap interface configuration immediately</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Special Functions -->
+                        <div class="settings-guide-item" style="cursor: pointer;" onclick="toggleTapGuideDetails(this)">
+                            <div style="display: flex; align-items: flex-start; padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; transition: background 0.2s;">
+                                <div style="flex-shrink: 0; margin-top: 0.25rem;">
+                                    <i class="fas fa-magic" style="color: #ec4899; font-size: 1.125rem;"></i>
+                                </div>
+                                <div style="margin-left: 0.75rem; flex: 1;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-weight: 600; color: #111827;">Special Functions & AI Features</div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <i class="fas fa-chevron-down" style="color: #9ca3af; transition: transform 0.3s;"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details" style="display: none; margin-top: 0.5rem;">
+                                        <div style="font-size: 0.875rem; color: #374151;">
+                                            <div style="background: #fce7f3; border-left: 4px solid #ec4899; padding: 0.75rem; border-radius: 0.25rem; margin-top: 0.5rem;">
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #9f1239; margin-bottom: 0.25rem;">Special Functions - Navigation to Pre-Defined Pages:</p>
+                                                <p style="font-size: 0.75rem; color: #374151; margin-bottom: 0.5rem;">Special Functions allow buttons to navigate to special pre-defined pages in the system. As new special pages are developed, they will be added to the dropdown list automatically.</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5; margin-bottom: 0.75rem;">
+                                                    <li>• <strong>spell:</strong> Navigate to the Spell page for spelling activities</li>
+                                                    <li>• <strong>games:</strong> Navigate to the Games page (coming soon)</li>
+                                                </ul>
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #9f1239; margin-bottom: 0.25rem; margin-top: 0.5rem;">AI-Powered Features:</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5;">
+                                                    <li>• <strong>LLM Prompt:</strong> AI generates dynamic button options based on context</li>
+                                                    <li>• <strong>Words Prompt:</strong> AI suggests relevant words for sentence building</li>
+                                                    <li>• <strong>Static Options:</strong> JSON array of predefined choices (no AI needed)</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Best Practices -->
+                        <div class="settings-guide-item" style="cursor: pointer;" onclick="toggleTapGuideDetails(this)">
+                            <div style="display: flex; align-items: flex-start; padding: 0.75rem; background: #f9fafb; border-radius: 0.5rem; transition: background 0.2s;">
+                                <div style="flex-shrink: 0; margin-top: 0.25rem;">
+                                    <i class="fas fa-star" style="color: #eab308; font-size: 1.125rem;"></i>
+                                </div>
+                                <div style="margin-left: 0.75rem; flex: 1;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                                        <div style="font-weight: 600; color: #111827;">Best Practices & Tips</div>
+                                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                            <i class="fas fa-chevron-down" style="color: #9ca3af; transition: transform 0.3s;"></i>
+                                        </div>
+                                    </div>
+                                    <div class="guide-details" style="display: none; margin-top: 0.5rem;">
+                                        <div style="font-size: 0.875rem; color: #374151;">
+                                            <div style="background: #fef9c3; border-left: 4px solid #eab308; padding: 0.75rem; border-radius: 0.25rem; margin-top: 0.5rem;">
+                                                <p style="font-size: 0.875rem; font-weight: 600; color: #854d0e; margin-bottom: 0.25rem;">Configuration Tips:</p>
+                                                <ul style="font-size: 0.75rem; color: #374151; margin-left: 1rem; line-height: 1.5;">
+                                                    <li>• <strong>Logical Grouping:</strong> Group related buttons under parent categories</li>
+                                                    <li>• <strong>Shallow Hierarchy:</strong> Avoid nesting more than 3-4 levels deep</li>
+                                                    <li>• <strong>Clear Labels:</strong> Use concise, descriptive button labels</li>
+                                                    <li>• <strong>Consistent Colors:</strong> Use color coding to indicate button types or categories</li>
+                                                    <li>• <strong>Test Navigation:</strong> After saving, test the tap interface flow on actual device</li>
+                                                    <li>• <strong>Use go_back:</strong> Include go_back buttons in child screens for easy navigation</li>
+                                                    <li>• <strong>Image Sizing:</strong> Use appropriately sized images (recommend 200x200px or similar)</li>
+                                                    <li>• <strong>Hidden Buttons:</strong> Use "Hidden" instead of deleting when temporarily removing features</li>
+                                                    <li>• <strong>Regular Backups:</strong> Save frequently and test changes before major reorganizations</li>
+                                                    <li>• <strong>Accessibility:</strong> Ensure sufficient color contrast between text and background</li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="padding: 1.5rem; border-top: 1px solid #e5e7eb; background: #f9fafb; display: flex; justify-content: space-between; align-items: center;">
+                <button id="contact-support-btn" style="font-size: 0.875rem; color: #FB4F14; background: none; border: none; cursor: pointer; display: flex; align-items: center; transition: color 0.2s;">
+                    <i class="fas fa-envelope" style="margin-right: 0.5rem;"></i>Contact Support
+                </button>
+                <button id="close-help-modal-footer" style="padding: 0.5rem 1rem; background: #FB4F14; color: white; border-radius: 0.5rem; border: none; cursor: pointer; transition: background 0.2s;">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Support Modal -->
+    <div id="contact-modal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; z-index: 1001; align-items: center; justify-content: center; padding: 1rem;">
+        <div style="background: white; border-radius: 1rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); width: 100%; max-width: 28rem;">
+            <div style="padding: 1.5rem; border-bottom: 1px solid #e5e7eb; background: linear-gradient(to right, #fff7ed, #fee2e2);">
+                <h3 style="font-size: 1.25rem; font-weight: bold; color: #1f2937; margin: 0;">
+                    <i class="fas fa-envelope" style="color: #FB4F14; margin-right: 0.5rem;"></i>Contact Support
+                </h3>
+            </div>
+            
+            <div style="padding: 1.5rem;">
+                <form id="contact-form" action="https://formspree.io/f/xnnqkvqj" method="POST">
+                    <div style="display: flex; flex-direction: column; gap: 1rem;">
+                        <div>
+                            <label for="contact-email" style="display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem;">Your Email</label>
+                            <input type="email" id="contact-email" name="email" required style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 0.875rem;">
+                        </div>
+                        <div>
+                            <label for="contact-message" style="display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem;">Message</label>
+                            <textarea id="contact-message" name="message" rows="4" required style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 0.875rem;"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+                        <button type="button" id="cancel-contact" style="flex: 1; padding: 0.5rem 1rem; background: #e5e7eb; color: #374151; border-radius: 0.5rem; border: none; cursor: pointer; font-size: 0.875rem;">
+                            Cancel
+                        </button>
+                        <button type="submit" style="flex: 1; padding: 0.5rem 1rem; background: #FB4F14; color: white; border-radius: 0.5rem; border: none; cursor: pointer; font-size: 0.875rem;">
+                            Send Message
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        /* Guide highlighting animation */
+        @keyframes guidePulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(251, 79, 20, 0.7), 0 0 20px rgba(251, 79, 20, 0.4);
+                border-color: #FB4F14;
+            }
+            50% {
+                box-shadow: 0 0 0 10px rgba(251, 79, 20, 0), 0 0 30px rgba(251, 79, 20, 0.6);
+                border-color: #F97316;
+            }
+        }
+        
+        .guide-highlight-target {
+            animation: guidePulse 2s ease-in-out infinite;
+            position: relative;
+            z-index: 1000;
+            border: 3px solid #FB4F14 !important;
+            border-radius: 8px !important;
+        }
+    </style>
+
+    <script>
+        // Toggle guide details
+        function toggleTapGuideDetails(element) {
+            const details = element.querySelector('.guide-details');
+            const chevron = element.querySelector('.fa-chevron-down');
+            
+            if (details.style.display === 'none') {
+                details.style.display = 'block';
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                details.style.display = 'none';
+                chevron.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        // Help modal controls
+        const helpIcon = document.getElementById('help-icon');
+        const helpModal = document.getElementById('help-modal');
+        const closeHelpModal = document.getElementById('close-help-modal');
+        const closeHelpModalFooter = document.getElementById('close-help-modal-footer');
+        const contactSupportBtn = document.getElementById('contact-support-btn');
+        const contactModal = document.getElementById('contact-modal');
+        const cancelContact = document.getElementById('cancel-contact');
+
+        function openHelpModal() {
+            helpModal.style.display = 'flex';
+        }
+
+        function closeHelpModalFunc() {
+            helpModal.style.display = 'none';
+        }
+
+        function openContactModal() {
+            contactModal.style.display = 'flex';
+            helpModal.style.display = 'none';
+        }
+
+        function closeContactModal() {
+            contactModal.style.display = 'none';
+        }
+
+        helpIcon?.addEventListener('click', openHelpModal);
+        closeHelpModal?.addEventListener('click', closeHelpModalFunc);
+        closeHelpModalFooter?.addEventListener('click', closeHelpModalFunc);
+        contactSupportBtn?.addEventListener('click', openContactModal);
+        cancelContact?.addEventListener('click', closeContactModal);
+
+        // Close modals on outside click
+        helpModal?.addEventListener('click', function(e) {
+            if (e.target === helpModal) closeHelpModalFunc();
+        });
+        contactModal?.addEventListener('click', function(e) {
+            if (e.target === contactModal) closeContactModal();
+        });
+
+        // Contact form submission
+        const contactForm = document.getElementById('contact-form');
+        contactForm?.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            try {
+                const response = await fetch(contactForm.action, {
+                    method: 'POST',
+                    body: new FormData(contactForm),
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    alert('Thank you for contacting support! We will get back to you soon.');
+                    contactForm.reset();
+                    closeContactModal();
+                } else {
+                    alert('There was a problem sending your message. Please try again.');
+                }
+            } catch (error) {
+                alert('There was a problem sending your message. Please try again.');
+            }
+        });
+
+        // Interactive Guide Objects
+        let currentTapGuide = null;
+
+        const navigationGuide = {
+            id: 'navigation',
+            steps: [
+                {
+                    title: 'Navigation Tree View',
+                    content: 'This tree view shows all buttons in a hierarchical structure. Root-level buttons appear on the main tap interface, while child buttons appear when their parent is tapped.',
+                    highlight: '#treeContainer',
+                    action: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) {
+                            container.classList.add('guide-highlight-target');
+                            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) container.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Add New Button',
+                    content: 'Click this button to create a new root-level button. It will be added to the bottom of the tree and can be edited or repositioned after creation.',
+                    highlight: '#addNewButtonBtn',
+                    action: function() {
+                        const btn = document.getElementById('addNewButtonBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('addNewButtonBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const buttonsGuide = {
+            id: 'buttons',
+            steps: [
+                {
+                    title: 'Select a Button to Edit',
+                    content: 'Click any button in the tree to load its properties into the editor form. The selected button will be highlighted and its details will appear in the right panel.',
+                    highlight: '#treeContainer',
+                    action: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) {
+                            container.classList.add('guide-highlight-target');
+                            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) container.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Button Properties Form',
+                    content: 'Edit all button properties in this form. Changes are tracked automatically and the "Unsaved Changes" indicator will appear when modifications are made.',
+                    highlight: '#buttonForm',
+                    action: function() {
+                        const form = document.getElementById('buttonForm');
+                        if (form) {
+                            form.classList.add('guide-highlight-target');
+                            form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const form = document.getElementById('buttonForm');
+                        if (form) form.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const dragDropGuide = {
+            id: 'dragdrop',
+            steps: [
+                {
+                    title: 'Drag to Reorder',
+                    content: 'Click and drag any button in the tree to reorder it among its siblings. The button will show where it will be placed with visual indicators.',
+                    highlight: '#treeContainer',
+                    action: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) {
+                            container.classList.add('guide-highlight-target');
+                            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) container.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Add as Child (Shift + Drag)',
+                    content: 'Hold the Shift key while dragging a button onto another button to make it a child. A green "Add Child" indicator will appear. This creates hierarchical navigation.',
+                    highlight: '#treeContainer',
+                    action: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) {
+                            container.classList.add('guide-highlight-target');
+                            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const container = document.getElementById('treeContainer');
+                        if (container) container.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Move to Root Level',
+                    content: 'Drag any button to this drop zone to move it to the root level (top of the hierarchy). This makes it appear on the main tap interface screen.',
+                    highlight: '#rootDropZone',
+                    action: function() {
+                        const zone = document.getElementById('rootDropZone');
+                        if (zone) {
+                            zone.classList.add('guide-highlight-target');
+                            zone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const zone = document.getElementById('rootDropZone');
+                        if (zone) zone.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        const savingGuide = {
+            id: 'saving',
+            steps: [
+                {
+                    title: 'Unsaved Changes Indicator',
+                    content: 'This indicator appears when you make changes to the configuration. It reminds you to save your work before leaving the page.',
+                    highlight: '#changesIndicator',
+                    action: function() {
+                        const indicator = document.getElementById('changesIndicator');
+                        if (indicator) {
+                            indicator.classList.add('guide-highlight-target');
+                            indicator.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const indicator = document.getElementById('changesIndicator');
+                        if (indicator) indicator.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Save Changes',
+                    content: 'Click this button to commit all your changes to the server. The tap interface will be updated immediately with your new configuration.',
+                    highlight: '#saveBtn',
+                    action: function() {
+                        const btn = document.getElementById('saveBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('saveBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Cancel Changes',
+                    content: 'Click this button to discard all unsaved changes and revert to the last saved configuration. This is useful if you want to start over or made a mistake.',
+                    highlight: '#cancelBtn',
+                    action: function() {
+                        const btn = document.getElementById('cancelBtn');
+                        if (btn) {
+                            btn.classList.add('guide-highlight-target');
+                            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const btn = document.getElementById('cancelBtn');
+                        if (btn) btn.classList.remove('guide-highlight-target');
+                    }
+                }
+            ]
+        };
+
+        // Start guide function
+        function startTapGuide(guideId) {
+            console.log('Starting tap guide for:', guideId);
+            
+            closeHelpModalFunc();
+            
+            const guides = {
+                'navigation': navigationGuide,
+                'buttons': buttonsGuide,
+                'dragdrop': dragDropGuide,
+                'saving': savingGuide
+            };
+            
+            const guide = guides[guideId];
+            if (guide) {
+                currentTapGuide = {
+                    guide: guide,
+                    currentStep: 0
+                };
+                showTapGuideWindow();
+            }
+        }
+
+        // Guide window functions
+        function showTapGuideWindow() {
+            if (!currentTapGuide) return;
+            
+            let guideWindow = document.getElementById('tap-guide-window');
+            if (!guideWindow) {
+                guideWindow = document.createElement('div');
+                guideWindow.id = 'tap-guide-window';
+                guideWindow.style.cssText = 'position: fixed; bottom: 20px; right: 20px; width: 400px; max-height: 500px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 9999; display: flex; flex-direction: column;';
+                
+                guideWindow.innerHTML = `
+                    <div style="background: linear-gradient(135deg, #FB4F14 0%, #F97316 100%); color: white; padding: 16px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div id="tap-guide-title" style="font-weight: bold; font-size: 18px;"></div>
+                            <div id="tap-guide-progress" style="font-size: 12px; opacity: 0.9; margin-top: 4px;"></div>
+                        </div>
+                        <button id="tap-guide-close" style="background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px;">&times;</button>
+                    </div>
+                    <div id="tap-guide-content" style="padding: 20px; flex: 1; overflow-y: auto;"></div>
+                    <div style="border-top: 1px solid #e5e7eb; padding: 16px; display: flex; justify-content: space-between; align-items: center; background: #f9fafb; border-radius: 0 0 12px 12px;">
+                        <button id="tap-guide-prev" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            <i class="fas fa-arrow-left"></i> Previous
+                        </button>
+                        <div id="tap-guide-step-indicator" style="display: flex; gap: 8px;"></div>
+                        <button id="tap-guide-next" style="padding: 8px 16px; background: #FB4F14; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">
+                            Next <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
+                `;
+                
+                document.body.appendChild(guideWindow);
+                
+                document.getElementById('tap-guide-close').addEventListener('click', closeTapGuide);
+                document.getElementById('tap-guide-prev').addEventListener('click', previousTapGuideStep);
+                document.getElementById('tap-guide-next').addEventListener('click', nextTapGuideStep);
+            }
+            
+            guideWindow.style.display = 'flex';
+            updateTapGuideStep();
+        }
+
+        function updateTapGuideStep() {
+            if (!currentTapGuide) return;
+            
+            const guide = currentTapGuide.guide;
+            const step = guide.steps[currentTapGuide.currentStep];
+            
+            document.getElementById('tap-guide-title').textContent = step.title;
+            document.getElementById('tap-guide-progress').textContent = `Step ${currentTapGuide.currentStep + 1} of ${guide.steps.length}`;
+            document.getElementById('tap-guide-content').innerHTML = `<p style="color: #374151; line-height: 1.6;">${step.content}</p>`;
+            
+            const indicatorContainer = document.getElementById('tap-guide-step-indicator');
+            indicatorContainer.innerHTML = '';
+            for (let i = 0; i < guide.steps.length; i++) {
+                const dot = document.createElement('div');
+                dot.style.cssText = 'width: 10px; height: 10px; border-radius: 50%; transition: all 0.3s;';
+                if (i < currentTapGuide.currentStep) {
+                    dot.style.background = '#10b981';
+                } else if (i === currentTapGuide.currentStep) {
+                    dot.style.background = '#FB4F14';
+                    dot.style.transform = 'scale(1.3)';
+                } else {
+                    dot.style.background = '#d1d5db';
+                }
+                indicatorContainer.appendChild(dot);
+            }
+            
+            const prevBtn = document.getElementById('tap-guide-prev');
+            const nextBtn = document.getElementById('tap-guide-next');
+            
+            prevBtn.disabled = currentTapGuide.currentStep === 0;
+            prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+            prevBtn.style.cursor = prevBtn.disabled ? 'not-allowed' : 'pointer';
+            
+            const isLastStep = currentTapGuide.currentStep === guide.steps.length - 1;
+            nextBtn.innerHTML = isLastStep ? 'Complete <i class="fas fa-check"></i>' : 'Next <i class="fas fa-arrow-right"></i>';
+            
+            if (step.action) {
+                if (currentTapGuide.currentStep > 0) {
+                    const prevStep = guide.steps[currentTapGuide.currentStep - 1];
+                    if (prevStep.cleanup) prevStep.cleanup();
+                }
+                step.action();
+            }
+        }
+
+        function nextTapGuideStep() {
+            if (!currentTapGuide) return;
+            
+            const guide = currentTapGuide.guide;
+            
+            if (currentTapGuide.currentStep < guide.steps.length - 1) {
+                currentTapGuide.currentStep++;
+                updateTapGuideStep();
+            } else {
+                closeTapGuide();
+            }
+        }
+
+        function previousTapGuideStep() {
+            if (!currentTapGuide) return;
+            
+            if (currentTapGuide.currentStep > 0) {
+                currentTapGuide.currentStep--;
+                updateTapGuideStep();
+            }
+        }
+
+        function closeTapGuide() {
+            if (!currentTapGuide) return;
+            
+            const guide = currentTapGuide.guide;
+            const step = guide.steps[currentTapGuide.currentStep];
+            if (step.cleanup) step.cleanup();
+            
+            const guideWindow = document.getElementById('tap-guide-window');
+            if (guideWindow) guideWindow.style.display = 'none';
+            
+            currentTapGuide = null;
+        }
+    </script>
 </body>
 </html>

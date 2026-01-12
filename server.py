@@ -12494,7 +12494,8 @@ async def button_symbol_search(
                 term_variations = [
                     term,                    # Original case
                     term.lower(),            # All lowercase  
-                    term.capitalize()        # First letter capitalized
+                    term.capitalize(),       # First letter capitalized
+                    term.title()             # Title case (capitalizes each word)
                 ]
                 
                 # Remove duplicates while preserving order
@@ -13465,7 +13466,11 @@ class TapNavigationButton(BaseModel):
     background_color: Optional[str] = Field("#FFFFFF", description="Hex color code for button background")
     text_color: Optional[str] = Field("#000000", description="Hex color code for button text")
     llm_prompt: Optional[str] = Field(None, description="LLM query for generating phrase options")
-    words_prompt: Optional[str] = Field(None, description="LLM query for generating word options (e.g., 'I am hungry for')")
+    words_prompt: Optional[str] = Field(None, description="LLM query for generating word options (deprecated)")
+    prompt_category: Optional[str] = Field(None, description="Pre-defined category or 'custom' for AI prompt generation")
+    prompt_topic: Optional[str] = Field(None, description="Custom topic for custom prompts")
+    prompt_examples: Optional[str] = Field(None, description="Examples for custom prompts (comma or newline separated)")
+    prompt_exclusions: Optional[str] = Field(None, description="Items to exclude for custom prompts (comma or newline separated)")
     static_options: Optional[str] = Field(None, description="Comma-separated list of static options (alternative to LLM prompt)")
     custom_audio_file: Optional[str] = Field(None, description="URL to custom audio file to play after speech text")
     special_function: Optional[str] = Field(None, description="Special function identifier (e.g., 'spell')")
@@ -13529,8 +13534,9 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     
     # Helper function to create button with all required fields
     def create_button(button_id, label, speech_text=None, image_url=None, bg_color="#FFFFFF", 
-                     text_color="#000000", llm_prompt=None, words_prompt=None, static_options=None, 
-                     custom_audio_file=None, special_function=None, children=None):
+                     text_color="#000000", llm_prompt=None, prompt_category=None, 
+                     prompt_topic=None, prompt_examples=None, prompt_exclusions=None,
+                     static_options=None, custom_audio_file=None, special_function=None, children=None):
         return {
             "id": button_id,
             "label": label,
@@ -13539,7 +13545,10 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "background_color": bg_color,
             "text_color": text_color,
             "llm_prompt": llm_prompt,
-            "words_prompt": words_prompt,
+            "prompt_category": prompt_category,
+            "prompt_topic": prompt_topic,
+            "prompt_examples": prompt_examples,
+            "prompt_exclusions": prompt_exclusions,
             "static_options": static_options,
             "custom_audio_file": custom_audio_file,
             "special_function": special_function,
@@ -13554,57 +13563,53 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
         "buttons": [
-            create_button("greetings", "Greetings", children=[
-                create_button("generic_greetings", "Generic Greetings", 
-                            llm_prompt="Generate common greeting phrases and expressions for everyday social interactions",
-                            words_prompt="Hello, I want to"),
-                create_button("current_location", "Current Location",
-                            llm_prompt="Generate location-based greetings and conversation starters",
-                            words_prompt="I am at"),
-                create_button("jokes", "Jokes",
-                            llm_prompt="Generate simple, appropriate jokes and funny conversation starters")
-            ]),
-            create_button("about_me", "About Me", children=[
-                create_button("personal_info", "Personal Info",
-                            llm_prompt="Generate phrases for sharing personal information and basic details about myself",
-                            words_prompt="I am"),
-                create_button("family", "Family",
-                            llm_prompt="Generate phrases for talking about family members and relationships",
-                            words_prompt="My family"),
-                create_button("interests", "Interests",
-                            llm_prompt="Generate phrases for discussing hobbies, interests, and favorite activities",
-                            words_prompt="I like to"),
-                create_button("medical_info", "Medical Info",
-                            llm_prompt="Generate phrases for communicating medical needs and health information",
-                            words_prompt="I need medical")
-            ]),
-            create_button("help", "Help", children=[
-                create_button("need_assistance", "Need Assistance",
-                            llm_prompt="Generate phrases for requesting help and assistance",
-                            words_prompt="I need help with"),
-                create_button("emergency", "Emergency",
-                            llm_prompt="Generate emergency communication phrases and urgent requests",
-                            words_prompt="Emergency! I need"),
-                create_button("questions", "Questions",
-                            llm_prompt="Generate question words and phrases for asking about things",
-                            words_prompt="Can you tell me about"),
-                create_button("support", "Support",
-                            llm_prompt="Generate phrases for requesting support and guidance")
-            ]),
-            create_button("feelings", "Feelings",
-                        llm_prompt="Generate words and phrases for expressing feelings and emotions"),
-            create_button("activities", "Activities",
-                        llm_prompt="Generate words and phrases about activities and things to do"),
-            create_button("requests", "Requests",
+            create_button("greetings_btn", "Greetings", 
+                        prompt_category="greetings",
+                        llm_prompt="Generate greeting phrases and words suitable for everyday social interactions. Include hellos, goodbyes, and common polite expressions."),
+            
+            create_button("actions_btn", "Actions", 
+                        prompt_category="actions",
+                        llm_prompt="Generate action words and phrases for common activities. Include verbs like eat, drink, play, go, help, want, need, etc."),
+            
+            create_button("describe_btn", "Describe",
+                        prompt_category="describe",
+                        llm_prompt="Generate descriptive words and phrases. Include colors, sizes, temperatures, quantities, and qualities."),
+            
+            create_button("things_btn", "Things",
+                        prompt_category="things",
+                        llm_prompt="Generate words about objects, items, and things"),
+            
+            create_button("requests_btn", "Requests",
+                        prompt_category="requests",
                         llm_prompt="Generate phrases for making requests and asking for things"),
-            create_button("people", "People",
-                        llm_prompt="Generate words about people, family, relationships, and social connections"),
-            create_button("places", "Places",
-                        llm_prompt="Generate words about locations, places, and destinations"),
-            create_button("actions", "Actions",
-                        llm_prompt="Generate action words and verbs for describing what to do"),
-            create_button("things", "Things",
-                        llm_prompt="Generate words about objects, items, and things")
+            
+            create_button("places_btn", "Places",
+                        prompt_category="places",
+                        llm_prompt="Generate words and phrases about places and locations. Include home, school, park, store, outside, inside, etc."),
+            
+            create_button("people_btn", "People",
+                        prompt_category="people",
+                        llm_prompt="Generate words about people, family, relationships, and social connections and phrases for the user to discuss these people"),
+            
+            create_button("animals_btn", "Animals",
+                        prompt_category="animals",
+                        llm_prompt="Generate list of words or phrases related to animals"),
+            
+            create_button("weather_btn", "Weather",
+                        prompt_category="weather",
+                        llm_prompt="Generate list of words or phrases related to discussing the weather"),
+            
+            create_button("numbers_btn", "Numbers",
+                        prompt_category="numbers",
+                        llm_prompt="Generate a list of numbers, quantities and amounts"),
+            
+            create_button("dates_times_btn", "Dates and Times",
+                        prompt_category="dates_and_times",
+                        llm_prompt="Generate a list of words and phrases the user can use to discuss time or dates. Consider current time and date and recent and upcoming holidays and recent and upcoming birthdays."),
+            
+            create_button("spell_btn", "Spell",
+                        prompt_category="spell",
+                        llm_prompt="Generate letters of the alphabet for spelling")
         ]
     }
 
