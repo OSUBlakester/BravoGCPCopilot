@@ -5699,6 +5699,8 @@ async def get_interface_preference(current_ids: Annotated[Dict[str, str], Depend
         settings = await load_settings_from_file(account_id, aac_user_id)
         use_tap_interface = settings.get("useTapInterface", False)
         
+        logging.warning(f"🔍 Interface preference check for user {aac_user_id}: useTapInterface = {use_tap_interface}, settings keys: {list(settings.keys())[:10]}")
+        
         return {
             "useTapInterface": use_tap_interface,
             "preferredInterface": "tap_interface.html" if use_tap_interface else "gridpage.html"
@@ -12406,6 +12408,63 @@ async def clear_duplicate_symbols(admin_user: Annotated[Dict[str, str], Depends(
             content={"error": "Failed to clear duplicates", "details": str(e)}
         )
 
+@app.get("/api/symbols/all-images")
+async def get_all_images(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Returns ALL image metadata for client-side caching.
+    This allows the web app to search images locally without network requests.
+    """
+    logging.info(f"🚀 all-images endpoint called by account_id: {current_ids.get('account_id')}")
+    try:
+        all_images = []
+        account_id = current_ids.get('account_id')
+        
+        # Use global firestore_db instance
+        if not firestore_db:
+            logging.error("Firestore database not initialized")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Database not available"}
+            )
+        
+        # Fetch from Firestore AAC images collection
+        # TEMPORARY: Remove source filter to see if ANY docs exist
+        logging.info(f"🔍 Querying collection 'aac_images' WITHOUT source filter (diagnostic)...")
+        firestore_symbols_ref = firestore_db.collection('aac_images').limit(100)
+        firestore_docs = firestore_symbols_ref.stream()
+        
+        doc_count = 0
+        url_count = 0
+        for doc in firestore_docs:
+            doc_count += 1
+            symbol = doc.to_dict()
+            if symbol and symbol.get('url'):
+                url_count += 1
+                # Only include essential fields to minimize payload
+                all_images.append({
+                    'word': symbol.get('word', '').lower().strip(),
+                    'url': symbol.get('url'),
+                    'tags': symbol.get('tags', []),
+                    'category': symbol.get('category', '')
+                })
+        
+        logging.info(f"📊 Image cache stats: {doc_count} docs in collection, {url_count} with URLs, {len(all_images)} loaded for client cache")
+        
+        return JSONResponse(content={
+            "images": all_images,
+            "total": len(all_images),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error loading all images: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to load images", "details": str(e)}
+        )
+
 @app.get("/api/symbols/button-search")
 async def button_symbol_search(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
@@ -12974,7 +13033,7 @@ async def batch_symbol_search(
                     
                     if variation_docs:
                         image = variation_docs[0].to_dict()
-                        image_url = image.get('url')
+                        image_url = image.get('image_url')  # Use 'image_url' not 'url'
                         if image_url:
                             logging.info(f"🔍 BATCH: ✅ Found image for '{text}' (variation '{variation}'): {image_url}")
                             return (text, image_url)
@@ -13032,6 +13091,53 @@ async def batch_symbol_search(
         return JSONResponse(
             status_code=500,
             content={"error": "Batch search failed", "details": str(e)}
+        )
+
+
+@app.get("/api/symbols/library-download")
+async def download_image_library(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Download entire AAC image library for local caching.
+    Returns all aac_images with source="bravo_images" for client-side search.
+    This enables instant local tag-based search without network calls.
+    """
+    try:
+        logging.info("📚 LIBRARY DOWNLOAD: Starting full library download")
+        
+        # Query all bravo images
+        images_ref = firestore_db.collection('aac_images')
+        query = images_ref.where('source', '==', 'bravo_images')
+        docs = query.stream()
+        
+        library = []
+        for doc in docs:
+            data = doc.to_dict()
+            # Only include essential fields to minimize download size
+            library.append({
+                'id': doc.id,
+                'image_url': data.get('image_url'),
+                'tags': data.get('tags', []),
+                'source': data.get('source'),
+                # Include any other metadata that might be useful for search
+                'category': data.get('category'),
+                'subcategory': data.get('subcategory')
+            })
+        
+        logging.info(f"📚 LIBRARY DOWNLOAD: Sending {len(library)} images to client")
+        
+        return JSONResponse(content={
+            "images": library,
+            "count": len(library),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error downloading image library: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Library download failed", "details": str(e)}
         )
 
 
