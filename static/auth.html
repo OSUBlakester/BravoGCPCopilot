@@ -6,6 +6,7 @@
     <title>Bravo AAC - Login/Register</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/static/mood-selection.css">
+    <link rel="stylesheet" href="/static/splash-screen.css">
     <style>
         body {
             display: flex;
@@ -508,10 +509,96 @@
 
     <div class="loading-indicator" id="loading-indicator">
         <div class="spinner"></div>
+        <p id="loading-status" style="color: white; margin-top: 1rem; font-size: 0.9rem;"></p>
     </div>
+
+    <!-- Loading Overlay (Welcome to Bravo) -->
+    <div id="mood-loading-overlay" class="mood-loading-overlay" style="display: none;">
+        <div class="mood-loading-container">
+            <div class="mood-loading-spinner"></div>
+            <div class="mood-loading-headline">Welcome to Bravo!</div>
+            <div class="mood-loading-text" id="splash-text">Loading user data...</div>
+            <div class="mood-loading-progress" id="splash-percentage">0%</div>
+        </div>
+    </div>
+
+    <style>
+        .mood-loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #003366;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        .mood-loading-container {
+            text-align: center;
+        }
+
+        .mood-loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 165, 0, 0.3);
+            border-top: 4px solid #ff8c00;
+            border-radius: 50%;
+            margin: 0 auto 2rem;
+            animation: mood-spin 1s linear infinite;
+        }
+
+        @keyframes mood-spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .mood-loading-headline {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            color: #ff8c00;
+            text-shadow: 
+                -2px -2px 0 white,
+                2px -2px 0 white,
+                -2px 2px 0 white,
+                2px 2px 0 white,
+                -2px 0 0 white,
+                2px 0 0 white,
+                0 -2px 0 white,
+                0 2px 0 white;
+        }
+
+        .mood-loading-text {
+            font-size: 1.5rem;
+            font-weight: 500;
+            margin-bottom: 1.5rem;
+            color: #ff8c00;
+            text-shadow: 
+                -1px -1px 0 white,
+                1px -1px 0 white,
+                -1px 1px 0 white,
+                1px 1px 0 white;
+        }
+
+        .mood-loading-progress {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #ff8c00;
+            text-shadow: 
+                -1px -1px 0 white,
+                1px -1px 0 white,
+                -1px 1px 0 white,
+                1px 1px 0 white;
+        }
+    </style>
 
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="/static/splash-screen.js"></script>
 
     <script>
 
@@ -549,39 +636,655 @@
 
         const auth = firebase.auth();
 
+        // ============ INDEXED DB FOR LOCAL IMAGE LIBRARY ============
+        
+        let imageLibraryDB = null;
+        
+        /**
+         * Initialize IndexedDB for storing the entire image library
+         */
+        async function initImageLibraryDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open('BravoImageLibrary', 1);
+                
+                request.onerror = () => reject(request.error);
+                request.onsuccess = () => {
+                    imageLibraryDB = request.result;
+                    resolve(imageLibraryDB);
+                };
+                
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    
+                    // Create object store for images
+                    if (!db.objectStoreNames.contains('images')) {
+                        const imageStore = db.createObjectStore('images', { keyPath: 'id' });
+                        // Create index on tags for faster searching
+                        imageStore.createIndex('tags', 'tags', { multiEntry: true });
+                    }
+                    
+                    // Create object store for metadata
+                    if (!db.objectStoreNames.contains('metadata')) {
+                        db.createObjectStore('metadata', { keyPath: 'key' });
+                    }
+                };
+            });
+        }
+        
+        /**
+         * Download and store entire image library in IndexedDB
+         */
+        async function downloadImageLibrary(token, aacUserId) {
+            try {
+                // Don't update loading status - parent shows "Loading user data..."
+                
+                // Check if library is already downloaded and fresh
+                const db = await initImageLibraryDB();
+                const metadata = await getLibraryMetadata(db);
+                const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+                
+                if (metadata && metadata.timestamp > oneDayAgo && metadata.count > 0) {
+                    console.log(`📚 Library already downloaded (${metadata.count} images, ${new Date(metadata.timestamp).toLocaleString()})`);
+                    return true;
+                }
+                
+                console.log('📚 Downloading fresh image library from server...');
+                
+                const response = await fetch('/api/symbols/library-download', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'X-User-ID': aacUserId
+                    }
+                });
+                
+                if (!response.ok) {
+                    console.error('Failed to download library:', response.status);
+                    return false;
+                }
+                
+                const data = await response.json();
+                const images = data.images || [];
+                
+                console.log(`📚 Received ${images.length} images, storing in IndexedDB...`);
+                
+                // Show percentage indicator
+                const percentageEl = document.getElementById('splash-percentage');
+                if (percentageEl) {
+                    percentageEl.style.display = 'block';
+                }
+                updateLoadingProgress(0, 100); // Start at 0%
+                
+                // Store all images in IndexedDB using proper Promise handling with progress updates
+                // Process in batches with delays to show visible progress
+                const batchSize = 50;
+                let currentBatchStart = 0;
+                
+                while (currentBatchStart < images.length) {
+                    await new Promise((resolve, reject) => {
+                        const transaction = db.transaction(['images', 'metadata'], 'readwrite');
+                        const imageStore = transaction.objectStore('images');
+                        const metadataStore = transaction.objectStore('metadata');
+                        
+                        // Clear old data on first batch only
+                        if (currentBatchStart === 0) {
+                            imageStore.clear();
+                        }
+                        
+                        transaction.oncomplete = () => resolve();
+                        transaction.onerror = () => reject(transaction.error);
+                        
+                        // Add current batch
+                        const endIndex = Math.min(currentBatchStart + batchSize, images.length);
+                        for (let i = currentBatchStart; i < endIndex; i++) {
+                            imageStore.add(images[i]);
+                        }
+                        
+                        // Update progress
+                        const percent = Math.round((endIndex / images.length) * 100);
+                        updateLoadingProgress(endIndex, images.length);
+                        console.log(`📦 Stored ${endIndex}/${images.length} images (${percent}%)`);
+                        
+                        // Store metadata on last batch
+                        if (endIndex >= images.length) {
+                            metadataStore.put({
+                                key: 'library',
+                                count: images.length,
+                                timestamp: Date.now()
+                            });
+                        }
+                    });
+                    
+                    currentBatchStart += batchSize;
+                    
+                    // Small delay between batches for visible progress (except on last batch)
+                    if (currentBatchStart < images.length) {
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                }
+                
+                // Hide percentage when complete
+                if (percentageEl) {
+                    percentageEl.style.display = 'none';
+                }
+                
+                return true;
+                
+            } catch (error) {
+                console.error('Error downloading image library:', error);
+                return false;
+            }
+        }
+        
+        /**
+         * Get library metadata from IndexedDB
+         */
+        async function getLibraryMetadata(db) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['metadata'], 'readonly');
+                const store = transaction.objectStore('metadata');
+                const request = store.get('library');
+                
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+        
+        /**
+         * Search local image library by text (tag-based matching)
+         * This function will be available globally for tap_interface.html to use
+         */
+        window.searchLocalImageLibrary = async function(searchText) {
+            try {
+                if (!imageLibraryDB) {
+                    imageLibraryDB = await initImageLibraryDB();
+                }
+                
+                const normalizedText = searchText.trim().toLowerCase();
+                
+                // Try exact match first, then variations
+                const searchVariations = [
+                    normalizedText,
+                    normalizedText.charAt(0).toUpperCase() + normalizedText.slice(1), // Capitalize
+                    searchText.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), // Title Case
+                    searchText.toUpperCase() // ALL CAPS
+                ];
+                
+                const transaction = imageLibraryDB.transaction(['images'], 'readonly');
+                const store = transaction.objectStore('images');
+                const tagsIndex = store.index('tags');
+                
+                // Search each variation
+                for (const variation of searchVariations) {
+                    const request = tagsIndex.get(variation);
+                    const result = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                    
+                    if (result && result.image_url) {
+                        return result.image_url;
+                    }
+                }
+                
+                return null;
+                
+            } catch (error) {
+                console.error('Error searching local library:', error);
+                return null;
+            }
+        };
+        
+        /**
+         * Batch search local image library for multiple words at once (MUCH faster!)
+         * Returns a Map of { searchText -> imageUrl }
+         */
+        window.batchSearchLocalImageLibrary = async function(searchTexts) {
+            try {
+                if (!imageLibraryDB) {
+                    imageLibraryDB = await initImageLibraryDB();
+                }
+                
+                const results = new Map();
+                const transaction = imageLibraryDB.transaction(['images'], 'readonly');
+                const store = transaction.objectStore('images');
+                const tagsIndex = store.index('tags');
+                
+                // Search all texts in parallel
+                const searchPromises = searchTexts.map(async (searchText) => {
+                    const normalizedText = searchText.trim().toLowerCase();
+                    const searchVariations = [
+                        normalizedText,
+                        normalizedText.charAt(0).toUpperCase() + normalizedText.slice(1),
+                        searchText.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+                        searchText.toUpperCase()
+                    ];
+                    
+                    for (const variation of searchVariations) {
+                        const request = tagsIndex.get(variation);
+                        const result = await new Promise((resolve, reject) => {
+                            request.onsuccess = () => resolve(request.result);
+                            request.onerror = () => reject(request.error);
+                        });
+                        
+                        if (result && result.image_url) {
+                            results.set(searchText, result.image_url);
+                            return; // Found match, move to next search text
+                        }
+                    }
+                    
+                    // No match found
+                    results.set(searchText, null);
+                });
+                
+                await Promise.all(searchPromises);
+                
+                console.log(`📦 Batch search complete: ${results.size} lookups, ${Array.from(results.values()).filter(v => v !== null).length} found`);
+                return results;
+                
+            } catch (error) {
+                console.error('Error batch searching local library:', error);
+                return new Map();
+            }
+        };
+
+        // ============ IMAGE CACHE WARM-UP (BEFORE NAVIGATION) ============
+        // This runs during login to pre-cache images, like the Flutter app does
+        
+        /**
+         * Updates loading progress percentage
+         */
+        function updateLoadingProgress(current, total) {
+            const progressEl = document.getElementById('splash-percentage');
+            if (progressEl) {
+                const percent = Math.round((current / total) * 100);
+                progressEl.textContent = `${percent}%`;
+            }
+        }
+        
+        /**
+         * Warm up all image caches before navigating to tap interface
+         * This includes: downloading full library + common words + config + phrases
+         */
+        async function warmUpAllCaches(token, aacUserId) {
+            // Show loading overlay at the start
+            const splashScreen = document.getElementById('mood-loading-overlay');
+            const splashText = document.getElementById('splash-text');
+            const percentageEl = document.getElementById('splash-percentage');
+            
+            if (splashScreen && splashText && percentageEl) {
+                splashScreen.style.display = 'flex';
+                splashText.textContent = 'Loading user data...';
+                percentageEl.style.display = 'block';
+                updateLoadingProgress(0, 100);
+            }
+            
+            // PRIORITY 1: Download entire image library to IndexedDB
+            console.log('📚 Step 1: Downloading image library...');
+            await downloadImageLibrary(token, aacUserId);
+            
+            // Initialize cache if needed
+            if (!window.symbolImageCache) {
+                window.symbolImageCache = new Map();
+            }
+            
+            // Load existing cache from localStorage
+            try {
+                const cached = localStorage.getItem('tap_pictogram_cache');
+                if (cached) {
+                    const cacheData = JSON.parse(cached);
+                    window.symbolImageCache = new Map(cacheData);
+                    console.log(`📚 Loaded ${window.symbolImageCache.size} cached images from localStorage`);
+                } else {
+                    console.log('📚 No existing cache found in localStorage');
+                }
+            } catch (error) {
+                console.error('Error loading cache from localStorage:', error);
+            }
+            
+            const currentCacheSize = window.symbolImageCache.size;
+            console.log(`🔥 Starting cache warm-up with ${currentCacheSize} existing images...`);
+            
+            // Always warm up cache to ensure we have fresh data
+            // (Remove MIN_CACHE_SIZE check for now to debug)
+            
+            // Phase 1: Common AAC words
+            if (splashText) splashText.textContent = 'Loading common words...';
+            updateLoadingProgress(20, 100); // Library done = 20%
+            await warmUpCommonWords(token, aacUserId);
+            console.log(`📦 Cache after common words: ${window.symbolImageCache.size} images`);
+            
+            // Phase 2: User's tap config words
+            if (splashText) splashText.textContent = 'Loading your configuration...';
+            updateLoadingProgress(60, 100); // Common words done = 60%
+            await warmUpTapConfig(token, aacUserId);
+            console.log(`📦 Cache after tap config: ${window.symbolImageCache.size} images`);
+            
+            // Phase 3: Cached phrase buttons
+            if (splashText) splashText.textContent = 'Loading saved phrases...';
+            updateLoadingProgress(80, 100); // Tap config done = 80%
+            await warmUpCachedPhrases(token, aacUserId);
+            console.log(`✅ Cache ready: ${window.symbolImageCache.size} images`);
+            
+            // Save to localStorage
+            if (splashText) splashText.textContent = 'Finalizing...';
+            updateLoadingProgress(100, 100); // All done = 100%
+            try {
+                const cacheData = Array.from(window.symbolImageCache.entries());
+                localStorage.setItem('tap_pictogram_cache', JSON.stringify(cacheData));
+                console.log(`💾 Saved ${window.symbolImageCache.size} images to localStorage (tap_pictogram_cache)`);
+            } catch (error) {
+                console.error('Error saving cache:', error);
+            }
+            
+            // Brief delay to show 100% before hiding
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
+            // Hide loading overlay
+            if (splashScreen) {
+                splashScreen.style.display = 'none';
+            }
+            if (percentageEl) {
+                percentageEl.style.display = 'none';
+            }
+        }
+        
+        /**
+         * Phase 1: Warm up common AAC vocabulary
+         */
+        async function warmUpCommonWords(token, aacUserId) {
+            const commonWords = [
+                // Pronouns
+                "I", "you", "he", "she", "we", "they", "me", "him", "her", "us", "them",
+                "my", "your", "his", "hers", "our", "their", "mine", "yours",
+                // Core verbs
+                "want", "need", "like", "have", "go", "get", "make", "do", "see", "look",
+                "help", "eat", "drink", "play", "work", "stop", "start", "finish", "come", "stay",
+                "give", "take", "put", "open", "close", "turn", "move", "sit", "stand", "walk",
+                "run", "sleep", "wake", "feel", "think", "know", "understand", "remember", "forget",
+                "say", "tell", "ask", "answer", "talk", "listen", "read", "write", "watch", "wait",
+                // Feelings
+                "happy", "sad", "angry", "scared", "excited", "tired", "sick", "hurt", "hungry", "thirsty",
+                "good", "bad", "okay", "fine", "great", "terrible", "better", "worse",
+                // Common nouns
+                "mom", "dad", "mother", "father", "brother", "sister", "family", "friend", "person", "people",
+                "home", "house", "room", "bed", "bathroom", "kitchen", "door", "window", "table", "chair",
+                "food", "water", "drink", "breakfast", "lunch", "dinner", "snack",
+                "phone", "computer", "TV", "book", "toy", "game", "music", "movie",
+                "school", "work", "store", "hospital", "park", "car", "bus",
+                // Question words
+                "what", "where", "when", "who", "why", "how", "which",
+                // Common adjectives
+                "big", "small", "hot", "cold", "fast", "slow", "easy", "hard",
+                "new", "old", "clean", "dirty", "full", "empty", "more", "less",
+                // Prepositions
+                "in", "on", "at", "to", "from", "with", "without", "for", "about", "before", "after",
+                // Time
+                "now", "today", "tomorrow", "yesterday", "morning", "afternoon", "evening", "night",
+                "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+                // Colors
+                "red", "blue", "green", "yellow", "orange", "purple", "pink", "black", "white", "brown",
+                // Numbers
+                "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                "first", "second", "third", "last", "next",
+                // Yes/No and common responses
+                "yes", "no", "maybe", "please", "thanks", "sorry", "excuse me", "hello", "goodbye", "hi", "bye",
+                // Body parts
+                "head", "face", "eye", "ear", "nose", "mouth", "hand", "arm", "leg", "foot", "stomach", "back",
+                // Activities
+                "bathroom", "shower", "brush teeth", "get dressed", "go outside", "come inside",
+                // More common words
+                "all", "some", "none", "every", "each", "other", "another", "both", "same", "different",
+                "very", "too", "so", "enough", "just", "only", "also", "even", "still", "again",
+                "here", "there", "everywhere", "nowhere", "somewhere", "anywhere",
+                "always", "never", "sometimes", "often", "usually", "rarely",
+                "up", "down", "left", "right", "front", "back", "inside", "outside", "over", "under",
+                // Medical/health
+                "doctor", "nurse", "medicine", "pain", "ache", "fever", "cough", "cold", "allergy",
+                // Technology
+                "internet", "email", "text", "call", "message", "video", "picture", "photo",
+                // Meals and food types
+                "hungry", "thirsty", "eat", "drink", "cook", "recipe", "dessert", "fruit", "vegetable",
+                // Clothing
+                "shirt", "pants", "shoes", "socks", "coat", "hat", "clothes", "dress",
+                // Weather
+                "weather", "sunny", "cloudy", "rainy", "snowy", "windy", "warm", "cool",
+                // Actions
+                "change", "choose", "decide", "try", "practice", "learn", "teach", "show",
+                "buy", "sell", "pay", "cost", "save", "spend", "share",
+                // States of being
+                "am", "is", "are", "was", "were", "be", "been", "being",
+                "can", "could", "will", "would", "should", "must", "may", "might",
+                // Emotions (extended)
+                "love", "hate", "worry", "care", "miss", "enjoy", "proud", "ashamed",
+                "surprised", "confused", "frustrated", "annoyed", "bored", "interested",
+                // Social
+                "meet", "visit", "invite", "join", "leave", "arrive", "return",
+                "party", "celebration", "birthday", "holiday", "vacation",
+                // Abilities
+                "able", "unable", "ready", "prepared", "finished", "done", "complete",
+                // Directions
+                "straight", "turn", "around", "toward", "away", "near", "far", "close",
+                // Quantities
+                "many", "few", "several", "couple", "dozen", "hundred", "thousand",
+                "whole", "half", "quarter", "part", "piece", "bit",
+                // Qualities
+                "important", "special", "favorite", "best", "worst", "better", "worse",
+                "nice", "mean", "kind", "rude", "polite", "gentle", "rough",
+                "quiet", "loud", "silent", "noisy",
+                "beautiful", "ugly", "pretty", "handsome",
+                "strong", "weak", "heavy", "light",
+                "thick", "thin", "wide", "narrow",
+                "long", "short", "tall", "high", "low",
+                "deep", "shallow", "flat", "round", "square",
+                "soft", "hard", "smooth", "rough", "sharp", "dull",
+                "wet", "dry", "damp", "soaked",
+                "sweet", "sour", "bitter", "salty", "spicy", "bland",
+                // Media and entertainment
+                "show", "program", "channel", "episode", "season", "series",
+                "song", "album", "artist", "band", "concert",
+                "team", "player", "game", "score", "win", "lose", "tie",
+                // Communication
+                "conversation", "discussion", "argument", "question", "answer", "comment",
+                "agree", "disagree", "opinion", "idea", "plan", "suggestion",
+                // Misc useful
+                "problem", "solution", "issue", "trouble", "difficulty",
+                "reason", "cause", "effect", "result", "consequence",
+                "choice", "option", "alternative", "possibility",
+                "way", "method", "manner", "style", "type", "kind", "sort",
+                "thing", "stuff", "item", "object", "something", "anything", "nothing", "everything"
+            ];
+            
+            console.log(`🔥 Warming up ${commonWords.length} common words...`);
+            await batchFetchImages(commonWords, token, aacUserId, '🔥');
+        }
+        
+        /**
+         * Phase 2: Warm up tap configuration words
+         */
+        async function warmUpTapConfig(token, aacUserId) {
+            try {
+                const response = await fetch(`/api/tap-interface/config?t=${Date.now()}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'X-User-ID': aacUserId
+                    }
+                });
+                
+                if (!response.ok) return;
+                
+                const config = await response.json();
+                const configWords = [];
+                
+                if (config.buttons) {
+                    config.buttons.forEach(btn => {
+                        if (btn.label && !btn.hidden) configWords.push(btn.label);
+                        if (btn.children) {
+                            btn.children.forEach(child => {
+                                if (child.label && !child.hidden) configWords.push(child.label);
+                            });
+                        }
+                    });
+                }
+                
+                if (configWords.length > 0) {
+                    console.log(`🎯 Warming up ${configWords.length} tap config words...`);
+                    await batchFetchImages(configWords, token, aacUserId, '🎯');
+                }
+            } catch (error) {
+                console.error('Error warming up tap config:', error);
+            }
+        }
+        
+        /**
+         * Phase 3: Warm up cached phrase buttons
+         */
+        async function warmUpCachedPhrases(token, aacUserId) {
+            try {
+                const cached = localStorage.getItem('tap_initial_phrases');
+                if (!cached) return;
+                
+                const data = JSON.parse(cached);
+                const phraseTexts = (data.data || []).map(opt => typeof opt === 'object' ? opt.option : opt);
+                
+                if (phraseTexts.length > 0) {
+                    console.log(`💬 Warming up ${phraseTexts.length} cached phrases...`);
+                    await batchFetchImages(phraseTexts, token, aacUserId, '💬');
+                }
+            } catch (error) {
+                console.error('Error warming up phrases:', error);
+            }
+        }
+        
+        /**
+         * Batch fetch images for a list of terms
+         */
+        async function batchFetchImages(terms, token, aacUserId, emoji = '📦') {
+            const BATCH_SIZE = 50;
+            const batches = [];
+            for (let i = 0; i < terms.length; i += BATCH_SIZE) {
+                batches.push(terms.slice(i, i + BATCH_SIZE));
+            }
+            
+            let totalCached = 0;
+            
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                console.log(`${emoji} Batch ${i + 1}/${batches.length} (${batch.length} words)...`);
+                
+                try {
+                    const response = await fetch('/api/symbols/batch-search', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'X-User-ID': aacUserId,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ terms: batch })
+                    });
+                    
+                    if (!response.ok) continue;
+                    
+                    const data = await response.json();
+                    const results = data.results || {};
+                    
+                    for (const [text, imageUrl] of Object.entries(results)) {
+                        if (imageUrl) {
+                            const cacheKey = `tap_${text.trim().toLowerCase()}`;
+                            window.symbolImageCache.set(cacheKey, {
+                                imageUrl: imageUrl,
+                                timestamp: Date.now()
+                            });
+                            totalCached++;
+                        }
+                    }
+                    
+                    console.log(`${emoji} Batch ${i + 1} complete: ${Object.keys(results).filter(k => results[k]).length} images`);
+                    
+                    // Brief delay
+                    if (i < batches.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                } catch (error) {
+                    console.error(`Error fetching batch ${i + 1}:`, error);
+                }
+            }
+            
+            console.log(`${emoji} Cached ${totalCached} new images, total: ${window.symbolImageCache.size}`);
+        }
+
         // Function to check mood selection and interface preference, then redirect appropriately
         async function redirectToPreferredInterface() {
             try {
                 const token = sessionStorage.getItem('firebaseIdToken');
+                const aacUserId = sessionStorage.getItem('currentAacUserId');
                 
-                // First check if mood selection is enabled
+                if (!aacUserId) {
+                    console.error('No AAC user ID in session storage, cannot fetch settings');
+                    // Default redirect to grid page
+                    console.log('Defaulting to grid page due to missing user ID');
+                    window.location.href = 'gridpage.html?page=home';
+                    return;
+                }
+                
+                // Check interface preference FIRST to know if we need to warm cache
+                const interfaceResponse = await fetch('/api/interface-preference', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'X-User-ID': aacUserId,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                let useTapInterface = false;
+                if (interfaceResponse.ok) {
+                    const interfaceData = await interfaceResponse.json();
+                    useTapInterface = interfaceData.useTapInterface || false;
+                }
+                
+                // WARM UP CACHE FIRST if using tap interface (like Flutter app)
+                if (useTapInterface) {
+                    console.log('🚀 Warming up image cache during login...');
+                    await warmUpAllCaches(token, aacUserId);
+                    console.log('✅ Cache warming complete');
+                }
+                
+                // Now check if mood selection is enabled
                 const settingsResponse = await fetch('/api/settings', {
                     method: 'GET',
                     headers: {
                         'Authorization': `Bearer ${token}`,
+                        'X-User-ID': aacUserId,
                         'Content-Type': 'application/json'
                     }
                 });
                 
                 let shouldShowMood = false;
+                let settings = null;
                 if (settingsResponse.ok) {
-                    const settings = await settingsResponse.json();
+                    settings = await settingsResponse.json();
                     shouldShowMood = settings.enableMoodSelection === true;
                     console.log('Mood selection enabled:', shouldShowMood);
+                } else {
+                    console.error('Failed to fetch settings:', settingsResponse.status, await settingsResponse.text());
+                    // Continue without mood selection
                 }
                 
-                // If mood selection is enabled, show it first
+                // Hide loading indicator before showing mood or navigating
+                loadingIndicator.style.display = 'none';
+                
+                // If mood selection is enabled, show it
                 if (shouldShowMood && typeof MoodSelection !== 'undefined') {
-                    console.log('Showing mood selection before interface redirect...');
-                    const moodSelection = new MoodSelection();
+                    console.log('Showing mood selection after cache warm-up...');
+                    const moodSelection = new MoodSelection(settings);
                     
                     // Set up completion callback to redirect after mood selection
                     moodSelection.onComplete = async () => {
-                        console.log('Mood selection completed, now checking interface preference...');
+                        console.log('Mood selection completed, now navigating to interface...');
                         await proceedToInterface();
                     };
                     
-                    moodSelection.show();
+                    await moodSelection.show();
                     return; // Don't proceed to interface until mood is selected
                 }
                 
@@ -606,6 +1309,8 @@
                     return;
                 }
                 
+                console.log('🔍 Fetching interface preference for user:', currentAacUserId);
+                
                 const response = await fetch('/api/interface-preference', {
                     method: 'GET',
                     headers: {
@@ -617,8 +1322,13 @@
                 
                 if (response.ok) {
                     const data = await response.json();
+                    console.log('🔍 Interface preference API response:', data);
                     const targetInterface = data.useTapInterface ? 'tap_interface.html' : 'gridpage.html';
-                    console.log(`Redirecting to preferred interface: ${targetInterface} (useTapInterface: ${data.useTapInterface})`);
+                    console.log(`🚀 Navigating to: ${targetInterface} (useTapInterface=${data.useTapInterface})`);
+                    
+                    // DELAY for 2 seconds so you can see the logs
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
                     window.location.href = `${targetInterface}?page=home`;
                 } else {
                     console.warn('Failed to get interface preference, defaulting to gridpage');
@@ -1998,7 +2708,7 @@ registerForm.addEventListener('submit', async (e) => {
             }
 
             try {
-                // Helper for auth fetch
+                // Helper for auth fetch with timeout
                 const authFetch = async (url, options = {}) => {
                     const headers = options.headers || {};
                     headers['Authorization'] = `Bearer ${firebaseIdToken}`;
@@ -2009,9 +2719,19 @@ registerForm.addEventListener('submit', async (e) => {
                     return fetch(url, options);
                 };
 
-                // Fetch favorites
-                const response = await authFetch('/api/user-current-favorites');
-                if (!response.ok) return false;
+                // Fetch favorites with timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+                
+                const response = await authFetch('/api/user-current-favorites', {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    console.log("Failed to fetch favorites, status:", response.status);
+                    return false;
+                }
                 
                 const data = await response.json();
                 const favorites = data.favorites;
@@ -2099,7 +2819,11 @@ registerForm.addEventListener('submit', async (e) => {
                 }
             } catch (error) {
                 console.error('Error checking scheduled favorites on auth:', error);
+                if (error.name === 'AbortError') {
+                    console.log('Favorites check timed out, proceeding with login...');
+                }
             }
+            console.log('Scheduled favorites check complete, proceeding...');
             return false; // Proceed if error or no match
         }
     </script>

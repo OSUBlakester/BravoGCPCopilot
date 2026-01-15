@@ -352,51 +352,9 @@ class MoodSelection {
             return null;
         }
         
-        const overlay = document.createElement('div');
-        overlay.className = 'mood-loading-overlay';
-        overlay.id = 'mood-loading-overlay';
-        // Add critical inline styles to ensure it shows immediately even if CSS not loaded
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #003366;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        `;
-        
-        const container = document.createElement('div');
-        container.className = 'mood-loading-container';
-        
-        const spinner = document.createElement('div');
-        spinner.className = 'mood-loading-spinner';
-        
-        const headline = document.createElement('div');
-        headline.className = 'mood-loading-headline';
-        headline.textContent = 'Welcome to Bravo!';
-        
-        const text = document.createElement('div');
-        text.className = 'mood-loading-text';
-        text.textContent = 'Loading user data...';
-        
-        const progress = document.createElement('div');
-        progress.className = 'mood-loading-progress';
-        progress.id = 'mood-loading-progress';
-        progress.textContent = '0%';
-        
-        container.appendChild(spinner);
-        container.appendChild(headline);
-        container.appendChild(text);
-        container.appendChild(progress);
-        overlay.appendChild(container);
-        document.body.appendChild(overlay);
-        
-        return overlay;
+        // Note: Loading overlay now defined in auth.html
+        // Just return reference to it if it exists
+        return document.getElementById('mood-loading-overlay');
     }
     
     /**
