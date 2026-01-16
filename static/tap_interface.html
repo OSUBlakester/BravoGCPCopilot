@@ -6,6 +6,7 @@
     <title>Tap Interface - Bravo AAC</title>
     
     <!-- Authentication handled via session storage (set by auth.html) -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="/static/mood-selection.css">
 
@@ -50,14 +51,6 @@
             align-items: center;
             gap: 0.5rem;
             flex-wrap: wrap;
-        }
-
-        /* Custom icon size - 20% larger than previous (21.6px) */
-        .h-5\.4 {
-            height: 1.35rem;
-        }
-        .w-5\.4 {
-            width: 1.35rem;
         }
 
         /* --- Page Banner Styles --- */
@@ -144,57 +137,97 @@
 
         .control-buttons {
             display: flex;
-            gap: 4px;
+            gap: 8px;
             align-items: stretch;
         }
 
         .control-btn {
-            padding: 8px 20px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            border: 1px solid #002244;
-            border-radius: 4px;
+            flex: 1;
+            min-width: 81px;
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
             cursor: pointer;
             transition: all 0.2s ease;
             display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0;
+            position: relative;
+            overflow: hidden;
+            height: 70px;
+            box-shadow: 
+                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
+                0 2px 5px -2px rgba(0, 0, 0, 0.2);
+        }
+
+        .control-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 
+                0 8px 16px -4px rgba(50, 50, 93, 0.2), 
+                0 4px 8px -4px rgba(0, 0, 0, 0.25);
+        }
+
+        .control-btn:active {
+            transform: scale(0.98);
+        }
+
+        .control-btn-icon {
+            flex: 1;
+            display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            min-height: 36px;
+            width: 100%;
+            font-size: 1.8em;
+            color: white;
+        }
+
+        .control-btn-label {
+            width: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            font-size: 8px;
+            font-weight: 600;
+            min-height: 24px;
         }
 
         .speak-btn {
-            background-color: #10B981;
-            color: white;
-            border-color: #10B981;
+            background: linear-gradient(145deg, #10B981, #059669);
         }
 
         .speak-btn:hover {
-            background-color: #059669;
-            border-color: #059669;
+            background: linear-gradient(145deg, #059669, #047857);
         }
 
         .backspace-btn {
-            background-color: #f59e0b;
-            color: white;
-            border-color: #f59e0b;
+            background: linear-gradient(145deg, #f59e0b, #d97706);
         }
 
         .backspace-btn:hover {
-            background-color: #d97706;
-            border-color: #d97706;
+            background: linear-gradient(145deg, #d97706, #b45309);
         }
 
-        .clear-build-btn {
-            background-color: #ff6b6b;
-            color: white;
-            border-color: #ff6b6b;
+        .clear-text-btn {
+            background: linear-gradient(145deg, #6366f1, #4f46e5);
         }
 
-        .clear-build-btn:hover {
-            background-color: #ff5252;
-            border-color: #ff5252;
+        .clear-text-btn:hover {
+            background: linear-gradient(145deg, #4f46e5, #4338ca);
         }
+
+        .reset-btn {
+            background: linear-gradient(145deg, #EF4444, #DC2626);
+        }
+
+        .reset-btn:hover {
+            background: linear-gradient(145deg, #DC2626, #B91C1C);
+        }
+
 
         /* Modal styles for category navigation */
         .modal-overlay {
@@ -340,7 +373,7 @@
 
         /* Sight Word Styling - distinctive format for sight words */
         .sight-word-button {
-            font-size: 1.65em !important;
+            font-size: 1.32em !important;
             font-weight: 900 !important;
             color: #dc2626 !important;
         }
@@ -401,6 +434,170 @@
         .section-header i {
             margin-right: 6.4px;
             color: #667eea;
+        }
+
+        /* Categories header button styling */
+        .categories-header-btn {
+            width: 100%;
+            background: linear-gradient(145deg, #ffffff, #f0f0f0);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            padding: 10px 12px;
+            margin: 0;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+            box-shadow: 
+                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
+                0 2px 5px -2px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .categories-header-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 
+                0 8px 12px -3px rgba(50, 50, 93, 0.2), 
+                0 4px 8px -3px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+            background: linear-gradient(145deg, #f8f8f8, #e8e8e8);
+        }
+
+        .categories-header-btn:active {
+            transform: translateY(0);
+            box-shadow: 
+                0 2px 4px -1px rgba(50, 50, 93, 0.15), 
+                0 1px 3px -1px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        .categories-header-btn i {
+            margin-right: 6px;
+            color: #667eea;
+        }
+
+        /* Categories Modal */
+        .categories-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .categories-modal.show {
+            display: flex;
+        }
+
+        .categories-modal-content {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            width: 90%;
+            max-width: 800px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .categories-modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 20px 20px 0 0;
+        }
+
+        .categories-modal-header h2 {
+            margin: 0;
+            font-size: 1.5em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+        }
+
+        .categories-modal-header i {
+            margin-right: 10px;
+        }
+
+        .categories-modal-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.8em;
+            cursor: pointer;
+            padding: 0;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .categories-modal-close:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .categories-modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .categories-modal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        .categories-modal-button {
+            height: 80px;
+            background: linear-gradient(145deg, #ffffff, #f0f0f0);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 12px;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+            box-shadow: 
+                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
+                0 2px 5px -2px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 6px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .categories-modal-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 
+                0 8px 12px -3px rgba(50, 50, 93, 0.2), 
+                0 4px 8px -3px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        .categories-modal-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            transform: scale(1.02);
         }
 
         /* Section Containers */
@@ -1080,26 +1277,44 @@
 
     <div id="app-container">
     <div class="page-banner">
-        <h1 id="dynamic-page-title"><i class="fas fa-hand-pointer"></i> Tap Interface</h1>
+        <h1 id="dynamic-page-title">Tap Interface</h1>
         <div class="admin-toolbar">
-            <button id="lock-icon" title="Admin Toolbar" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600">
-                <i class="fas fa-lock text-xs"></i>
+            <button id="lock-icon" title="Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100">
+                <i class="fas fa-lock"></i>
             </button>
-            <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-red-100 hover:text-red-600 hidden"><i class="fas fa-lock text-xs"></i></button>
-            <a href="tap_interface_admin.html" title="Tap Interface Admin" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-hand-pointer text-xs"></i></a>
-            <a href="admin_settings.html" title="Global Settings" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-cog text-xs"></i></a>
-            <a href="user_current_admin.html" title="User Current Location" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-map-marker-alt text-xs"></i></a>
-            <a href="user_info_admin.html" title="User Info & Birthdays" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-info-circle text-xs"></i></a>
-            <a href="user_diary_admin.html" title="User Diary" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-book-open text-xs"></i></a>
-            <a href="audio_admin.html" title="Audio Devices" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-volume-up text-xs"></i></a>
-            <a href="favorites_admin.html" title="Favorites Topics" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-star text-xs"></i></a>
-            <a href="admin_audit_report.html" title="Activity Reports" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-clipboard-list text-xs"></i></a>
-            <span class="border-l border-gray-300 h-3 mx-0.5 admin-icon hidden"></span>
-            <button id="switch-user-button" title="Switch User Profile" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-users text-xs"></i></button>
-            <button id="logout-button" title="Logout" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full transition-colors duration-200 text-xs hover:bg-blue-100 hover:text-blue-600 admin-icon hidden"><i class="fas fa-sign-out-alt text-xs"></i></button>
-            <button id="help-icon" title="Help" aria-label="Help" class="h-5.4 w-5.4 flex items-center justify-center text-gray-600 bg-gray-100 rounded-full ml-1 transition-colors duration-200 text-xs hover:bg-green-100 hover:text-green-600 focus:outline-none focus:ring-2 focus:ring-green-500">
-                <i class="fas fa-question-circle text-xs"></i>
+            <div id="admin-icons" class="hidden flex items-center gap-0.4rem">
+                <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-lock"></i></button>
+                <span class="border-l border-white h-6 mx-1"></span>
+                <a href="tap_interface_admin.html" title="Tap Interface Admin" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-hand-pointer"></i></a>
+                <a href="admin_settings.html" title="Global Settings" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-cog"></i></a>
+                <a href="user_current_admin.html" title="User Current Location" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-map-marker-alt"></i></a>
+                <a href="user_info_admin.html" title="User Info & Birthdays" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-info-circle"></i></a>
+                <a href="user_diary_admin.html" title="User Diary" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-book-open"></i></a>
+                <a href="audio_admin.html" title="Audio Devices" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-volume-up"></i></a>
+                <a href="favorites_admin.html" title="Favorites Topics" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-star"></i></a>
+                <a href="admin_audit_report.html" title="Activity Reports" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-clipboard-list"></i></a>
+                <span class="border-l border-white h-6 mx-1"></span>
+                <button id="switch-user-button" title="Switch User Profile" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-users"></i></button>
+                <button id="logout-button" title="Logout" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-sign-out-alt"></i></button>
+            </div>
+            <button id="help-icon" title="Help" aria-label="Help" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full ml-2 transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                <i class="fas fa-question-circle"></i>
             </button>
+        </div>
+    </div>
+
+    <!-- Categories Modal -->
+    <div id="categoriesModal" class="categories-modal">
+        <div class="categories-modal-content">
+            <div class="categories-modal-header">
+                <h2><i class="fas fa-folder-open"></i> All Categories</h2>
+                <button class="categories-modal-close" id="categoriesModalClose">&times;</button>
+            </div>
+            <div class="categories-modal-body">
+                <div class="categories-modal-grid" id="categoriesModalGrid">
+                    <!-- Categories will be loaded dynamically -->
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1125,24 +1340,32 @@
                 <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
                 <div class="control-buttons">
                     <button id="speak-build-btn" class="control-btn speak-btn">
-                        <i class="fas fa-volume-up" style="font-size: 1.1em;"></i> Speak
+                        <div class="control-btn-icon">
+                            <i class="fas fa-volume-up"></i>
+                        </div>
+                        <div class="control-btn-label">Speak</div>
                     </button>
                     <button id="backspace-build-btn" class="control-btn backspace-btn">
-                        <i class="fas fa-backspace" style="font-size: 1.1em;"></i> Backspace
+                        <div class="control-btn-icon">
+                            <i class="fas fa-backspace"></i>
+                        </div>
+                        <div class="control-btn-label">Backspace</div>
                     </button>
-                    <button id="clear-build-btn" class="control-btn clear-build-btn">
-                        <i class="fas fa-trash" style="font-size: 1.1em;"></i> Clear
+                    <button id="clear-text-btn" class="control-btn clear-text-btn">
+                        <div class="control-btn-icon">
+                            <i class="fas fa-eraser"></i>
+                        </div>
+                        <div class="control-btn-label">Clear Text</div>
+                    </button>
+                    <button id="reset-btn" class="control-btn reset-btn">
+                        <div class="control-btn-icon">
+                            <i class="fas fa-redo"></i>
+                        </div>
+                        <div class="control-btn-label">Reset</div>
                     </button>
                 </div>
             </div>
         </div>
-
-        <div id="question-container" style="margin: 0 10px 10px 10px;">
-            <label for="question-display" style="font-weight: 600; color: #333; font-size: 0.75em; margin-left: 2px;">Question:</label>
-            <textarea id="question-display" readonly rows="1" style="width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.8em; resize: none; background-color: #f9f9f9; min-height: 36px; display: block; margin-top: 4px;"></textarea>
-        </div>
-
-
 
         <!-- Category Navigation Modal -->
         <div id="categoryModal" class="modal-overlay" style="display: none;">
@@ -1161,9 +1384,9 @@
         <div class="main-grid">
             <!-- Categories Column -->
             <div class="categories-column" id="categoriesColumn">
-                <div class="section-header">
-                    <h3><i class="fas fa-folder-open"></i> Categories</h3>
-                </div>
+                <button class="categories-header-btn" id="categoriesHeaderBtn">
+                    <i class="fas fa-folder-open"></i> Categories
+                </button>
                 <div class="categories-content">
                     <!-- Categories will be loaded dynamically -->
                 </div>
@@ -1245,6 +1468,7 @@
         let questionRecognitionInstance = null;
         let isSettingUpRecognition = false;
         let listeningForQuestion = false;
+        let activeQuestionAsked = false;
 
         // Announcement Queue System (from gridpage)
         let announcementQueue = [];
@@ -1263,7 +1487,8 @@
         const buildSpace = document.getElementById('build-space');
         const speakBuildBtn = document.getElementById('speak-build-btn');
         const backspaceBuildBtn = document.getElementById('backspace-build-btn');
-        const clearBuildBtn = document.getElementById('clear-build-btn');
+        const clearTextBtn = document.getElementById('clear-text-btn');
+        const resetBtn = document.getElementById('reset-btn');
         const categoryModal = document.getElementById('categoryModal');
         const modalTitle = document.getElementById('modalTitle');
         const modalGrid = document.getElementById('modalGrid');
@@ -1276,6 +1501,92 @@
             const statusMessageElement = document.getElementById('statusMessage');
             if (statusMessageElement) {
                 statusMessageElement.textContent = message;
+            }
+        }
+
+        function getWakeWordDisplay() {
+            const interjection = (wakeWordInterjection || "hey").charAt(0).toUpperCase() + (wakeWordInterjection || "hey").slice(1);
+            const name = (wakeWordName || "friend").charAt(0).toUpperCase() + (wakeWordName || "friend").slice(1);
+            return `${interjection} ${name}`;
+        }
+
+        function getReadyMessage() {
+            return `Ready - Say "${getWakeWordDisplay()}" to ask a question or make a comment`;
+        }
+
+        // Extract main keyword from a phrase for image matching
+        // Removes common stop words (articles, prepositions, etc.) to find the most meaningful word
+        function extractKeywordForImage(text) {
+            if (!text || typeof text !== 'string') return text;
+            
+            // Common stop words to ignore when finding the main keyword
+            const stopWords = new Set([
+                'a', 'an', 'the', 'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'from',
+                'my', 'your', 'his', 'her', 'its', 'our', 'their', 'this', 'that', 'these', 'those',
+                'i', 'you', 'he', 'she', 'it', 'we', 'they', 'am', 'is', 'are', 'was', 'were',
+                'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+                'will', 'would', 'should', 'could', 'can', 'may', 'might', 'must',
+                'and', 'or', 'but', 'not', 'so', 'than', 'as', 'if', 'when', 'where', 'why', 'how'
+            ]);
+            
+            // Split text into words and filter
+            const words = text.toLowerCase().trim().split(/\s+/);
+            
+            // Find the first non-stop word (usually the most important)
+            const keyword = words.find(word => !stopWords.has(word));
+            
+            // If all words are stop words, return the original text
+            // Otherwise return the keyword found
+            return keyword || text;
+        }
+
+        // Clean numbered list items from server responses
+        // Removes patterns like "1. ", "2. ", etc. from the beginning of text
+        function cleanNumberedListItem(text) {
+            if (!text || typeof text !== 'string') return text;
+            // Remove leading number followed by period and optional space (e.g., "1. ", "2.", "10. ")
+            return text.replace(/^\d+\.\s*/, '').trim();
+        }
+
+        // ============ CACHE MANAGEMENT ============
+        const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+        const CACHE_KEYS = {
+            INITIAL_PHRASES: 'tap_initial_phrases',
+            INITIAL_WORDS: 'tap_initial_words'
+        };
+
+        function getCachedData(key) {
+            try {
+                const cached = localStorage.getItem(key);
+                if (!cached) return null;
+                
+                const data = JSON.parse(cached);
+                const now = Date.now();
+                
+                // Check if cache is expired
+                if (now - data.timestamp > CACHE_DURATION) {
+                    localStorage.removeItem(key);
+                    return null;
+                }
+                
+                console.log(`💾 Using cached data for ${key}`);
+                return data.content;
+            } catch (error) {
+                console.error(`Error reading cache for ${key}:`, error);
+                return null;
+            }
+        }
+
+        function setCachedData(key, content) {
+            try {
+                const data = {
+                    content: content,
+                    timestamp: Date.now()
+                };
+                localStorage.setItem(key, JSON.stringify(data));
+                console.log(`💾 Cached data for ${key}`);
+            } catch (error) {
+                console.error(`Error writing cache for ${key}:`, error);
             }
         }
 
@@ -1293,15 +1604,14 @@
         });
 
         /**
-         * Fetches symbol image from the AAC symbol database (like gridpage)
+         * Fetches symbol image from the AAC symbol database
          * @param {string} text - The button text to find a symbol for
          * @param {Array<string>} keywords - Optional semantic keywords for LLM-generated content  
+         * @param {boolean} cacheOnly - If true, only return cached results (no API calls)
          * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
          */
-        async function getSymbolImageForText(text, keywords = null) {
-            console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
+        async function getSymbolImageForText(text, keywords = null, cacheOnly = false) {
             if (!text || text.trim() === '') {
-                console.log(`❌ Empty text provided to getSymbolImageForText`);
                 return null;
             }
             
@@ -1311,31 +1621,94 @@
                 return null;
             }
             
-            // Load images even if enablePictograms is false for debugging
-            // if (!enablePictograms) {
-            //     console.log(`❌ Pictograms disabled, skipping image load for "${text}"`);
-            //     return null;
-            // }
-            
             // Simple in-memory cache to avoid repeated requests
             if (!window.symbolImageCache) {
                 window.symbolImageCache = new Map();
             }
             
-            const cacheKey = `tap_${text.trim().toLowerCase()}`;
-            if (window.symbolImageCache.has(cacheKey)) {
-                const cached = window.symbolImageCache.get(cacheKey);
-                if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
-                    return cached.imageUrl;
+            // Custom images cache (preloaded from server)
+            if (!window.customImagesCache) {
+                window.customImagesCache = [];
+            }
+            if (!window.customImageMatches) {
+                window.customImageMatches = new Map();
+            }
+            
+            // Request throttling to prevent overwhelming server
+            if (!window.imageRequestQueue) {
+                window.imageRequestQueue = [];
+                window.activeRequests = 0;
+                window.MAX_CONCURRENT_REQUESTS = 10; // Max 10 simultaneous requests
+            }
+            
+            const normalizedText = text.trim().toLowerCase();
+            const cacheKey = `tap_${normalizedText}`;
+            
+            // PRIORITY 1: Check preloaded custom images cache first
+            if (window.customImageMatches.has(normalizedText)) {
+                const customImageUrl = window.customImageMatches.get(normalizedText);
+                console.log(`⚡ Using preloaded custom image for "${text}"`);
+                return customImageUrl;
+            }
+            
+            // PRIORITY 2: Check individual custom image lookup (not preloaded yet)
+            if (window.customImagesCache && window.customImagesCache.length > 0) {
+                for (const image of window.customImagesCache) {
+                    if (matchesQuery(image, text)) {
+                        const customImageUrl = image.image_url;
+                        // Cache the match for future lookups
+                        window.customImageMatches.set(normalizedText, customImageUrl);
+                        console.log(`⚡ Found custom image match for "${text}": ${customImageUrl}`);
+                        return customImageUrl;
+                    }
                 }
             }
             
+            // PRIORITY 3: Check global library cache (localStorage + memory)
+            if (window.symbolImageCache.has(cacheKey)) {
+                const cached = window.symbolImageCache.get(cacheKey);
+                console.log(`🎯 Cache HIT for "${text}" (key: ${cacheKey}):`, cached);
+                if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
+                    return cached.imageUrl;
+                } else {
+                    console.log(`⏰ Cache expired for "${text}"`);
+                }
+            } else {
+                console.log(`❌ Cache MISS for "${text}" (key: ${cacheKey}). Cache has ${window.symbolImageCache.size} entries`);
+            }
+            
+            // PRIORITY 4: Search local IndexedDB library (instant, no network!)
+            if (window.searchLocalImageLibrary) {
+                try {
+                    const localResult = await window.searchLocalImageLibrary(text);
+                    if (localResult) {
+                        // Cache the result for even faster future lookups
+                        window.symbolImageCache.set(cacheKey, {
+                            imageUrl: localResult,
+                            timestamp: Date.now()
+                        });
+                        console.log(`📚 Local library found image for "${text}"`);
+                        return localResult;
+                    }
+                } catch (error) {
+                    console.error('Error searching local library:', error);
+                }
+            }
+            
+            // PRIORITY 5: Fetch from global library API (skip if cacheOnly mode)
+            if (cacheOnly) {
+                // On initial page load, only use cached images for instant display
+                return null;
+            }
+            
             try {
+                // Wait for available slot in request queue
+                await waitForRequestSlot();
+                
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => {
-                    console.warn(`⏰ Timeout reached for symbol search: "${text}"`);
                     controller.abort();
-                }, 10000); // Increased to 10 second timeout
+                }, 10000); // 10 second timeout to handle server load
                 
                 // Use unified button-search that searches Firestore collections with keywords support
                 let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`;
@@ -1348,6 +1721,7 @@
                 });
                 
                 clearTimeout(timeoutId);
+                releaseRequestSlot();
                 
                 if (!response.ok) {
                     console.warn(`Symbol search failed for "${text}": ${response.status}`);
@@ -1358,11 +1732,13 @@
                 
                 if (data && data.symbols && Array.isArray(data.symbols) && data.symbols.length > 0) {
                     const symbolUrl = data.symbols[0].url;
-                    // Cache the result
+                    // Cache the result in memory
                     window.symbolImageCache.set(cacheKey, {
                         imageUrl: symbolUrl,
                         timestamp: Date.now()
                     });
+                    // Persist to localStorage
+                    saveGlobalCacheToLocalStorage();
                     console.log(`✅ Found Firestore image for "${text}": ${symbolUrl}`);
                     return symbolUrl;
                 } else {
@@ -1371,10 +1747,13 @@
                         imageUrl: null,
                         timestamp: Date.now()
                     });
+                    // Persist to localStorage
+                    saveGlobalCacheToLocalStorage();
                     console.log(`❌ No Firestore image found for "${text}"`);
                     return null;
                 }
             } catch (error) {
+                releaseRequestSlot();
                 if (error.name === 'AbortError') {
                     console.warn(`🚫 Request aborted for symbol "${text}" - likely due to timeout`);
                 } else {
@@ -1382,6 +1761,663 @@
                 }
                 return null;
             }
+        }
+        
+        /**
+         * Wait for an available request slot (throttling)
+         */
+        async function waitForRequestSlot() {
+            while (window.activeRequests >= window.MAX_CONCURRENT_REQUESTS) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            window.activeRequests++;
+        }
+        
+        /**
+         * Release a request slot
+         */
+        function releaseRequestSlot() {
+            window.activeRequests = Math.max(0, window.activeRequests - 1);
+        }
+
+        /**
+         * Load global image cache from localStorage (persistent across sessions)
+         */
+        function loadGlobalCacheFromLocalStorage() {
+            const CACHE_KEY = 'tap_pictogram_cache';
+            const ENV_KEY = 'tap_pictogram_cache_env';
+            const currentEnv = window.location.hostname; // Use hostname as environment indicator
+            
+            try {
+                const cachedEnv = localStorage.getItem(ENV_KEY);
+                
+                // Clear cache if environment changed
+                if (cachedEnv !== currentEnv) {
+                    console.log(`🔄 Environment changed from ${cachedEnv} to ${currentEnv} - clearing cache`);
+                    localStorage.removeItem(CACHE_KEY);
+                    localStorage.setItem(ENV_KEY, currentEnv);
+                    return;
+                }
+                
+                const cached = localStorage.getItem(CACHE_KEY);
+                if (cached) {
+                    const cacheData = JSON.parse(cached);
+                    window.symbolImageCache = new Map(cacheData);
+                    console.log(`📚 Loaded ${window.symbolImageCache.size} cached images from localStorage`);
+                    
+                    // Debug: Show first 3 cache entries
+                    const firstEntries = Array.from(window.symbolImageCache.entries()).slice(0, 3);
+                    console.log('📋 Sample cache entries:', firstEntries.map(([key, val]) => ({key, url: val?.imageUrl?.substring(0, 50)})));
+                }
+            } catch (e) {
+                console.warn('Failed to load cache from localStorage:', e);
+            }
+        }
+        
+        /**
+         * Extract meaningful keywords from a phrase for image search
+         * Removes filler words and returns important words
+         */
+        function extractKeywords(text) {
+            const fillerWords = new Set([
+                'a', 'an', 'the', 'this', 'that', 'these', 'those',
+                'i', 'me', 'my', 'you', 'your', 'we', 'our',
+                'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+                'have', 'has', 'had', 'do', 'does', 'did',
+                'can', 'could', 'will', 'would', 'should', 'may', 'might',
+                'and', 'or', 'but', 'so', 'if', 'when', 'where', 'who', 'what', 'how',
+                'to', 'for', 'of', 'in', 'on', 'at', 'by', 'with', 'from',
+                'some', 'any', 'all', 'please', 'it', 'just', 'very'
+            ]);
+            
+            // Split and clean
+            const words = text.toLowerCase()
+                .replace(/[.,!?;:'"]/g, '') // Remove punctuation
+                .split(/\s+/)
+                .filter(word => word.length > 2 && !fillerWords.has(word));
+            
+            return words;
+        }
+        
+        /**
+         * Batch search local IndexedDB image library for multiple words at once (MUCH faster!)
+         * Returns a Map of { searchText -> imageUrl }
+         */
+        async function batchSearchLocalImageLibrary(searchTexts) {
+            try {
+                // Initialize IndexedDB if needed
+                if (!window.imageLibraryDB) {
+                    const request = indexedDB.open('BravoImageLibrary', 1);
+                    window.imageLibraryDB = await new Promise((resolve, reject) => {
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                }
+                
+                const results = new Map();
+                const transaction = window.imageLibraryDB.transaction(['images'], 'readonly');
+                const store = transaction.objectStore('images');
+                const tagsIndex = store.index('tags');
+                
+                // Search all texts in parallel
+                const searchPromises = searchTexts.map(async (searchText) => {
+                    // For single words, search directly; for phrases, extract keywords
+                    const words = searchText.trim().split(/\s+/);
+                    let searchTerms;
+                    
+                    if (words.length === 1) {
+                        // Single word: use as-is
+                        searchTerms = [searchText.trim()];
+                    } else {
+                        // Phrase: extract keywords and search for each
+                        const keywords = extractKeywords(searchText);
+                        searchTerms = keywords.length > 0 ? keywords : [words[words.length - 1]]; // Fallback to last word
+                    }
+                    
+                    // Try each search term (important words first)
+                    for (const term of searchTerms) {
+                        const searchVariations = [
+                            term.toLowerCase(),
+                            term.charAt(0).toUpperCase() + term.slice(1),
+                            term.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+                            term.toUpperCase()
+                        ];
+                        
+                        for (const variation of searchVariations) {
+                            const request = tagsIndex.get(variation);
+                            const result = await new Promise((resolve, reject) => {
+                                request.onsuccess = () => resolve(request.result);
+                                request.onerror = () => reject(request.error);
+                            });
+                            
+                            if (result && result.image_url) {
+                                results.set(searchText, result.image_url);
+                                return; // Found match, move to next search text
+                            }
+                        }
+                    }
+                    
+                    // No match found
+                    results.set(searchText, null);
+                });
+                
+                await Promise.all(searchPromises);
+                return results;
+                
+            } catch (error) {
+                console.error('Error batch searching local library:', error);
+                return new Map();
+            }
+        }
+        
+        /**
+         * Save global image cache to localStorage
+         */
+        function saveGlobalCacheToLocalStorage() {
+            const CACHE_KEY = 'tap_pictogram_cache';
+            try {
+                const cacheData = Array.from(window.symbolImageCache.entries());
+                localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+            } catch (e) {
+                console.warn('Failed to save cache to localStorage:', e);
+            }
+        }
+        
+        /**
+         * Warm-up cache by batch-fetching common AAC words
+         * This significantly improves initial performance by pre-caching 1000+ images
+         */
+        async function warmUpImageCache() {
+            const MIN_CACHE_SIZE = 1000; // Only warm up if cache is smaller than this
+            const currentCacheSize = window.symbolImageCache.size;
+            
+            console.log(`🔥 Cache warm-up check: ${currentCacheSize} images cached`);
+            
+            if (currentCacheSize >= MIN_CACHE_SIZE) {
+                console.log(`✅ Cache already warmed up (${currentCacheSize} >= ${MIN_CACHE_SIZE})`);
+                return;
+            }
+            
+            console.log(`🚀 Starting cache warm-up...`);
+            
+            // Core AAC vocabulary - most common words used in AAC
+            // Based on Dolch sight words, core vocabulary lists, and common AAC usage
+            const commonWords = [
+                // Core pronouns and basic words
+                "I", "you", "me", "my", "we", "he", "she", "they", "it", "this", "that",
+                // Action verbs (most common)
+                "want", "go", "like", "need", "help", "eat", "drink", "play", "look", "see",
+                "hear", "stop", "come", "get", "give", "make", "put", "take", "turn", "open",
+                "close", "sit", "stand", "walk", "run", "jump", "push", "pull", "throw", "catch",
+                // Feelings and states
+                "happy", "sad", "angry", "tired", "hurt", "scared", "good", "bad", "sick", "better",
+                "hungry", "thirsty", "hot", "cold", "wet", "dry", "dirty", "clean",
+                // Basic nouns - people
+                "mom", "dad", "mother", "father", "sister", "brother", "baby", "friend", "teacher",
+                "doctor", "nurse", "people", "family", "boy", "girl", "man", "woman", "child",
+                // Basic nouns - places
+                "home", "school", "bathroom", "bedroom", "kitchen", "store", "park", "hospital",
+                "outside", "inside", "here", "there", "up", "down",
+                // Basic nouns - things
+                "food", "water", "juice", "milk", "cookie", "apple", "bread", "cheese", "pizza",
+                "toy", "ball", "book", "car", "phone", "computer", "tv", "music", "bed", "chair",
+                "table", "door", "window", "light", "cup", "plate", "spoon", "fork", "shirt",
+                "pants", "shoes", "coat", "hat", "dog", "cat", "bird", "fish",
+                // Question words
+                "what", "where", "when", "who", "why", "how",
+                // Responses
+                "yes", "no", "please", "thank you", "sorry", "okay", "hi", "bye", "hello",
+                // Time
+                "now", "later", "today", "tomorrow", "yesterday", "morning", "night", "day",
+                // More common verbs
+                "love", "know", "think", "feel", "tell", "talk", "say", "ask", "show", "read",
+                "write", "draw", "color", "sing", "dance", "sleep", "wake", "wash", "brush",
+                "change", "finish", "start", "wait", "watch", "listen", "touch", "smell", "taste",
+                // Descriptors
+                "big", "small", "little", "more", "less", "all", "some", "many", "few", "first",
+                "last", "new", "old", "young", "fast", "slow", "loud", "quiet", "hard", "soft",
+                "heavy", "light", "long", "short", "tall", "high", "low", "same", "different",
+                // Colors
+                "red", "blue", "green", "yellow", "orange", "purple", "pink", "brown", "black",
+                "white", "gray",
+                // Numbers
+                "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+                // Prepositions
+                "in", "on", "under", "over", "by", "with", "for", "to", "from", "at", "off",
+                // Conjunctions
+                "and", "or", "but", "because", "if", "then",
+                // More actions
+                "buy", "sell", "pay", "work", "fix", "break", "cut", "cook", "bake", "clean",
+                "sweep", "wipe", "pour", "mix", "stir", "shake", "roll", "fold", "tear", "glue",
+                "paint", "build", "knock", "ring", "call", "answer", "text", "type", "click",
+                "swipe", "scroll", "save", "delete", "send", "share", "like", "comment", "post",
+                // Body parts
+                "head", "hair", "eye", "eyes", "ear", "ears", "nose", "mouth", "teeth", "tongue",
+                "face", "neck", "shoulder", "arm", "hand", "finger", "leg", "foot", "toe", "back",
+                "stomach", "heart", "knee", "elbow",
+                // More feelings
+                "excited", "nervous", "worried", "calm", "proud", "silly", "bored", "confused",
+                "surprised", "mad", "upset", "frustrated", "disappointed",
+                // School/learning
+                "learn", "study", "homework", "test", "class", "lesson", "question", "answer",
+                "pencil", "paper", "crayon", "marker", "eraser", "ruler", "backpack", "lunch",
+                // Time/calendar
+                "minute", "hour", "week", "month", "year", "Monday", "Tuesday", "Wednesday",
+                "Thursday", "Friday", "Saturday", "Sunday", "January", "February", "March",
+                "April", "May", "June", "July", "August", "September", "October", "November",
+                "December", "spring", "summer", "fall", "winter", "birthday", "holiday",
+                // Weather
+                "sun", "sunny", "rain", "rainy", "cloud", "cloudy", "wind", "windy", "snow",
+                "snowy", "storm", "thunder", "lightning",
+                // More food
+                "breakfast", "lunch", "dinner", "snack", "hungry", "full", "yummy", "yuck",
+                "sweet", "sour", "salty", "spicy", "chicken", "beef", "fish", "egg", "rice",
+                "pasta", "soup", "salad", "fruit", "vegetable", "banana", "orange", "grape",
+                "strawberry", "watermelon", "carrot", "broccoli", "potato", "corn", "peas",
+                // Clothing
+                "dress", "skirt", "sweater", "jacket", "gloves", "socks", "boots", "belt",
+                "button", "zipper", "pocket",
+                // Animals
+                "animal", "pet", "horse", "cow", "pig", "sheep", "chicken", "duck", "rabbit",
+                "mouse", "squirrel", "deer", "bear", "lion", "tiger", "elephant", "monkey",
+                "snake", "frog", "turtle", "butterfly", "bee", "spider",
+                // Transportation
+                "bus", "train", "plane", "boat", "bike", "truck", "motorcycle", "helicopter",
+                "subway", "taxi", "ride", "drive", "fly",
+                // Nature
+                "tree", "flower", "grass", "garden", "plant", "leaf", "branch", "rock", "dirt",
+                "sand", "water", "ocean", "lake", "river", "stream", "mountain", "hill", "sky",
+                "star", "moon", "cloud",
+                // Activities
+                "game", "sport", "soccer", "basketball", "baseball", "football", "tennis",
+                "swim", "skate", "ski", "hike", "camp", "picnic", "party", "movie", "show",
+                "art", "craft", "puzzle", "cards",
+                // Technology
+                "iPad", "tablet", "screen", "keyboard", "mouse", "app", "game", "video",
+                "picture", "photo", "camera", "charger", "battery", "wifi", "internet",
+                // Medical
+                "medicine", "pill", "shot", "bandaid", "thermometer", "cough", "sneeze",
+                "fever", "pain", "ache", "owie", "boo boo",
+                // More descriptors
+                "pretty", "ugly", "beautiful", "nice", "mean", "kind", "gentle", "rough",
+                "smooth", "bumpy", "sharp", "dull", "bright", "dark", "shiny", "clear",
+                "empty", "full", "open", "closed", "broken", "fixed", "safe", "dangerous",
+                // Position/direction
+                "left", "right", "front", "back", "middle", "top", "bottom", "beside", "between",
+                "around", "through", "across", "toward", "away",
+                // Quantity
+                "none", "any", "every", "each", "both", "half", "whole", "pair", "group",
+                "bunch", "lots", "enough", "too much",
+                // Social
+                "share", "take turns", "wait your turn", "be nice", "be kind", "be gentle",
+                "be careful", "be quiet", "be still", "listen", "pay attention", "try",
+                "practice", "help", "cooperate"
+            ];
+            
+            console.log(`📦 Preparing to batch-fetch ${commonWords.length} common words`);
+            
+            // Batch size limit from server is 50, so we'll do multiple batches
+            const BATCH_SIZE = 50;
+            const batches = [];
+            for (let i = 0; i < commonWords.length; i += BATCH_SIZE) {
+                batches.push(commonWords.slice(i, i + BATCH_SIZE));
+            }
+            
+            console.log(`📤 Fetching ${batches.length} batches of ${BATCH_SIZE} words each...`);
+            
+            let totalFetched = 0;
+            let totalCached = 0;
+            
+            // Process batches sequentially to avoid overwhelming server
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                console.log(`📦 Fetching batch ${i + 1}/${batches.length} (${batch.length} words)...`);
+                
+                try {
+                    const response = await authenticatedFetch('/api/symbols/batch-search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ terms: batch })
+                    });
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.warn(`⚠️ Batch ${i + 1} failed: ${response.status} - ${errorText}`);
+                        continue;
+                    }
+                    
+                    const data = await response.json();
+                    const results = data.results || {};
+                    
+                    console.log(`📥 Batch ${i + 1} received ${Object.keys(results).length} results`);
+                    
+                    // Cache all results
+                    for (const [text, imageUrl] of Object.entries(results)) {
+                        if (imageUrl) {
+                            const normalizedText = text.toLowerCase().trim();
+                            const cacheKey = `${normalizedText}`;
+                            
+                            window.symbolImageCache.set(cacheKey, {
+                                imageUrl: imageUrl,
+                                timestamp: Date.now()
+                            });
+                            
+                            totalCached++;
+                        }
+                    }
+                    
+                    totalFetched += Object.keys(results).length;
+                    const foundCount = Object.keys(results).filter(k => results[k]).length;
+                    console.log(`✅ Batch ${i + 1} complete: ${foundCount} images found, ${totalCached} total cached so far`);
+                    
+                    // Small delay between batches to be gentle on server
+                    if (i < batches.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                } catch (error) {
+                    console.error(`❌ Error fetching batch ${i + 1}:`, error);
+                    console.error(`   Error details:`, error.message, error.stack);
+                }
+            }
+            
+            // Save to localStorage
+            saveGlobalCacheToLocalStorage();
+            
+            const finalCacheSize = window.symbolImageCache.size;
+            console.log(`🔥 Cache warm-up complete!`);
+            console.log(`   📊 Fetched: ${totalFetched} words`);
+            console.log(`   💾 Cached: ${totalCached} new images`);
+            console.log(`   📈 Total cache: ${currentCacheSize} → ${finalCacheSize} images`);
+        }
+        
+        /**
+         * Warm up cache with user's actual tap interface config words
+         * Fetches images for category labels and child labels from tap config
+         */
+        async function warmUpUserConfigWords() {
+            console.log('🎯 Starting user config word warm-up...');
+            
+            // Load tap config first
+            try {
+                const response = await authenticatedFetch(`/api/tap-interface/config?t=${Date.now()}`);
+                if (!response.ok) {
+                    console.warn('Failed to load tap config for warm-up');
+                    return;
+                }
+                const config = await response.json();
+                
+                // Collect all labels from config
+                const configWords = [];
+                if (config.buttons) {
+                    config.buttons.forEach(btn => {
+                        if (btn.label && !btn.hidden) {
+                            configWords.push(btn.label);
+                        }
+                        if (btn.children) {
+                            btn.children.forEach(child => {
+                                if (child.label && !child.hidden) {
+                                    configWords.push(child.label);
+                                }
+                            });
+                        }
+                    });
+                }
+                
+                if (configWords.length === 0) {
+                    console.log('🎯 No config words to warm up');
+                    return;
+                }
+                
+                console.log(`🎯 Found ${configWords.length} config words to warm up`);
+                
+                // Batch fetch config word images
+                const BATCH_SIZE = 50;
+                const batches = [];
+                for (let i = 0; i < configWords.length; i += BATCH_SIZE) {
+                    batches.push(configWords.slice(i, i + BATCH_SIZE));
+                }
+                
+                let totalCached = 0;
+                const currentCacheSize = window.symbolImageCache.size;
+                
+                for (let i = 0; i < batches.length; i++) {
+                    const batch = batches[i];
+                    console.log(`🎯 Fetching config batch ${i + 1}/${batches.length} (${batch.length} words)...`);
+                    
+                    try {
+                        const response = await authenticatedFetch('/api/symbols/batch-search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ terms: batch })
+                        });
+                        
+                        if (!response.ok) continue;
+                        
+                        const data = await response.json();
+                        const results = data.results || {};
+                        
+                        // Cache results
+                        for (const [text, imageUrl] of Object.entries(results)) {
+                            if (imageUrl) {
+                                const cacheKey = `tap_${text.trim().toLowerCase()}`;
+                                window.symbolImageCache.set(cacheKey, {
+                                    imageUrl: imageUrl,
+                                    timestamp: Date.now()
+                                });
+                                totalCached++;
+                            }
+                        }
+                        
+                        console.log(`✅ Config batch ${i + 1} complete: ${Object.keys(results).filter(k => results[k]).length} images found`);
+                        
+                        // Brief delay between batches
+                        if (i < batches.length - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error fetching config batch ${i + 1}:`, error);
+                    }
+                }
+                
+                // Save to localStorage
+                saveGlobalCacheToLocalStorage();
+                
+                const finalCacheSize = window.symbolImageCache.size;
+                console.log(`🎯 Config warm-up complete!`);
+                console.log(`   💾 Cached: ${totalCached} new images`);
+                console.log(`   📈 Total cache: ${currentCacheSize} → ${finalCacheSize} images`);
+                
+            } catch (error) {
+                console.error('❌ Error in user config warm-up:', error);
+            }
+        }
+        
+        /**
+         * Warm up cache with LLM-generated phrase button text
+         * Fetches images for cached phrase options that will be displayed on page load
+         */
+        async function warmUpCachedPhraseImages() {
+            console.log('💬 Starting cached phrase image warm-up...');
+            
+            try {
+                // Get cached phrases (if any)
+                const cachedPhrases = getCachedData(CACHE_KEYS.INITIAL_PHRASES);
+                if (!cachedPhrases || cachedPhrases.length === 0) {
+                    console.log('💬 No cached phrases to warm up');
+                    return;
+                }
+                
+                // Extract phrase text from options (could be strings or objects)
+                const phraseTexts = cachedPhrases.map(opt => 
+                    typeof opt === 'object' ? opt.option : opt
+                );
+                
+                console.log(`💬 Found ${phraseTexts.length} cached phrases to warm up`);
+                
+                // Batch fetch phrase images
+                const BATCH_SIZE = 50;
+                const batches = [];
+                for (let i = 0; i < phraseTexts.length; i += BATCH_SIZE) {
+                    batches.push(phraseTexts.slice(i, i + BATCH_SIZE));
+                }
+                
+                let totalCached = 0;
+                const currentCacheSize = window.symbolImageCache.size;
+                
+                for (let i = 0; i < batches.length; i++) {
+                    const batch = batches[i];
+                    console.log(`💬 Fetching phrase batch ${i + 1}/${batches.length} (${batch.length} phrases)...`);
+                    
+                    try {
+                        const response = await authenticatedFetch('/api/symbols/batch-search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ terms: batch })
+                        });
+                        
+                        if (!response.ok) continue;
+                        
+                        const data = await response.json();
+                        const results = data.results || {};
+                        
+                        // Cache results
+                        for (const [text, imageUrl] of Object.entries(results)) {
+                            if (imageUrl) {
+                                const cacheKey = `tap_${text.trim().toLowerCase()}`;
+                                window.symbolImageCache.set(cacheKey, {
+                                    imageUrl: imageUrl,
+                                    timestamp: Date.now()
+                                });
+                                totalCached++;
+                            }
+                        }
+                        
+                        console.log(`✅ Phrase batch ${i + 1} complete: ${Object.keys(results).filter(k => results[k]).length} images found`);
+                        
+                        // Brief delay between batches
+                        if (i < batches.length - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                        }
+                    } catch (error) {
+                        console.error(`❌ Error fetching phrase batch ${i + 1}:`, error);
+                    }
+                }
+                
+                // Save to localStorage
+                saveGlobalCacheToLocalStorage();
+                
+                const finalCacheSize = window.symbolImageCache.size;
+                console.log(`💬 Phrase warm-up complete!`);
+                console.log(`   💾 Cached: ${totalCached} new images`);
+                console.log(`   📈 Total cache: ${currentCacheSize} → ${finalCacheSize} images`);
+                
+            } catch (error) {
+                console.error('❌ Error in phrase warm-up:', error);
+            }
+        }
+        
+        /**
+         * Client-side matching logic (based on Flutter's matchesQuery)
+         * @param {Object} customImage - Custom image object with concept, subconcept, tags
+         * @param {string} query - Search query text
+         * @returns {boolean} - True if image matches query
+         */
+        function matchesQuery(customImage, query) {
+            if (!query || query.trim() === '') return true;
+            
+            const lowerQuery = query.toLowerCase().trim();
+            const searchText = `${customImage.concept || ''} ${customImage.subconcept || ''} ${(customImage.tags || []).join(' ')}`.toLowerCase().trim();
+            
+            // For single character queries, be strict to avoid false positives
+            if (lowerQuery.length === 1) {
+                const words = searchText.split(/\s+/);
+                return words.some(word => word === lowerQuery);
+            }
+            
+            // For short queries (2-3 chars), look for word starts or exact words
+            if (lowerQuery.length <= 3) {
+                const words = searchText.split(/\s+/);
+                return words.some(word => word === lowerQuery || word.startsWith(lowerQuery));
+            }
+            
+            // For longer queries, use contains logic
+            return searchText.includes(lowerQuery);
+        }
+        
+        /**
+         * Preload all custom images for the current user (called once on initialization)
+         */
+        async function preloadCustomImages() {
+            if (!currentAacUserId || !firebaseIdToken) {
+                console.log('📭 No user context for custom image preloading');
+                return;
+            }
+            
+            try {
+                console.log('🚀 Preloading custom images...');
+                
+                const response = await authenticatedFetch('/api/get_custom_images', {
+                    method: 'GET'
+                });
+                
+                if (!response.ok) {
+                    console.warn('Failed to fetch custom images:', response.status);
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.images && Array.isArray(data.images)) {
+                    window.customImagesCache = data.images;
+                    console.log(`✅ Preloaded ${window.customImagesCache.length} custom images`);
+                } else {
+                    console.warn('No custom images found or invalid response');
+                    window.customImagesCache = [];
+                }
+            } catch (error) {
+                console.error('Error preloading custom images:', error);
+                window.customImagesCache = [];
+            }
+        }
+        
+        /**
+         * Batch preload custom images for specific button texts (before showing modal)
+         * @param {Array<string>} buttonTexts - Array of button text labels
+         */
+        async function batchPreloadCustomImageMatches(buttonTexts) {
+            // Ensure global Maps are initialized
+            if (!window.customImagesCache) {
+                window.customImagesCache = [];
+            }
+            if (!window.customImageMatches) {
+                window.customImageMatches = new Map();
+            }
+            
+            if (window.customImagesCache.length === 0) {
+                return;
+            }
+            
+            console.log(`🔍 Building match cache for ${buttonTexts.length} buttons from ${window.customImagesCache.length} custom images`);
+            
+            let matchCount = 0;
+            for (const buttonText of buttonTexts) {
+                // Skip if already cached
+                if (window.customImageMatches.has(buttonText.toLowerCase())) {
+                    continue;
+                }
+                
+                // Find first matching custom image
+                for (const image of window.customImagesCache) {
+                    if (matchesQuery(image, buttonText)) {
+                        window.customImageMatches.set(buttonText.toLowerCase(), image.image_url);
+                        matchCount++;
+                        break; // Use first match
+                    }
+                }
+            }
+            
+            console.log(`🎯 Batch preload complete - ${matchCount} new matches cached (${window.customImageMatches.size} total)`);
         }
 
         // Load user settings from server (like gridpage loadScanSettings)
@@ -1608,14 +2644,25 @@
                 // Apply dynamic grid layout after settings are loaded
                 applyGridLayout();
                 
-                updateStatusMessage('Ready - Say Hey Bravo to start');
+                updateStatusMessage(getReadyMessage());
                 
-                // Render interface
-                await renderInterface();
-                await loadFreestyleOptions();
+                // Render categories first (synchronous)
+                renderCategories();
                 
-                // Pre-cache images in BACKGROUND (don't await)
-                preCacheCategoryImages();
+                // Load phrases and words in PARALLEL
+                console.log('⏱️ Starting parallel load of phrases and words at:', Date.now());
+                const phrasesPromise = loadInitialPhrases();
+                const wordsPromise = loadFreestyleOptions();
+                
+                console.log('⏱️ Waiting for both to complete at:', Date.now());
+                await Promise.all([phrasesPromise, wordsPromise]);
+                console.log('⏱️ Both completed at:', Date.now());
+                
+                // Pre-cache images in BACKGROUND - DISABLED for performance
+                // preCacheCategoryImages();
+                
+                // Start wake word listener
+                setupWakeWordDetection();
                 
             } catch (error) {
                 console.error('Error initializing tap interface:', error);
@@ -1708,6 +2755,16 @@
             }
             
             console.log(`User context initialized. AAC User ID: ${currentAacUserId}`);
+            
+            // Load global cache from localStorage (persistent across sessions)
+            loadGlobalCacheFromLocalStorage();
+            
+            // NOTE: Cache warming now happens in auth.html before navigation
+            // This allows the page to load instantly with pre-cached images
+            
+            // Preload custom images for fast lookup
+            await preloadCustomImages();
+            
             return true;
         }
 
@@ -1718,7 +2775,8 @@
                 speakBuildSpace();
             });
             backspaceBuildBtn.addEventListener('click', backspaceBuildSpace);
-            clearBuildBtn.addEventListener('click', clearBuildSpace);
+            clearTextBtn.addEventListener('click', clearTextOnly);
+            resetBtn.addEventListener('click', clearBuildSpace);
             
             // Modal controls
             modalClose.addEventListener('click', closeModal);
@@ -1762,7 +2820,15 @@
                     if (response.ok) {
                         const data = await response.json();
                         console.log('🟢 Category words exclusion response:', data);
-                        return data.words || [];
+                        // Clean any numbered list items from the response
+                        const cleanedWords = (data.words || []).map(word => {
+                            const cleaned = cleanNumberedListItem(word);
+                            if (cleaned !== word) {
+                                console.log(`🧹 Cleaned numbered item: "${word}" -> "${cleaned}"`);
+                            }
+                            return cleaned;
+                        });
+                        return cleanedWords;
                     }
                 }
                 
@@ -1784,7 +2850,15 @@
                 if (response.ok) {
                     const data = await response.json();
                     console.log('🟢 Word options exclusion response:', data.word_options);
-                    return data.word_options || [];
+                    // Clean any numbered list items from the response
+                    const cleanedWords = (data.word_options || []).map(word => {
+                        const cleaned = cleanNumberedListItem(word);
+                        if (cleaned !== word) {
+                            console.log(`🧹 Cleaned numbered item: "${word}" -> "${cleaned}"`);
+                        }
+                        return cleaned;
+                    });
+                    return cleanedWords;
                 } else {
                     console.error('🔴 Word options exclusion API failed:', response.status);
                     return [];
@@ -1846,20 +2920,344 @@
         }
 
         async function loadInitialPhrases() {
-            console.log('Loading initial generic phrases...');
+            console.log('⏱️ loadInitialPhrases: Starting at:', Date.now());
             try {
                 // Generate generic conversation starters and common phrases
                 const genericPrompt = "Generate general conversation starters and common communication phrases for everyday social interactions";
                 // Store the prompt for Something Else regeneration
                 currentPhrasePrompt = genericPrompt;
+                
+                // Check cache first
+                const cachedPhrases = getCachedData(CACHE_KEYS.INITIAL_PHRASES);
+                if (cachedPhrases) {
+                    console.log('⏱️ loadInitialPhrases: Rendering from cache at:', Date.now());
+                    renderCategoryOptions(cachedPhrases, true); // true = defer images
+                    // Load cached images INSTANTLY (100ms delay for DOM)
+                    setTimeout(async () => {
+                        await loadImagesForPhrases(cachedPhrases, true); // true = cache only, instant
+                        // Then load missing images in background (2 second delay to not block UI)
+                        setTimeout(() => loadImagesForPhrases(cachedPhrases, false), 2000); // false = fetch if needed
+                    }, 100);
+                }
+                
+                // Fetch fresh data in background (even if we have cache)
+                console.log('⏱️ loadInitialPhrases: Fetching fresh phrases at:', Date.now());
                 const options = await generateGridpageLLMOptions(genericPrompt, LLMOptions);
-                console.log('Generated initial phrases:', options);
-                renderCategoryOptions(options);
+                console.log('⏱️ loadInitialPhrases: Got', options.length, 'phrases at:', Date.now());
+                
+                // Update cache
+                setCachedData(CACHE_KEYS.INITIAL_PHRASES, options);
+                
+                // Only re-render if we didn't use cache (to avoid flicker)
+                if (!cachedPhrases) {
+                    console.log('⏱️ loadInitialPhrases: Rendering phrases at:', Date.now());
+                    renderCategoryOptions(options, true); // true = defer images
+                    // Load cached images INSTANTLY (100ms delay for DOM)
+                    setTimeout(async () => {
+                        await loadImagesForPhrases(options, true); // true = cache only, instant
+                        // Then load missing images in background (2 second delay)
+                        setTimeout(() => loadImagesForPhrases(options, false), 2000); // false = fetch if needed
+                    }, 100);
+                    console.log('⏱️ loadInitialPhrases: Rendering complete at:', Date.now());
+                }
             } catch (error) {
                 console.error('Error loading initial phrases:', error);
                 // Show empty state if loading fails
                 renderCategoryOptions([]);
             }
+        }
+
+        // ============ DEFERRED IMAGE LOADING ============
+        
+        // Batch load images for better performance
+        async function batchLoadImages(terms) {
+            if (!terms || terms.length === 0) return {};
+            
+            try {
+                const response = await authenticatedFetch('/api/symbols/batch-search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ terms: terms })
+                });
+                
+                if (!response.ok) {
+                    console.warn('Batch image load failed, falling back to individual requests');
+                    return {};
+                }
+                
+                const data = await response.json();
+                console.log(`✅ Batch loaded ${Object.keys(data.results || {}).length} images`);
+                
+                // Cache the results
+                if (!window.symbolImageCache) {
+                    window.symbolImageCache = new Map();
+                }
+                
+                for (const [text, imageUrl] of Object.entries(data.results || {})) {
+                    const cacheKey = `tap_${text.trim().toLowerCase()}`;
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: imageUrl,
+                        timestamp: Date.now()
+                    });
+                }
+                
+                return data.results || {};
+            } catch (error) {
+                console.error('Error in batch image load:', error);
+                return {};
+            }
+        }
+        
+        async function loadImagesForPhrases(options, initialLoad = false) {
+            console.log(`🖼️ Loading images for ${options.length} phrases (initialLoad: ${initialLoad})`);
+            const buttons = llmStaticOptions.querySelectorAll('.option-button');
+            
+            // Batch preload custom image matches for all phrase options (non-blocking)
+            // Exclude 'Something Else' from batch search
+            const phraseTexts = options.map(opt => typeof opt === 'object' ? opt.option : opt).filter(text => text !== 'Something Else');
+            if (phraseTexts.length > 0) {
+                batchPreloadCustomImageMatches(phraseTexts).catch(error => {
+                    console.error('Error batch preloading phrase images:', error);
+                });
+            }
+            
+            // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
+            if (phraseTexts.length > 0) {
+                try {
+                    console.log(`📦 Batch searching local library for ${phraseTexts.length} phrases...`);
+                    const startTime = performance.now();
+                    const batchResults = await batchSearchLocalImageLibrary(phraseTexts);
+                    const duration = performance.now() - startTime;
+                    console.log(`⚡ Batch search completed in ${duration.toFixed(0)}ms - found ${Array.from(batchResults.values()).filter(v => v !== null).length}/${phraseTexts.length} images`);
+                    
+                    // Cache all found images immediately
+                    let cachedCount = 0;
+                    for (const [text, imageUrl] of batchResults.entries()) {
+                        if (imageUrl) {
+                            const cacheKey = `tap_${text.toLowerCase()}`;
+                            window.symbolImageCache.set(cacheKey, {
+                                imageUrl: imageUrl,
+                                timestamp: Date.now()
+                            });
+                            cachedCount++;
+                        }
+                    }
+                    console.log(`💾 Cached ${cachedCount} images from local library batch search`);
+                } catch (error) {
+                    console.error('Error batch searching local library:', error);
+                }
+            }
+            
+            // Load all images in parallel for better performance
+            const imagePromises = [];
+            const buttonMappings = [];
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image
+                if (btn.querySelector('img')) continue;
+                
+                // Handle "Something Else" button specially
+                if (btn.textContent === 'Something Else') {
+                    console.log('📦 Loading image for Something Else button in Phrases');
+                    const cacheOnly = initialLoad;
+                    imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
+                    buttonMappings.push({ btn, text: 'Something Else' });
+                    continue;
+                }
+                
+                const speechText = typeof option === 'object' ? option.option : option;
+                const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                
+                // On initial load: cache only. Background: fetch if needed.
+                const cacheOnly = initialLoad;
+                imagePromises.push(getSymbolImageForText(speechText, phraseKeywords, cacheOnly));
+                buttonMappings.push({ btn, text: btn.textContent });
+            }
+            
+            // Wait for all images to load in parallel
+            const imageUrls = await Promise.all(imagePromises);
+            
+            // Apply images to buttons
+            for (let i = 0; i < imageUrls.length; i++) {
+                if (imageUrls[i]) {
+                    applyImageToButton(buttonMappings[i].btn, imageUrls[i], buttonMappings[i].text);
+                }
+            }
+        }
+
+        async function loadImagesForWords(options, initialLoad = false) {
+            console.log(`🖼️ Loading images for ${options.length} words (initialLoad: ${initialLoad})`);
+            const buttons = freestyleOptions.querySelectorAll('.freestyle-button');
+            
+            // Batch preload custom image matches for all word options (non-blocking)
+            // Exclude 'Something Else' from batch search
+            const wordTexts = options.map(opt => typeof opt === 'object' ? (opt.text || opt.option) : opt).filter(text => text !== 'Something Else');
+            if (wordTexts.length > 0) {
+                batchPreloadCustomImageMatches(wordTexts).catch(error => {
+                    console.error('Error batch preloading word images:', error);
+                });
+            }
+            
+            // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
+            if (wordTexts.length > 0) {
+                try {
+                    console.log(`📦 Batch searching local library for ${wordTexts.length} words...`);
+                    const startTime = performance.now();
+                    const batchResults = await batchSearchLocalImageLibrary(wordTexts);
+                    const duration = performance.now() - startTime;
+                    console.log(`⚡ Batch search completed in ${duration.toFixed(0)}ms - found ${Array.from(batchResults.values()).filter(v => v !== null).length}/${wordTexts.length} images`);
+                    
+                    // Cache all found images immediately
+                    let cachedCount = 0;
+                    for (const [text, imageUrl] of batchResults.entries()) {
+                        if (imageUrl) {
+                            const cacheKey = `tap_${text.toLowerCase()}`;
+                            window.symbolImageCache.set(cacheKey, {
+                                imageUrl: imageUrl,
+                                timestamp: Date.now()
+                            });
+                            cachedCount++;
+                        }
+                    }
+                    console.log(`💾 Cached ${cachedCount} images from local library batch search`);
+                } catch (error) {
+                    console.error('Error batch searching local library:', error);
+                }
+            }
+            
+            // Load all images in parallel for better performance
+            const imagePromises = [];
+            const buttonMappings = [];
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image or is sight word
+                if (btn.querySelector('img') || btn.classList.contains('sight-word')) continue;
+                
+                // Handle "Something Else" button specially
+                if (btn.textContent === 'Something Else') {
+                    console.log('📦 Loading image for Something Else button in Words');
+                    const cacheOnly = initialLoad;
+                    imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
+                    buttonMappings.push({ btn, text: 'Something Else' });
+                    continue;
+                }
+                
+                const text = typeof option === 'object' ? (option.text || option.option) : option;
+                const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                
+                // On initial load: cache only. Background: fetch if needed.
+                const cacheOnly = initialLoad;
+                imagePromises.push(getSymbolImageForText(text, keywords, cacheOnly));
+                buttonMappings.push({ btn, text });
+            }
+            
+            // Wait for all images to load in parallel
+            const imageUrls = await Promise.all(imagePromises);
+            
+            // Apply images to buttons
+            for (let i = 0; i < imageUrls.length; i++) {
+                if (imageUrls[i]) {
+                    applyImageToButton(buttonMappings[i].btn, imageUrls[i], buttonMappings[i].text);
+                }
+            }
+        }
+
+        async function loadImagesForPhrases_OLD(options) {
+            console.log('🖼️ Loading images for', options.length, 'phrases');
+            const buttons = llmStaticOptions.querySelectorAll('.option-button');
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image
+                if (btn.querySelector('img')) continue;
+                
+                const speechText = typeof option === 'object' ? option.option : option;
+                const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                
+                // Load image asynchronously
+                const imageUrl = await getSymbolImageForText(speechText, phraseKeywords);
+                if (imageUrl) {
+                    applyImageToButton(btn, imageUrl, btn.textContent);
+                }
+            }
+        }
+
+        async function loadImagesForWords_OLD(options) {
+            console.log('🖼️ Loading images for', options.length, 'words');
+            const buttons = freestyleOptions.querySelectorAll('.freestyle-button');
+            
+            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                const option = options[i];
+                const btn = buttons[i];
+                
+                // Skip if button already has an image or is sight word
+                if (btn.querySelector('img') || btn.classList.contains('sight-word')) continue;
+                
+                const text = typeof option === 'object' ? (option.text || option.option) : option;
+                const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                
+                // Load image asynchronously
+                const imageUrl = await getSymbolImageForText(text, keywords);
+                if (imageUrl) {
+                    applyImageToButton(btn, imageUrl, text);
+                }
+            }
+        }
+
+        function applyImageToButton(btn, imageUrl, text) {
+            // Create image + text layout
+            btn.innerHTML = '';
+            const buttonContent = document.createElement('div');
+            buttonContent.style.position = 'relative';
+            buttonContent.style.width = '100%';
+            buttonContent.style.height = '100%';
+            buttonContent.style.display = 'flex';
+            buttonContent.style.flexDirection = 'column';
+            
+            const imageContainer = document.createElement('div');
+            imageContainer.style.flex = '1';
+            imageContainer.style.width = '100%';
+            imageContainer.style.overflow = 'hidden';
+            imageContainer.style.borderRadius = '8px 8px 0 0';
+            imageContainer.style.display = 'flex';
+            imageContainer.style.alignItems = 'center';
+            imageContainer.style.justifyContent = 'center';
+            
+            const imageElement = document.createElement('img');
+            imageElement.src = imageUrl;
+            imageElement.alt = text;
+            imageElement.style.width = '100%';
+            imageElement.style.height = '100%';
+            imageElement.style.objectFit = 'cover';
+            
+            const textFooter = document.createElement('div');
+            textFooter.style.minHeight = '22px';
+            textFooter.style.width = '100%';
+            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+            textFooter.style.backdropFilter = 'blur(4px)';
+            textFooter.style.color = 'white';
+            textFooter.style.display = 'flex';
+            textFooter.style.alignItems = 'center';
+            textFooter.style.justifyContent = 'center';
+            textFooter.style.padding = '2px 4px';
+            textFooter.style.fontSize = '10px';
+            textFooter.style.fontWeight = '600';
+            textFooter.textContent = text;
+            
+            imageContainer.appendChild(imageElement);
+            buttonContent.appendChild(imageContainer);
+            buttonContent.appendChild(textFooter);
+            btn.appendChild(buttonContent);
         }
 
         function renderCategories() {
@@ -1908,9 +3306,7 @@
                 
                 // Add Firestore image support for categories (like gridpage) - skip for sight words
                 if (!isSightWord) {
-                    console.log(`🔍 Attempting image load for category: "${button.label}"`);
                     getSymbolImageForText(button.label).then(imageUrl => {
-                        console.log(`🎯 Image result for "${button.label}": ${imageUrl ? 'Found' : 'Not found'}`);
                         if (imageUrl) {
                             // Create image + text layout like gridpage
                             categoryBtn.innerHTML = '';
@@ -2011,6 +3407,188 @@
             });
         }
 
+        // Categories Modal functionality
+        function openCategoriesModal() {
+            const modal = document.getElementById('categoriesModal');
+            const modalGrid = document.getElementById('categoriesModalGrid');
+            
+            if (!modal || !modalGrid) {
+                console.error('Categories modal elements not found');
+                return;
+            }
+            
+            // Clear existing content
+            modalGrid.innerHTML = '';
+            
+            if (!tapConfig || !tapConfig.buttons || tapConfig.buttons.length === 0) {
+                modalGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #666;">No categories configured</div>';
+                modal.classList.add('show');
+                return;
+            }
+            
+            // Batch preload custom image matches for all modal buttons (non-blocking)
+            const buttonLabels = tapConfig.buttons
+                .filter(b => !b.hidden)
+                .map(b => b.label);
+            
+            if (buttonLabels.length > 0) {
+                // Run preload asynchronously without blocking modal display
+                batchPreloadCustomImageMatches(buttonLabels).catch(error => {
+                    console.error('Error batch preloading modal images:', error);
+                });
+            }
+            
+            // Render all non-hidden categories in the modal
+            tapConfig.buttons.forEach(button => {
+                if (button.hidden) return;
+                
+                const modalBtn = document.createElement('button');
+                modalBtn.className = 'categories-modal-button';
+                
+                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                
+                if (button.background_color && button.background_color !== '#FFFFFF') {
+                    modalBtn.style.backgroundColor = button.background_color;
+                }
+                
+                if (!isSightWord) {
+                    modalBtn.style.color = button.text_color || '#000000';
+                }
+                
+                // Add image support (matching category button logic)
+                // DISABLED for faster modal display - categories shown as text-only
+                /*
+                if (!isSightWord) {
+                    getSymbolImageForText(button.label).then(imageUrl => {
+                        if (imageUrl) {
+                            modalBtn.innerHTML = '';
+                            const buttonContent = document.createElement('div');
+                            buttonContent.style.position = 'relative';
+                            buttonContent.style.width = '100%';
+                            buttonContent.style.height = '100%';
+                            buttonContent.style.display = 'flex';
+                            buttonContent.style.flexDirection = 'column';
+                            
+                            const imageContainer = document.createElement('div');
+                            imageContainer.style.flex = '1';
+                            imageContainer.style.width = '100%';
+                            imageContainer.style.overflow = 'hidden';
+                            imageContainer.style.borderRadius = '8px 8px 0 0';
+                            imageContainer.style.display = 'flex';
+                            imageContainer.style.alignItems = 'center';
+                            imageContainer.style.justifyContent = 'center';
+                            
+                            const imageElement = document.createElement('img');
+                            imageElement.src = imageUrl;
+                            imageElement.alt = button.label;
+                            imageElement.style.width = '100%';
+                            imageElement.style.height = '100%';
+                            imageElement.style.objectFit = 'cover';
+                            
+                            const textFooter = document.createElement('div');
+                            textFooter.style.height = '18px';
+                            textFooter.style.width = '100%';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.color = 'white';
+                            textFooter.style.display = 'flex';
+                            textFooter.style.alignItems = 'center';
+                            textFooter.style.justifyContent = 'center';
+                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.position = 'absolute';
+                            textFooter.style.bottom = '0';
+                            textFooter.style.left = '0';
+                            textFooter.style.right = '0';
+                            
+                            const textSpan = document.createElement('span');
+                            textSpan.textContent = button.label;
+                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontWeight = 'bold';
+                            textSpan.style.textAlign = 'center';
+                            
+                            imageContainer.appendChild(imageElement);
+                            textFooter.appendChild(textSpan);
+                            buttonContent.appendChild(imageContainer);
+                            buttonContent.appendChild(textFooter);
+                            modalBtn.appendChild(buttonContent);
+                        }
+                    }).catch(error => {
+                        console.error('Error loading image for modal category button:', error);
+                    });
+                }
+                */
+                
+                if (isSightWord) {
+                    modalBtn.classList.add('sight-word-button');
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = button.label;
+                    textSpan.style.fontSize = '1.25em';
+                    textSpan.style.fontWeight = '900';
+                    textSpan.style.color = '#dc2626';
+                    modalBtn.appendChild(textSpan);
+                } else {
+                    modalBtn.textContent = button.label;
+                }
+                
+                // Check if currently active
+                if (currentCategory && currentCategory.label === button.label) {
+                    modalBtn.classList.add('active');
+                }
+                
+                modalBtn.addEventListener('click', async (event) => {
+                    if (button.speech_text && button.speech_text.trim() !== '') {
+                        await announce(button.speech_text, "system", true);
+                    }
+                    
+                    if (button.custom_audio_file) {
+                        try {
+                            await playCustomButtonAudio(button.custom_audio_file);
+                        } catch (error) {
+                            console.error('Error playing button audio:', error);
+                        }
+                    }
+                    
+                    // Close modal and select category
+                    closeCategoriesModal();
+                    selectCategory(button, event);
+                });
+                
+                modalGrid.appendChild(modalBtn);
+            });
+            
+            modal.classList.add('show');
+        }
+
+        function closeCategoriesModal() {
+            const modal = document.getElementById('categoriesModal');
+            if (modal) {
+                modal.classList.remove('show');
+            }
+        }
+
+        // Add event listeners for categories modal
+        document.addEventListener('DOMContentLoaded', function() {
+            const categoriesHeaderBtn = document.getElementById('categoriesHeaderBtn');
+            const categoriesModalClose = document.getElementById('categoriesModalClose');
+            const categoriesModal = document.getElementById('categoriesModal');
+            
+            if (categoriesHeaderBtn) {
+                categoriesHeaderBtn.addEventListener('click', openCategoriesModal);
+            }
+            
+            if (categoriesModalClose) {
+                categoriesModalClose.addEventListener('click', closeCategoriesModal);
+            }
+            
+            if (categoriesModal) {
+                // Close modal when clicking outside content
+                categoriesModal.addEventListener('click', function(e) {
+                    if (e.target === categoriesModal) {
+                        closeCategoriesModal();
+                    }
+                });
+            }
+        });
+
         async function selectCategory(category, event) {
             console.log('Selecting category:', category);
             
@@ -2041,54 +3619,79 @@
             
             console.log('Loading phrases for category:', category.label);
             
-            // Clear existing options
+            // Clear existing options and show loading state for both sections
             llmStaticOptions.innerHTML = '';
+            freestyleOptions.innerHTML = '';
             
-            // Show loading state
+            // Show loading state for phrases
             for (let i = 0; i < LLMOptions; i++) {
                 const btn = document.createElement('button');
                 btn.className = 'option-button loading';
                 btn.textContent = '...';
                 llmStaticOptions.appendChild(btn);
             }
+            
+            // Show loading state for words
+            for (let i = 0; i < FreestyleWordOptions; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'option-button freestyle-button loading';
+                btn.textContent = '...';
+                freestyleOptions.appendChild(btn);
+            }
 
             try {
-                let options = [];
-                
-                // PHRASES SECTION LOGIC
-                if (category.llm_prompt) {
-                    console.log('Generating LLM options with prompt:', category.llm_prompt);
-                    // Generate full phrases using gridpage-style LLM
-                    options = await generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
-                    console.log('Generated options:', options);
-                } else {
-                    // Fallback: Use category label as prompt if no specific prompt is provided
-                    console.log('No llm_prompt found, using category label as prompt:', category.label);
-                    const fallbackPrompt = `Generate phrases related to ${category.label}`;
-                    options = await generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
-                }
-
-                console.log('Final options to render:', options);
-                renderCategoryOptions(options);
-                
-                // WORDS SECTION LOGIC
-                console.log('Updating freestyle options for category:', category.label || category);
-                console.log('Category has words_prompt:', category.words_prompt);
-                console.log('Category has llm_prompt:', category.llm_prompt);
-                
                 // Store the words prompt and instruction prompt globally for word selection
                 currentWordsPrompt = category.words_prompt || null;
                 currentInstructionPrompt = category.llm_prompt || null;
 
+                console.log('⏱️ Starting parallel fetch at:', Date.now());
+
+                // Start both promises immediately - they will execute concurrently
+                let phrasesPromise, wordsPromise;
+                
+                // PHRASES SECTION LOGIC
+                if (category.llm_prompt) {
+                    console.log('⏱️ Starting phrases fetch with prompt at:', Date.now());
+                    phrasesPromise = generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
+                } else {
+                    console.log('⏱️ Starting phrases fetch with fallback prompt at:', Date.now());
+                    const fallbackPrompt = `Generate phrases related to ${category.label}`;
+                    phrasesPromise = generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
+                }
+
+                // WORDS SECTION LOGIC
+                console.log('⏱️ Starting words fetch at:', Date.now());
                 if (category.static_options) {
                     console.log('Using static options for Words section:', category.static_options);
                     const staticWords = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
-                    // Format as objects for renderFreestyleOptions
-                    const wordOptions = staticWords.map(text => ({ text: text, keywords: [] }));
-                    renderFreestyleOptions(wordOptions);
+                    wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
                 } else {
-                    await updateFreestyleOptionsWithContext(category.label || category, true, category.words_prompt, category.llm_prompt);
+                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, 29, category.words_prompt, category.llm_prompt);
                 }
+
+                console.log('⏱️ Waiting for both fetches at:', Date.now());
+                // Wait for both to complete in parallel
+                const [phrasesOptions, wordsOptions] = await Promise.all([phrasesPromise, wordsPromise]);
+
+                console.log('⏱️ Both fetches completed at:', Date.now());
+                console.log('Final phrases options:', phrasesOptions);
+                console.log('Final words options:', wordsOptions);
+                
+                // Render both sections with deferred images for batch loading
+                renderCategoryOptions(phrasesOptions, true); // true = defer images
+                if (wordsOptions) {
+                    renderFreestyleOptions(wordsOptions, true); // true = defer images
+                }
+                
+                // Load images for both phrases and words in parallel
+                setTimeout(() => {
+                    Promise.all([
+                        loadImagesForPhrases(phrasesOptions),
+                        wordsOptions ? loadImagesForWords(wordsOptions) : Promise.resolve()
+                    ]);
+                }, 50);
+                
+                console.log('⏱️ Rendering completed at:', Date.now());
             } catch (error) {
                 console.error('Error loading category options:', error);
                 renderCategoryOptions([]);
@@ -2261,7 +3864,10 @@
                     options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
                 }
 
-                renderCategoryOptions(options);
+                renderCategoryOptions(options, true); // Defer images for batch loading
+                
+                // Batch load phrase images after render
+                setTimeout(() => loadImagesForPhrases(options), 50);
 
                 // Also update freestyle options with the selected category context 
                 // IMPORTANT: Use just the subcategory name for API calls, not the full path
@@ -2500,8 +4106,8 @@
             }
         }
 
-        function renderCategoryOptions(options) {
-            console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0);
+        function renderCategoryOptions(options, deferImages = false) {
+            console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0, 'Defer Images:', deferImages);
             console.log('renderCategoryOptions called with:', options);
             console.log('llmStaticOptions element:', llmStaticOptions);
             
@@ -2531,8 +4137,11 @@
 
             llmStaticOptions.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
             // Use explicit rows but ensure container doesn't have min-height forcing extra space
-            llmStaticOptions.style.gridTemplateRows = `repeat(${rows}, 110px)`;
+            llmStaticOptions.style.gridTemplateRows = `repeat(${rows}, 80px)`;
             llmStaticOptions.style.height = 'fit-content'; // Ensure container shrinks to fit content
+            
+            // Use DocumentFragment for better performance (batch DOM updates)
+            const fragment = document.createDocumentFragment();
             
             // Fill up to available phrase slots based on LLMOptions setting
             // Reserve one slot for "Something Else" button
@@ -2548,8 +4157,9 @@
                     btn.className = 'option-button';
                     btn.textContent = 'Something Else';
                     
-                    // Apply image matching like other buttons
-                    getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
+                    // Apply image matching like other buttons - skip when deferring
+                    if (!deferImages) {
+                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
                         if (imageUrl) {
                             // Create image + text layout like other buttons
                             btn.innerHTML = '';
@@ -2596,13 +4206,14 @@
                             btn.appendChild(buttonContent);
                         }
                     });
+                    } // End if (!deferImages)
                     
                     btn.onclick = async () => {
                         console.log('🔄 Something Else clicked for phrases');
                         await regeneratePhraseOptions();
                     };
                     
-                    llmStaticOptions.appendChild(btn);
+                    fragment.appendChild(btn);
                     continue;
                 }
                 
@@ -2638,8 +4249,8 @@
                     // Check if displayText is a sight word - if so, skip image loading
                     const isSightWord = window.isSightWord && window.isSightWord(displayText);
                     
-                    // Add Firestore image support (like gridpage) - skip for sight words
-                    if (!isSightWord) {
+                    // Add Firestore image support (like gridpage) - skip for sight words and when deferring
+                    if (!isSightWord && !deferImages) {
                         console.log(`🔍 Attempting image load for phrase: "${speechText}"`);
                         const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
                         getSymbolImageForText(speechText, phraseKeywords).then(imageUrl => {
@@ -2716,6 +4327,12 @@
                     
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
+                        // Reset status message after first button click following a question
+                        if (activeQuestionAsked) {
+                            activeQuestionAsked = false;
+                            updateStatusMessage(getReadyMessage());
+                        }
+                        
                         addToSpeech(speechText);
                         // Announce the speech text when phrase is selected
                         await announce(speechText, "system", true);
@@ -2725,23 +4342,54 @@
                     btn.textContent = '—';
                 }
                 
-                llmStaticOptions.appendChild(btn);
+                fragment.appendChild(btn);
             }
+            
+            // Batch append all buttons at once for better performance
+            llmStaticOptions.appendChild(fragment);
         }
 
         async function loadFreestyleOptions() {
-            console.log('🟡 loadFreestyleOptions called - loading initial freestyle options');
+            console.log('⏱️ loadFreestyleOptions: Starting at:', Date.now());
             try {
                 // Clear any current words prompt since we're loading general options
                 currentWordsPrompt = null;
                 // Store a general category for Something Else regeneration
                 currentCategory = { label: 'general' };
+                
+                // Check cache first
+                const cachedWords = getCachedData(CACHE_KEYS.INITIAL_WORDS);
+                if (cachedWords) {
+                    console.log('⏱️ loadFreestyleOptions: Rendering from cache at:', Date.now());
+                    renderFreestyleOptions(cachedWords, true); // true = defer images
+                    // Load cached images INSTANTLY (200ms delay for DOM)
+                    setTimeout(async () => {
+                        await loadImagesForWords(cachedWords, true); // true = cache only, instant
+                        // Then load missing images in background (3 second delay)
+                        setTimeout(() => loadImagesForWords(cachedWords, false), 3000); // false = fetch if needed
+                    }, 200);
+                }
+                
                 // Generate initial freestyle options (general communication words)
-                console.log('🟡 Calling generateFreestyleLLMOptions with null category...');
+                console.log('⏱️ loadFreestyleOptions: Fetching fresh words at:', Date.now());
                 const options = await generateFreestyleLLMOptions(null, 29);
-                console.log('🟢 Generated initial freestyle options:', options);
-                console.log('🟢 Options count:', options ? options.length : 0);
-                renderFreestyleOptions(options);
+                console.log('⏱️ loadFreestyleOptions: Got', options ? options.length : 0, 'words at:', Date.now());
+                
+                // Update cache
+                setCachedData(CACHE_KEYS.INITIAL_WORDS, options);
+                
+                // Only re-render if we didn't use cache (to avoid flicker)
+                if (!cachedWords) {
+                    console.log('⏱️ loadFreestyleOptions: Rendering words at:', Date.now());
+                    renderFreestyleOptions(options, true); // true = defer images
+                    // Load cached images INSTANTLY (200ms delay for DOM)
+                    setTimeout(async () => {
+                        await loadImagesForWords(options, true); // true = cache only, instant
+                        // Then load missing images in background (3 second delay)
+                        setTimeout(() => loadImagesForWords(options, false), 3000); // false = fetch if needed
+                    }, 200);
+                    console.log('⏱️ loadFreestyleOptions: Rendering complete at:', Date.now());
+                }
             } catch (error) {
                 console.error('🔴 Error loading freestyle options:', error);
                 renderFreestyleOptions([]);
@@ -2757,13 +4405,15 @@
                     // categoryOrPath may be an object or a string full path
                     const categoryPath = (typeof categoryOrPath === 'string') ? categoryOrPath : (categoryOrPath.label || '');
                     const options = await generateFreestyleOptionsForCategory(categoryPath, 29, wordsPrompt, instructionPrompt);
-                    renderFreestyleOptions(options);
+                    renderFreestyleOptions(options, true); // Defer images for batch loading
+                    setTimeout(() => loadImagesForWords(options), 50);
                     return;
                 }
 
                 // Otherwise use the freestyle /word-options endpoint which uses navigation/build-space context
                 const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, 29, wordsPrompt);
-                renderFreestyleOptions(options);
+                renderFreestyleOptions(options, true); // Defer images for batch loading
+                setTimeout(() => loadImagesForWords(options), 50);
             } catch (error) {
                 console.error('Error updating freestyle options with context:', error);
             }
@@ -3387,8 +5037,8 @@
             }
         }
 
-        function renderFreestyleOptions(options = []) {
-            console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length);
+        function renderFreestyleOptions(options = [], deferImages = false) {
+            console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length, 'Defer Images:', deferImages);
             console.log('renderFreestyleOptions called with', options.length, 'options:', options);
             console.log('freestyleOptions element:', freestyleOptions);
             
@@ -3407,7 +5057,10 @@
             
             // Calculate rows needed based on FreestyleWordOptions and gridColumns
             const rows = Math.ceil(FreestyleWordOptions / gridColumns);
-            freestyleOptions.style.gridTemplateRows = `repeat(${rows}, 110px)`;
+            freestyleOptions.style.gridTemplateRows = `repeat(${rows}, 80px)`;
+            
+            // Use DocumentFragment for better performance (batch DOM updates)
+            const fragment = document.createDocumentFragment();
             
             // Create freestyle slots based on FreestyleWordOptions setting
             // Reserve one slot for "Something Else" button
@@ -3422,8 +5075,9 @@
                     btn.className = 'option-button freestyle-button';
                     btn.textContent = 'Something Else';
                     
-                    // Apply image matching like other buttons
-                    getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
+                    // Apply image matching like other buttons - skip when deferring
+                    if (!deferImages) {
+                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
                         if (imageUrl) {
                             // Create image + text layout like other buttons
                             btn.innerHTML = '';
@@ -3470,13 +5124,14 @@
                             btn.appendChild(buttonContent);
                         }
                     });
+                    } // End if (!deferImages)
                     
                     btn.onclick = async () => {
                         console.log('🔄 Something Else clicked for words');
                         await regenerateWordOptions();
                     };
                     
-                    freestyleOptions.appendChild(btn);
+                    fragment.appendChild(btn);
                     continue;
                 }
                 
@@ -3490,11 +5145,14 @@
                     // Check if this is a sight word - if so, skip image loading
                     const isSightWord = window.isSightWord && window.isSightWord(text);
                     
-                    // Add Firestore image support for words (like gridpage) - skip for sight words
-                    if (!isSightWord) {
+                    // Add Firestore image support for words (like gridpage) - skip for sight words and when deferring
+                    if (!isSightWord && !deferImages) {
                         console.log(`🔍 Attempting image load for word: "${text}"`);
-                        getSymbolImageForText(text).then(imageUrl => {
-                            console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
+                        // Extract the main keyword for better image matching
+                        const imageKeyword = extractKeywordForImage(text);
+                        console.log(`🔑 Extracted keyword for image matching: "${text}" -> "${imageKeyword}"`);
+                        getSymbolImageForText(imageKeyword).then(imageUrl => {
+                            console.log(`🎯 Image result for "${text}" (keyword: "${imageKeyword}"): ${imageUrl ? 'Found' : 'Not found'}`);
                             if (imageUrl) {
                                 // Create image + text layout like gridpage
                                 btn.innerHTML = '';
@@ -3566,6 +5224,12 @@
                     }
                     
                     btn.addEventListener('click', async () => {
+                        // Reset status message after first button click following a question
+                        if (activeQuestionAsked) {
+                            activeQuestionAsked = false;
+                            updateStatusMessage(getReadyMessage());
+                        }
+                        
                         // SIMPLIFIED LOGIC: 
                         // 1. If there's a word prompt, combine it with the selection
                         // 2. Add the result to Speech History and announce it
@@ -3601,8 +5265,11 @@
                     btn.disabled = true;
                 }
                 
-                freestyleOptions.appendChild(btn);
+                fragment.appendChild(btn);
             }
+            
+            // Batch append all buttons at once for better performance
+            freestyleOptions.appendChild(fragment);
         }
 
         // Removed promptForFreestyleWord function - no longer needed
@@ -3893,12 +5560,23 @@
             }
         }
 
+        function clearTextOnly() {
+            const buildSpaceElement = document.getElementById('build-space');
+            if (buildSpaceElement) {
+                buildSpaceElement.value = '';
+                updateSpeechOutput();
+                console.log('Build space text cleared (no reset)');
+            } else {
+                console.error('Build space element not found - ID: build-space');
+            }
+        }
+
         async function clearBuildSpace() {
             const buildSpaceElement = document.getElementById('build-space');
             if (buildSpaceElement) {
                 buildSpaceElement.value = '';
                 updateSpeechOutput();
-                console.log('Build space cleared');
+                console.log('Build space cleared and reset');
                 
                 // Reset word options to start fresh after clearing
                 await updateFreestyleOptionsWithSelectedWord('');
@@ -4138,7 +5816,6 @@
                 
                 updateStatusMessage("Listening for question...");
                 if (questionDisplay) {
-                    questionDisplay.placeholder = "Listening...";
                     questionDisplay.value = "";
                     questionDisplay.classList.add(LISTENING_HIGHLIGHT_CLASS);
                     console.log("Question display updated: highlighted and cleared");
@@ -4182,9 +5859,13 @@
                 console.log("Final so far:", finalTranscript);
                 console.log("Is final utterance:", isFinishedUtterance);
                 
-                // Update display with current transcript
+                // Update display with current transcript in status message
+                const currentTranscript = finalTranscript + (interimTranscript || '');
+                if (currentTranscript.trim()) {
+                    updateStatusMessage(`Listening: ${currentTranscript}`);
+                }
                 if (questionDisplay) {
-                    questionDisplay.value = finalTranscript + (interimTranscript || '');
+                    questionDisplay.value = currentTranscript;
                 }
 
                 if (isFinishedUtterance && finalTranscript.trim()) {
@@ -4202,8 +5883,9 @@
                         announce("Okay, processing: " + finalTranscript.trim() + ". Give me a moment.", "system", false);
                         currentQuestion = finalTranscript.trim().toLowerCase();
                         
-                        // Update status message with current question
-                        updateStatusMessage(`Current: ${currentQuestion}`);
+                        // Update status message with question asked
+                        updateStatusMessage(`Question asked: ${finalTranscript.trim()}`);
+                        activeQuestionAsked = true;
 
                         // Process the question and update the interface
                         await processQuestionAndUpdateInterface(currentQuestion);
@@ -4213,13 +5895,10 @@
                         announce("Error processing question.", "system", false);
                         isRestartingKeyword = true;
                         setupSpeechRecognition();
-                    } finally {
-                        updateStatusMessage("Ready - Say 'Hey Bravo' to start");
-                        if (questionDisplay) {
-                            questionDisplay.placeholder = "Say 'Hey Bravo' followed by your question...";
-                        }
-                        console.log("Question processing finished.");
+                        activeQuestionAsked = false;
+                        updateStatusMessage(getReadyMessage());
                     }
+                    // Don't reset status here - wait for first button click
                 } else if (!isFinishedUtterance) {
                     console.log("Waiting for final result...");
                 } else {
@@ -4262,9 +5941,9 @@
                     announce(errorMessage, "system", false);
                 }
                 
-                updateStatusMessage("Ready - Say 'Hey Bravo' to start");
+                activeQuestionAsked = false;
+                updateStatusMessage(getReadyMessage());
                 if (questionDisplay) {
-                    questionDisplay.placeholder = "Say 'Hey Bravo' followed by your question...";
                     questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
                 }
                 listeningForQuestion = false;
@@ -4288,6 +5967,11 @@
                 console.log("Question Recognition ended.");
                 listeningForQuestion = false;
                 clearTimeout(listeningTimeout);
+                
+                // Reset status if no question was successfully processed
+                if (!activeQuestionAsked && !hasProcessedResult) {
+                    updateStatusMessage(getReadyMessage());
+                }
                 
                 if (questionDisplay) {
                     questionDisplay.classList.remove(LISTENING_HIGHLIGHT_CLASS);
@@ -4405,7 +6089,7 @@
     <script>
         // Admin toolbar functionality
         const lockButton = document.getElementById('lock-icon');
-        const adminIconElements = document.querySelectorAll('.admin-icon');
+        const adminIconsContainer = document.getElementById('admin-icons');
         const lockToolbarButton = document.getElementById('lock-toolbar-button');
         const pinModal = document.getElementById('pin-modal');
         const pinInput = document.getElementById('pin-input');
@@ -4461,11 +6145,8 @@
 
         // Function to unlock admin toolbar
         function unlockToolbar() {
-            adminIconElements.forEach(icon => {
-                icon.classList.remove('hidden');
-            });
-            if (lockToolbarButton) {
-                lockToolbarButton.classList.remove('hidden');
+            if (adminIconsContainer) {
+                adminIconsContainer.classList.remove('hidden');
             }
             if (lockButton) {
                 lockButton.style.display = 'none';
@@ -4475,11 +6156,8 @@
 
         // Function to lock admin toolbar
         function lockToolbar() {
-            adminIconElements.forEach(icon => {
-                icon.classList.add('hidden');
-            });
-            if (lockToolbarButton) {
-                lockToolbarButton.classList.add('hidden');
+            if (adminIconsContainer) {
+                adminIconsContainer.classList.add('hidden');
             }
             if (lockButton) {
                 lockButton.style.display = 'block';

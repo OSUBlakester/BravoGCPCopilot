@@ -5699,6 +5699,8 @@ async def get_interface_preference(current_ids: Annotated[Dict[str, str], Depend
         settings = await load_settings_from_file(account_id, aac_user_id)
         use_tap_interface = settings.get("useTapInterface", False)
         
+        logging.warning(f"🔍 Interface preference check for user {aac_user_id}: useTapInterface = {use_tap_interface}, settings keys: {list(settings.keys())[:10]}")
+        
         return {
             "useTapInterface": use_tap_interface,
             "preferredInterface": "tap_interface.html" if use_tap_interface else "gridpage.html"
@@ -12406,6 +12408,63 @@ async def clear_duplicate_symbols(admin_user: Annotated[Dict[str, str], Depends(
             content={"error": "Failed to clear duplicates", "details": str(e)}
         )
 
+@app.get("/api/symbols/all-images")
+async def get_all_images(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Returns ALL image metadata for client-side caching.
+    This allows the web app to search images locally without network requests.
+    """
+    logging.info(f"🚀 all-images endpoint called by account_id: {current_ids.get('account_id')}")
+    try:
+        all_images = []
+        account_id = current_ids.get('account_id')
+        
+        # Use global firestore_db instance
+        if not firestore_db:
+            logging.error("Firestore database not initialized")
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Database not available"}
+            )
+        
+        # Fetch from Firestore AAC images collection
+        # TEMPORARY: Remove source filter to see if ANY docs exist
+        logging.info(f"🔍 Querying collection 'aac_images' WITHOUT source filter (diagnostic)...")
+        firestore_symbols_ref = firestore_db.collection('aac_images').limit(100)
+        firestore_docs = firestore_symbols_ref.stream()
+        
+        doc_count = 0
+        url_count = 0
+        for doc in firestore_docs:
+            doc_count += 1
+            symbol = doc.to_dict()
+            if symbol and symbol.get('url'):
+                url_count += 1
+                # Only include essential fields to minimize payload
+                all_images.append({
+                    'word': symbol.get('word', '').lower().strip(),
+                    'url': symbol.get('url'),
+                    'tags': symbol.get('tags', []),
+                    'category': symbol.get('category', '')
+                })
+        
+        logging.info(f"📊 Image cache stats: {doc_count} docs in collection, {url_count} with URLs, {len(all_images)} loaded for client cache")
+        
+        return JSONResponse(content={
+            "images": all_images,
+            "total": len(all_images),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error loading all images: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Failed to load images", "details": str(e)}
+        )
+
 @app.get("/api/symbols/button-search")
 async def button_symbol_search(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
@@ -12494,7 +12553,8 @@ async def button_symbol_search(
                 term_variations = [
                     term,                    # Original case
                     term.lower(),            # All lowercase  
-                    term.capitalize()        # First letter capitalized
+                    term.capitalize(),       # First letter capitalized
+                    term.title()             # Title case (capitalizes each word)
                 ]
                 
                 # Remove duplicates while preserving order
@@ -12898,6 +12958,189 @@ async def button_symbol_search(
             content={"error": "Button search failed", "details": str(e)}
         )
 
+
+@app.post("/api/symbols/batch-search")
+async def batch_symbol_search(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Batch symbol search endpoint - searches for multiple terms in a single request.
+    Returns a map of term -> best matching image URL.
+    Uses parallel Firestore queries for maximum performance.
+    """
+    try:
+        data = await request.json()
+        terms = data.get('terms', [])
+        
+        logging.info(f"🔍 BATCH SEARCH: Received request with {len(terms) if terms else 0} terms")
+        if terms:
+            logging.info(f"🔍 BATCH SEARCH: First 5 terms: {terms[:5]}")
+        
+        if not terms or not isinstance(terms, list):
+            logging.warning("🔍 BATCH SEARCH: No terms provided or invalid format")
+            return JSONResponse(content={"results": {}})
+        
+        # Limit batch size to prevent abuse
+        terms = terms[:50]
+        
+        aac_user_id = current_ids["aac_user_id"]
+        account_id = current_ids["account_id"]
+        
+        logging.info(f"🔍 BATCH SEARCH: User ID: {aac_user_id}, Account ID: {account_id}")
+        
+        # Function to search for a single term (will be run in parallel)
+        def search_single_term(item):
+            if isinstance(item, dict):
+                text = item.get('text', '').strip()
+                keywords = item.get('keywords', [])
+            else:
+                text = str(item).strip()
+                keywords = []
+            
+            if not text:
+                logging.debug(f"🔍 BATCH: Empty text, skipping")
+                return (text, None)
+            
+            logging.info(f"🔍 BATCH: Searching for '{text}' with keywords {keywords}")
+                
+            query_lower = text.lower()
+            
+            # Search BravoImages first
+            images_ref = firestore_db.collection("aac_images")
+            term_variations = [
+                text,                    # Original case (might be "tree", "Tree", etc.)
+                text.lower(),            # All lowercase
+                text.capitalize(),       # First letter capitalized
+                text.title()             # Title case (capitalizes each word)
+            ]
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_variations = []
+            for variation in term_variations:
+                if variation not in seen:
+                    seen.add(variation)
+                    unique_variations.append(variation)
+            term_variations = unique_variations
+            
+            logging.info(f"🔍 BATCH: Trying variations for '{text}': {term_variations}")
+            
+            for variation in term_variations:
+                try:
+                    variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(1)
+                    variation_docs = list(variation_query.stream())
+                    
+                    if variation_docs:
+                        image = variation_docs[0].to_dict()
+                        image_url = image.get('image_url')  # Use 'image_url' not 'url'
+                        if image_url:
+                            logging.info(f"🔍 BATCH: ✅ Found image for '{text}' (variation '{variation}'): {image_url}")
+                            return (text, image_url)
+                except Exception as e:
+                    logging.error(f"🔍 BATCH: Query failed for variation '{variation}': {e}")
+                    continue
+            
+            logging.info(f"🔍 BATCH: ❌ No image found for '{text}' in BravoImages")
+            
+            # If BravoImages didn't match, try custom images
+            try:
+                custom_ref = firestore_db.collection("accounts").document(account_id).collection("users").document(aac_user_id).collection("custom_images")
+                custom_query = custom_ref.where("status", "==", "active").where("tags", "array_contains", query_lower).limit(1)
+                custom_docs = list(custom_query.stream())
+                
+                if custom_docs:
+                    custom_image = custom_docs[0].to_dict()
+                    image_url = custom_image.get('url')
+                    if image_url:
+                        logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
+                        return (text, image_url)
+            except Exception as e:
+                logging.error(f"🔍 BATCH: Custom search failed for '{query_lower}': {e}")
+            
+            logging.info(f"🔍 BATCH: ❌ No custom image found for '{text}'")
+            return (text, None)
+        
+        # Run all searches in parallel using ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import asyncio
+        
+        results = {}
+        
+        # Use ThreadPoolExecutor to parallelize Firestore queries
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # Submit all tasks
+            future_to_term = {executor.submit(search_single_term, item): item for item in terms}
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_term):
+                try:
+                    text, image_url = future.result()
+                    if text:
+                        results[text] = image_url
+                except Exception as e:
+                    logging.error(f"Error in batch search task: {e}")
+        
+        logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results out of {len(terms)} terms")
+        logging.info(f"🔍 BATCH SEARCH: Results summary: {list(results.keys())[:10]}")
+        return JSONResponse(content={"results": results})
+        
+    except Exception as e:
+        logging.error(f"Error in batch symbol search: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Batch search failed", "details": str(e)}
+        )
+
+
+@app.get("/api/symbols/library-download")
+async def download_image_library(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Download entire AAC image library for local caching.
+    Returns all aac_images with source="bravo_images" for client-side search.
+    This enables instant local tag-based search without network calls.
+    """
+    try:
+        logging.info("📚 LIBRARY DOWNLOAD: Starting full library download")
+        
+        # Query all bravo images
+        images_ref = firestore_db.collection('aac_images')
+        query = images_ref.where('source', '==', 'bravo_images')
+        docs = query.stream()
+        
+        library = []
+        for doc in docs:
+            data = doc.to_dict()
+            # Only include essential fields to minimize download size
+            library.append({
+                'id': doc.id,
+                'image_url': data.get('image_url'),
+                'tags': data.get('tags', []),
+                'source': data.get('source'),
+                # Include any other metadata that might be useful for search
+                'category': data.get('category'),
+                'subcategory': data.get('subcategory')
+            })
+        
+        logging.info(f"📚 LIBRARY DOWNLOAD: Sending {len(library)} images to client")
+        
+        return JSONResponse(content={
+            "images": library,
+            "count": len(library),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logging.error(f"Error downloading image library: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Library download failed", "details": str(e)}
+        )
+
+
 # --- SIMPLIFIED IMAGE GENERATOR ENDPOINTS ---
 import tempfile
 import uuid
@@ -13127,7 +13370,7 @@ async def upload_button_audio(
     file: UploadFile,
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
 ):
-    """Upload MP3 file for button custom audio"""
+    """Upload MP3 file for button custom audio to Google Cloud Storage"""
     try:
         logging.info(f"[AUDIO UPLOAD] Starting upload for file: {file.filename}, content_type: {file.content_type}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
         
@@ -13167,16 +13410,12 @@ async def upload_button_audio(
         
         # Generate unique filename
         account_id = current_ids["account_id"]
-        user_id = current_ids["aac_user_id"]  # Fix: correct key name
+        user_id = current_ids["aac_user_id"]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_extension = file.filename.split('.')[-1].lower()
-        unique_filename = f"button_audio_{timestamp}_{uuid.uuid4().hex[:8]}.{file_extension}"
+        unique_filename = f"button_audio/{account_id}/{user_id}/{timestamp}_{uuid.uuid4().hex[:8]}.{file_extension}"
         
-        # Convert to base64 data URL (same approach as images)
-        import base64
-        file_base64 = base64.b64encode(file_content).decode()
-        
-        # Determine MIME type for data URL
+        # Determine MIME type
         if file_extension == 'mp3':
             mime_type = 'audio/mpeg'
         elif file_extension == 'wav':
@@ -13186,17 +13425,26 @@ async def upload_button_audio(
         else:
             mime_type = 'audio/mpeg'  # default
         
-        # Create data URL (same format as images in Firestore)
-        audio_url = f"data:{mime_type};base64,{file_base64}"
-        logging.info(f"[AUDIO UPLOAD] Created data URL, size: {len(audio_url)} characters")
-        
-        logging.info(f"Uploaded button audio: {audio_url}")
-        
-        return JSONResponse(content={
-            "success": True,
-            "audio_url": audio_url,
-            "filename": unique_filename
-        })
+        # Upload to Google Cloud Storage (same bucket as AAC images)
+        try:
+            bucket = await ensure_aac_images_bucket()
+            blob = bucket.blob(unique_filename)
+            
+            # Upload audio file
+            await asyncio.to_thread(blob.upload_from_string, file_content, content_type=mime_type)
+            
+            # Return the public URL
+            audio_url = f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
+            logging.info(f"[AUDIO UPLOAD] Uploaded to GCS: {audio_url}")
+            
+            return JSONResponse(content={
+                "success": True,
+                "audio_url": audio_url,
+                "filename": unique_filename
+            })
+        except Exception as upload_error:
+            logging.error(f"[AUDIO UPLOAD] GCS upload failed: {upload_error}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {str(upload_error)}")
         
     except HTTPException:
         raise
@@ -13465,7 +13713,11 @@ class TapNavigationButton(BaseModel):
     background_color: Optional[str] = Field("#FFFFFF", description="Hex color code for button background")
     text_color: Optional[str] = Field("#000000", description="Hex color code for button text")
     llm_prompt: Optional[str] = Field(None, description="LLM query for generating phrase options")
-    words_prompt: Optional[str] = Field(None, description="LLM query for generating word options (e.g., 'I am hungry for')")
+    words_prompt: Optional[str] = Field(None, description="LLM query for generating word options (deprecated)")
+    prompt_category: Optional[str] = Field(None, description="Pre-defined category or 'custom' for AI prompt generation")
+    prompt_topic: Optional[str] = Field(None, description="Custom topic for custom prompts")
+    prompt_examples: Optional[str] = Field(None, description="Examples for custom prompts (comma or newline separated)")
+    prompt_exclusions: Optional[str] = Field(None, description="Items to exclude for custom prompts (comma or newline separated)")
     static_options: Optional[str] = Field(None, description="Comma-separated list of static options (alternative to LLM prompt)")
     custom_audio_file: Optional[str] = Field(None, description="URL to custom audio file to play after speech text")
     special_function: Optional[str] = Field(None, description="Special function identifier (e.g., 'spell')")
@@ -13529,8 +13781,9 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     
     # Helper function to create button with all required fields
     def create_button(button_id, label, speech_text=None, image_url=None, bg_color="#FFFFFF", 
-                     text_color="#000000", llm_prompt=None, words_prompt=None, static_options=None, 
-                     custom_audio_file=None, special_function=None, children=None):
+                     text_color="#000000", llm_prompt=None, prompt_category=None, 
+                     prompt_topic=None, prompt_examples=None, prompt_exclusions=None,
+                     static_options=None, custom_audio_file=None, special_function=None, children=None):
         return {
             "id": button_id,
             "label": label,
@@ -13539,7 +13792,10 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "background_color": bg_color,
             "text_color": text_color,
             "llm_prompt": llm_prompt,
-            "words_prompt": words_prompt,
+            "prompt_category": prompt_category,
+            "prompt_topic": prompt_topic,
+            "prompt_examples": prompt_examples,
+            "prompt_exclusions": prompt_exclusions,
             "static_options": static_options,
             "custom_audio_file": custom_audio_file,
             "special_function": special_function,
@@ -13554,57 +13810,53 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
         "buttons": [
-            create_button("greetings", "Greetings", children=[
-                create_button("generic_greetings", "Generic Greetings", 
-                            llm_prompt="Generate common greeting phrases and expressions for everyday social interactions",
-                            words_prompt="Hello, I want to"),
-                create_button("current_location", "Current Location",
-                            llm_prompt="Generate location-based greetings and conversation starters",
-                            words_prompt="I am at"),
-                create_button("jokes", "Jokes",
-                            llm_prompt="Generate simple, appropriate jokes and funny conversation starters")
-            ]),
-            create_button("about_me", "About Me", children=[
-                create_button("personal_info", "Personal Info",
-                            llm_prompt="Generate phrases for sharing personal information and basic details about myself",
-                            words_prompt="I am"),
-                create_button("family", "Family",
-                            llm_prompt="Generate phrases for talking about family members and relationships",
-                            words_prompt="My family"),
-                create_button("interests", "Interests",
-                            llm_prompt="Generate phrases for discussing hobbies, interests, and favorite activities",
-                            words_prompt="I like to"),
-                create_button("medical_info", "Medical Info",
-                            llm_prompt="Generate phrases for communicating medical needs and health information",
-                            words_prompt="I need medical")
-            ]),
-            create_button("help", "Help", children=[
-                create_button("need_assistance", "Need Assistance",
-                            llm_prompt="Generate phrases for requesting help and assistance",
-                            words_prompt="I need help with"),
-                create_button("emergency", "Emergency",
-                            llm_prompt="Generate emergency communication phrases and urgent requests",
-                            words_prompt="Emergency! I need"),
-                create_button("questions", "Questions",
-                            llm_prompt="Generate question words and phrases for asking about things",
-                            words_prompt="Can you tell me about"),
-                create_button("support", "Support",
-                            llm_prompt="Generate phrases for requesting support and guidance")
-            ]),
-            create_button("feelings", "Feelings",
-                        llm_prompt="Generate words and phrases for expressing feelings and emotions"),
-            create_button("activities", "Activities",
-                        llm_prompt="Generate words and phrases about activities and things to do"),
-            create_button("requests", "Requests",
+            create_button("greetings_btn", "Greetings", 
+                        prompt_category="greetings",
+                        llm_prompt="Generate greeting phrases and words suitable for everyday social interactions. Include hellos, goodbyes, and common polite expressions."),
+            
+            create_button("actions_btn", "Actions", 
+                        prompt_category="actions",
+                        llm_prompt="Generate action words and phrases for common activities. Include verbs like eat, drink, play, go, help, want, need, etc."),
+            
+            create_button("describe_btn", "Describe",
+                        prompt_category="describe",
+                        llm_prompt="Generate descriptive words and phrases. Include colors, sizes, temperatures, quantities, and qualities."),
+            
+            create_button("things_btn", "Things",
+                        prompt_category="things",
+                        llm_prompt="Generate words about objects, items, and things"),
+            
+            create_button("requests_btn", "Requests",
+                        prompt_category="requests",
                         llm_prompt="Generate phrases for making requests and asking for things"),
-            create_button("people", "People",
-                        llm_prompt="Generate words about people, family, relationships, and social connections"),
-            create_button("places", "Places",
-                        llm_prompt="Generate words about locations, places, and destinations"),
-            create_button("actions", "Actions",
-                        llm_prompt="Generate action words and verbs for describing what to do"),
-            create_button("things", "Things",
-                        llm_prompt="Generate words about objects, items, and things")
+            
+            create_button("places_btn", "Places",
+                        prompt_category="places",
+                        llm_prompt="Generate words and phrases about places and locations. Include home, school, park, store, outside, inside, etc."),
+            
+            create_button("people_btn", "People",
+                        prompt_category="people",
+                        llm_prompt="Generate words about people, family, relationships, and social connections and phrases for the user to discuss these people"),
+            
+            create_button("animals_btn", "Animals",
+                        prompt_category="animals",
+                        llm_prompt="Generate list of words or phrases related to animals"),
+            
+            create_button("weather_btn", "Weather",
+                        prompt_category="weather",
+                        llm_prompt="Generate list of words or phrases related to discussing the weather"),
+            
+            create_button("numbers_btn", "Numbers",
+                        prompt_category="numbers",
+                        llm_prompt="Generate a list of numbers, quantities and amounts"),
+            
+            create_button("dates_times_btn", "Dates and Times",
+                        prompt_category="dates_and_times",
+                        llm_prompt="Generate a list of words and phrases the user can use to discuss time or dates. Consider current time and date and recent and upcoming holidays and recent and upcoming birthdays."),
+            
+            create_button("spell_btn", "Spell",
+                        prompt_category="spell",
+                        llm_prompt="Generate letters of the alphabet for spelling")
         ]
     }
 
