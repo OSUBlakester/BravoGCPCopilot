@@ -13370,7 +13370,7 @@ async def upload_button_audio(
     file: UploadFile,
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
 ):
-    """Upload MP3 file for button custom audio"""
+    """Upload MP3 file for button custom audio to Google Cloud Storage"""
     try:
         logging.info(f"[AUDIO UPLOAD] Starting upload for file: {file.filename}, content_type: {file.content_type}, size: {file.size if hasattr(file, 'size') else 'unknown'}")
         
@@ -13410,16 +13410,12 @@ async def upload_button_audio(
         
         # Generate unique filename
         account_id = current_ids["account_id"]
-        user_id = current_ids["aac_user_id"]  # Fix: correct key name
+        user_id = current_ids["aac_user_id"]
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_extension = file.filename.split('.')[-1].lower()
-        unique_filename = f"button_audio_{timestamp}_{uuid.uuid4().hex[:8]}.{file_extension}"
+        unique_filename = f"button_audio/{account_id}/{user_id}/{timestamp}_{uuid.uuid4().hex[:8]}.{file_extension}"
         
-        # Convert to base64 data URL (same approach as images)
-        import base64
-        file_base64 = base64.b64encode(file_content).decode()
-        
-        # Determine MIME type for data URL
+        # Determine MIME type
         if file_extension == 'mp3':
             mime_type = 'audio/mpeg'
         elif file_extension == 'wav':
@@ -13429,17 +13425,26 @@ async def upload_button_audio(
         else:
             mime_type = 'audio/mpeg'  # default
         
-        # Create data URL (same format as images in Firestore)
-        audio_url = f"data:{mime_type};base64,{file_base64}"
-        logging.info(f"[AUDIO UPLOAD] Created data URL, size: {len(audio_url)} characters")
-        
-        logging.info(f"Uploaded button audio: {audio_url}")
-        
-        return JSONResponse(content={
-            "success": True,
-            "audio_url": audio_url,
-            "filename": unique_filename
-        })
+        # Upload to Google Cloud Storage (same bucket as AAC images)
+        try:
+            bucket = await ensure_aac_images_bucket()
+            blob = bucket.blob(unique_filename)
+            
+            # Upload audio file
+            await asyncio.to_thread(blob.upload_from_string, file_content, content_type=mime_type)
+            
+            # Return the public URL
+            audio_url = f"https://storage.googleapis.com/{bucket.name}/{blob.name}"
+            logging.info(f"[AUDIO UPLOAD] Uploaded to GCS: {audio_url}")
+            
+            return JSONResponse(content={
+                "success": True,
+                "audio_url": audio_url,
+                "filename": unique_filename
+            })
+        except Exception as upload_error:
+            logging.error(f"[AUDIO UPLOAD] GCS upload failed: {upload_error}")
+            raise HTTPException(status_code=500, detail=f"Failed to upload to storage: {str(upload_error)}")
         
     except HTTPException:
         raise
