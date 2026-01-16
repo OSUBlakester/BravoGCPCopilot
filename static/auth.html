@@ -298,6 +298,46 @@
             cursor: pointer;
         }
 
+        .password-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .password-input-wrapper input {
+            padding-right: 2.5rem;
+        }
+
+        .password-toggle-btn {
+            position: absolute;
+            right: 0.5rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            color: #6b7280;
+            font-size: 1.25rem;
+            line-height: 1;
+        }
+
+        .password-toggle-btn:hover {
+            color: #374151;
+        }
+
+        .forgot-password-link {
+            display: block;
+            text-align: right;
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            color: #2563eb;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .forgot-password-link:hover {
+            text-decoration: underline;
+        }
+
         .set-default-btn {
             background-color: #28a745;
             color: white;
@@ -332,7 +372,11 @@
                 </div>
                 <div class="form-group">
                     <label for="login-password">Password</label>
-                    <input type="password" id="login-password" name="password" required autocomplete="current-password">
+                    <div class="password-input-wrapper">
+                        <input type="password" id="login-password" name="password" required autocomplete="current-password">
+                        <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('login-password', this)">👁️</button>
+                    </div>
+                    <a href="#" class="forgot-password-link" onclick="showForgotPassword(event)">Forgot Password?</a>
                 </div>
                 <div class="save-login-container">
                     <div class="checkbox-group">
@@ -357,7 +401,10 @@
                 </div>
                 <div class="form-group">
                     <label for="register-password">Password (min 6 characters)</label>
-                    <input type="password" id="register-password" name="password" required autocomplete="new-password">
+                    <div class="password-input-wrapper">
+                        <input type="password" id="register-password" name="password" required autocomplete="new-password">
+                        <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('register-password', this)">👁️</button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="register-account-name">Account Name (e.g., Your Name, School Name)</label>
@@ -392,7 +439,7 @@
                 <div class="form-group">
                     <div class="checkbox-group">
                         <input type="checkbox" id="register-allow-admin-access" name="allow_admin_access" checked>
-                        <label for="register-allow-admin-access">Allow Bravo Admin access to this account (for support purposes)</label>
+                        <label for="register-allow-admin-access">Allow Bravo Admin access to this account (for support purposes, data is kept confidential and NEVER shared)</label>
                     </div>
                 </div>
                 <div class="button-group">
@@ -459,15 +506,24 @@
                 <div id="password-change-fields" style="display: none;">
                     <div class="form-group">
                         <label for="edit-current-password">Current Password</label>
-                        <input type="password" id="edit-current-password" name="current_password">
+                        <div class="password-input-wrapper">
+                            <input type="password" id="edit-current-password" name="current_password">
+                            <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('edit-current-password', this)">👁️</button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="edit-new-password">New Password</label>
-                        <input type="password" id="edit-new-password" name="new_password" minlength="6">
+                        <div class="password-input-wrapper">
+                            <input type="password" id="edit-new-password" name="new_password" minlength="6">
+                            <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('edit-new-password', this)">👁️</button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="edit-confirm-password">Confirm New Password</label>
-                        <input type="password" id="edit-confirm-password" name="confirm_password" minlength="6">
+                        <div class="password-input-wrapper">
+                            <input type="password" id="edit-confirm-password" name="confirm_password" minlength="6">
+                            <button type="button" class="password-toggle-btn" onclick="togglePasswordVisibility('edit-confirm-password', this)">👁️</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -492,7 +548,7 @@
                 <div class="form-group">
                     <div class="checkbox-group">
                         <input type="checkbox" id="edit-allow-admin-access" name="allow_admin_access">
-                        <label for="edit-allow-admin-access">Allow Bravo Admin access to this account (for support purposes)</label>
+                        <label for="edit-allow-admin-access">Allow Bravo Admin access to this account (for support purposes, data is kept confidential and NEVER shared)</label>
                     </div>
                 </div>
                 <div class="button-group">
@@ -601,6 +657,50 @@
     <script src="/static/splash-screen.js"></script>
 
     <script>
+
+        // Password visibility toggle function
+        function togglePasswordVisibility(inputId, button) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                button.textContent = '🙈';
+                button.title = 'Hide Password';
+            } else {
+                input.type = 'password';
+                button.textContent = '👁️';
+                button.title = 'Show Password';
+            }
+        }
+
+        // Show forgot password dialog
+        function showForgotPassword(event) {
+            event.preventDefault();
+            const email = document.getElementById('login-email').value.trim();
+            
+            if (!email) {
+                alert('Please enter your email address first.');
+                document.getElementById('login-email').focus();
+                return;
+            }
+
+            if (!confirm(`Send password reset email to ${email}?`)) {
+                return;
+            }
+
+            // Use Firebase's sendPasswordResetEmail
+            if (typeof firebase !== 'undefined' && firebase.auth) {
+                firebase.auth().sendPasswordResetEmail(email)
+                    .then(() => {
+                        alert(`Password reset email sent to ${email}. Please check your inbox and spam folder.`);
+                    })
+                    .catch((error) => {
+                        console.error('Password reset error:', error);
+                        alert(`Error sending password reset email: ${error.message}`);
+                    });
+            } else {
+                alert('Firebase authentication not initialized yet. Please wait a moment and try again.');
+            }
+        }
 
         // Use an Immediately Invoked Function Expression (IIFE) to handle the async setup
         (async () => {
