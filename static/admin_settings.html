@@ -422,6 +422,17 @@
                     </div>
                     <p class="text-xs text-gray-500 mt-1">Location Country to determine local info. Use 2-letter codes.</p>
                 </div>
+                
+                <div>
+                    <label for="vocabularyLevel" class="block text-lg font-medium text-gray-700 mb-2">Vocabulary Level:</label>
+                    <select id="vocabularyLevel" name="vocabularyLevel" class="w-full max-w-xs">
+                        <option value="emergent">Emergent - Basic everyday words (e.g., want, help, happy)</option>
+                        <option value="functional" selected>Functional - Practical daily living vocabulary (e.g., tired, wonderful, choose)</option>
+                        <option value="developing">Developing - Expanded academic vocabulary (e.g., anxious, fascinating, investigate)</option>
+                        <option value="proficient">Proficient - Sophisticated specialized vocabulary (e.g., lethargic, magnificent, articulate)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Controls the complexity of AI-generated vocabulary to match the user's communication level. Higher levels use more advanced words.</p>
+                </div>
             </div>
             
             <div class="mt-6 pt-4 border-t border-gray-200">
@@ -837,6 +848,7 @@
                                         <p><strong>Auto Clean in Freestyle:</strong> Automatically formats and cleans text before speaking in freestyle mode.</p>
                                         <p><strong>Enable Mood Selection:</strong> Shows a mood selection screen at session start to personalize AI responses based on the user's current emotional state.</p>
                                         <p><strong>Location:</strong> Set the 2-letter country code (e.g., US, UK, CA) to provide location-relevant information.</p>
+                                        <p><strong>Vocabulary Level:</strong> Controls the complexity of AI-generated vocabulary (Emergent = basic words, Functional = practical daily vocabulary, Developing = academic terms, Proficient = sophisticated language).</p>
                                         <p><strong>AI Provider:</strong> Choose between Google Gemini or OpenAI ChatGPT for AI-generated responses.</p>
                                     </div>
                                 </div>
