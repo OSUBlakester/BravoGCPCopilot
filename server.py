@@ -845,8 +845,7 @@ async def create_page(page: dict, current_ids: Annotated[Dict[str, str], Depends
         pages.append(page)
         await save_pages_to_file(account_id, aac_user_id, pages) # ADD 'await' here
         
-        # Invalidate caches that might be affected by page changes
-        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        # NOTE: No cache invalidation needed - pages are in delta context, not cached
         
         return {"message": "Page created successfully"}
     except Exception as e:
@@ -909,8 +908,7 @@ async def update_page(request: Request, current_ids: Annotated[Dict[str, str], D
         # The save_pages_to_file wraps this list in a dictionary, which is what Firestore expects.
         await save_pages_to_file(account_id, aac_user_id, all_pages_for_user)
         
-        # Invalidate caches that might be affected by page changes
-        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        # NOTE: No cache invalidation needed - pages are in delta context, not cached
         
         return {"message": "Page updated successfully"}
     except Exception as e:
@@ -933,8 +931,7 @@ async def delete_page(page_name: str, current_ids: Annotated[Dict[str, str], Dep
     if len(pages_data) < initial_len:
         await save_pages_to_file(account_id, aac_user_id, pages_data) # Save for this user
         
-        # Invalidate caches that might be affected by page deletion
-        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        # NOTE: No cache invalidation needed - pages are in delta context, not cached
         
         return {"message": f"Page '{page_name}' deleted successfully"}
     else:
@@ -947,6 +944,7 @@ class UserCurrentState(BaseModel):
     location: Optional[str] = ""
     people: Optional[str] = "" # Renamed from People Present for consistency
     activity: Optional[str] = ""
+    mood: Optional[str] = None  # Current mood - saved to info/user_narrative
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
     favorite_name: Optional[str] = None  # NEW: Name of the favorite that was loaded
     saved_at: Optional[str] = None  # NEW: ISO timestamp when data was manually saved
@@ -993,11 +991,22 @@ async def get_user_current_endpoint(current_ids: Annotated[Dict[str, str], Depen
             doc_subpath="info/current_state", # Back to current_state for existing accounts
             default_data=DEFAULT_USER_CURRENT.copy() # Use your default dictionary
         )
-        # Return the full state including favorite tracking fields
+        
+        # Also get mood from user_narrative
+        user_info = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        current_mood = user_info.get("currentMood")
+        
+        # Return the full state including favorite tracking fields and mood
         return JSONResponse(content={
             "location": user_current_content_dict.get("location", ""),
             "people": user_current_content_dict.get("people", ""),
             "activity": user_current_content_dict.get("activity", ""),
+            "mood": current_mood,  # Include mood from user_narrative
             "loaded_at": user_current_content_dict.get("loaded_at"),
             "favorite_name": user_current_content_dict.get("favorite_name"),
             "saved_at": user_current_content_dict.get("saved_at")
@@ -1013,9 +1022,12 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
     location = payload.location or ""
     people = payload.people or ""
     activity = payload.activity or ""
+    mood = payload.mood  # Current mood
     loaded_at = payload.loaded_at  # Timestamp when favorite was loaded
     favorite_name = payload.favorite_name  # Name of the favorite that was loaded
     provided_saved_at = payload.saved_at  # Timestamp when data was saved (may be provided for favorite loads)
+    
+    logging.info(f"🔍 /user_current called with mood='{mood}', location='{location}', people='{people}', activity='{activity}'")
     
     # The content to embed for current state should be a single string for LLM context
     current_state_content = f"Location: {location}\nPeople Present: {people}\nActivity: {activity}"
@@ -1053,6 +1065,28 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
         data_to_save=data_to_save
     )
     
+    # Save mood to user_narrative if provided
+    if success and mood is not None:
+        try:
+            # Get current user_narrative
+            user_info = await load_firestore_document(
+                account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO.copy()
+            )
+            # Update mood
+            user_info["currentMood"] = mood
+            # Save back
+            await save_firestore_document(
+                account_id, aac_user_id, "info/user_narrative", user_info
+            )
+            
+            # Track mood update timestamp
+            global mood_update_timestamps
+            user_key = f"{account_id}/{aac_user_id}"
+            mood_update_timestamps[user_key] = time.time()
+            logging.info(f"✅ Mood updated via current_state endpoint: {mood} for {account_id}/{aac_user_id}")
+        except Exception as mood_error:
+            logging.error(f"Error saving mood from current_state: {mood_error}")
+    
     # Cache invalidation for user current state changes (location, people, activity)
     if success:
         # Update USER_PROFILE cache with new current state
@@ -1063,11 +1097,10 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
             )
             user_info_content = user_info_content_dict.get("narrative", "") if user_info_content_dict else ""
             
-            # Invalidate cache since user context changed
-            await cache_manager.invalidate_cache(account_id, aac_user_id)
-            logging.info(f"Invalidated cache due to current state change for account {account_id} and user {aac_user_id}")
+            # NOTE: No cache invalidation needed - current state (mood/location/activity) is in delta context, not cached
+            logging.info(f"Current state updated for {account_id}/{aac_user_id} - using delta context, no cache invalidation")
         except Exception as cache_error:
-            logging.error(f"Failed to update USER_PROFILE cache with current state for account {account_id} and user {aac_user_id}: {cache_error}")
+            logging.error(f"Error during current state update for {account_id}/{aac_user_id}: {cache_error}")
             # Don't fail the entire operation due to cache update failure
     
     return {"success": success}
@@ -1559,52 +1592,136 @@ class GeminiCacheManager:
     relevant context (user info, settings, diary, etc.).
     """
     def __init__(self, ttl_hours: int = 4):
-        # Stores the name of the created Gemini CachedContent object for each user.
-        # Format: { "account_id_aac_user_id": "cachedContents/..." }
-        self._user_cache_map = {}
-        # Stores the creation timestamp of the cache to manage its lifecycle.
-        # Format: { "account_id_aac_user_id": 1678886400.0 }
-        self._cache_creation_times = {}
+        # Firestore collection path for cache metadata
+        self.CACHE_COLLECTION = "system/cache_manager/user_caches"
+        
+        # Initialize Firestore client for persistent cache tracking
+        self.db = firestore.Client()
+        
         self.ttl_seconds = ttl_hours * 3600
-        logging.info(f"Cache Manager initialized with a {ttl_hours}-hour TTL.")
+        logging.info(f"✅ Cache Manager initialized with Firestore persistence and {ttl_hours}-hour TTL.")
 
     def _get_user_key(self, account_id: str, aac_user_id: str) -> str:
         """Generates a unique key for a user to manage their cache."""
         return f"{account_id}_{aac_user_id}"
+    
+    async def _load_cache_from_firestore(self, user_key: str) -> Optional[Dict]:
+        """Load cache info from Firestore."""
+        try:
+            doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
+            doc = await asyncio.to_thread(doc_ref.get)
+            
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            logging.error(f"Error loading cache from Firestore for {user_key}: {e}")
+            return None
+    
+    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float):
+        """Save cache info to Firestore."""
+        try:
+            expires_at = created_at + self.ttl_seconds
+            doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
+            
+            await asyncio.to_thread(
+                doc_ref.set,
+                {
+                    "user_key": user_key,
+                    "cache_name": cache_name,
+                    "created_at": created_at,
+                    "expires_at": expires_at,
+                    "ttl_seconds": self.ttl_seconds
+                }
+            )
+            logging.info(f"Saved cache reference to Firestore: {user_key} -> {cache_name}")
+        except Exception as e:
+            logging.error(f"Error saving cache to Firestore for {user_key}: {e}")
+    
+    async def _delete_cache_from_firestore(self, user_key: str):
+        """Delete cache info from Firestore."""
+        try:
+            doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
+            await asyncio.to_thread(doc_ref.delete)
+            logging.info(f"Deleted cache reference from Firestore: {user_key}")
+        except Exception as e:
+            logging.error(f"Error deleting cache from Firestore for {user_key}: {e}")
 
     async def _is_cache_valid(self, user_key: str) -> bool:
-        """Checks if a user's cache exists and is within its TTL."""
-        if user_key not in self._user_cache_map:
+        """Checks if a user's cache exists in Firestore and is within its TTL."""
+        cache_data = await self._load_cache_from_firestore(user_key)
+        
+        if not cache_data:
             return False
         
-        creation_time = self._cache_creation_times.get(user_key, 0)
-        is_expired = (dt.now().timestamp() - creation_time) > self.ttl_seconds
+        created_at = cache_data.get('created_at', 0)
+        is_expired = (dt.now().timestamp() - created_at) > self.ttl_seconds
         
         if is_expired:
             logging.warning(f"Cache for user '{user_key}' has expired. TTL: {self.ttl_seconds}s.")
-            # Clean up expired cache entry
-            self._user_cache_map.pop(user_key, None)
-            self._cache_creation_times.pop(user_key, None)
+            # Clean up expired cache from Firestore and Gemini
+            await self._delete_expired_cache(user_key, cache_data.get('cache_name'))
             return False
-            
-        return True
-
-    async def _build_combined_context_string(self, account_id: str, aac_user_id: str, query_hint: str = "") -> str:
-        """
-        Fetches all user-related data from Firestore and compiles it into a single
-        string formatted for the LLM prompt.
-        """
-        logging.info(f"Building combined context string for {account_id}/{aac_user_id}...")
         
-        # Fetch all data concurrently
+        # Cache is valid - verify it still exists in Gemini
+        cache_name = cache_data.get('cache_name')
+        if cache_name:
+            try:
+                # Verify the cache still exists in Gemini API
+                await asyncio.to_thread(caching.CachedContent.get, cache_name)
+                logging.info(f"Cache for '{user_key}' is valid: {cache_name}")
+                return True
+            except Exception as e:
+                logging.warning(f"Cache reference exists in Firestore but not in Gemini: {cache_name}. Error: {e}")
+                # Clean up stale reference
+                await self._delete_cache_from_firestore(user_key)
+                return False
+        
+        return False
+    
+    async def _delete_expired_cache(self, user_key: str, cache_name: Optional[str]):
+        """Delete expired cache from both Firestore and Gemini."""
+        # Delete from Firestore
+        await self._delete_cache_from_firestore(user_key)
+        
+        # Delete from Gemini if cache_name provided
+        if cache_name:
+            try:
+                cache_to_delete = caching.CachedContent(name=cache_name)
+                await asyncio.to_thread(cache_to_delete.delete)
+                logging.info(f"Deleted expired Gemini cache: {cache_name}")
+            except Exception as e:
+                logging.warning(f"Error deleting expired Gemini cache {cache_name}: {e}")
+
+    async def _build_base_context(self, account_id: str, aac_user_id: str) -> str:
+        """
+        Builds the BASE context for caching - contains only stable, long-term data.
+        This is cached and reused across multiple requests.
+        
+        Includes:
+        - System prompt
+        - User profile narrative (stable)
+        - Friends & family (stable)
+        - Settings (rarely changes)
+        - Birthdays (stable)
+        - Diary entries (stable)
+        - Old chat history (>10 messages old)
+        
+        Excludes (moved to delta):
+        - Current mood (changes frequently)
+        - Current location/people/activity (changes per request)
+        - Recent chat history (last 5-10 turns)
+        - User pages (frequently edited)
+        """
+        logging.info(f"🏛️ Building BASE context (for caching) for {account_id}/{aac_user_id}...")
+        
+        # Fetch only stable data for caching
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
-            "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
             "settings": load_settings_from_file(account_id, aac_user_id),
             "birthdays": load_birthdays_from_file(account_id, aac_user_id),
             "diary": load_diary_entries(account_id, aac_user_id),
             "chat_history": load_chat_history(account_id, aac_user_id),
-            "pages": load_pages_from_file(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
         }
         results = await asyncio.gather(*tasks.values())
@@ -1620,7 +1737,7 @@ IMPORTANT: Always prioritize the User Profile information as your PRIMARY source
 Format responses as a JSON array of objects, each with "option" and "summary" keys.
 Analyze the provided context to create helpful, personalized suggestions."""
 
-        # Assemble the context string with USER PROFILE FIRST and EMPHASIZED
+        # Assemble the BASE context string
         context_parts = [f"--- SYSTEM PROMPT ---\n{system_prompt}\n"]
 
         # PRIORITIZE USER PROFILE - This should be the PRIMARY focus for all responses
@@ -1628,30 +1745,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
             user_narrative = context_data['user_info'].get('narrative', 'Not available')
             context_parts.append(f"=== PRIMARY USER PROFILE (MOST IMPORTANT) ===\n{user_narrative}\n\n⚠️  REMEMBER: This user profile should be the foundation for ALL responses. Personal details, family, interests, and characteristics mentioned here are the most important context.\n")
         
-        # MOOD - High Priority Context (Level 1.5) - Mood should immediately influence response tone and style
-        if context_data["user_info"]:
-            current_mood = context_data['user_info'].get('currentMood', 'Not set')
-            print(f"🎭 MOOD CONTEXT: Building context for {account_id}/{aac_user_id} - mood from data: '{current_mood}'")
-            logging.info(f"🎭 Building context for {account_id}/{aac_user_id} - mood from data: '{current_mood}'")
-            if current_mood and current_mood != 'Not set' and current_mood != 'None':
-                print(f"🎯 MOOD PRIORITY: Adding HIGH PRIORITY mood section: {current_mood}")
-                logging.info(f"🎯 Adding HIGH PRIORITY mood section: {current_mood}")
-                context_parts.append(f"=== CURRENT MOOD (HIGH PRIORITY) ===\nUser's Current Mood: {current_mood}\n\n🎭 IMPORTANT: This mood should significantly influence the tone, energy, and style of your response. Let this mood guide how you express the user's personality.\n")
-            else:
-                print(f"⚠️ MOOD WARNING: No valid mood found - mood was: '{current_mood}'")
-                logging.info(f"⚠️ No valid mood found - mood was: '{current_mood}'")
-        
-        # Secondary context - current situation (use sparingly, don't let it dominate user profile)
-        if context_data["user_current"]:
-            current_parts = []
-            current_parts.extend([
-                f"Location: {context_data['user_current'].get('location', 'Unknown')}",
-                f"People Present: {context_data['user_current'].get('people', 'None')}",
-                f"Activity: {context_data['user_current'].get('activity', 'Idle')}"
-            ])
-            context_parts.append(f"--- Current Situation (Secondary Context) ---\n{chr(10).join(current_parts)}\n")
-        
-        # Additional supporting context (least priority)
+        # Additional supporting context (stable data only)
         if context_data["friends_family"]:
             context_parts.append(f"--- Friends & Family (Supporting Context) ---\n{json.dumps(context_data['friends_family'], indent=2)}\n")
         if context_data["settings"]:
@@ -1659,43 +1753,14 @@ Analyze the provided context to create helpful, personalized suggestions."""
         if context_data["birthdays"] and (context_data["birthdays"].get("userBirthdate") or context_data["birthdays"].get("friendsFamily")):
             context_parts.append(f"--- Birthdays (Supporting Context) ---\n{json.dumps(context_data['birthdays'], indent=2)}\n")
         
-        # Add current date right before diary entries so LLM can interpret entry dates correctly
+        # Add current date for diary context
         from datetime import datetime
         current_date_str = datetime.now().strftime('%Y-%m-%d')
         context_parts.append(f"--- TODAY'S DATE (CRITICAL FOR DIARY CONTEXT) ---\n{current_date_str}\n⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events. Generate responses accordingly.\n")
         
+        # Diary entries (stable, long-term data)
         if context_data["diary"]:
-            # Detect if this is a query about upcoming/future plans for enhanced filtering guidance
-            is_upcoming_query = any(keyword in query_hint.lower() for keyword in [
-                "upcoming", "future", "plans", "planning", "coming up", "scheduled", 
-                "dates after today", "after today's date", "planned activities"
-            ])
-            
-            # PRE-FILTER diary entries for upcoming queries to eliminate confusion
-            if is_upcoming_query:
-                # Only include diary entries with dates AFTER today
-                future_entries = [
-                    entry for entry in context_data['diary'] 
-                    if entry.get('date', '') > current_date_str
-                ]
-                
-                if future_entries:
-                    diary_context = f"""--- Future Diary Entries (UPCOMING PLANS ONLY) ---
-📅 TODAY'S DATE: {current_date_str}
-✅ PRE-FILTERED: Only showing entries with dates AFTER {current_date_str}
-🎯 THESE ARE CONFIRMED FUTURE EVENTS - use these for upcoming plans
-
-Future Diary Entries ({len(future_entries)} entries found):
-{json.dumps(future_entries[:10], indent=2)}
-"""
-                else:
-                    diary_context = f"""--- Future Diary Entries (UPCOMING PLANS ONLY) ---
-📅 TODAY'S DATE: {current_date_str}
-❌ NO FUTURE ENTRIES FOUND: No diary entries with dates after {current_date_str}
-💡 RESPONSE GUIDANCE: Since no future diary entries exist, respond that no upcoming plans are currently scheduled.
-"""
-            else:
-                diary_context = f"""--- Diary Entries (Background Context) ---
+            diary_context = f"""--- Diary Entries (Background Context) ---
 📅 TODAY'S DATE: {current_date_str}
 ⚠️ CRITICAL INSTRUCTIONS FOR DIARY INTERPRETATION:
 - Entries with dates BEFORE {current_date_str} = PAST events (use past tense: "I did", "I went", "I had")
@@ -1706,16 +1771,118 @@ Diary Entries (most recent 15, sorted newest to oldest):
 {json.dumps(context_data['diary'][:15], indent=2)}
 """
             context_parts.append(diary_context)
-        if context_data["chat_history"]:
-            # For joke generation, pass more history to prevent repetition
-            history_count = 10 if "joke" in query_hint.lower() else 3
-            context_parts.append(f"--- Recent Chat History (Background Context) ---\n{json.dumps(context_data['chat_history'][-history_count:], indent=2)}\n")
-        if context_data["pages"]:
-            context_parts.append(f"--- User-Defined Pages (Background Context) ---\n{json.dumps(context_data['pages'], indent=2)}\n")
+        
+        # OLD chat history (older messages beyond recent 10) for context
+        # Recent chat will be in delta context
+        if context_data["chat_history"] and len(context_data["chat_history"]) > 10:
+            old_history = context_data['chat_history'][:-10]  # Everything except last 10
+            context_parts.append(f"--- Historical Chat Context (Older Messages) ---\n{json.dumps(old_history, indent=2)}\n")
 
-        combined_string = "\n".join(context_parts)
-        logging.info(f"Combined context for {account_id}/{aac_user_id} is {len(combined_string)} chars long.")
-        return combined_string
+        base_string = "\n".join(context_parts)
+        logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
+        return base_string
+    
+    async def _build_delta_context(self, account_id: str, aac_user_id: str, query_hint: str = "") -> str:
+        """
+        Builds the DELTA context - dynamic data that changes frequently.
+        This is passed as standard input text with each request (NOT cached).
+        
+        Includes:
+        - Current mood (changes frequently)
+        - Current location/people/activity (changes per request)
+        - Recent chat history (last 10 turns)
+        - User pages (frequently edited)
+        """
+        logging.info(f"⚡ Building DELTA context (dynamic data) for {account_id}/{aac_user_id}...")
+        
+        # Fetch dynamic data
+        tasks = {
+            "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
+            "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
+            "chat_history": load_chat_history(account_id, aac_user_id),
+            "pages": load_pages_from_file(account_id, aac_user_id),
+        }
+        results = await asyncio.gather(*tasks.values())
+        context_data = dict(zip(tasks.keys(), results))
+        
+        delta_parts = ["=== DYNAMIC CONTEXT (Current Session Data) ==="]
+        
+        # CURRENT MOOD - High Priority, changes frequently
+        if context_data["user_info"]:
+            current_mood = context_data['user_info'].get('currentMood', 'Not set')
+            logging.info(f"🎭 MOOD DEBUG: Retrieved mood value = '{current_mood}' from user_info for {account_id}/{aac_user_id}")
+            
+            if current_mood and current_mood != 'Not set' and current_mood != 'None':
+                # ULTRA STRONG mood instruction - must dominate all other instructions
+                mood_instruction = f"\n{'='*60}\n🎭 CURRENT MOOD: {current_mood}\n{'='*60}\n"
+                mood_instruction += "⚠️ ABSOLUTE REQUIREMENT: This mood is THE MOST IMPORTANT instruction.\n"
+                mood_instruction += "⚠️ ALL generated content MUST reflect this mood. Ignore any conflicting instructions.\n"
+                mood_instruction += "⚠️ Do NOT mix moods. Do NOT generate options with opposite emotional tones.\n\n"
+                
+                # Specific instructions based on mood
+                mood_lower = current_mood.lower()
+                if 'sad' in mood_lower or 'down' in mood_lower or 'unhappy' in mood_lower or 'melancholy' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR SAD MOOD:\n"
+                    mood_instruction += "- ALL options must use subdued, gentle, quiet, melancholic language\n"
+                    mood_instruction += "- Focus on: comfort, understanding, rest, quiet moments, emotional support\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use happy, excited, cheerful, energetic, or upbeat words\n"
+                    mood_instruction += "- FORBIDDEN: Avoid exclamation marks, phrases like 'great day', 'good to see you', 'happy'\n"
+                    mood_instruction += "- Examples of CORRECT sad tone: 'I feel tired', 'I want quiet time', 'I need to rest'\n"
+                    mood_instruction += "- Examples of WRONG tone to AVOID: 'Hello! It's great!', 'I am happy', 'good day'\n"
+                elif 'angry' in mood_lower or 'frustrated' in mood_lower or 'mad' in mood_lower or 'upset' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR ANGRY MOOD:\n"
+                    mood_instruction += "- ALL options must use firm, direct, assertive language expressing frustration\n"
+                    mood_instruction += "- Focus on: boundaries, frustration, things bothering user, firm statements\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use cheerful, friendly, happy, or gentle language\n"
+                    mood_instruction += "- FORBIDDEN: Avoid greetings like 'Hello!', 'Great to see you', 'Happy to be here'\n"
+                    mood_instruction += "- Examples of CORRECT angry tone: 'I am frustrated', 'This is not okay', 'I need space'\n"
+                    mood_instruction += "- Examples of WRONG tone to AVOID: 'Hello there!', 'I am happy', 'It is a good day'\n"
+                elif 'happy' in mood_lower or 'excited' in mood_lower or 'joyful' in mood_lower or 'cheerful' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR HAPPY MOOD:\n"
+                    mood_instruction += "- ALL options must use upbeat, positive, energetic, enthusiastic language\n"
+                    mood_instruction += "- Focus on: celebration, joy, excitement, fun activities\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use sad, tired, or negative expressions\n"
+                elif 'silly' in mood_lower or 'playful' in mood_lower or 'funny' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR SILLY/PLAYFUL MOOD:\n"
+                    mood_instruction += "- ALL options must use playful, humorous, lighthearted, whimsical language\n"
+                    mood_instruction += "- Focus on: silliness, jokes, playful statements, fun wordplay\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use serious, formal, or somber language\n"
+                elif 'calm' in mood_lower or 'peaceful' in mood_lower or 'relaxed' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR CALM MOOD:\n"
+                    mood_instruction += "- ALL options must use gentle, soothing, tranquil, peaceful language\n"
+                    mood_instruction += "- Focus on: peace, contentment, quiet activities, relaxation\n"
+                
+                mood_instruction += f"\n{'='*60}\n"
+                delta_parts.append(mood_instruction)
+                logging.info(f"✅ MOOD INSTRUCTION ADDED: {current_mood} with strict requirements")
+            else:
+                logging.warning(f"⚠️ MOOD NOT ADDED: currentMood = '{current_mood}' (filtered out)")
+        
+        # Current situation - location, people, activity
+        if context_data["user_current"]:
+            current_parts = []
+            current_parts.extend([
+                f"Location: {context_data['user_current'].get('location', 'Unknown')}",
+                f"People Present: {context_data['user_current'].get('people', 'None')}",
+                f"Activity: {context_data['user_current'].get('activity', 'Idle')}"
+            ])
+            delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
+        
+        # Recent chat history (last 10 turns)
+        if context_data["chat_history"]:
+            history_count = 10 if "joke" in query_hint.lower() else 10
+            recent_history = context_data['chat_history'][-history_count:]
+            if recent_history:
+                delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {len(recent_history)} turns):\n{json.dumps(recent_history, indent=2)}\n")
+        
+        # User-defined pages (frequently edited)
+        if context_data["pages"]:
+            delta_parts.append(f"\n📄 USER PAGES:\n{json.dumps(context_data['pages'], indent=2)}\n")
+        
+        delta_string = "\n".join(delta_parts)
+        logging.info(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
+        logging.info(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
+        return delta_string
 
     async def warm_up_user_cache_if_needed(self, account_id: str, aac_user_id: str) -> None:
         """
@@ -1731,81 +1898,95 @@ Diary Entries (most recent 15, sorted newest to oldest):
 
         logging.info(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
         try:
-            combined_context = await self._build_combined_context_string(account_id, aac_user_id)
+            # Build BASE context only - stable data for caching
+            base_context = await self._build_base_context(account_id, aac_user_id)
 
-            # Gemini requires a minimum of 1,024 tokens to create a cache for Gemini 1.5/2.0 Flash.
-            # Use a more accurate token estimation: roughly 3.5 chars per token for English text
-            estimated_tokens = len(combined_context) // 3.5
+            # Gemini 2.5 Flash minimum cache size - lowered to 1024 to allow smaller profiles
+            # Use a more accurate token estimation: roughly 4 chars per token for English text
+            estimated_tokens = len(base_context) // 4
             min_tokens_required = 1024
             
-            logging.info(f"Context for user '{user_key}': {len(combined_context)} chars, ~{int(estimated_tokens)} tokens")
+            logging.info(f"BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
             if estimated_tokens < min_tokens_required:
-                logging.warning(f"Context for user '{user_key}' has {int(estimated_tokens)} tokens < {min_tokens_required} minimum. Skipping cache creation.")
+                logging.warning(f"BASE context for user '{user_key}' has {int(estimated_tokens)} tokens < {min_tokens_required} minimum. Skipping cache creation.")
                 return
             
-            logging.info(f"Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
+            logging.info(f"🚀 Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
 
-            # Create the cache using the Gemini API
+            # Create the cache using the Gemini API (BASE context only)
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
+            created_at = dt.now().timestamp()
             
             # The model used for caching must match the model used for generation.
             cached_content = await asyncio.to_thread(
                 caching.CachedContent.create,
                 model=GEMINI_PRIMARY_MODEL,
                 display_name=cache_display_name,
-                contents=[{'role': 'user', 'parts': [{'text': combined_context}]}],
+                contents=[{'role': 'user', 'parts': [{'text': base_context}]}],
                 ttl=timedelta(seconds=self.ttl_seconds)
             )
 
-            self._user_cache_map[user_key] = cached_content.name
-            self._cache_creation_times[user_key] = dt.now().timestamp()
+            # Save to Firestore instead of in-memory dict
+            await self._save_cache_to_firestore(user_key, cached_content.name, created_at)
             logging.info(f"Successfully warmed up cache for user '{user_key}'. Cache Name: {cached_content.name}")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
-            # Ensure partial state is cleaned up on failure
-            self._user_cache_map.pop(user_key, None)
-            self._cache_creation_times.pop(user_key, None)
+            # Clean up any partial state from Firestore
+            await self._delete_cache_from_firestore(user_key)
 
     async def get_cached_content_reference(self, account_id: str, aac_user_id: str) -> Optional[str]:
         """
         Returns the Gemini cache name (e.g., 'cachedContents/...') for the user
-        if a valid cache exists.
+        if a valid cache exists (loaded from Firestore).
         """
         user_key = self._get_user_key(account_id, aac_user_id)
+        
         if await self._is_cache_valid(user_key):
-            cache_name = self._user_cache_map.get(user_key)
-            logging.info(f"Found valid cache reference for user '{user_key}': {cache_name}")
-            return cache_name
+            cache_data = await self._load_cache_from_firestore(user_key)
+            if cache_data:
+                cache_name = cache_data.get('cache_name')
+                logging.info(f"Found valid cache reference for user '{user_key}': {cache_name}")
+                return cache_name
+        
         logging.warning(f"No valid cache reference found for user '{user_key}'.")
         return None
 
     async def invalidate_cache(self, account_id: str, aac_user_id: str) -> None:
-        """Invalidates and deletes the cache for a specific user."""
+        """Invalidates and deletes the cache for a specific user from both Firestore and Gemini."""
         user_key = self._get_user_key(account_id, aac_user_id)
-        cache_name = self._user_cache_map.pop(user_key, None)
-        self._cache_creation_times.pop(user_key, None)
-
-        if cache_name:
-            try:
-                # Get the cached content object first, then delete it.
-                cache_to_delete = caching.CachedContent(name=cache_name)
-                await asyncio.to_thread(cache_to_delete.delete)
-                logging.info(f"Successfully invalidated and deleted cache '{cache_name}' for user '{user_key}'.")
-            except Exception as e:
-                logging.error(f"Error deleting Gemini cache '{cache_name}': {e}", exc_info=True)
+        
+        # Load cache info from Firestore
+        cache_data = await self._load_cache_from_firestore(user_key)
+        
+        if cache_data:
+            cache_name = cache_data.get('cache_name')
+            
+            # Delete from Firestore
+            await self._delete_cache_from_firestore(user_key)
+            
+            # Delete from Gemini
+            if cache_name:
+                try:
+                    cache_to_delete = caching.CachedContent(name=cache_name)
+                    await asyncio.to_thread(cache_to_delete.delete)
+                    logging.info(f"Successfully invalidated and deleted cache '{cache_name}' for user '{user_key}'.")
+                except Exception as e:
+                    logging.error(f"Error deleting Gemini cache '{cache_name}': {e}", exc_info=True)
         else:
             logging.info(f"No cache to invalidate for user '{user_key}'.")
 
-    def get_cache_debug_info(self, account_id: str, aac_user_id: str) -> Dict:
-        """Provides debugging information about a user's cache."""
+    async def get_cache_debug_info(self, account_id: str, aac_user_id: str) -> Dict:
+        """Provides debugging information about a user's cache (loaded from Firestore)."""
         user_key = self._get_user_key(account_id, aac_user_id)
-        cache_name = self._user_cache_map.get(user_key)
-        creation_time = self._cache_creation_times.get(user_key)
+        cache_data = await self._load_cache_from_firestore(user_key)
 
-        if not cache_name or not creation_time:
+        if not cache_data:
             return {"status": "No active cache found."}
+        
+        cache_name = cache_data.get('cache_name')
+        creation_time = cache_data.get('created_at', 0)
 
         age_seconds = dt.now().timestamp() - creation_time
         time_left_seconds = self.ttl_seconds - age_seconds
@@ -1821,6 +2002,34 @@ Diary Entries (most recent 15, sorted newest to oldest):
             "time_left_minutes": round(time_left_seconds / 60, 2),
             "is_valid": is_valid
         }
+    
+    async def cleanup_expired_caches_globally(self):
+        """Background task to clean up expired caches across all users."""
+        try:
+            logging.info("🧹 Running global cache cleanup...")
+            
+            docs = await asyncio.to_thread(
+                lambda: list(self.db.collection(self.CACHE_COLLECTION).stream())
+            )
+            
+            now = dt.now().timestamp()
+            cleaned = 0
+            
+            for doc in docs:
+                data = doc.to_dict()
+                created_at = data.get('created_at', 0)
+                user_key = data.get('user_key')
+                cache_name = data.get('cache_name')
+                
+                if (now - created_at) > self.ttl_seconds:
+                    # Expired - delete it
+                    await self._delete_expired_cache(user_key, cache_name)
+                    cleaned += 1
+            
+            logging.info(f"✅ Global cache cleanup complete: cleaned {cleaned} expired caches")
+            
+        except Exception as e:
+            logging.error(f"Error during global cache cleanup: {e}", exc_info=True)
 
 # Initialize global cache manager
 cache_manager = GeminiCacheManager()
@@ -2816,7 +3025,7 @@ async def get_cache_debug_info_endpoint(
 
 @app.post("/api/cache/refresh")
 async def refresh_user_cache(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
-    """Manually invalidates and deletes the cache for the current user."""
+    """Manually invalidates and deletes the cache for the current user. Use when base context changes."""
     global cache_manager
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
@@ -2830,11 +3039,26 @@ async def build_full_prompt_for_non_cached_llm(account_id: str, aac_user_id: str
     """
     Builds the complete LLM prompt from scratch by fetching all context data.
     This is used as a fallback when a cache is not available.
+    Uses Base + Delta architecture to match cached request structure.
     """
-    # This function reuses the same logic as the cache manager's context builder
-    # to ensure consistency between cached and non-cached prompts.
     global cache_manager
-    full_context_string = await cache_manager._build_combined_context_string(account_id, aac_user_id, user_query)
+    
+    try:
+        # Build base and delta context separately for consistency with cached approach
+        logging.info(f"🔧 Starting fallback prompt build for {account_id}/{aac_user_id}")
+        base_context = await cache_manager._build_base_context(account_id, aac_user_id)
+        logging.info(f"✅ Base context built: {len(base_context)} chars")
+        
+        delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_query)
+        logging.info(f"✅ Delta context built: {len(delta_context)} chars")
+        
+        # Combine base + delta (same as cached requests do)
+        full_context_string = f"{base_context}\n\n{delta_context}"
+        
+        logging.info(f"📋 FALLBACK FULL PROMPT PREVIEW (first 1000 chars):\n{full_context_string[:1000]}")
+    except Exception as e:
+        logging.error(f"❌ Error building fallback prompt: {e}", exc_info=True)
+        raise
     
     # Add advanced randomization prompt for joke generation
     if "joke" in user_query.lower():
@@ -3065,22 +3289,31 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
         llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
-        # --- Gemini Cache-First Approach ---
-        logging.info(f"Using Gemini with caching for {account_id}/{aac_user_id}.")
+        # --- Gemini Cache-First Approach with Base + Delta Architecture ---
+        logging.info(f"🚀 Using Gemini with Base+Delta caching for {account_id}/{aac_user_id}.")
         cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
 
         if cached_content_ref:
             try:
+                # Build delta context (dynamic data not in cache)
+                delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content)
+                
+                # Combine delta + user query
+                combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
+                
+                logging.info(f"🔍 COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
+                
+                # Use cached base context + pass delta as standard input
                 model = genai.GenerativeModel.from_cached_content(cached_content_ref)
                 response = await asyncio.to_thread(
-                    model.generate_content, final_user_query, generation_config=generation_config
+                    model.generate_content, combined_prompt, generation_config=generation_config
                 )
                 llm_response_json_str = response.text.strip()
                 
                 # Log detailed token usage for cached requests
-                log_token_usage(response, "CACHED", account_id, aac_user_id)
+                log_token_usage(response, "CACHED+DELTA", account_id, aac_user_id)
                 
-                logging.info(f"Successfully generated content using cached reference for {account_id}/{aac_user_id}.")
+                logging.info(f"✅ Successfully generated content using BASE cache + DELTA context for {account_id}/{aac_user_id}.")
             except Exception as e:
                 logging.error(f"Error using cached content for {account_id}/{aac_user_id}: {e}. Falling back.")
                 full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
@@ -3096,17 +3329,20 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
                 
                 if cached_content_ref:
-                    # Cache was successfully created, use it
+                    # Cache was successfully created, use it with delta context
+                    delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content)
+                    combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
+                    
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
                     response = await asyncio.to_thread(
-                        model.generate_content, final_user_query, generation_config=generation_config
+                        model.generate_content, combined_prompt, generation_config=generation_config
                     )
                     llm_response_json_str = response.text.strip()
                     
                     # Log detailed token usage for newly cached requests
-                    log_token_usage(response, "NEW_CACHE", account_id, aac_user_id)
+                    log_token_usage(response, "NEW_CACHE+DELTA", account_id, aac_user_id)
                     
-                    logging.info(f"Successfully generated content using newly created cache for {account_id}/{aac_user_id}.")
+                    logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA for {account_id}/{aac_user_id}.")
                 else:
                     # Cache creation failed, use full prompt fallback
                     logging.warning(f"Cache creation failed for {account_id}/{aac_user_id}. Using full prompt fallback.")
@@ -3490,18 +3726,50 @@ class UserCurrentState(BaseModel): location: Optional[str] = ""; people: Optiona
 
 
 # --- FastAPI Lifespan Context Manager (Replaces @app.on_event) ---
+
+# Background task for periodic cache cleanup
+cleanup_task = None
+
+async def periodic_cache_cleanup():
+    """Periodic background task to clean up expired caches every hour."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Wait 1 hour
+            logging.info("⏰ Running scheduled cache cleanup...")
+            await cache_manager.cleanup_expired_caches_globally()
+        except asyncio.CancelledError:
+            logging.info("Cache cleanup task cancelled.")
+            break
+        except Exception as e:
+            logging.error(f"Error in periodic cache cleanup: {e}", exc_info=True)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global cleanup_task
+    
     # Code to run on startup
     logging.info("Application startup: Initializing shared backend services...")
     initialize_backend_services() # This now only initializes global, shared items
     # REMOVE THESE:
     # load_settings_from_file() # Settings loaded per user now
     # load_birthdays_from_file() # Birthdays loaded per user now
+    
+    # Start periodic cache cleanup task
+    cleanup_task = asyncio.create_task(periodic_cache_cleanup())
+    logging.info("✅ Started periodic cache cleanup task (runs every hour)")
+    
     logging.info("Startup complete (shared services).")
     yield
-    # Code to run on shutdown (optional)
-    logging.info("Application shutdown.")
+    
+    # Code to run on shutdown
+    logging.info("Application shutdown: cleaning up...")
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    logging.info("Application shutdown complete.")
 
 # Assign the lifespan manager to the FastAPI app instance
 app.router.lifespan_context = lifespan
@@ -3551,9 +3819,10 @@ async def update_user_info_endpoint(payload: UserInfoNarrative, current_ids: Ann
         data_to_save=existing_data
     )
     
-    # Cache invalidation for user info changes
+    # Cache invalidation for user info changes - KEEP THIS, narrative is in base context
     if success:
         await cache_manager.invalidate_cache(account_id, aac_user_id)
+        logging.info(f"✅ Invalidated cache due to user narrative change (base context) for {account_id}/{aac_user_id}")
     
     return {"success": success}
 
@@ -3595,9 +3864,8 @@ async def update_user_favorites(request: Request, current_ids: Annotated[Dict[st
     # Call the existing, correct Firestore-based function
     success = await save_dynamic_scraping_config(account_id, aac_user_id, incoming_config_data)
 
-    # Cache invalidation for user favorites changes
+    # NOTE: No cache invalidation - favorites/scraping config not in base context
     if success:
-        await cache_manager.invalidate_cache(account_id, aac_user_id)
         return JSONResponse(content={"message": "User favorites saved successfully"})
     else:
         raise HTTPException(status_code=500, detail="Failed to save user favorites (scraping configuration) to Firestore.")
@@ -3667,8 +3935,7 @@ async def save_favorites(favorites_data: FavoritesData, current_ids: Annotated[D
             data_to_save=favorites_data.dict()
         )
         if success:
-            # Cache invalidation for favorites changes
-            await cache_manager.invalidate_cache(account_id, aac_user_id)
+            # NOTE: No cache invalidation - favorites config not in base context
             return JSONResponse(content={"message": "Favorites saved successfully"})
         else:
             raise HTTPException(status_code=500, detail="Failed to save favorites")
@@ -5872,10 +6139,10 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
         # Await load_settings_from_file to get the actual dictionary
         saved_settings_dict = await load_settings_from_file(account_id, aac_user_id)
         
-        # CRITICAL FIX: Invalidate relevant caches after settings update
+        # Invalidate cache - settings ARE in base context (cached)
         try:
             await cache_manager.invalidate_cache(account_id, aac_user_id)
-            logging.info(f"Invalidated cache for account {account_id}, user {aac_user_id} after settings update")
+            logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after settings update (base context change)")
         except Exception as e:
             logging.error(f"Failed to invalidate caches after settings update: {e}")
         
@@ -6900,9 +7167,9 @@ async def save_birthdays(birthday_data: BirthdayData, current_ids: Annotated[Dic
     success = await save_birthdays_to_file(account_id, aac_user_id, data_to_save) # Renamed to 'success' for clarity
 
     if success:
-        # Invalidate cache so it gets rebuilt with new birthday data
+        # Invalidate cache - birthdays ARE in base context (cached)
         await cache_manager.invalidate_cache(account_id, aac_user_id)
-        logging.info(f"Invalidated cache for account {account_id} and user {aac_user_id} after birthday update")
+        logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after birthday update (base context change)")
         
         return JSONResponse(content=data_to_save)
     else: 
@@ -6928,9 +7195,9 @@ async def save_friends_family(friends_family_data: FriendsFamilyData, current_id
     success = await save_friends_family_to_file(account_id, aac_user_id, data_to_save)
 
     if success:
-        # Invalidate cache so it gets rebuilt with new friends & family data
+        # Invalidate cache - friends & family ARE in base context (cached)
         await cache_manager.invalidate_cache(account_id, aac_user_id)
-        logging.info(f"Invalidated cache for account {account_id} and user {aac_user_id} after friends & family update")
+        logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after friends & family update (base context change)")
         
         return JSONResponse(content=data_to_save)
     else: 
@@ -7155,11 +7422,13 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
                 mood_update_timestamps[user_key] = time.time()
                 logging.info(f"🕐 Mood update timestamp recorded for {user_key}: {current_mood}")
             
-            logging.info(f"✅ User info updated for {account_id}/{aac_user_id}. Mood: {current_mood}. Invalidating cache...")
+            # NOTE: Mood is in DELTA context, NOT cached. Only invalidate if narrative/name changed.
+            # For now, keep simple: always invalidate on /update-user-info endpoint
+            logging.info(f"✅ User info updated for {account_id}/{aac_user_id}. Invalidating cache (narrative may have changed)...")
             await cache_manager.invalidate_cache(account_id, aac_user_id)
-            logging.info(f"🗑️ Cache invalidated successfully for mood/info change")
+            logging.info(f"🗑️ Cache invalidated for user info change")
         except Exception as cache_error:
-            logging.error(f"❌ Failed to invalidate cache for account {account_id} and user {aac_user_id}: {cache_error}", exc_info=True)
+            logging.error(f"❌ Failed to invalidate cache for {account_id}/{aac_user_id}: {cache_error}", exc_info=True)
         
         response_data = {"narrative": user_info, "currentMood": current_mood, "name": user_name}
         if avatar_config:
@@ -7780,8 +8049,9 @@ async def add_or_update_diary_entry(entry_data: DiaryEntryInput, response: Respo
         entries.append(new_entry_dict)
 
     if await save_diary_entries(account_id, aac_user_id, entries):
+        # Invalidate cache - diary entries ARE in base context (cached)
         await cache_manager.invalidate_cache(account_id, aac_user_id)
-        logging.info(f"Invalidated cache after diary entry update for user {aac_user_id}.")
+        logging.info(f"✅ Invalidated cache after diary entry update for {aac_user_id} (base context change)")
         response.status_code = current_status
         return new_entry_dict
     else:
@@ -7799,8 +8069,9 @@ async def delete_diary_entry(current_ids: Annotated[Dict[str, str], Depends(get_
     
     if len(entries_after_delete) < initial_length:
         if await save_diary_entries(account_id, aac_user_id, entries_after_delete):
+            # Invalidate cache - diary entries ARE in base context (cached)
             await cache_manager.invalidate_cache(account_id, aac_user_id)
-            logging.info(f"Invalidated cache after deleting diary entry for user {aac_user_id}.")
+            logging.info(f"✅ Invalidated cache after deleting diary entry for {aac_user_id} (base context change)")
             return Response(status_code=204)
         else:
             raise HTTPException(status_code=500, detail="Failed to save diary entries after deletion.")
@@ -7826,10 +8097,11 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         history.append(log_entry)
         if len(history) > MAX_CHAT_HISTORY: history = history[-MAX_CHAT_HISTORY:]
         await save_chat_history(account_id, aac_user_id, history) # Pass user_id
-        logging.info(f"Chat history updated successfully for account {account_id} and user {aac_user_id}.")
+        logging.info(f"Chat history updated successfully for {account_id}/{aac_user_id}.")
         
-        # Invalidate the cache since chat history has changed
-        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        # NOTE: Recent chat history (last 10 turns) is in DELTA context, not cached
+        # Old history (>10 turns) is in base cache, but changes rarely so skip invalidation
+        # This prevents cache churn on every single message
         
         return JSONResponse(content={"message": "Chat history saved successfully"})
     except HTTPException as http_exc: raise http_exc
@@ -8883,12 +9155,10 @@ async def set_mood(
                 mood_update_timestamps[user_key] = time.time()
                 logging.info(f"🕐 Mood update timestamp recorded for {user_key}: {new_mood}")
                 
-                # Invalidate cache since mood affects context
-                logging.info(f"✅ Mood updated for {account_id}/{aac_user_id}. New mood: {new_mood}. Invalidating cache...")
-                await cache_manager.invalidate_cache(account_id, aac_user_id)
-                logging.info(f"🗑️ Cache invalidated successfully for mood change")
+                # NOTE: Mood is in DELTA context, NOT cached - no invalidation needed
+                logging.info(f"✅ Mood updated for {account_id}/{aac_user_id}. New mood: {new_mood} (using delta context, no cache invalidation)")
             except Exception as cache_error:
-                logging.error(f"❌ Failed to invalidate cache for mood change: {cache_error}", exc_info=True)
+                logging.error(f"❌ Error during mood update: {cache_error}", exc_info=True)
             
             return JSONResponse(content={"success": True, "mood": new_mood})
         else:
@@ -14123,6 +14393,9 @@ async def generate_options(
         account_id = current_user_info["account_id"]
         aac_user_id = current_user_info["aac_user_id"]
         
+        # Build full prompt with user context (including mood)
+        logging.info(f"📝 Building context for generate_options: {account_id}/{aac_user_id}")
+        
         # Try multiple times for category-specific requests to get enough options
         max_attempts = 3 if is_category_request else 1
         all_options = []
@@ -14130,7 +14403,9 @@ async def generate_options(
         
         for attempt in range(max_attempts):
             try:
-                options_text = await _generate_gemini_content_with_fallback(enhanced_prompt, None, account_id, aac_user_id)
+                # Build full prompt with user context for each attempt (includes mood, location, etc.)
+                full_prompt_with_context = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, enhanced_prompt)
+                options_text = await _generate_gemini_content_with_fallback(full_prompt_with_context, None, account_id, aac_user_id)
                 
                 # Parse the response into individual options with deduplication
                 for line in options_text.strip().split('\n'):
