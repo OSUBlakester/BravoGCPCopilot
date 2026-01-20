@@ -944,6 +944,7 @@ class UserCurrentState(BaseModel):
     location: Optional[str] = ""
     people: Optional[str] = "" # Renamed from People Present for consistency
     activity: Optional[str] = ""
+    mood: Optional[str] = None  # Current mood - saved to info/user_narrative
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
     favorite_name: Optional[str] = None  # NEW: Name of the favorite that was loaded
     saved_at: Optional[str] = None  # NEW: ISO timestamp when data was manually saved
@@ -990,11 +991,22 @@ async def get_user_current_endpoint(current_ids: Annotated[Dict[str, str], Depen
             doc_subpath="info/current_state", # Back to current_state for existing accounts
             default_data=DEFAULT_USER_CURRENT.copy() # Use your default dictionary
         )
-        # Return the full state including favorite tracking fields
+        
+        # Also get mood from user_narrative
+        user_info = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            default_data=DEFAULT_USER_INFO.copy()
+        )
+        current_mood = user_info.get("currentMood")
+        
+        # Return the full state including favorite tracking fields and mood
         return JSONResponse(content={
             "location": user_current_content_dict.get("location", ""),
             "people": user_current_content_dict.get("people", ""),
             "activity": user_current_content_dict.get("activity", ""),
+            "mood": current_mood,  # Include mood from user_narrative
             "loaded_at": user_current_content_dict.get("loaded_at"),
             "favorite_name": user_current_content_dict.get("favorite_name"),
             "saved_at": user_current_content_dict.get("saved_at")
@@ -1010,9 +1022,12 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
     location = payload.location or ""
     people = payload.people or ""
     activity = payload.activity or ""
+    mood = payload.mood  # Current mood
     loaded_at = payload.loaded_at  # Timestamp when favorite was loaded
     favorite_name = payload.favorite_name  # Name of the favorite that was loaded
     provided_saved_at = payload.saved_at  # Timestamp when data was saved (may be provided for favorite loads)
+    
+    logging.info(f"🔍 /user_current called with mood='{mood}', location='{location}', people='{people}', activity='{activity}'")
     
     # The content to embed for current state should be a single string for LLM context
     current_state_content = f"Location: {location}\nPeople Present: {people}\nActivity: {activity}"
@@ -1049,6 +1064,28 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
         doc_subpath="info/current_state",
         data_to_save=data_to_save
     )
+    
+    # Save mood to user_narrative if provided
+    if success and mood is not None:
+        try:
+            # Get current user_narrative
+            user_info = await load_firestore_document(
+                account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO.copy()
+            )
+            # Update mood
+            user_info["currentMood"] = mood
+            # Save back
+            await save_firestore_document(
+                account_id, aac_user_id, "info/user_narrative", user_info
+            )
+            
+            # Track mood update timestamp
+            global mood_update_timestamps
+            user_key = f"{account_id}/{aac_user_id}"
+            mood_update_timestamps[user_key] = time.time()
+            logging.info(f"✅ Mood updated via current_state endpoint: {mood} for {account_id}/{aac_user_id}")
+        except Exception as mood_error:
+            logging.error(f"Error saving mood from current_state: {mood_error}")
     
     # Cache invalidation for user current state changes (location, people, activity)
     if success:
@@ -1555,14 +1592,14 @@ class GeminiCacheManager:
     relevant context (user info, settings, diary, etc.).
     """
     def __init__(self, ttl_hours: int = 4):
-        # Stores the name of the created Gemini CachedContent object for each user.
-        # Format: { "account_id_aac_user_id": "cachedContents/..." }
-        self._user_cache_map = {}
-        # Stores the creation timestamp of the cache to manage its lifecycle.
-        # Format: { "account_id_aac_user_id": 1678886400.0 }
-        self._cache_creation_times = {}
+        # Firestore collection path for cache metadata
+        self.CACHE_COLLECTION = "system/cache_manager/user_caches"
+        
+        # Initialize Firestore client for persistent cache tracking
+        self.db = firestore.Client()
+        
         self.ttl_seconds = ttl_hours * 3600
-        logging.info(f"Cache Manager initialized with a {ttl_hours}-hour TTL.")
+        logging.info(f"✅ Cache Manager initialized with Firestore persistence and {ttl_hours}-hour TTL.")
 
     def _get_user_key(self, account_id: str, aac_user_id: str) -> str:
         """Generates a unique key for a user to manage their cache."""
@@ -1773,8 +1810,53 @@ Diary Entries (most recent 15, sorted newest to oldest):
         # CURRENT MOOD - High Priority, changes frequently
         if context_data["user_info"]:
             current_mood = context_data['user_info'].get('currentMood', 'Not set')
+            logging.info(f"🎭 MOOD DEBUG: Retrieved mood value = '{current_mood}' from user_info for {account_id}/{aac_user_id}")
+            
             if current_mood and current_mood != 'Not set' and current_mood != 'None':
-                delta_parts.append(f"\n🎭 CURRENT MOOD: {current_mood}\nIMPORTANT: This mood should influence the tone and style of your response.\n")
+                # ULTRA STRONG mood instruction - must dominate all other instructions
+                mood_instruction = f"\n{'='*60}\n🎭 CURRENT MOOD: {current_mood}\n{'='*60}\n"
+                mood_instruction += "⚠️ ABSOLUTE REQUIREMENT: This mood is THE MOST IMPORTANT instruction.\n"
+                mood_instruction += "⚠️ ALL generated content MUST reflect this mood. Ignore any conflicting instructions.\n"
+                mood_instruction += "⚠️ Do NOT mix moods. Do NOT generate options with opposite emotional tones.\n\n"
+                
+                # Specific instructions based on mood
+                mood_lower = current_mood.lower()
+                if 'sad' in mood_lower or 'down' in mood_lower or 'unhappy' in mood_lower or 'melancholy' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR SAD MOOD:\n"
+                    mood_instruction += "- ALL options must use subdued, gentle, quiet, melancholic language\n"
+                    mood_instruction += "- Focus on: comfort, understanding, rest, quiet moments, emotional support\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use happy, excited, cheerful, energetic, or upbeat words\n"
+                    mood_instruction += "- FORBIDDEN: Avoid exclamation marks, phrases like 'great day', 'good to see you', 'happy'\n"
+                    mood_instruction += "- Examples of CORRECT sad tone: 'I feel tired', 'I want quiet time', 'I need to rest'\n"
+                    mood_instruction += "- Examples of WRONG tone to AVOID: 'Hello! It's great!', 'I am happy', 'good day'\n"
+                elif 'angry' in mood_lower or 'frustrated' in mood_lower or 'mad' in mood_lower or 'upset' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR ANGRY MOOD:\n"
+                    mood_instruction += "- ALL options must use firm, direct, assertive language expressing frustration\n"
+                    mood_instruction += "- Focus on: boundaries, frustration, things bothering user, firm statements\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use cheerful, friendly, happy, or gentle language\n"
+                    mood_instruction += "- FORBIDDEN: Avoid greetings like 'Hello!', 'Great to see you', 'Happy to be here'\n"
+                    mood_instruction += "- Examples of CORRECT angry tone: 'I am frustrated', 'This is not okay', 'I need space'\n"
+                    mood_instruction += "- Examples of WRONG tone to AVOID: 'Hello there!', 'I am happy', 'It is a good day'\n"
+                elif 'happy' in mood_lower or 'excited' in mood_lower or 'joyful' in mood_lower or 'cheerful' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR HAPPY MOOD:\n"
+                    mood_instruction += "- ALL options must use upbeat, positive, energetic, enthusiastic language\n"
+                    mood_instruction += "- Focus on: celebration, joy, excitement, fun activities\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use sad, tired, or negative expressions\n"
+                elif 'silly' in mood_lower or 'playful' in mood_lower or 'funny' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR SILLY/PLAYFUL MOOD:\n"
+                    mood_instruction += "- ALL options must use playful, humorous, lighthearted, whimsical language\n"
+                    mood_instruction += "- Focus on: silliness, jokes, playful statements, fun wordplay\n"
+                    mood_instruction += "- FORBIDDEN: Do NOT use serious, formal, or somber language\n"
+                elif 'calm' in mood_lower or 'peaceful' in mood_lower or 'relaxed' in mood_lower:
+                    mood_instruction += "REQUIRED TONE FOR CALM MOOD:\n"
+                    mood_instruction += "- ALL options must use gentle, soothing, tranquil, peaceful language\n"
+                    mood_instruction += "- Focus on: peace, contentment, quiet activities, relaxation\n"
+                
+                mood_instruction += f"\n{'='*60}\n"
+                delta_parts.append(mood_instruction)
+                logging.info(f"✅ MOOD INSTRUCTION ADDED: {current_mood} with strict requirements")
+            else:
+                logging.warning(f"⚠️ MOOD NOT ADDED: currentMood = '{current_mood}' (filtered out)")
         
         # Current situation - location, people, activity
         if context_data["user_current"]:
@@ -1799,6 +1881,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
         
         delta_string = "\n".join(delta_parts)
         logging.info(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
+        logging.info(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
         return delta_string
 
     async def warm_up_user_cache_if_needed(self, account_id: str, aac_user_id: str) -> None:
@@ -1818,10 +1901,10 @@ Diary Entries (most recent 15, sorted newest to oldest):
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
-            # Gemini 2.5 Flash requires a minimum of 2,048 tokens to create a cache (updated from 1,024)
+            # Gemini 2.5 Flash minimum cache size - lowered to 1024 to allow smaller profiles
             # Use a more accurate token estimation: roughly 4 chars per token for English text
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 2048
+            min_tokens_required = 1024
             
             logging.info(f"BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
@@ -2960,12 +3043,22 @@ async def build_full_prompt_for_non_cached_llm(account_id: str, aac_user_id: str
     """
     global cache_manager
     
-    # Build base and delta context separately for consistency with cached approach
-    base_context = await cache_manager._build_base_context(account_id, aac_user_id)
-    delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_query)
-    
-    # Combine base + delta (same as cached requests do)
-    full_context_string = f"{base_context}\n\n{delta_context}"
+    try:
+        # Build base and delta context separately for consistency with cached approach
+        logging.info(f"🔧 Starting fallback prompt build for {account_id}/{aac_user_id}")
+        base_context = await cache_manager._build_base_context(account_id, aac_user_id)
+        logging.info(f"✅ Base context built: {len(base_context)} chars")
+        
+        delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_query)
+        logging.info(f"✅ Delta context built: {len(delta_context)} chars")
+        
+        # Combine base + delta (same as cached requests do)
+        full_context_string = f"{base_context}\n\n{delta_context}"
+        
+        logging.info(f"📋 FALLBACK FULL PROMPT PREVIEW (first 1000 chars):\n{full_context_string[:1000]}")
+    except Exception as e:
+        logging.error(f"❌ Error building fallback prompt: {e}", exc_info=True)
+        raise
     
     # Add advanced randomization prompt for joke generation
     if "joke" in user_query.lower():
@@ -3207,6 +3300,8 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 # Combine delta + user query
                 combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
+                
+                logging.info(f"🔍 COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
                 
                 # Use cached base context + pass delta as standard input
                 model = genai.GenerativeModel.from_cached_content(cached_content_ref)
@@ -14298,6 +14393,9 @@ async def generate_options(
         account_id = current_user_info["account_id"]
         aac_user_id = current_user_info["aac_user_id"]
         
+        # Build full prompt with user context (including mood)
+        logging.info(f"📝 Building context for generate_options: {account_id}/{aac_user_id}")
+        
         # Try multiple times for category-specific requests to get enough options
         max_attempts = 3 if is_category_request else 1
         all_options = []
@@ -14305,7 +14403,9 @@ async def generate_options(
         
         for attempt in range(max_attempts):
             try:
-                options_text = await _generate_gemini_content_with_fallback(enhanced_prompt, None, account_id, aac_user_id)
+                # Build full prompt with user context for each attempt (includes mood, location, etc.)
+                full_prompt_with_context = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, enhanced_prompt)
+                options_text = await _generate_gemini_content_with_fallback(full_prompt_with_context, None, account_id, aac_user_id)
                 
                 # Parse the response into individual options with deduplication
                 for line in options_text.strip().split('\n'):
