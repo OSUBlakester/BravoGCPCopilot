@@ -1517,7 +1517,8 @@ DEFAULT_SETTINGS = {
     "sightWordGradeLevel": "pre_k",  # Default sight word grade level
     "useTapInterface": False,  # Default to gridpage interface
     "applicationVolume": 8,  # Default application volume (80%)
-    "spellLetterOrder": "alphabetical"  # Default spell page letter order
+    "spellLetterOrder": "alphabetical",  # Default spell page letter order
+    "vocabularyLevel": "functional"  # Default vocabulary level: emergent|functional|developing|proficient
 }
 
 
@@ -2918,6 +2919,57 @@ def log_token_usage(response, request_type: str, account_id: str, aac_user_id: s
 class LLMRequest(BaseModel):
     prompt: str
 
+# --- Vocabulary Level Helper Function ---
+def get_vocabulary_level_instruction(level: str) -> str:
+    """
+    Returns vocabulary level instructions based on user's setting.
+    Used across all LLM endpoints to ensure consistent vocabulary complexity.
+    """
+    vocabulary_instructions = {
+        "emergent": """
+VOCABULARY LEVEL: EMERGENT (Basic Tier 1)
+Use ONLY basic, high-frequency words that appear in everyday conversation:
+- Common objects: home, car, food, water, bed, chair
+- Basic actions: go, eat, help, want, like, see
+- Simple descriptors: good, bad, big, little, hot, cold
+- Essential words: yes, no, more, stop, please, thank you
+AVOID: Any abstract concepts, multi-syllable words, or academic vocabulary.
+EXAMPLES: "I want food" not "I desire nourishment", "I feel happy" not "I'm elated"
+""",
+        "functional": """
+VOCABULARY LEVEL: FUNCTIONAL (Utility Tier 2)
+Use practical, functional vocabulary for daily living and common situations:
+- Everyday objects and activities: school, work, shopping, cooking, cleaning
+- Utility actions: choose, find, bring, buy, make, need
+- Practical descriptors: ready, finished, empty, full, broken, working
+- Common feelings: happy, sad, angry, tired, excited, scared
+AVOID: Highly specialized terms, literary language, or academic jargon.
+EXAMPLES: "I'm tired" not "I'm lethargic", "That's wonderful" not "That's magnificent"
+""",
+        "developing": """
+VOCABULARY LEVEL: DEVELOPING (Academic Tier 2+)
+Use expanded vocabulary including some academic and descriptive language:
+- Broader concepts: community, environment, technology, information
+- Varied actions: analyze, organize, prepare, demonstrate, investigate
+- Richer descriptors: anxious, determined, relieved, disappointed, fascinating
+- Academic terms: compare, examine, identify, describe, explain
+AVOID: Highly specialized professional terminology or obscure words.
+EXAMPLES: "I'm anxious about the test" is acceptable, "That's fascinating" is acceptable
+""",
+        "proficient": """
+VOCABULARY LEVEL: PROFICIENT (Specialized Tier 3)
+Use sophisticated, precise vocabulary including specialized and nuanced terms:
+- Abstract concepts: philosophy, methodology, paradigm, construct
+- Precise actions: synthesize, formulate, conceptualize, articulate, collaborate
+- Nuanced descriptors: lethargic, exuberant, meticulous, ambiguous, comprehensive
+- Advanced terms: appropriate for professional or academic contexts
+USE: Rich, varied, and precise language without simplification.
+EXAMPLES: "I'm feeling lethargic" is acceptable, "That's magnificent" is acceptable
+"""
+    }
+    
+    return vocabulary_instructions.get(level, vocabulary_instructions["functional"])
+
 # --- LLM Endpoint (MODIFIED RAG Context Processing for user-specificity) ---
 @app.post("/llm")
 async def get_llm_response_endpoint(
@@ -2933,6 +2985,7 @@ async def get_llm_response_endpoint(
     user_settings = await load_settings_from_file(account_id, aac_user_id)
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
+    vocabulary_level = user_settings.get("vocabularyLevel", "functional")
 
     # Check if mood was recently updated and add small delay to prevent race conditions
     global mood_update_timestamps
@@ -2986,7 +3039,13 @@ CREATIVITY BOOSTERS:
 
     # Define generation config and add JSON formatting instructions  
     generation_config = {"response_mime_type": "application/json", "temperature": 0.9}  # Increased temperature for more creativity
-    json_format_instructions = """
+    
+    # Get vocabulary level instruction
+    vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
+    
+    json_format_instructions = f"""
+{vocab_instruction}
+
 CRITICAL: Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
 If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
 The "option" key should contain the FULL option text.
@@ -5632,6 +5691,7 @@ class SettingsModel(BaseModel):
     useTapInterface: Optional[bool] = Field(None, description="Use tap interface as main interface instead of gridpage")
     applicationVolume: Optional[int] = Field(None, description="Application volume level 0-10", ge=0, le=10)
     spellLetterOrder: Optional[str] = Field(None, description="Letter order for spell page: 'alphabetical', 'qwerty', or 'frequency'")
+    vocabularyLevel: Optional[str] = Field(None, description="Vocabulary complexity level for LLM outputs: 'emergent', 'functional', 'developing', or 'proficient'")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -5658,6 +5718,17 @@ class SettingsModel(BaseModel):
                 return value
             else:
                 raise ValueError(f"Invalid spellLetterOrder value: {value}. Must be 'alphabetical', 'qwerty', or 'frequency'")
+        return value
+    
+    @field_validator('vocabularyLevel', mode='before')
+    @classmethod
+    def validate_vocabulary_level(cls, value: Any) -> Optional[str]:
+        if isinstance(value, str) and value:
+            value = value.strip().lower()
+            if value in ['emergent', 'functional', 'developing', 'proficient']:
+                return value
+            else:
+                raise ValueError(f"Invalid vocabularyLevel value: {value}. Must be 'emergent', 'functional', 'developing', or 'proficient'")
         return value
     
 
@@ -5718,24 +5789,32 @@ async def save_settings_to_file(account_id: str, aac_user_id: str, settings_data
     Saves settings to Firestore for a specific user.
     It loads current settings, updates them with new valid data, and saves back.
     """
-    # DEBUG: Log FreestyleOptions in incoming data
+    # DEBUG: Log incoming data
     if 'FreestyleOptions' in settings_data_to_save:
         logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions in incoming data: {settings_data_to_save['FreestyleOptions']}")
+    if 'vocabularyLevel' in settings_data_to_save:
+        logging.warning(f"DEBUG save_settings_to_file - vocabularyLevel in incoming data: {settings_data_to_save['vocabularyLevel']}")
     
     # Load current settings first to merge and retain unspecified fields
     current_settings = await load_settings_from_file(account_id, aac_user_id)
     
-    # DEBUG: Log current FreestyleOptions before merge
+    # DEBUG: Log current settings before merge
     logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions in current_settings before merge: {current_settings.get('FreestyleOptions', 'NOT_FOUND')}")
+    logging.warning(f"DEBUG save_settings_to_file - vocabularyLevel in current_settings before merge: {current_settings.get('vocabularyLevel', 'NOT_FOUND')}")
     
     # Remove any keys not defined in DEFAULT_SETTINGS before merging to avoid storing junk
     sanitized_data_to_save = {k: v for k, v in settings_data_to_save.items() if k in DEFAULT_SETTINGS}
     
-    # DEBUG: Log FreestyleOptions after sanitization
+    # DEBUG: Log after sanitization
     if 'FreestyleOptions' in sanitized_data_to_save:
         logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions in sanitized_data: {sanitized_data_to_save['FreestyleOptions']}")
     else:
-        logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions NOT in sanitized_data. Original keys: {list(settings_data_to_save.keys())}, DEFAULT_SETTINGS keys: {list(DEFAULT_SETTINGS.keys())}")
+        logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions NOT in sanitized_data")
+    
+    if 'vocabularyLevel' in sanitized_data_to_save:
+        logging.warning(f"DEBUG save_settings_to_file - vocabularyLevel in sanitized_data: {sanitized_data_to_save['vocabularyLevel']}")
+    else:
+        logging.warning(f"DEBUG save_settings_to_file - vocabularyLevel NOT in sanitized_data. Original keys: {list(settings_data_to_save.keys())}, DEFAULT_SETTINGS has vocabularyLevel: {'vocabularyLevel' in DEFAULT_SETTINGS}")
     
     # Merge (update existing defaults with new sanitized data)
     current_settings.update(sanitized_data_to_save)
@@ -9517,9 +9596,40 @@ async def generate_category_words(
     account_id = current_ids["account_id"]
     
     try:
-        # Load user settings to get FreestyleOptions
+        # Load user settings to get FreestyleOptions and vocabulary level
         settings = await load_settings_from_file(account_id, aac_user_id)
         freestyle_options = settings.get("FreestyleOptions", 6)  # Default to 6 if not set
+        vocabulary_level = settings.get("vocabularyLevel", "functional")
+        
+        # Detect if this is a NOUN category (objects, animals, places, people)
+        # These categories need specific vocabulary even at emergent level
+        category_lower = request.category.lower()
+        noun_categories = [
+            'animals', 'pets', 'insects', 'reptiles', 'birds', 'fish', 'wild',
+            'food', 'drink', 'fruit', 'vegetable', 'snack', 'meal',
+            'people', 'family', 'friends', 'person',
+            'places', 'location', 'room', 'building',
+            'things', 'objects', 'items', 'toys', 'games', 'tools', 'vehicles',
+            'body parts', 'clothes', 'technology', 'furniture', 'school', 'work',
+            'outside', 'nature', 'sports', 'hobbies', 'hardware', 'transportation',
+            'money', 'shopping', 'entertainment', 'movies', 'tv', 'music', 'books'
+        ]
+        is_noun_category = any(noun_cat in category_lower for noun_cat in noun_categories)
+        
+        # Get vocabulary level instruction - use relaxed version for noun categories
+        if is_noun_category:
+            # For noun categories, use lighter vocabulary constraints
+            # Users need specific nouns even at emergent level (e.g., "butterfly" not "pretty bug")
+            vocab_instruction = f"""VOCABULARY GUIDANCE for {vocabulary_level.upper()} level:
+While maintaining a {vocabulary_level} level approach, prioritize SPECIFIC NOUNS over generic descriptions.
+- Generate concrete, specific names rather than descriptive phrases
+- It's better to use a specific noun (e.g., "butterfly", "grasshopper") than a vague description (e.g., "pretty bug", "jumping bug")
+- Images will help users understand specific nouns even if the word is advanced
+- Focus on commonly known items within this category
+"""
+        else:
+            # For non-noun categories (adjectives, actions, etc.), use full vocabulary constraints
+            vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
         
         # Load user context for better word generation
         user_info = await load_firestore_document(
@@ -9560,12 +9670,32 @@ async def generate_category_words(
             
         user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
         
+        # Detect if this is an adjective-only category (descriptive attributes)
+        category_lower = request.category.lower()
+        adjective_only_categories = [
+            'rating', 'emotions', 'touch', 'sight', 'taste', 'color', 'size', 
+            'shape', 'age', 'smell', 'character', 'temperature', 'sound'
+        ]
+        is_adjective_category = any(adj_cat in category_lower for adj_cat in adjective_only_categories)
+        
+        # Build adjective-only constraint if needed
+        adjective_constraint = ""
+        if is_adjective_category:
+            adjective_constraint = """
+CRITICAL CONSTRAINT - ADJECTIVES ONLY:
+- Generate ONLY single adjectives or adjective phrases (1-2 words maximum)
+- Do NOT include nouns in your responses
+- Do NOT include verbs in your responses  
+- Do NOT combine adjectives with nouns (e.g., "good" NOT "good food", "big" NOT "big house")
+- Examples of CORRECT responses: "good", "bad", "happy", "soft", "bright", "hot", "large"
+- Examples of INCORRECT responses: "good time", "bad day", "happy person", "soft pillow"
+"""
+        
         # Add mood context only if semantically relevant to the category
         mood_context = ""
         if request.current_mood and request.current_mood != 'none':
             # Only apply mood context for categories that are inherently about emotions/feelings
             # Avoid applying mood to descriptive categories (like "positive adjectives" which describe objects, not feelings)
-            category_lower = request.category.lower()
             mood_relevant_categories = [
                 'feeling', 'emotion', 'mood', 'how i feel', 'my feelings', 
                 'emotional', 'mental state', 'how are you'
@@ -9584,10 +9714,13 @@ async def generate_category_words(
             # Custom prompt takes priority - use it directly with minimal server additions
             # IMPORTANT: Do NOT inject mood_context here as it overrides the custom prompt's intent
             
-            prompt = f"""TASK: Generate words based on the following specific instructions.
+            prompt = f"""{vocab_instruction}
+
+TASK: Generate words based on the following specific instructions.
             
 INSTRUCTIONS:
 {request.custom_prompt}
+{adjective_constraint}
 
 CONSTRAINTS:
 - You MUST follow all "Do not" or "Exclude" instructions in the prompt above.
@@ -9604,11 +9737,14 @@ FORMAT:
 - If the word itself is the best keyword, use the same word (e.g., "car|car")"""
         else:
             # Use general template for categories without specific instructions
-            prompt = f"""Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
+            prompt = f"""{vocab_instruction}
+
+Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
 
 You are helping someone communicate by providing words that fit the category '{request.category}'. Use the user context below to personalize your suggestions, but ONLY when the personal information semantically fits the category type.
 
 User context: {user_context}
+{adjective_constraint}
 
 DECISION FRAMEWORK for using personal context:
 - For SEMANTIC categories (adjectives, emotions, actions, descriptions): Use personal context to choose which appropriate words to prioritize, but don't include personal nouns that don't fit the semantic type
