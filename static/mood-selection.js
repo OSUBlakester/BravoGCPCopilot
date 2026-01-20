@@ -631,42 +631,65 @@ class MoodSelection {
      */
     async saveMoodToSettings(mood) {
         try {
-            const fetchFunction = window.authenticatedFetch || fetch;
-            const aacUserId = sessionStorage.getItem('aacUserId');
+            const aacUserId = sessionStorage.getItem('currentAacUserId') || sessionStorage.getItem('aacUserId');
+            const firebaseToken = sessionStorage.getItem('firebaseIdToken');
             
-            // First get current user info to preserve it
-            const getCurrentResponse = await fetchFunction('/api/user-info', {
+            console.log('🔐 AUTH DEBUG - aacUserId:', aacUserId);
+            console.log('🔐 AUTH DEBUG - firebaseToken exists:', !!firebaseToken);
+            console.log('🔐 AUTH DEBUG - firebaseToken length:', firebaseToken ? firebaseToken.length : 0);
+            
+            if (!firebaseToken || !aacUserId) {
+                console.warn('⚠️ Missing auth credentials. Firebase token:', !!firebaseToken, 'aacUserId:', !!aacUserId);
+                console.warn('⚠️ Mood will be saved to sessionStorage only.');
+                // Still save to sessionStorage for use during this session
+                sessionStorage.setItem('currentSessionMood', mood);
+                return;
+            }
+            
+            const headers = {
+                'Authorization': `Bearer ${firebaseToken}`,
+                'X-User-ID': aacUserId,
+                'Content-Type': 'application/json'
+            };
+            
+            // First get current user state to preserve it
+            const getCurrentResponse = await fetch('/get-user-current', {
                 method: 'GET',
-                headers: {
-                    'X-User-ID': aacUserId
-                },
+                headers: headers,
                 credentials: 'include'
             });
             
-            let currentUserInfo = "";
+            let currentLocation = "";
+            let currentPeople = "";
+            let currentActivity = "";
+            
             if (getCurrentResponse.ok) {
                 const current = await getCurrentResponse.json();
-                currentUserInfo = current.userInfo || "";
+                currentLocation = current.location || "";
+                currentPeople = current.people || "";
+                currentActivity = current.activity || "";
             }
             
-            // Save mood along with existing user info
-            const response = await fetchFunction('/api/user-info', {
+            // Save mood along with existing current state
+            const response = await fetch('/user_current', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-User-ID': aacUserId
-                },
+                headers: headers,
                 body: JSON.stringify({
-                    userInfo: currentUserInfo,
-                    currentMood: mood
-                })
+                    location: currentLocation,
+                    people: currentPeople,
+                    activity: currentActivity,
+                    mood: mood
+                }),
+                credentials: 'include'
             });
 
             if (!response.ok) {
-                console.warn('Failed to save mood to user info:', response.statusText);
+                console.warn('Failed to save mood to current state:', response.statusText);
+            } else {
+                console.log('✅ Mood saved successfully:', mood);
             }
         } catch (error) {
-            console.warn('Error saving mood to user info:', error);
+            console.warn('Error saving mood to current state:', error);
         }
     }
 
