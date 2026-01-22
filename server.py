@@ -1618,8 +1618,8 @@ class GeminiCacheManager:
             logging.error(f"Error loading cache from Firestore for {user_key}: {e}")
             return None
     
-    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float):
-        """Save cache info to Firestore."""
+    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float, message_count: int = 0):
+        """Save cache info to Firestore with message count for drift tracking."""
         try:
             expires_at = created_at + self.ttl_seconds
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
@@ -1631,10 +1631,11 @@ class GeminiCacheManager:
                     "cache_name": cache_name,
                     "created_at": created_at,
                     "expires_at": expires_at,
-                    "ttl_seconds": self.ttl_seconds
+                    "ttl_seconds": self.ttl_seconds,
+                    "message_count": message_count  # Track messages in cache for drift detection
                 }
             )
-            logging.info(f"Saved cache reference to Firestore: {user_key} -> {cache_name}")
+            logging.info(f"💾 Saved cache reference to Firestore: {user_key} -> {cache_name} ({message_count} messages)")
         except Exception as e:
             logging.error(f"Error saving cache to Firestore for {user_key}: {e}")
     
@@ -1868,12 +1869,29 @@ Diary Entries (most recent 15, sorted newest to oldest):
             ])
             delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
         
-        # Recent chat history (last 10 turns)
+        # SMART CHAT HISTORY: Only include messages AFTER the cache snapshot
+        # This implements the "Snapshot + Buffer" strategy to minimize costs
+        # Instead of always including last 10 messages, we calculate the "drift"
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cache_data = await self._load_cache_from_firestore(user_key)
+        
+        messages_in_cache = 0
+        if cache_data:
+            messages_in_cache = cache_data.get('message_count', 0)
+            logging.info(f"📊 Cache snapshot contains {messages_in_cache} messages")
+        
         if context_data["chat_history"]:
-            history_count = 10 if "joke" in query_hint.lower() else 10
-            recent_history = context_data['chat_history'][-history_count:]
-            if recent_history:
-                delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {len(recent_history)} turns):\n{json.dumps(recent_history, indent=2)}\n")
+            total_messages = len(context_data['chat_history'])
+            
+            # Calculate NEW messages since cache was created (the "drift")
+            new_messages = context_data['chat_history'][messages_in_cache:] if messages_in_cache < total_messages else []
+            drift = len(new_messages)
+            
+            if new_messages:
+                delta_parts.append(f"\n💬 NEW CHAT MESSAGES (Last {drift} messages since cache):\n{json.dumps(new_messages, indent=2)}\n")
+                logging.info(f"✅ Including {drift} new messages in delta (saving {messages_in_cache} from standard input cost)")
+            else:
+                logging.info(f"✅ No new messages since cache creation (all {total_messages} messages cached)")
         
         # User-defined pages (frequently edited)
         if context_data["pages"]:
@@ -1918,6 +1936,10 @@ Diary Entries (most recent 15, sorted newest to oldest):
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
             created_at = dt.now().timestamp()
             
+            # Get current chat history count to track in cache metadata
+            chat_history = await load_chat_history_from_file(account_id, aac_user_id)
+            message_count_at_cache = len(chat_history)
+            
             # The model used for caching must match the model used for generation.
             cached_content = await asyncio.to_thread(
                 caching.CachedContent.create,
@@ -1927,9 +1949,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 ttl=timedelta(seconds=self.ttl_seconds)
             )
 
-            # Save to Firestore instead of in-memory dict
-            await self._save_cache_to_firestore(user_key, cached_content.name, created_at)
-            logging.info(f"Successfully warmed up cache for user '{user_key}'. Cache Name: {cached_content.name}")
+            # Save to Firestore with message count for drift tracking
+            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count_at_cache)
+            logging.info(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name}, Messages: {message_count_at_cache}")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
@@ -1978,7 +2000,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
             logging.info(f"No cache to invalidate for user '{user_key}'.")
 
     async def get_cache_debug_info(self, account_id: str, aac_user_id: str) -> Dict:
-        """Provides debugging information about a user's cache (loaded from Firestore)."""
+        """Provides debugging information about a user's cache including drift stats."""
         user_key = self._get_user_key(account_id, aac_user_id)
         cache_data = await self._load_cache_from_firestore(user_key)
 
@@ -1987,10 +2009,16 @@ Diary Entries (most recent 15, sorted newest to oldest):
         
         cache_name = cache_data.get('cache_name')
         creation_time = cache_data.get('created_at', 0)
+        messages_in_cache = cache_data.get('message_count', 0)
 
         age_seconds = dt.now().timestamp() - creation_time
         time_left_seconds = self.ttl_seconds - age_seconds
         is_valid = time_left_seconds > 0
+        
+        # Calculate current drift
+        chat_history = await load_chat_history_from_file(account_id, aac_user_id)
+        current_message_count = len(chat_history)
+        drift = current_message_count - messages_in_cache
 
         return {
             "status": "Active" if is_valid else "Expired",
@@ -2000,7 +2028,55 @@ Diary Entries (most recent 15, sorted newest to oldest):
             "expires_at": dt.fromtimestamp(creation_time + self.ttl_seconds).isoformat(),
             "age_minutes": round(age_seconds / 60, 2),
             "time_left_minutes": round(time_left_seconds / 60, 2),
-            "is_valid": is_valid
+            "is_valid": is_valid,
+            "messages_in_cache": messages_in_cache,
+            "current_message_count": current_message_count,
+            "drift": drift,
+            "drift_percentage": round((drift / messages_in_cache * 100) if messages_in_cache > 0 else 0, 1)
+        }
+    
+    async def check_cache_drift(self, account_id: str, aac_user_id: str, max_drift: int = 20) -> Dict:
+        """
+        Check if cache drift exceeds threshold and should be rebuilt.
+        Returns dict with should_rebuild flag and drift statistics.
+        
+        Args:
+            account_id: Account ID
+            aac_user_id: AAC User ID  
+            max_drift: Maximum acceptable drift (new messages) before rebuilding cache
+            
+        Returns:
+            Dict with should_rebuild, reason, drift, and message counts
+        """
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cache_data = await self._load_cache_from_firestore(user_key)
+        
+        if not cache_data:
+            return {"should_rebuild": True, "reason": "no_cache", "drift": 0}
+        
+        messages_in_cache = cache_data.get('message_count', 0)
+        
+        # Get current message count
+        chat_history = await load_chat_history_from_file(account_id, aac_user_id)
+        current_message_count = len(chat_history)
+        drift = current_message_count - messages_in_cache
+        
+        if drift >= max_drift:
+            return {
+                "should_rebuild": True,
+                "reason": "drift_threshold_exceeded",
+                "drift": drift,
+                "max_drift": max_drift,
+                "messages_in_cache": messages_in_cache,
+                "current_message_count": current_message_count
+            }
+        
+        return {
+            "should_rebuild": False,
+            "drift": drift,
+            "max_drift": max_drift,
+            "messages_in_cache": messages_in_cache,
+            "current_message_count": current_message_count
         }
     
     async def cleanup_expired_caches_globally(self):
@@ -3289,9 +3365,30 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
         llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
-        # --- Gemini Cache-First Approach with Base + Delta Architecture ---
+        # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
         logging.info(f"🚀 Using Gemini with Base+Delta caching for {account_id}/{aac_user_id}.")
-        cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
+        
+        # SMART DRIFT DETECTION: Check if cache needs rebuilding
+        drift_check = await cache_manager.check_cache_drift(account_id, aac_user_id, max_drift=20)
+        
+        if drift_check["should_rebuild"]:
+            reason = drift_check.get("reason", "unknown")
+            drift = drift_check.get("drift", 0)
+            
+            if reason == "drift_threshold_exceeded":
+                logging.info(f"♻️ Cache drift ({drift} messages) exceeds threshold. Rebuilding cache to optimize costs.")
+                logging.info(f"   Messages in cache: {drift_check['messages_in_cache']}, Current: {drift_check['current_message_count']}")
+            elif reason == "no_cache":
+                logging.info(f"📝 No cache exists. Creating initial cache.")
+            
+            # Invalidate old cache and let warmup create a fresh one
+            await cache_manager.invalidate_cache(account_id, aac_user_id)
+            cached_content_ref = None
+        else:
+            # Drift is acceptable, use existing cache
+            drift = drift_check.get("drift", 0)
+            logging.info(f"✅ Cache drift ({drift} messages) is acceptable. Using existing cache + delta.")
+            cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
 
         if cached_content_ref:
             try:
