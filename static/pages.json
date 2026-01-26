@@ -757,7 +757,7 @@
                 "text": "My Upcoming Plans",
                 "speechPhrase": "",
                 "targetPage": "",
-                "LLMQuery": "Based on the user diary, generate #LLMOptions statements based on any upcoming planned activities. Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.",
+                "LLMQuery": "Based on the user diary, generate #LLMOptions statements about planned activities and events. CRITICAL: Use correct verb tenses based on timing - future tense for upcoming events (e.g., 'I'm going to...', 'I have plans to...', 'I will...') and past tense for events that already happened (e.g., 'I went to...', 'I did...', 'I attended...'). Each statement should be phrased conversationally as if the user is telling someone nearby about their activities.",
                 "queryType": "options"
             },
             {

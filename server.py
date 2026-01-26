@@ -347,8 +347,8 @@ template_user_data_paths = {
         "displayName": "Going On",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions  statements based on the most recent activities.  Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Based on the user diary and the current date, generate #LLMOptions statements based ONLY on diary entries with dates AFTER today's date. COMPLETELY IGNORE all entries from today or earlier dates. Only include future planned activities scheduled for dates later than today. Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user is planning to do or has coming up in the future.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements about planned activities and events. CRITICAL: Use correct verb tenses based on timing - future tense ONLY for events that haven't happened yet (e.g., 'I'm going to...', 'I have plans to...', 'I will...') and past tense for events that already happened (e.g., 'I went to...', 'I did...', 'I attended...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby about their activities.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "customAudioFile": None, "hidden": False}
         ]
@@ -686,6 +686,47 @@ class DeleteFavoriteButtonRequest(BaseModel):
 class TestScrapingRequest(BaseModel):
     scraping_config: ScrapingConfig
 
+
+@app.get("/api/firebase-config")
+async def get_firebase_config():
+    """
+    Returns Firebase configuration based on current GCP_PROJECT_ID.
+    This allows the frontend to dynamically connect to the correct Firebase project.
+    """
+    project_id = os.environ.get("GCP_PROJECT_ID", "bravo-dev-465400")
+    
+    # Firebase configurations for each environment
+    firebase_configs = {
+        "bravo-dev-465400": {
+            "apiKey": "AIzaSyBN3usyIJ25HDEoOgHIU2w71K5iUXB2ANk",
+            "authDomain": "bravo-dev-465400.firebaseapp.com",
+            "projectId": "bravo-dev-465400",
+            "storageBucket": "bravo-dev-465400.firebasestorage.app",
+            "messagingSenderId": "398013502624",
+            "appId": "1:398013502624:web:9c8b8f35eb41c0e5c5e5e5"
+        },
+        "bravo-test-465400": {
+            "apiKey": "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4",
+            "authDomain": "bravo-test-465400.firebaseapp.com",
+            "projectId": "bravo-test-465400",
+            "storageBucket": "bravo-test-465400.firebasestorage.app",
+            "messagingSenderId": "YOUR_TEST_SENDER_ID",
+            "appId": "YOUR_TEST_APP_ID"
+        },
+        "bravo-prod-465323": {
+            "apiKey": "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4",
+            "authDomain": "bravo-prod-465323.firebaseapp.com",
+            "projectId": "bravo-prod-465323",
+            "storageBucket": "bravo-prod-465323.firebasestorage.app",
+            "messagingSenderId": "YOUR_PROD_SENDER_ID",
+            "appId": "YOUR_PROD_APP_ID"
+        }
+    }
+    
+    config = firebase_configs.get(project_id, firebase_configs["bravo-dev-465400"])
+    logging.info(f"🔐 Serving Firebase config for project: {project_id}")
+    
+    return JSONResponse(content=config)
 
 @app.get("/")
 async def root():
@@ -1937,7 +1978,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
             created_at = dt.now().timestamp()
             
             # Get current chat history count to track in cache metadata
-            chat_history = await load_chat_history_from_file(account_id, aac_user_id)
+            chat_history = await load_chat_history(account_id, aac_user_id)
             message_count_at_cache = len(chat_history)
             
             # The model used for caching must match the model used for generation.
@@ -2016,7 +2057,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
         is_valid = time_left_seconds > 0
         
         # Calculate current drift
-        chat_history = await load_chat_history_from_file(account_id, aac_user_id)
+        chat_history = await load_chat_history(account_id, aac_user_id)
         current_message_count = len(chat_history)
         drift = current_message_count - messages_in_cache
 
@@ -2057,7 +2098,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
         messages_in_cache = cache_data.get('message_count', 0)
         
         # Get current message count
-        chat_history = await load_chat_history_from_file(account_id, aac_user_id)
+        chat_history = await load_chat_history(account_id, aac_user_id)
         current_message_count = len(chat_history)
         drift = current_message_count - messages_in_cache
         
@@ -3563,15 +3604,24 @@ def initialize_backend_services():
             logging.warning(f"Service account key file not found at {SERVICE_ACCOUNT_KEY_PATH}. Proceeding with Application Default Credentials as fallback where applicable (might fail).")
 
 
-        # --- Initialize Cloud Firestore client (UNCHANGED from last attempt) ---
+        # --- Initialize Cloud Firestore client (MODIFIED for project override) ---
         logging.info("Initializing Cloud Firestore client...")
+        
+        # Check for Firestore project override (for local testing with prod data)
+        firestore_project = os.getenv('FIRESTORE_PROJECT_OVERRIDE')
+        if firestore_project:
+            logging.info(f"🔄 FIRESTORE_PROJECT_OVERRIDE detected: {firestore_project}")
+            logging.info(f"   Will use {firestore_project} for Firestore while keeping {CONFIG.get('gcp_project_id')} for Firebase Auth")
+        else:
+            firestore_project = CONFIG.get('gcp_project_id')
+        
         try:
             if service_account_credentials_gcp:
-                firestore_db = FirestoreClient(credentials=service_account_credentials_gcp)
-                logging.info("Cloud Firestore client initialized successfully with explicit credentials.")
+                firestore_db = FirestoreClient(project=firestore_project, credentials=service_account_credentials_gcp)
+                logging.info(f"Cloud Firestore client initialized successfully with explicit credentials for project: {firestore_project}")
             else:
-                firestore_db = FirestoreClient() # Fallback
-                logging.warning("Cloud Firestore client initialized using Application Default Credentials (explicit credentials not found).")
+                firestore_db = FirestoreClient(project=firestore_project) # Fallback
+                logging.warning(f"Cloud Firestore client initialized using Application Default Credentials for project: {firestore_project}")
         except Exception as e:
             logging.error(f"Error initializing Cloud Firestore client: {e}", exc_info=True)
             firestore_db = None
