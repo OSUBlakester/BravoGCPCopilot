@@ -692,41 +692,14 @@ async def get_firebase_config():
     """
     Returns Firebase configuration based on current GCP_PROJECT_ID.
     This allows the frontend to dynamically connect to the correct Firebase project.
+    Configuration is loaded from config.py which uses environment variables.
     """
-    project_id = os.environ.get("GCP_PROJECT_ID", "bravo-dev-465400")
+    # Use the client_firebase_config from config.py
+    firebase_config = CONFIG.get('client_firebase_config', {})
     
-    # Firebase configurations for each environment
-    firebase_configs = {
-        "bravo-dev-465400": {
-            "apiKey": "AIzaSyBN3usyIJ25HDEoOgHIU2w71K5iUXB2ANk",
-            "authDomain": "bravo-dev-465400.firebaseapp.com",
-            "projectId": "bravo-dev-465400",
-            "storageBucket": "bravo-dev-465400.firebasestorage.app",
-            "messagingSenderId": "398013502624",
-            "appId": "1:398013502624:web:9c8b8f35eb41c0e5c5e5e5"
-        },
-        "bravo-test-465400": {
-            "apiKey": "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4",
-            "authDomain": "bravo-test-465400.firebaseapp.com",
-            "projectId": "bravo-test-465400",
-            "storageBucket": "bravo-test-465400.firebasestorage.app",
-            "messagingSenderId": "YOUR_TEST_SENDER_ID",
-            "appId": "YOUR_TEST_APP_ID"
-        },
-        "bravo-prod-465323": {
-            "apiKey": "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4",
-            "authDomain": "bravo-prod-465323.firebaseapp.com",
-            "projectId": "bravo-prod-465323",
-            "storageBucket": "bravo-prod-465323.firebasestorage.app",
-            "messagingSenderId": "YOUR_PROD_SENDER_ID",
-            "appId": "YOUR_PROD_APP_ID"
-        }
-    }
+    logging.info(f"🔐 Serving Firebase config for project: {firebase_config.get('projectId', 'unknown')}")
     
-    config = firebase_configs.get(project_id, firebase_configs["bravo-dev-465400"])
-    logging.info(f"🔐 Serving Firebase config for project: {project_id}")
-    
-    return JSONResponse(content=config)
+    return JSONResponse(content=firebase_config)
 
 @app.get("/")
 async def root():
