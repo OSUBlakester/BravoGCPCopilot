@@ -347,8 +347,8 @@ template_user_data_paths = {
         "displayName": "Going On",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions  statements based on the most recent activities.  Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user has done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Based on the user diary and the current date, generate #LLMOptions statements based ONLY on diary entries with dates AFTER today's date. COMPLETELY IGNORE all entries from today or earlier dates. Only include future planned activities scheduled for dates later than today. Each statement should be phrased conversationally as if they are coming from the user and telling someone nearby what the user is planning to do or has coming up in the future.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements about planned activities and events. CRITICAL: Use correct verb tenses based on timing - future tense ONLY for events that haven't happened yet (e.g., 'I'm going to...', 'I have plans to...', 'I will...') and past tense for events that already happened (e.g., 'I went to...', 'I did...', 'I attended...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby about their activities.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "customAudioFile": None, "hidden": False}
         ]
@@ -686,6 +686,47 @@ class DeleteFavoriteButtonRequest(BaseModel):
 class TestScrapingRequest(BaseModel):
     scraping_config: ScrapingConfig
 
+
+@app.get("/api/firebase-config")
+async def get_firebase_config():
+    """
+    Returns Firebase configuration based on current GCP_PROJECT_ID.
+    This allows the frontend to dynamically connect to the correct Firebase project.
+    """
+    project_id = os.environ.get("GCP_PROJECT_ID", "bravo-dev-465400")
+    
+    # Firebase configurations for each environment
+    firebase_configs = {
+        "bravo-dev-465400": {
+            "apiKey": "AIzaSyBN3usyIJ25HDEoOgHIU2w71K5iUXB2ANk",
+            "authDomain": "bravo-dev-465400.firebaseapp.com",
+            "projectId": "bravo-dev-465400",
+            "storageBucket": "bravo-dev-465400.firebasestorage.app",
+            "messagingSenderId": "398013502624",
+            "appId": "1:398013502624:web:9c8b8f35eb41c0e5c5e5e5"
+        },
+        "bravo-test-465400": {
+            "apiKey": "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4",
+            "authDomain": "bravo-test-465400.firebaseapp.com",
+            "projectId": "bravo-test-465400",
+            "storageBucket": "bravo-test-465400.firebasestorage.app",
+            "messagingSenderId": "YOUR_TEST_SENDER_ID",
+            "appId": "YOUR_TEST_APP_ID"
+        },
+        "bravo-prod-465323": {
+            "apiKey": "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4",
+            "authDomain": "bravo-prod-465323.firebaseapp.com",
+            "projectId": "bravo-prod-465323",
+            "storageBucket": "bravo-prod-465323.firebasestorage.app",
+            "messagingSenderId": "YOUR_PROD_SENDER_ID",
+            "appId": "YOUR_PROD_APP_ID"
+        }
+    }
+    
+    config = firebase_configs.get(project_id, firebase_configs["bravo-dev-465400"])
+    logging.info(f"🔐 Serving Firebase config for project: {project_id}")
+    
+    return JSONResponse(content=config)
 
 @app.get("/")
 async def root():
@@ -1618,8 +1659,8 @@ class GeminiCacheManager:
             logging.error(f"Error loading cache from Firestore for {user_key}: {e}")
             return None
     
-    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float):
-        """Save cache info to Firestore."""
+    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float, message_count: int = 0):
+        """Save cache info to Firestore with message count for drift tracking."""
         try:
             expires_at = created_at + self.ttl_seconds
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
@@ -1631,10 +1672,11 @@ class GeminiCacheManager:
                     "cache_name": cache_name,
                     "created_at": created_at,
                     "expires_at": expires_at,
-                    "ttl_seconds": self.ttl_seconds
+                    "ttl_seconds": self.ttl_seconds,
+                    "message_count": message_count  # Track messages in cache for drift detection
                 }
             )
-            logging.info(f"Saved cache reference to Firestore: {user_key} -> {cache_name}")
+            logging.info(f"💾 Saved cache reference to Firestore: {user_key} -> {cache_name} ({message_count} messages)")
         except Exception as e:
             logging.error(f"Error saving cache to Firestore for {user_key}: {e}")
     
@@ -1868,12 +1910,29 @@ Diary Entries (most recent 15, sorted newest to oldest):
             ])
             delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
         
-        # Recent chat history (last 10 turns)
+        # SMART CHAT HISTORY: Only include messages AFTER the cache snapshot
+        # This implements the "Snapshot + Buffer" strategy to minimize costs
+        # Instead of always including last 10 messages, we calculate the "drift"
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cache_data = await self._load_cache_from_firestore(user_key)
+        
+        messages_in_cache = 0
+        if cache_data:
+            messages_in_cache = cache_data.get('message_count', 0)
+            logging.info(f"📊 Cache snapshot contains {messages_in_cache} messages")
+        
         if context_data["chat_history"]:
-            history_count = 10 if "joke" in query_hint.lower() else 10
-            recent_history = context_data['chat_history'][-history_count:]
-            if recent_history:
-                delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {len(recent_history)} turns):\n{json.dumps(recent_history, indent=2)}\n")
+            total_messages = len(context_data['chat_history'])
+            
+            # Calculate NEW messages since cache was created (the "drift")
+            new_messages = context_data['chat_history'][messages_in_cache:] if messages_in_cache < total_messages else []
+            drift = len(new_messages)
+            
+            if new_messages:
+                delta_parts.append(f"\n💬 NEW CHAT MESSAGES (Last {drift} messages since cache):\n{json.dumps(new_messages, indent=2)}\n")
+                logging.info(f"✅ Including {drift} new messages in delta (saving {messages_in_cache} from standard input cost)")
+            else:
+                logging.info(f"✅ No new messages since cache creation (all {total_messages} messages cached)")
         
         # User-defined pages (frequently edited)
         if context_data["pages"]:
@@ -1918,6 +1977,10 @@ Diary Entries (most recent 15, sorted newest to oldest):
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
             created_at = dt.now().timestamp()
             
+            # Get current chat history count to track in cache metadata
+            chat_history = await load_chat_history(account_id, aac_user_id)
+            message_count_at_cache = len(chat_history)
+            
             # The model used for caching must match the model used for generation.
             cached_content = await asyncio.to_thread(
                 caching.CachedContent.create,
@@ -1927,9 +1990,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 ttl=timedelta(seconds=self.ttl_seconds)
             )
 
-            # Save to Firestore instead of in-memory dict
-            await self._save_cache_to_firestore(user_key, cached_content.name, created_at)
-            logging.info(f"Successfully warmed up cache for user '{user_key}'. Cache Name: {cached_content.name}")
+            # Save to Firestore with message count for drift tracking
+            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count_at_cache)
+            logging.info(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name}, Messages: {message_count_at_cache}")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
@@ -1978,7 +2041,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
             logging.info(f"No cache to invalidate for user '{user_key}'.")
 
     async def get_cache_debug_info(self, account_id: str, aac_user_id: str) -> Dict:
-        """Provides debugging information about a user's cache (loaded from Firestore)."""
+        """Provides debugging information about a user's cache including drift stats."""
         user_key = self._get_user_key(account_id, aac_user_id)
         cache_data = await self._load_cache_from_firestore(user_key)
 
@@ -1987,10 +2050,16 @@ Diary Entries (most recent 15, sorted newest to oldest):
         
         cache_name = cache_data.get('cache_name')
         creation_time = cache_data.get('created_at', 0)
+        messages_in_cache = cache_data.get('message_count', 0)
 
         age_seconds = dt.now().timestamp() - creation_time
         time_left_seconds = self.ttl_seconds - age_seconds
         is_valid = time_left_seconds > 0
+        
+        # Calculate current drift
+        chat_history = await load_chat_history(account_id, aac_user_id)
+        current_message_count = len(chat_history)
+        drift = current_message_count - messages_in_cache
 
         return {
             "status": "Active" if is_valid else "Expired",
@@ -2000,7 +2069,55 @@ Diary Entries (most recent 15, sorted newest to oldest):
             "expires_at": dt.fromtimestamp(creation_time + self.ttl_seconds).isoformat(),
             "age_minutes": round(age_seconds / 60, 2),
             "time_left_minutes": round(time_left_seconds / 60, 2),
-            "is_valid": is_valid
+            "is_valid": is_valid,
+            "messages_in_cache": messages_in_cache,
+            "current_message_count": current_message_count,
+            "drift": drift,
+            "drift_percentage": round((drift / messages_in_cache * 100) if messages_in_cache > 0 else 0, 1)
+        }
+    
+    async def check_cache_drift(self, account_id: str, aac_user_id: str, max_drift: int = 20) -> Dict:
+        """
+        Check if cache drift exceeds threshold and should be rebuilt.
+        Returns dict with should_rebuild flag and drift statistics.
+        
+        Args:
+            account_id: Account ID
+            aac_user_id: AAC User ID  
+            max_drift: Maximum acceptable drift (new messages) before rebuilding cache
+            
+        Returns:
+            Dict with should_rebuild, reason, drift, and message counts
+        """
+        user_key = self._get_user_key(account_id, aac_user_id)
+        cache_data = await self._load_cache_from_firestore(user_key)
+        
+        if not cache_data:
+            return {"should_rebuild": True, "reason": "no_cache", "drift": 0}
+        
+        messages_in_cache = cache_data.get('message_count', 0)
+        
+        # Get current message count
+        chat_history = await load_chat_history(account_id, aac_user_id)
+        current_message_count = len(chat_history)
+        drift = current_message_count - messages_in_cache
+        
+        if drift >= max_drift:
+            return {
+                "should_rebuild": True,
+                "reason": "drift_threshold_exceeded",
+                "drift": drift,
+                "max_drift": max_drift,
+                "messages_in_cache": messages_in_cache,
+                "current_message_count": current_message_count
+            }
+        
+        return {
+            "should_rebuild": False,
+            "drift": drift,
+            "max_drift": max_drift,
+            "messages_in_cache": messages_in_cache,
+            "current_message_count": current_message_count
         }
     
     async def cleanup_expired_caches_globally(self):
@@ -3289,9 +3406,30 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
         llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
-        # --- Gemini Cache-First Approach with Base + Delta Architecture ---
+        # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
         logging.info(f"🚀 Using Gemini with Base+Delta caching for {account_id}/{aac_user_id}.")
-        cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
+        
+        # SMART DRIFT DETECTION: Check if cache needs rebuilding
+        drift_check = await cache_manager.check_cache_drift(account_id, aac_user_id, max_drift=20)
+        
+        if drift_check["should_rebuild"]:
+            reason = drift_check.get("reason", "unknown")
+            drift = drift_check.get("drift", 0)
+            
+            if reason == "drift_threshold_exceeded":
+                logging.info(f"♻️ Cache drift ({drift} messages) exceeds threshold. Rebuilding cache to optimize costs.")
+                logging.info(f"   Messages in cache: {drift_check['messages_in_cache']}, Current: {drift_check['current_message_count']}")
+            elif reason == "no_cache":
+                logging.info(f"📝 No cache exists. Creating initial cache.")
+            
+            # Invalidate old cache and let warmup create a fresh one
+            await cache_manager.invalidate_cache(account_id, aac_user_id)
+            cached_content_ref = None
+        else:
+            # Drift is acceptable, use existing cache
+            drift = drift_check.get("drift", 0)
+            logging.info(f"✅ Cache drift ({drift} messages) is acceptable. Using existing cache + delta.")
+            cached_content_ref = await cache_manager.get_cached_content_reference(account_id, aac_user_id)
 
         if cached_content_ref:
             try:
@@ -3466,15 +3604,24 @@ def initialize_backend_services():
             logging.warning(f"Service account key file not found at {SERVICE_ACCOUNT_KEY_PATH}. Proceeding with Application Default Credentials as fallback where applicable (might fail).")
 
 
-        # --- Initialize Cloud Firestore client (UNCHANGED from last attempt) ---
+        # --- Initialize Cloud Firestore client (MODIFIED for project override) ---
         logging.info("Initializing Cloud Firestore client...")
+        
+        # Check for Firestore project override (for local testing with prod data)
+        firestore_project = os.getenv('FIRESTORE_PROJECT_OVERRIDE')
+        if firestore_project:
+            logging.info(f"🔄 FIRESTORE_PROJECT_OVERRIDE detected: {firestore_project}")
+            logging.info(f"   Will use {firestore_project} for Firestore while keeping {CONFIG.get('gcp_project_id')} for Firebase Auth")
+        else:
+            firestore_project = CONFIG.get('gcp_project_id')
+        
         try:
             if service_account_credentials_gcp:
-                firestore_db = FirestoreClient(credentials=service_account_credentials_gcp)
-                logging.info("Cloud Firestore client initialized successfully with explicit credentials.")
+                firestore_db = FirestoreClient(project=firestore_project, credentials=service_account_credentials_gcp)
+                logging.info(f"Cloud Firestore client initialized successfully with explicit credentials for project: {firestore_project}")
             else:
-                firestore_db = FirestoreClient() # Fallback
-                logging.warning("Cloud Firestore client initialized using Application Default Credentials (explicit credentials not found).")
+                firestore_db = FirestoreClient(project=firestore_project) # Fallback
+                logging.warning(f"Cloud Firestore client initialized using Application Default Credentials for project: {firestore_project}")
         except Exception as e:
             logging.error(f"Error initializing Cloud Firestore client: {e}", exc_info=True)
             firestore_db = None

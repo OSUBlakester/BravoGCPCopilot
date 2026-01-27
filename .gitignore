@@ -61,6 +61,11 @@ logs/
 config.ini
 secrets.json
 
+# Service account keys (CRITICAL - never commit these!)
+*service-account*.json
+*service-account-key*.json
+bravo-*-service-account*.json
+
 # API Keys and sensitive configuration
 APIKEYS.reg
 *.reg
