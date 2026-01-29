@@ -3466,10 +3466,30 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content)
                     combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                     
+                    logging.info(f"🔍 NEW_CACHE COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
+                    logging.info(f"📊 USER QUERY that triggered LLM (new cache path): {user_prompt_content[:500]}")
+                    logging.info(f"⚙️ Generation config: {generation_config}")
+                    
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
                     response = await asyncio.to_thread(
                         model.generate_content, combined_prompt, generation_config=generation_config
                     )
+                    
+                    # Log response details for debugging
+                    logging.info(f"🤖 RAW LLM RESPONSE LENGTH (new cache): {len(response.text) if response.text else 0} chars")
+                    logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
+                    
+                    # Check for safety blocks or empty responses
+                    if not response.text or response.text.strip() == "":
+                        logging.error(f"❌ LLM returned empty response! Candidates: {response.candidates}")
+                        logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
+                        raise Exception("LLM returned empty response")
+                    
+                    if response.text.strip() == "[":
+                        logging.error(f"❌ LLM returned ONLY opening bracket! This suggests the response was cut off.")
+                        logging.error(f"❌ Response candidates: {response.candidates}")
+                        logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
+                    
                     llm_response_json_str = response.text.strip()
                     
                     # Log detailed token usage for newly cached requests
