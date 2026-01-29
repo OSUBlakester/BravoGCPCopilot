@@ -3352,7 +3352,11 @@ CREATIVITY BOOSTERS:
         user_prompt_content = randomization_prompt + user_prompt_content
 
     # Define generation config and add JSON formatting instructions  
-    generation_config = {"response_mime_type": "application/json", "temperature": 0.9}  # Increased temperature for more creativity
+    generation_config = {
+        "response_mime_type": "application/json", 
+        "temperature": 0.9,  # Increased temperature for more creativity
+        "max_output_tokens": 4096  # Ensure enough space for complete JSON responses
+    }
     
     # Get vocabulary level instruction
     vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
@@ -3515,7 +3519,19 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         return JSONResponse(content=extracted_options_list)
 
     except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse LLM response as JSON: {e}. Clean Raw: {clean_json_str[:500]}...", exc_info=True)
+        logging.error(f"Failed to parse LLM response as JSON: {e}. Clean Raw (first 1000 chars): {clean_json_str[:1000]}", exc_info=True)
+        logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
+        
+        # Try to provide a helpful fallback
+        try:
+            # Check if response was truncated mid-JSON
+            if clean_json_str.strip().endswith(','):
+                logging.error("Response appears to be truncated (ends with comma). LLM may have hit token limit.")
+            elif not (clean_json_str.strip().endswith(']') or clean_json_str.strip().endswith('}')):
+                logging.error("Response appears to be truncated (missing closing bracket). LLM may have hit token limit.")
+        except:
+            pass
+            
         raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(e)}")
     except Exception as e:
         logging.error(f"Error processing LLM response for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
