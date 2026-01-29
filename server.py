@@ -3054,7 +3054,26 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         
         logging.info(f"Attempting LLM generation with primary model: {primary_llm_model_instance.model_name}")
         logging.info(f"Prompt length: {len(prompt_text)} characters")
+        logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
+        logging.info(f"⚙️ Generation config (fallback): {generation_config}")
+        
         response = await asyncio.to_thread(primary_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+        
+        # Log response details for debugging
+        logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
+        logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
+        
+        # Check for safety blocks or empty responses
+        if not response.text or response.text.strip() == "":
+            logging.error(f"❌ LLM returned empty response (fallback)! Candidates: {response.candidates}")
+            logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
+            raise Exception("LLM returned empty response")
+        
+        if response.text.strip() == "[":
+            logging.error(f"❌ LLM returned ONLY opening bracket (fallback)! This suggests the response was cut off.")
+            logging.error(f"❌ Response candidates: {response.candidates}")
+            logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
+        
         response_text = (await get_text_from_response(response)).strip()
         
         # Log detailed token usage for non-cached requests
