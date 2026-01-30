@@ -1518,6 +1518,29 @@ MAX_CHAT_HISTORY = 50 # Max number of chat entries to keep
 MAX_DIARY_CONTEXT = 5 # Max number of recent/future diary entries for LLM
 MAX_CHAT_CONTEXT = 5 # Max number of recent chat turns for LLM
 
+# Chat history intelligence settings
+CHAT_HISTORY_ACTIVE_DAYS = 7  # Messages within this many days are considered "active"
+CHAT_HISTORY_ARCHIVE_DAYS = 30  # Messages older than this are archived
+
+# Message type classifications for intelligent processing
+MESSAGE_TYPES = [
+    "greeting",      # Hello, good morning, hi
+    "joke",          # Told a joke
+    "question_answer",  # Q&A pair
+    "statement",     # General statement
+    "request_help",  # Asking for assistance
+    "other"          # Unclassified
+]
+
+MESSAGE_CATEGORIES = [
+    "social",         # Greetings, pleasantries
+    "personal_info",  # Facts about the user
+    "preference",     # Likes, dislikes, favorites
+    "activity",       # What user is doing
+    "emotion",        # How user feels
+    "other"           # Unclassified
+]
+
 
 DEFAULT_COUNTRY_CODE = 'US'
 DEFAULT_SPEECH_RATE = 180 
@@ -1588,6 +1611,17 @@ DEFAULT_FRIENDS_FAMILY = []  # List of friends and family entries
 DEFAULT_DIARY: List[Dict] = [] # Diary is a list of entries
 DEFAULT_CHAT_HISTORY: List[Dict] = [] # Chat history is a list of entries
 DEFAULT_BUTTON_ACTIVITY_LOG: List[Dict] = [] # For button clicks
+
+# AI-extracted narrative from chat history
+DEFAULT_CHAT_DERIVED_NARRATIVE = {
+    "last_updated": None,
+    "source_message_count": 0,
+    "extracted_facts": [],  # List of {fact, source_message_id, confidence, category, first_mentioned, mention_count}
+    "narrative_text": "",
+    "recent_greetings": [],  # Last 5 unique greetings used
+    "recent_jokes": [],      # Last 5 jokes told (with timestamps)
+    "answered_questions": {}  # {topic: answer} pairs
+}
 
 # Legacy scraping config (kept for migration)
 DEFAULT_SCRAPING_CONFIG = {
@@ -1737,6 +1771,7 @@ class GeminiCacheManager:
             "birthdays": load_birthdays_from_file(account_id, aac_user_id),
             "diary": load_diary_entries(account_id, aac_user_id),
             "chat_history": load_chat_history(account_id, aac_user_id),
+            "chat_narrative": load_chat_derived_narrative(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
         }
         results = await asyncio.gather(*tasks.values())
@@ -1787,12 +1822,45 @@ Diary Entries (most recent 15, sorted newest to oldest):
 """
             context_parts.append(diary_context)
         
-        # OLD chat history (older messages beyond recent 10) for context
-        # Recent chat will be in delta context
-        if context_data["chat_history"] and len(context_data["chat_history"]) > 10:
-            old_history = context_data['chat_history'][:-10]  # Everything except last 10
-            context_parts.append(f"--- Historical Chat Context (Older Messages) ---\n{json.dumps(old_history, indent=2)}\n")
-
+        # AI-extracted chat narrative (replaces old chat history to save tokens)
+        if context_data["chat_narrative"]:
+            chat_narrative = context_data["chat_narrative"]
+            if chat_narrative.get("narrative_text") or chat_narrative.get("extracted_facts"):
+                chat_context_parts = ["--- User Communication Patterns (from Chat History) ---"]
+                
+                # Add narrative summary
+                if chat_narrative.get("narrative_text"):
+                    chat_context_parts.append(f"Summary: {chat_narrative['narrative_text']}")
+                
+                # Add extracted facts
+                if chat_narrative.get("extracted_facts"):
+                    facts_text = []
+                    for fact in chat_narrative["extracted_facts"]:
+                        confidence = fact.get("confidence", "medium")
+                        fact_text = fact.get("fact", "")
+                        mention_count = fact.get("mention_count", 1)
+                        facts_text.append(f"  • {fact_text} [{confidence} confidence, mentioned {mention_count}x]")
+                    chat_context_parts.append("Extracted Facts:\n" + "\n".join(facts_text))
+                
+                # Add common greetings (to help avoid repetition)
+                if chat_narrative.get("recent_greetings"):
+                    greetings = ", ".join(chat_narrative["recent_greetings"])
+                    chat_context_parts.append(f"Recent Greetings Used: {greetings}")
+                    chat_context_parts.append("⚠️ Suggest DIFFERENT greeting variations to avoid repetition")
+                
+                # Add answered questions
+                if chat_narrative.get("answered_questions"):
+                    qa_pairs = []
+                    for q, a in chat_narrative["answered_questions"].items():
+                        qa_pairs.append(f"  • {q}: {a}")
+                    chat_context_parts.append("Previously Answered Questions:\n" + "\n".join(qa_pairs))
+                
+                context_parts.append("\n".join(chat_context_parts) + "\n")
+        
+        # REMOVED: Old chat history no longer included here to save tokens
+        # It's been replaced by chat_derived_narrative above
+        # Recent chat (last 10) will be in delta context
+        
         base_string = "\n".join(context_parts)
         logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
         return base_string
@@ -7260,6 +7328,114 @@ async def save_chat_history(account_id: str, aac_user_id: str, history: List[Dic
         items=history # Save all items to the subcollection
     )
 
+# --- Chat-Derived Narrative Load/Save ---
+async def load_chat_derived_narrative(account_id: str, aac_user_id: str) -> Dict:
+    """Load the AI-extracted narrative from chat history"""
+    return await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/chat_derived_narrative",
+        default_data=DEFAULT_CHAT_DERIVED_NARRATIVE.copy()
+    )
+
+async def save_chat_derived_narrative(account_id: str, aac_user_id: str, narrative_data: Dict) -> bool:
+    """Save the AI-extracted narrative from chat history"""
+    return await save_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/chat_derived_narrative",
+        data_to_save=narrative_data
+    )
+
+# --- Chat History Intelligence Helpers ---
+def classify_message_type(message_text: str) -> str:
+    """Classify message into type categories using simple heuristics"""
+    message_lower = message_text.lower().strip()
+    
+    # Greetings
+    greeting_patterns = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", 
+                        "good night", "howdy", "greetings", "what's up", "sup"]
+    if any(pattern in message_lower for pattern in greeting_patterns):
+        return "greeting"
+    
+    # Request for help
+    help_patterns = ["help", "need", "assist", "can you", "could you", "please"]
+    if any(pattern in message_lower for pattern in help_patterns):
+        return "request_help"
+    
+    # Jokes (harder to detect, look for punchline indicators)
+    joke_indicators = ["why did", "knock knock", "what do you call", "how many", "walks into a bar"]
+    if any(indicator in message_lower for indicator in joke_indicators):
+        return "joke"
+    
+    # Questions (has question mark or starts with question words)
+    question_words = ["what", "where", "when", "why", "who", "how", "is", "are", "do", "does", "can", "could"]
+    if "?" in message_text or any(message_lower.startswith(qw) for qw in question_words):
+        return "question_answer"
+    
+    # Default
+    return "statement"
+
+def classify_message_category(message_text: str, message_type: str) -> str:
+    """Classify message into semantic categories"""
+    message_lower = message_text.lower()
+    
+    if message_type == "greeting":
+        return "social"
+    
+    # Personal preferences
+    preference_keywords = ["favorite", "like", "love", "enjoy", "prefer", "hate", "dislike"]
+    if any(kw in message_lower for kw in preference_keywords):
+        return "preference"
+    
+    # Personal info
+    info_keywords = ["my name is", "i am", "i'm", "i live", "i work", "my age"]
+    if any(kw in message_lower for kw in info_keywords):
+        return "personal_info"
+    
+    # Activities
+    activity_keywords = ["doing", "going to", "playing", "watching", "reading", "listening"]
+    if any(kw in message_lower for kw in activity_keywords):
+        return "activity"
+    
+    # Emotions
+    emotion_keywords = ["feel", "happy", "sad", "angry", "excited", "tired", "frustrated"]
+    if any(kw in message_lower for kw in emotion_keywords):
+        return "emotion"
+    
+    return "other"
+
+def check_message_repetition(new_message: str, recent_messages: List[Dict], days: int = 1) -> tuple[bool, Optional[str]]:
+    """
+    Check if a message is a repetition of recent messages
+    Returns (is_repetition, similar_message_id)
+    """
+    from datetime import datetime, timedelta
+    
+    cutoff_time = dt.now() - timedelta(days=days)
+    new_message_lower = new_message.lower().strip()
+    
+    for msg in recent_messages:
+        msg_time = datetime.fromisoformat(msg.get("timestamp", "2000-01-01T00:00:00"))
+        if msg_time < cutoff_time:
+            continue
+            
+        existing_response = msg.get("response", "").lower().strip()
+        
+        # Exact match
+        if new_message_lower == existing_response:
+            return True, msg.get("id")
+        
+        # Similar (80% similarity using simple word overlap)
+        new_words = set(new_message_lower.split())
+        existing_words = set(existing_response.split())
+        if len(new_words) > 0 and len(existing_words) > 0:
+            overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
+            if overlap > 0.8:
+                return True, msg.get("id")
+    
+    return False, None
+
 
 # Update the `get_upcoming_birthdays` function to accept `user_id`
 async def get_upcoming_birthdays(account_id: str, aac_user_id: str, days_ahead=14) -> List[str]: # ADD user_id
@@ -8283,20 +8459,66 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         account_id = current_ids["account_id"]
         question = payload.question or ""
         response = payload.response or ""
-        if not question.strip() and not response.strip(): raise HTTPException(status_code=400, detail="Either question or response must be provided.")
+        if not question.strip() and not response.strip(): 
+            raise HTTPException(status_code=400, detail="Either question or response must be provided.")
+        
         timestamp = dt.now().isoformat()
-        log_entry = {"timestamp": timestamp, "question": question, "response": response, "id": uuid.uuid4().hex}
-        history = await load_chat_history(account_id, aac_user_id) # Pass user_id
+        
+        # Load existing history to check for repetition
+        history = await load_chat_history(account_id, aac_user_id)
+        
+        # Classify the message
+        message_type = classify_message_type(response)
+        message_category = classify_message_category(response, message_type)
+        is_repetition, similar_id = check_message_repetition(response, history, days=1)
+        
+        # Build enhanced log entry with metadata
+        log_entry = {
+            "timestamp": timestamp,
+            "question": question,
+            "response": response,
+            "id": uuid.uuid4().hex,
+            "metadata": {
+                "type": message_type,
+                "category": message_category,
+                "is_repetition": is_repetition,
+                "similar_to": similar_id,
+                "extracted_info": {},  # Will be filled by AI extraction later
+                "age_days": 0  # Fresh message
+            }
+        }
+        
+        # Update chat-derived narrative for greetings immediately
+        if message_type == "greeting":
+            narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+            if response not in narrative.get("recent_greetings", []):
+                recent_greetings = narrative.get("recent_greetings", [])
+                recent_greetings.append(response)
+                if len(recent_greetings) > 5:
+                    recent_greetings = recent_greetings[-5:]  # Keep only last 5
+                narrative["recent_greetings"] = recent_greetings
+                narrative["last_updated"] = timestamp
+                await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+        
         history.append(log_entry)
-        if len(history) > MAX_CHAT_HISTORY: history = history[-MAX_CHAT_HISTORY:]
-        await save_chat_history(account_id, aac_user_id, history) # Pass user_id
-        logging.info(f"Chat history updated successfully for {account_id}/{aac_user_id}.")
+        if len(history) > MAX_CHAT_HISTORY: 
+            history = history[-MAX_CHAT_HISTORY:]
+        
+        await save_chat_history(account_id, aac_user_id, history)
+        logging.info(f"Chat history updated for {account_id}/{aac_user_id} - Type: {message_type}, Category: {message_category}, Repetition: {is_repetition}")
         
         # NOTE: Recent chat history (last 10 turns) is in DELTA context, not cached
         # Old history (>10 turns) is in base cache, but changes rarely so skip invalidation
         # This prevents cache churn on every single message
         
-        return JSONResponse(content={"message": "Chat history saved successfully"})
+        return JSONResponse(content={
+            "message": "Chat history saved successfully",
+            "metadata": {
+                "type": message_type,
+                "category": message_category,
+                "is_repetition": is_repetition
+            }
+        })
     except HTTPException as http_exc: raise http_exc
     except Exception as e:
         logging.error(f"Error recording chat history for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
