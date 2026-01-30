@@ -1850,12 +1850,28 @@ Diary Entries (most recent 15, sorted newest to oldest):
                     chat_context_parts.append(f"Recent Greetings Used: {greetings}")
                     chat_context_parts.append("⚠️ Suggest DIFFERENT greeting variations to avoid repetition")
                 
-                # Add answered questions
+                # Add answered questions with better formatting for LLM comprehension
                 if chat_narrative.get("answered_questions"):
                     qa_pairs = []
+                    # Convert shorthand keys to natural language for better LLM understanding
+                    key_mappings = {
+                        "city_to_visit": "City they want to visit",
+                        "favorite_music": "Favorite music",
+                        "favorite_food": "Favorite food",
+                        "favorite_color": "Favorite color",
+                        "favorite_sport": "Favorite sport",
+                        "sounds_for_talker": "Sounds they want for their AAC device",
+                        "yesterday_activity": "What they did recently",
+                        "favorite_kind_of_music": "Favorite kind of music",
+                    }
+                    
                     for q, a in chat_narrative["answered_questions"].items():
-                        qa_pairs.append(f"  • {q}: {a}")
-                    chat_context_parts.append("Previously Answered Questions:\n" + "\n".join(qa_pairs))
+                        # Use mapped question or original if not in mapping
+                        question_text = key_mappings.get(q, q.replace("_", " ").title())
+                        qa_pairs.append(f"  • {question_text}: {a}")
+                    
+                    chat_context_parts.append("⭐ User Preferences (from past conversations):\n" + "\n".join(qa_pairs))
+                    chat_context_parts.append("💡 USE THESE when generating relevant suggestions (e.g., include Savannah when suggesting vacation destinations)")
                 
                 context_parts.append("\n".join(chat_context_parts) + "\n")
         
