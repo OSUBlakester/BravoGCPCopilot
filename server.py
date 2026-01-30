@@ -1863,6 +1863,26 @@ Diary Entries (most recent 15, sorted newest to oldest):
         # Older messages are summarized in chat_derived_narrative above
         if context_data["chat_history"]:
             recent_messages = context_data["chat_history"]
+            
+            # Extract jokes from recent messages for explicit repetition avoidance
+            recent_jokes = []
+            for msg in recent_messages:
+                response = msg.get("response", "").lower()
+                # Check if it's likely a joke (contains common joke patterns)
+                if any(pattern in response for pattern in ["why did", "what do you call", "how do you", "what's the difference"]):
+                    # Extract the full joke text
+                    joke_text = msg.get("response", "")[:200]  # First 200 chars
+                    if joke_text:
+                        recent_jokes.append(joke_text)
+            
+            # Add explicit joke avoidance warning if jokes were found
+            if recent_jokes:
+                joke_warning = "⚠️ CRITICAL - AVOID THESE RECENTLY USED JOKES:\n"
+                for i, joke in enumerate(recent_jokes[:10], 1):  # Max 10 most recent
+                    joke_warning += f"  {i}. {joke}\n"
+                joke_warning += "\n🚫 DO NOT generate any of these jokes again. Create COMPLETELY NEW and DIFFERENT jokes.\n"
+                context_parts.append(f"--- Recently Used Jokes (DO NOT REPEAT) ---\n{joke_warning}\n")
+            
             context_parts.append(f"--- Recent Chat History (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages) ---\n{json.dumps(recent_messages, indent=2)}\n")
             logging.info(f"📝 Including {len(recent_messages)} recent messages in BASE context")
         
