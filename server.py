@@ -3618,9 +3618,57 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     clean_json_str = extract_json_from_response(llm_response_json_str)
     logging.info(f"--- Extracted clean JSON for account {account_id} and user {aac_user_id} (Clean length: {len(clean_json_str)}) ---")
 
+    def repair_json(json_str: str) -> str:
+        """Attempt to repair common JSON errors"""
+        json_str = json_str.strip()
+        
+        # Fix truncated JSON - if ends with comma, remove it and close brackets
+        if json_str.endswith(','):
+            logging.info("Detected trailing comma - removing and closing brackets")
+            json_str = json_str[:-1].strip()  # Remove trailing comma
+        
+        # Count brackets and add missing closers
+        open_brackets = json_str.count('[')
+        close_brackets = json_str.count(']')
+        if open_brackets > close_brackets:
+            missing = open_brackets - close_brackets
+            logging.info(f"Adding {missing} missing closing bracket(s)")
+            json_str += ']' * missing
+            
+        open_braces = json_str.count('{')
+        close_braces = json_str.count('}')
+        if open_braces > close_braces:
+            missing = open_braces - close_braces
+            logging.info(f"Adding {missing} missing closing brace(s)")
+            json_str += '}' * missing
+        
+        # Fix trailing commas BEFORE closing brackets (must run after adding missing brackets)
+        json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+        
+        # Fix missing quotes around keys (common LLM error)
+        json_str = re.sub(r'(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
+        
+        return json_str
+
     try:
         parsed_llm_output = json.loads(clean_json_str)
-        
+    except json.JSONDecodeError as first_error:
+        # Try to repair the JSON
+        logging.warning(f"Initial JSON parse failed: {first_error}. Attempting repair...")
+        repaired_json_str = repair_json(clean_json_str)
+        logging.info(f"Repaired JSON (first 500 chars): {repaired_json_str[:500]}")
+        try:
+            parsed_llm_output = json.loads(repaired_json_str)
+            logging.info("✅ JSON repair successful!")
+        except json.JSONDecodeError as second_error:
+            # Repair failed, log details and re-raise
+            logging.error(f"JSON repair failed: {second_error}")
+            logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
+            logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
+            raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
+    
+    # Continue with processing the parsed output
+    try:
         extracted_options_list = []
         if isinstance(parsed_llm_output, dict):
             for key, value in parsed_llm_output.items():
@@ -3643,21 +3691,9 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
 
         return JSONResponse(content=extracted_options_list)
 
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse LLM response as JSON: {e}. Clean Raw (first 1000 chars): {clean_json_str[:1000]}", exc_info=True)
-        logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
-        
-        # Try to provide a helpful fallback
-        try:
-            # Check if response was truncated mid-JSON
-            if clean_json_str.strip().endswith(','):
-                logging.error("Response appears to be truncated (ends with comma). LLM may have hit token limit.")
-            elif not (clean_json_str.strip().endswith(']') or clean_json_str.strip().endswith('}')):
-                logging.error("Response appears to be truncated (missing closing bracket). LLM may have hit token limit.")
-        except:
-            pass
-            
-        raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(e)}")
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logging.error(f"Error processing LLM response for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing LLM response: {str(e)}")
@@ -8475,59 +8511,81 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         
         timestamp = dt.now().isoformat()
         
-        # Load existing history to check for repetition
-        history = await load_chat_history(account_id, aac_user_id)
-        
-        # Classify the message
-        message_type = classify_message_type(response)
-        message_category = classify_message_category(response, message_type)
-        is_repetition, similar_id = check_message_repetition(response, history, days=1)
-        
-        # Build enhanced log entry with metadata
+        # Save basic entry immediately (fast - no classification needed)
         log_entry = {
             "timestamp": timestamp,
             "question": question,
             "response": response,
             "id": uuid.uuid4().hex,
             "metadata": {
-                "type": message_type,
-                "category": message_category,
-                "is_repetition": is_repetition,
-                "similar_to": similar_id,
-                "extracted_info": {},  # Will be filled by AI extraction later
-                "age_days": 0  # Fresh message
+                "type": "pending",  # Will be updated by background task
+                "category": "pending",
+                "is_repetition": False,
+                "similar_to": None,
+                "extracted_info": {},
+                "age_days": 0
             }
         }
         
-        # Update chat-derived narrative for greetings immediately
-        if message_type == "greeting":
-            narrative = await load_chat_derived_narrative(account_id, aac_user_id)
-            if response not in narrative.get("recent_greetings", []):
-                recent_greetings = narrative.get("recent_greetings", [])
-                recent_greetings.append(response)
-                if len(recent_greetings) > 5:
-                    recent_greetings = recent_greetings[-5:]  # Keep only last 5
-                narrative["recent_greetings"] = recent_greetings
-                narrative["last_updated"] = timestamp
-                await save_chat_derived_narrative(account_id, aac_user_id, narrative)
-        
+        # Load and save immediately
+        history = await load_chat_history(account_id, aac_user_id)
         history.append(log_entry)
         if len(history) > MAX_CHAT_HISTORY: 
             history = history[-MAX_CHAT_HISTORY:]
-        
         await save_chat_history(account_id, aac_user_id, history)
-        logging.info(f"Chat history updated for {account_id}/{aac_user_id} - Type: {message_type}, Category: {message_category}, Repetition: {is_repetition}")
         
-        # NOTE: Recent chat history (last 10 turns) is in DELTA context, not cached
-        # Old history (>10 turns) is in base cache, but changes rarely so skip invalidation
-        # This prevents cache churn on every single message
+        logging.info(f"Chat history saved immediately for {account_id}/{aac_user_id}")
+        
+        # Now process metadata in background (non-blocking)
+        async def process_metadata_async():
+            try:
+                # Reload history to get latest
+                history = await load_chat_history(account_id, aac_user_id)
+                
+                # Find our entry
+                for entry in reversed(history):
+                    if entry.get("id") == log_entry["id"]:
+                        # Classify the message
+                        message_type = classify_message_type(response)
+                        message_category = classify_message_category(response, message_type)
+                        is_repetition, similar_id = check_message_repetition(response, history[:-1], days=1)  # Exclude current entry
+                        
+                        # Update metadata
+                        entry["metadata"].update({
+                            "type": message_type,
+                            "category": message_category,
+                            "is_repetition": is_repetition,
+                            "similar_to": similar_id
+                        })
+                        
+                        # Update chat-derived narrative for greetings
+                        if message_type == "greeting":
+                            narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+                            if response not in narrative.get("recent_greetings", []):
+                                recent_greetings = narrative.get("recent_greetings", [])
+                                recent_greetings.append(response)
+                                if len(recent_greetings) > 5:
+                                    recent_greetings = recent_greetings[-5:]
+                                narrative["recent_greetings"] = recent_greetings
+                                narrative["last_updated"] = timestamp
+                                await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+                        
+                        break
+                
+                # Save updated history with metadata
+                await save_chat_history(account_id, aac_user_id, history)
+                logging.info(f"Chat history metadata processed for {account_id}/{aac_user_id}")
+            except Exception as e:
+                logging.error(f"Error processing chat metadata in background: {e}", exc_info=True)
+        
+        # Fire and forget the metadata processing
+        import asyncio
+        asyncio.create_task(process_metadata_async())
         
         return JSONResponse(content={
             "message": "Chat history saved successfully",
             "metadata": {
-                "type": message_type,
-                "category": message_category,
-                "is_repetition": is_repetition
+                "type": "processing"
             }
         })
     except HTTPException as http_exc: raise http_exc
@@ -8740,24 +8798,28 @@ class ButtonClickData(BaseModel):
 async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
-    try:
-        log_entry = click_data.model_dump()
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # Pass user_id
-        activity_log.append(log_entry)
-        print(f"Button click logged for account {account_id} and user {aac_user_id}: {log_entry}")
-        success = await save_button_activity_log(account_id, aac_user_id, activity_log)
-        if success:
-            logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
-            
-            # Cache is NOT invalidated here to preserve context during a session.
-            # It will be invalidated by other actions like changing user info, settings, etc.
-            logging.info(f"Cache not invalidated for button click for user {aac_user_id}.")
-            
-            return JSONResponse(content={"message": "Button click logged successfully."})
-        else: raise HTTPException(status_code=500, detail="Failed to save button click log.")
-    except Exception as e:
-        logging.error(f"Error logging button click for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
+    # Log the click asynchronously (fire and forget)
+    async def save_click_async():
+        try:
+            log_entry = click_data.model_dump()
+            activity_log = await load_button_activity_log(account_id, aac_user_id)
+            activity_log.append(log_entry)
+            print(f"Button click logged for account {account_id} and user {aac_user_id}: {log_entry}")
+            success = await save_button_activity_log(account_id, aac_user_id, activity_log)
+            if success:
+                logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
+            else:
+                logging.error(f"Failed to save button click log for {account_id}/{aac_user_id}")
+        except Exception as e:
+            logging.error(f"Error logging button click in background for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+    
+    # Fire and forget
+    import asyncio
+    asyncio.create_task(save_click_async())
+    
+    # Return immediately
+    return JSONResponse(content={"message": "Button click queued for logging."})
     
 
 
