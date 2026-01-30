@@ -8,7 +8,7 @@ echo "🔨 Building image..."
 docker build --no-cache -t bravo-local -f Dockerfile.cloudrun .
 
 echo "🚀 Starting container..."
-docker run -d --name bravo-dev -p 8080:8080 \
+docker run -d --name bravo-dev -p 8000:8080 \
   -e ENVIRONMENT=development \
   -e GCP_PROJECT_ID=bravo-dev-465400 \
   -e GOOGLE_CLOUD_PROJECT=bravo-dev-465400 \
@@ -27,6 +27,6 @@ echo "✅ Server logs:"
 docker logs bravo-dev 2>&1 | tail -10
 
 echo ""
-echo "🌐 Server running at http://localhost:8080"
+echo "🌐 Server running at http://localhost:8000"
 echo "📋 View logs: docker logs -f bravo-dev"
 echo "🛑 Stop server: docker stop bravo-dev"

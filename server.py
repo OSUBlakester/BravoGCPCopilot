@@ -2238,7 +2238,7 @@ RoutingTarget = Literal["personal", "system", "default"] # 'default' for fallbac
 
 collection = None # (This will be removed later, still a global variable)
 chroma_client_global = None # NEW: Keep a global chroma client for static db if needed, but per-user client is key.
-sentence_transformer_model: Optional[SentenceTransformer] = None # Global instance
+sentence_transformer_model = None # DISABLED - not currently used
 primary_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 fallback_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
