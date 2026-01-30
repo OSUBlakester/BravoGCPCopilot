@@ -112,7 +112,7 @@ import calendar # For calculating floating observances
 from datetime import date, timedelta, datetime as dt, timezone # Alias datetime to avoid conflict
 from fastapi.middleware.cors import CORSMiddleware
 import re
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer  # DISABLED - not currently used
 from jinja2 import Environment, FileSystemLoader
 import urllib.parse
 import http.client  # Import the http.client module
@@ -7675,6 +7675,17 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         response_data["avatarConfig"] = user_info_content_dict["avatarConfig"]
     
     return JSONResponse(content=response_data)
+
+@app.get("/api/chat-derived-narrative")
+async def get_chat_derived_narrative_api(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get AI-extracted narrative from chat history"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    logging.info(f"GET /api/chat-derived-narrative request received for account {account_id} and user {aac_user_id}.")
+    
+    narrative_data = await load_chat_derived_narrative(account_id, aac_user_id)
+    
+    return JSONResponse(content=narrative_data)
 
 # Debug endpoint for cache inspection
 @app.get("/api/debug/cache")
