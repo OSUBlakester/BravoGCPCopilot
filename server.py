@@ -1765,12 +1765,14 @@ class GeminiCacheManager:
         logging.info(f"🏛️ Building BASE context (for caching) for {account_id}/{aac_user_id}...")
         
         # Fetch only stable data for caching
+        # NOTE: chat_history is LIMITED to recent messages (CHAT_HISTORY_ACTIVE_DAYS)
+        # Older messages are summarized in chat_narrative to save tokens
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "settings": load_settings_from_file(account_id, aac_user_id),
             "birthdays": load_birthdays_from_file(account_id, aac_user_id),
             "diary": load_diary_entries(account_id, aac_user_id),
-            "chat_history": load_chat_history(account_id, aac_user_id),
+            "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
             "chat_narrative": load_chat_derived_narrative(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
         }
@@ -1857,9 +1859,12 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 
                 context_parts.append("\n".join(chat_context_parts) + "\n")
         
-        # REMOVED: Old chat history no longer included here to save tokens
-        # It's been replaced by chat_derived_narrative above
-        # Recent chat (last 10) will be in delta context
+        # Recent chat history (last CHAT_HISTORY_ACTIVE_DAYS days) - included in BASE for context
+        # Older messages are summarized in chat_derived_narrative above
+        if context_data["chat_history"]:
+            recent_messages = context_data["chat_history"]
+            context_parts.append(f"--- Recent Chat History (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages) ---\n{json.dumps(recent_messages, indent=2)}\n")
+            logging.info(f"📝 Including {len(recent_messages)} recent messages in BASE context")
         
         base_string = "\n".join(context_parts)
         logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
@@ -1879,10 +1884,11 @@ Diary Entries (most recent 15, sorted newest to oldest):
         logging.info(f"⚡ Building DELTA context (dynamic data) for {account_id}/{aac_user_id}...")
         
         # Fetch dynamic data
+        # NOTE: chat_history uses recent messages (CHAT_HISTORY_ACTIVE_DAYS) to match BASE context
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
-            "chat_history": load_chat_history(account_id, aac_user_id),
+            "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
             "pages": load_pages_from_file(account_id, aac_user_id),
         }
         results = await asyncio.gather(*tasks.values())
@@ -2018,8 +2024,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
             created_at = dt.now().timestamp()
             
-            # Get current chat history count to track in cache metadata
-            chat_history = await load_chat_history(account_id, aac_user_id)
+            # Get current RECENT chat history count to track in cache metadata
+            # We only cache recent messages (CHAT_HISTORY_ACTIVE_DAYS), so we track those
+            chat_history = await load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS)
             message_count_at_cache = len(chat_history)
             
             # The model used for caching must match the model used for generation.
@@ -7354,6 +7361,29 @@ async def load_chat_history(account_id: str, aac_user_id: str) -> List[Dict]:
         aac_user_id=aac_user_id,
         collection_subpath="chat_history", # Firestore subcollection path
     )
+
+async def load_recent_chat_history(account_id: str, aac_user_id: str, days: int = 7) -> List[Dict]:
+    """Load only recent chat messages within the specified number of days"""
+    all_messages = await load_chat_history(account_id, aac_user_id)
+    
+    if not all_messages:
+        return []
+    
+    from datetime import datetime, timedelta
+    cutoff_date = datetime.now() - timedelta(days=days)
+    
+    recent_messages = []
+    for msg in all_messages:
+        try:
+            msg_date = datetime.fromisoformat(msg.get("timestamp", "2000-01-01T00:00:00"))
+            if msg_date >= cutoff_date:
+                recent_messages.append(msg)
+        except:
+            # If can't parse date, include it to be safe
+            recent_messages.append(msg)
+    
+    logging.info(f"📅 Filtered chat history: {len(recent_messages)}/{len(all_messages)} messages within last {days} days")
+    return recent_messages
 
 async def save_chat_history(account_id: str, aac_user_id: str, history: List[Dict]):
     # The MAX_CHAT_HISTORY limit check should happen in the calling endpoint (e.g., record_chat_history)
