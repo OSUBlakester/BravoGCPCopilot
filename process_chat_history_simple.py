@@ -14,8 +14,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict
 from google.cloud import firestore
-import vertexai
-from vertexai.generative_models import GenerativeModel
+import google.generativeai as genai
 import os
 
 # Load config
@@ -30,13 +29,17 @@ logging.basicConfig(
 FIRESTORE_ACCOUNTS_COLLECTION = "accounts"
 FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION = "users"
 CHAT_HISTORY_ACTIVE_DAYS = 7
-GEMINI_PRIMARY_MODEL = "gemini-1.5-flash-001"
+GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "models/gemini-2.5-flash")
 
 # Initialize Firestore
 firestore_db = firestore.Client(project=CONFIG.get('gcp_project_id'))
 
-# Initialize Vertex AI
-vertexai.init(project=CONFIG.get('gcp_project_id'), location="us-central1")
+# Initialize Gemini with API key
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    logging.error("GOOGLE_API_KEY environment variable not set")
+    sys.exit(1)
+genai.configure(api_key=GOOGLE_API_KEY)
 
 DEFAULT_CHAT_DERIVED_NARRATIVE = {
     "last_updated": None,
@@ -85,7 +88,7 @@ class ChatHistoryProcessor:
     
     def __init__(self, dry_run: bool = False):
         self.dry_run = dry_run
-        self.model = GenerativeModel(GEMINI_PRIMARY_MODEL)
+        self.model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
     
     async def extract_user_insights(self, messages: List[Dict]) -> Dict:
         """Use Gemini to extract user preferences, facts, and patterns from chat messages"""
