@@ -1698,9 +1698,12 @@ class GeminiCacheManager:
 
     async def _is_cache_valid(self, user_key: str) -> bool:
         """Checks if a user's cache exists in Firestore and is within its TTL."""
+        print(f"DEBUG: _is_cache_valid called for {user_key}", flush=True)
         cache_data = await self._load_cache_from_firestore(user_key)
+        print(f"DEBUG: cache_data from Firestore: {cache_data}", flush=True)
         
         if not cache_data:
+            print(f"DEBUG: No cache_data, returning False", flush=True)
             return False
         
         created_at = cache_data.get('created_at', 0)
