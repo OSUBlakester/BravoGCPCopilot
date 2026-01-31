@@ -2031,14 +2031,16 @@ Diary Entries (most recent 15, sorted newest to oldest):
         Checks if a valid cache exists for the user. If not, it builds the
         combined context and creates a new Gemini CachedContent object.
         """
-        logging.info(f"🔥 warm_up_user_cache_if_needed called for account_id={account_id}, aac_user_id={aac_user_id}")
+        print(f"DEBUG: warm_up_user_cache_if_needed ENTRY for {account_id}/{aac_user_id}", flush=True)
+        logging.warning(f"🔥 WARMUP FUNCTION CALLED for account_id={account_id}, aac_user_id={aac_user_id}")
         user_key = self._get_user_key(account_id, aac_user_id)
-        logging.info(f"🔑 Generated user_key: {user_key}")
+        logging.warning(f"🔑 Generated user_key: {user_key}")
         if await self._is_cache_valid(user_key):
-            logging.info(f"Cache for user '{user_key}' is already warm and valid.")
+            logging.warning(f"Cache for user '{user_key}' is already warm and valid.")
             return
 
-        logging.info(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
+        logging.warning(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
+        print(f"DEBUG: About to build BASE context", flush=True)
         try:
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
