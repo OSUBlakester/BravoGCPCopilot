@@ -3670,6 +3670,14 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         """Attempt to repair common JSON errors"""
         json_str = json_str.strip()
         
+        # Fix missing commas between objects/arrays
+        # Pattern: }WHITESPACE" (missing comma between objects)
+        json_str = re.sub(r'}\s+\"', r'},\n"', json_str)
+        # Pattern: ]WHITESPACE" (missing comma between array and next property)
+        json_str = re.sub(r']\s+\"', r'],\n"', json_str)
+        # Pattern: }WHITESPACE{ (missing comma between objects in array)
+        json_str = re.sub(r'}\s+\{', r'},\n{', json_str)
+        
         # Fix truncated JSON - if ends with comma, remove it and close brackets
         if json_str.endswith(','):
             logging.info("Detected trailing comma - removing and closing brackets")
