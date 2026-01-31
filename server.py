@@ -3507,6 +3507,12 @@ IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND p
 
 ⚠️ CRITICAL SUMMARY RULE: NEVER include the user's name in the "summary" field. The summary is what the user will hear when the option is spoken aloud. Remove any personal names from summaries and use generic language instead. For example, if the option is "Jon is excited to learn", the summary should be "Excited to learn", not "Jon excited to learn".
 
+⚠️ CRITICAL JSON FORMATTING: Your response MUST be STRICTLY valid JSON. Pay special attention to:
+- Every object in the array must be separated by commas
+- Every property within an object must be followed by a comma EXCEPT the last one
+- Close all opened braces {{ }} and brackets [ ]
+- Do not forget commas between array elements
+
 Return ONLY valid JSON - no other text before or after the JSON array."""
     final_user_query = f"{user_prompt_content}\n\n{json_format_instructions}"
 
