@@ -3731,8 +3731,9 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     except json.JSONDecodeError as first_error:
         # Try to repair the JSON
         logging.warning(f"Initial JSON parse failed: {first_error}. Attempting repair...")
+        logging.warning(f"Original JSON (first 500 chars): {clean_json_str[:500]}")
         repaired_json_str = repair_json(clean_json_str)
-        logging.info(f"Repaired JSON (first 500 chars): {repaired_json_str[:500]}")
+        logging.warning(f"Repaired JSON (first 1000 chars): {repaired_json_str[:1000]}")
         try:
             parsed_llm_output = json.loads(repaired_json_str)
             logging.info("✅ JSON repair successful!")
@@ -3740,7 +3741,15 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             # Repair failed, log details and re-raise
             logging.error(f"JSON repair failed: {second_error}")
             logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
+            logging.error(f"Repaired JSON (first 2000 chars): {repaired_json_str[:2000]}")
             logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
+            
+            # Log the specific problematic area around the error
+            if hasattr(second_error, 'pos'):
+                start = max(0, second_error.pos - 200)
+                end = min(len(repaired_json_str), second_error.pos + 200)
+                logging.error(f"Problem area (±200 chars around error): {repaired_json_str[start:end]}")
+            
             raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
     
     # Continue with processing the parsed output
