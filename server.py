@@ -3670,6 +3670,10 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         """Attempt to repair common JSON errors"""
         json_str = json_str.strip()
         
+        # Fix missing closing braces before arrays - LLM sometimes forgets }
+        # Pattern: ]WHITESPACE[ (missing } before next object's array)
+        json_str = re.sub(r']\s*\n\s*\[', r']\n},\n{', json_str)
+        
         # Fix missing commas between objects/arrays - be more aggressive
         # Pattern: }WHITESPACE" (missing comma between objects)
         json_str = re.sub(r'}\s+\"', r'},\n"', json_str)
@@ -3680,7 +3684,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         # Pattern: "value"WHITESPACE" (missing comma between string values and next property)
         json_str = re.sub(r'\"([^\"]*)\"\s+\"([a-zA-Z_])', r'"\1",\n"\2', json_str)
         # Pattern: ]WHITESPACE} (missing comma before closing brace after array)
-        # This is tricky - only add if not already there
         json_str = re.sub(r']\s+}', r']\n}', json_str)
         
         # Fix truncated JSON - if ends with comma, remove it and close brackets
@@ -3710,7 +3713,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         json_str = re.sub(r'(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
         
         # Fix missing commas after closing braces/brackets within objects
-        # Pattern: } followed by new line and then " at start (property name)
+        # Pattern: } or ] followed by new line and then " at start (property name)
         lines = json_str.split('\n')
         fixed_lines = []
         for i, line in enumerate(lines):
