@@ -3670,17 +3670,22 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         """Attempt to repair common JSON errors"""
         json_str = json_str.strip()
         
-        # Fix missing commas between objects/arrays
+        # Fix missing commas between objects/arrays - be more aggressive
         # Pattern: }WHITESPACE" (missing comma between objects)
         json_str = re.sub(r'}\s+\"', r'},\n"', json_str)
         # Pattern: ]WHITESPACE" (missing comma between array and next property)
         json_str = re.sub(r']\s+\"', r'],\n"', json_str)
         # Pattern: }WHITESPACE{ (missing comma between objects in array)
         json_str = re.sub(r'}\s+\{', r'},\n{', json_str)
+        # Pattern: "value"WHITESPACE" (missing comma between string values and next property)
+        json_str = re.sub(r'\"([^\"]*)\"\s+\"([a-zA-Z_])', r'"\1",\n"\2', json_str)
+        # Pattern: ]WHITESPACE} (missing comma before closing brace after array)
+        # This is tricky - only add if not already there
+        json_str = re.sub(r']\s+}', r']\n}', json_str)
         
         # Fix truncated JSON - if ends with comma, remove it and close brackets
         if json_str.endswith(','):
-            logging.info("Detected trailing comma - removing and closing brackets")
+            logging.warning("Detected trailing comma - removing and closing brackets")
             json_str = json_str[:-1].strip()  # Remove trailing comma
         
         # Count brackets and add missing closers
@@ -3688,14 +3693,14 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         close_brackets = json_str.count(']')
         if open_brackets > close_brackets:
             missing = open_brackets - close_brackets
-            logging.info(f"Adding {missing} missing closing bracket(s)")
+            logging.warning(f"Adding {missing} missing closing bracket(s)")
             json_str += ']' * missing
             
         open_braces = json_str.count('{')
         close_braces = json_str.count('}')
         if open_braces > close_braces:
             missing = open_braces - close_braces
-            logging.info(f"Adding {missing} missing closing brace(s)")
+            logging.warning(f"Adding {missing} missing closing brace(s)")
             json_str += '}' * missing
         
         # Fix trailing commas BEFORE closing brackets (must run after adding missing brackets)
@@ -3703,6 +3708,21 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         
         # Fix missing quotes around keys (common LLM error)
         json_str = re.sub(r'(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
+        
+        # Fix missing commas after closing braces/brackets within objects
+        # Pattern: } followed by new line and then " at start (property name)
+        lines = json_str.split('\n')
+        fixed_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if i < len(lines) - 1:
+                next_line = lines[i + 1].strip()
+                # If this line ends with } or ] and next line starts with ", add comma
+                if (stripped.endswith('}') or stripped.endswith(']')) and next_line.startswith('"'):
+                    if not stripped.endswith(','):
+                        line = line.rstrip() + ','
+            fixed_lines.append(line)
+        json_str = '\n'.join(fixed_lines)
         
         return json_str
 
