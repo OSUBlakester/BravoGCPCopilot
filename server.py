@@ -2043,10 +2043,10 @@ Diary Entries (most recent 15, sorted newest to oldest):
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
-            # Gemini 2.5 Flash minimum cache size - lowered to 1024 to allow smaller profiles
+            # Gemini 2.5 Flash minimum cache size - temporarily lowered to 512 for testing
             # Use a more accurate token estimation: roughly 4 chars per token for English text
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 1024
+            min_tokens_required = 512
             
             logging.info(f"BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
