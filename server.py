@@ -2053,13 +2053,13 @@ Diary Entries (most recent 15, sorted newest to oldest):
             estimated_tokens = len(base_context) // 4
             min_tokens_required = 512
             
-            logging.info(f"BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
+            logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
             if estimated_tokens < min_tokens_required:
                 logging.warning(f"BASE context for user '{user_key}' has {int(estimated_tokens)} tokens < {min_tokens_required} minimum. Skipping cache creation.")
                 return
             
-            logging.info(f"🚀 Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
+            logging.warning(f"🚀 Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
 
             # Create the cache using the Gemini API (BASE context only)
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
@@ -2081,7 +2081,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
 
             # Save to Firestore with message count for drift tracking
             await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count_at_cache)
-            logging.info(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name}, Messages: {message_count_at_cache}")
+            logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name}, Messages: {message_count_at_cache}")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
