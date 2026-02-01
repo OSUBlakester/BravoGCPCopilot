@@ -1999,10 +1999,13 @@ Diary Entries (most recent 15, sorted newest to oldest):
             
             delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages):\n{json.dumps(recent_messages, indent=2)}\n")
             logging.warning(f"✅ Including ALL {len(recent_messages)} recent messages in DELTA (not cached)")
+            logging.warning(f"📊 Chat history size: {len(json.dumps(recent_messages))} chars")
         
         # User-defined pages (frequently edited)
         if context_data["pages"]:
-            delta_parts.append(f"\n📄 USER PAGES:\n{json.dumps(context_data['pages'], indent=2)}\n")
+            pages_json = json.dumps(context_data['pages'], indent=2)
+            delta_parts.append(f"\n📄 USER PAGES:\n{pages_json}\n")
+            logging.warning(f"📄 Pages size: {len(pages_json)} chars, {len(context_data['pages'])} pages")
         
         delta_string = "\n".join(delta_parts)
         logging.warning(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
