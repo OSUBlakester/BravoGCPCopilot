@@ -458,9 +458,66 @@
                     </div>
 
                     <div>
-                        <label for="user-info" class="block text-lg font-medium text-gray-700 mb-2">User Narrative</label>
+                        <label for="user-info" class="block text-lg font-medium text-gray-700 mb-2">User Narrative (Admin Input)</label>
                         <textarea id="user-info" name="user-info" rows="10" placeholder="Enter a complete user story including personality, history, interests, preferences, favorites, family, pets, and any other relevant details. This helps personalize responses." class="w-full"></textarea>
                         <p class="text-xs text-gray-500 mt-1">Include as much relevant detail as possible to create a comprehensive narrative about the user.</p>
+                    </div>
+
+                    <!-- AI-Extracted Narrative from Chat History -->
+                    <div class="border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="block text-lg font-medium text-purple-700">
+                                <i class="fas fa-robot mr-2"></i>AI-Extracted Narrative (from Chat History)
+                            </label>
+                            <button type="button" id="refreshChatNarrativeBtn" class="px-3 py-1 text-xs bg-purple-600 hover:bg-purple-700 text-white rounded transition-colors">
+                                <i class="fas fa-sync-alt mr-1"></i>Refresh
+                            </button>
+                        </div>
+                        
+                        <div id="chat-narrative-content" class="space-y-3">
+                            <div id="chat-narrative-loading" class="text-gray-500 italic">Loading...</div>
+                            
+                            <!-- Narrative Text -->
+                            <div id="chat-narrative-text-section" class="hidden">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Summary</label>
+                                <textarea id="chat-narrative-text" rows="4" class="w-full text-sm bg-white" placeholder="No narrative extracted yet. Run the chat history processor to extract insights."></textarea>
+                            </div>
+                            
+                            <!-- Extracted Facts -->
+                            <div id="chat-facts-section" class="hidden">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    Extracted Facts (<span id="facts-count">0</span>)
+                                </label>
+                                <div id="chat-facts-list" class="space-y-2 max-h-48 overflow-y-auto"></div>
+                            </div>
+                            
+                            <!-- Answered Questions -->
+                            <div id="chat-questions-section" class="hidden">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">
+                                    Known Preferences (<span id="questions-count">0</span>)
+                                </label>
+                                <div id="chat-questions-list" class="grid grid-cols-2 gap-2 text-sm"></div>
+                            </div>
+                            
+                            <!-- Recent Greetings -->
+                            <div id="chat-greetings-section" class="hidden">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Recent Greetings</label>
+                                <div id="chat-greetings-list" class="flex flex-wrap gap-2"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3 flex gap-2 text-xs text-gray-600">
+                            <span id="chat-narrative-meta">
+                                Last updated: <span id="chat-narrative-updated">Never</span> | 
+                                Source: <span id="chat-narrative-message-count">0</span> messages
+                            </span>
+                        </div>
+                        
+                        <p class="text-xs text-purple-600 mt-2">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            This narrative is automatically extracted from chat messages older than 7 days. 
+                            It captures user preferences, personal facts, and communication patterns.
+                        </p>
                     </div>
 
                     <div>

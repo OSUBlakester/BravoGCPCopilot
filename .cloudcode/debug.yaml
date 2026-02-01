@@ -1,0 +1,5 @@
+# Disable debugging for all containers
+version: v1
+runtimeConfigs:
+  python:
+    enabled: false

@@ -157,6 +157,12 @@ async function initializePage() {
         closeModalBtn.addEventListener('click', closeRelationshipModal);
         addRelationshipBtn.addEventListener('click', addRelationship);
         
+        // Chat-derived narrative refresh button
+        const refreshChatNarrativeBtn = document.getElementById('refreshChatNarrativeBtn');
+        if (refreshChatNarrativeBtn) {
+            refreshChatNarrativeBtn.addEventListener('click', loadChatDerivedNarrative);
+        }
+        
         // Interview button event listeners
         if (startInterviewButton) {
             startInterviewButton.addEventListener('click', startInterview);
@@ -238,6 +244,7 @@ async function loadInitialData() {
         await loadMoodOptions();
         await loadCurrentMood();
         await loadCustomImages();
+        await loadChatDerivedNarrative();
         console.log("All initial data loaded successfully");
     } catch (error) {
         console.error("Error loading initial data:", error);
@@ -467,6 +474,109 @@ async function loadUserInfo() {
     }
 }
 
+// --- Chat-Derived Narrative Loading ---
+async function loadChatDerivedNarrative() {
+    console.log("Loading chat-derived narrative...");
+    const loadingEl = document.getElementById('chat-narrative-loading');
+    const contentSections = [
+        'chat-narrative-text-section',
+        'chat-facts-section',
+        'chat-questions-section',
+        'chat-greetings-section'
+    ];
+    
+    try {
+        // Show loading
+        loadingEl.style.display = 'block';
+        contentSections.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+        
+        const response = await window.authenticatedFetch('/api/chat-derived-narrative', {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to load: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Hide loading
+        loadingEl.style.display = 'none';
+        
+        // Display narrative text
+        const narrativeTextEl = document.getElementById('chat-narrative-text');
+        if (narrativeTextEl) {
+            narrativeTextEl.value = data.narrative_text || '';
+            if (data.narrative_text) {
+                document.getElementById('chat-narrative-text-section').classList.remove('hidden');
+            }
+        }
+        
+        // Display extracted facts
+        if (data.extracted_facts && data.extracted_facts.length > 0) {
+            document.getElementById('chat-facts-section').classList.remove('hidden');
+            document.getElementById('facts-count').textContent = data.extracted_facts.length;
+            
+            const factsList = document.getElementById('chat-facts-list');
+            factsList.innerHTML = data.extracted_facts.map(fact => `
+                <div class="bg-white border border-gray-200 rounded px-3 py-2">
+                    <div class="text-sm text-gray-800">${fact.fact}</div>
+                    <div class="text-xs text-gray-500 mt-1">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-${fact.category === 'preference' ? 'purple' : 'blue'}-100 text-${fact.category === 'preference' ? 'purple' : 'blue'}-800">
+                            ${fact.category}
+                        </span>
+                        <span class="ml-2">Confidence: ${fact.confidence}</span>
+                        ${fact.mention_count > 1 ? `<span class="ml-2">(mentioned ${fact.mention_count}x)</span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Display answered questions
+        const questions = data.answered_questions || {};
+        const questionKeys = Object.keys(questions);
+        if (questionKeys.length > 0) {
+            document.getElementById('chat-questions-section').classList.remove('hidden');
+            document.getElementById('questions-count').textContent = questionKeys.length;
+            
+            const questionsList = document.getElementById('chat-questions-list');
+            questionsList.innerHTML = questionKeys.map(key => `
+                <div class="bg-white border border-gray-200 rounded px-2 py-1">
+                    <span class="font-medium text-gray-700">${key}:</span>
+                    <span class="text-gray-600">${questions[key]}</span>
+                </div>
+            `).join('');
+        }
+        
+        // Display recent greetings
+        if (data.recent_greetings && data.recent_greetings.length > 0) {
+            document.getElementById('chat-greetings-section').classList.remove('hidden');
+            
+            const greetingsList = document.getElementById('chat-greetings-list');
+            greetingsList.innerHTML = data.recent_greetings.map(greeting => `
+                <span class="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm">
+                    ${greeting}
+                </span>
+            `).join('');
+        }
+        
+        // Update metadata
+        const updatedDate = data.last_updated ? new Date(data.last_updated).toLocaleString() : 'Never';
+        document.getElementById('chat-narrative-updated').textContent = updatedDate;
+        document.getElementById('chat-narrative-message-count').textContent = data.source_message_count || 0;
+        
+        console.log("Chat-derived narrative loaded successfully");
+        
+    } catch (error) {
+        console.error("Error loading chat-derived narrative:", error);
+        loadingEl.textContent = 'Error loading narrative';
+        loadingEl.style.color = '#ef4444';
+    }
+}
 async function saveUserInfoAndBirthday() {
     console.log("Saving user info and birthday...");
     showStatus(infoSaveStatus, "Saving...", false, 0);

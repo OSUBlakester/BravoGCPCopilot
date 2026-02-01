@@ -1335,7 +1335,7 @@ async function handleButtonClick(buttonData) {
     debugTimes.pageInfo = performance.now();
 
     let localQueryType = buttonData.queryType || '';
-    const llmQuery = buttonData.LLMQuery || '';
+    const llmQuery = buttonData.LLMQuery || buttonData.llmQuery || '';  // Check both capital and lowercase
     const targetPage = buttonData.targetPage || '';
     const navigationType = buttonData.navigationType || '';
     const speechPhrase = buttonData.speechPhrase || '';
@@ -1351,6 +1351,7 @@ async function handleButtonClick(buttonData) {
         text: buttonData.text || buttonData.option, 
         queryType: localQueryType, 
         llmQuery: llmQuery ? 'present' : 'none',
+        llmQueryActual: llmQuery,  // Show actual value for debugging
         speechPhrase: speechPhrase ? speechPhrase : 'none',
         isLLMGenerated: buttonData.isLLMGenerated 
     });
@@ -1427,10 +1428,13 @@ async function handleButtonClick(buttonData) {
     // --- STEP 3: Execute the main logic (the slow part) ---
     try {
         debugTimes.preMain = performance.now();
+        console.log('🔍 STEP 3: Checking llmQuery:', llmQuery ? 'YES' : 'NO', 'Value:', llmQuery);
         if (llmQuery) {
+            console.log('✅ ENTERING LLM QUERY BRANCH');
             const t0 = performance.now();
             // Case 1: Button triggers an LLM query.
             if (speechPhrase) {
+                console.log('🎤 Has speech phrase, announcing:', speechPhrase);
                 const tAnnounce0 = performance.now();
                 await announce(speechPhrase, "system"); // Announce while speech bubble is clear.
                 const tAnnounce1 = performance.now();
@@ -2908,16 +2912,19 @@ async function generateLlmButtons(options) {
             };
             console.log("Logging LLM button click data:", logData);
             try {
-                const auditResponse = await fetch('/api/audit/log-button-click', {
+                console.log('🔄 About to send audit log...');
+                const auditResponse = await authenticatedFetch('/api/audit/log-button-click', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }, // authenticatedFetch will add other headers
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(logData)
                 });
+                console.log('📊 Audit response received:', auditResponse.ok);
                 if (!auditResponse.ok) console.error("Failed to log LLM button click:", auditResponse.status, await auditResponse.text());
                 else console.log("LLM button click logged successfully:", logData);
             } catch (auditError) {
                 console.error("Error sending LLM button click log:", auditError);
             }
+            console.log('✅ Audit logging complete');
             // --- End Audit Logging ---
             
             // --- Record Chat History for LLM Selection ---
@@ -2926,23 +2933,25 @@ async function generateLlmButtons(options) {
             console.log('🎯 GRIDPAGE Wake word question context:', { currentQuestion, isWakeWordQuestion });
             localStorage.setItem('debug_wake_word', `Question: "${currentQuestion}", Option: "${optionData.option}" at ${new Date().toISOString()}`);
             
-            try {
-                // For wake word questions, record both question and response
-                const questionToRecord = isWakeWordQuestion ? currentQuestion : "";
-                await recordChatHistory(questionToRecord, optionData.option);
+            console.log('💬 Recording chat history (non-blocking)...');
+            // Fire and forget - don't wait for chat history recording
+            const questionToRecord = isWakeWordQuestion ? currentQuestion : "";
+            recordChatHistory(questionToRecord, optionData.option).then(() => {
                 localStorage.setItem('debug_wake_success', `Recorded Q:"${questionToRecord}" A:"${optionData.option}" at ${new Date().toISOString()}`);
                 console.log('✅ GRIDPAGE LLM chat history recorded successfully');
-            } catch (chatError) {
+            }).catch(chatError => {
                 localStorage.setItem('debug_wake_error', `Error: ${chatError.message} at ${new Date().toISOString()}`);
                 console.error('❌ Failed to record LLM chat history:', chatError);
-            }
+            });
             // --- End Chat History Recording ---
             
+            console.log('🔊 About to announce option...');
             try {
                 // Announce the selected option (using the full option text for clarity)
                 await announce(optionData.option, "system"); // Use optionData.option directly
-                console.log("Announcement finished for:", button.dataset.option);
+                console.log("✅ Announcement finished for:", button.dataset.option);
 
+                console.log('🔄 About to reload page...');
                 // Clear the question display after announcement
                 // NOTE: Keep activeLLMPromptForContext intact for context-aware navigation (e.g., to freestyle)
                 const questionDisplay = document.getElementById('question-display');
@@ -2953,7 +2962,7 @@ async function generateLlmButtons(options) {
                 window.location.reload(true);
 
             } catch (error) {
-                 console.error("Error during announcement or reload:", error);
+                 console.error("❌ Error during announcement or reload:", error);
                  // Optionally restart scanning here if announce fails
                  startAuditoryScanning();
             } finally {

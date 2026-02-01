@@ -112,7 +112,7 @@ import calendar # For calculating floating observances
 from datetime import date, timedelta, datetime as dt, timezone # Alias datetime to avoid conflict
 from fastapi.middleware.cors import CORSMiddleware
 import re
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer  # DISABLED - not currently used
 from jinja2 import Environment, FileSystemLoader
 import urllib.parse
 import http.client  # Import the http.client module
@@ -1518,6 +1518,29 @@ MAX_CHAT_HISTORY = 50 # Max number of chat entries to keep
 MAX_DIARY_CONTEXT = 5 # Max number of recent/future diary entries for LLM
 MAX_CHAT_CONTEXT = 5 # Max number of recent chat turns for LLM
 
+# Chat history intelligence settings
+CHAT_HISTORY_ACTIVE_DAYS = 7  # Messages within this many days are considered "active"
+CHAT_HISTORY_ARCHIVE_DAYS = 30  # Messages older than this are archived
+
+# Message type classifications for intelligent processing
+MESSAGE_TYPES = [
+    "greeting",      # Hello, good morning, hi
+    "joke",          # Told a joke
+    "question_answer",  # Q&A pair
+    "statement",     # General statement
+    "request_help",  # Asking for assistance
+    "other"          # Unclassified
+]
+
+MESSAGE_CATEGORIES = [
+    "social",         # Greetings, pleasantries
+    "personal_info",  # Facts about the user
+    "preference",     # Likes, dislikes, favorites
+    "activity",       # What user is doing
+    "emotion",        # How user feels
+    "other"           # Unclassified
+]
+
 
 DEFAULT_COUNTRY_CODE = 'US'
 DEFAULT_SPEECH_RATE = 180 
@@ -1588,6 +1611,17 @@ DEFAULT_FRIENDS_FAMILY = []  # List of friends and family entries
 DEFAULT_DIARY: List[Dict] = [] # Diary is a list of entries
 DEFAULT_CHAT_HISTORY: List[Dict] = [] # Chat history is a list of entries
 DEFAULT_BUTTON_ACTIVITY_LOG: List[Dict] = [] # For button clicks
+
+# AI-extracted narrative from chat history
+DEFAULT_CHAT_DERIVED_NARRATIVE = {
+    "last_updated": None,
+    "source_message_count": 0,
+    "extracted_facts": [],  # List of {fact, source_message_id, confidence, category, first_mentioned, mention_count}
+    "narrative_text": "",
+    "recent_greetings": [],  # Last 5 unique greetings used
+    "recent_jokes": [],      # Last 5 jokes told (with timestamps)
+    "answered_questions": {}  # {topic: answer} pairs
+}
 
 # Legacy scraping config (kept for migration)
 DEFAULT_SCRAPING_CONFIG = {
@@ -1664,9 +1698,12 @@ class GeminiCacheManager:
 
     async def _is_cache_valid(self, user_key: str) -> bool:
         """Checks if a user's cache exists in Firestore and is within its TTL."""
+        print(f"DEBUG: _is_cache_valid called for {user_key}", flush=True)
         cache_data = await self._load_cache_from_firestore(user_key)
+        print(f"DEBUG: cache_data from Firestore: {cache_data}", flush=True)
         
         if not cache_data:
+            print(f"DEBUG: No cache_data, returning False", flush=True)
             return False
         
         created_at = cache_data.get('created_at', 0)
@@ -1731,12 +1768,15 @@ class GeminiCacheManager:
         logging.info(f"🏛️ Building BASE context (for caching) for {account_id}/{aac_user_id}...")
         
         # Fetch only stable data for caching
+        # NOTE: chat_history is LIMITED to recent messages (CHAT_HISTORY_ACTIVE_DAYS)
+        # Older messages are summarized in chat_narrative to save tokens
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "settings": load_settings_from_file(account_id, aac_user_id),
             "birthdays": load_birthdays_from_file(account_id, aac_user_id),
             "diary": load_diary_entries(account_id, aac_user_id),
-            "chat_history": load_chat_history(account_id, aac_user_id),
+            "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
+            "chat_narrative": load_chat_derived_narrative(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
         }
         results = await asyncio.gather(*tasks.values())
@@ -1787,12 +1827,69 @@ Diary Entries (most recent 15, sorted newest to oldest):
 """
             context_parts.append(diary_context)
         
-        # OLD chat history (older messages beyond recent 10) for context
-        # Recent chat will be in delta context
-        if context_data["chat_history"] and len(context_data["chat_history"]) > 10:
-            old_history = context_data['chat_history'][:-10]  # Everything except last 10
-            context_parts.append(f"--- Historical Chat Context (Older Messages) ---\n{json.dumps(old_history, indent=2)}\n")
-
+        # Vocabulary level instruction (replaces sending full pages/vocabulary lists)
+        # This saves ~261k tokens by using instruction instead of full word lists
+        if context_data["settings"]:
+            vocabulary_level = context_data["settings"].get("vocabularyLevel", "functional")
+            vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
+            context_parts.append(f"--- Vocabulary Guidelines ---\n{vocab_instruction}\n")
+            logging.info(f"📚 Using vocabulary level: {vocabulary_level} (instruction-based, not full pages)")
+        
+        # AI-extracted chat narrative (replaces old chat history to save tokens)
+        if context_data["chat_narrative"]:
+            chat_narrative = context_data["chat_narrative"]
+            if chat_narrative.get("narrative_text") or chat_narrative.get("extracted_facts"):
+                chat_context_parts = ["--- User Communication Patterns (from Chat History) ---"]
+                
+                # Add narrative summary
+                if chat_narrative.get("narrative_text"):
+                    chat_context_parts.append(f"Summary: {chat_narrative['narrative_text']}")
+                
+                # Add extracted facts
+                if chat_narrative.get("extracted_facts"):
+                    facts_text = []
+                    for fact in chat_narrative["extracted_facts"]:
+                        confidence = fact.get("confidence", "medium")
+                        fact_text = fact.get("fact", "")
+                        mention_count = fact.get("mention_count", 1)
+                        facts_text.append(f"  • {fact_text} [{confidence} confidence, mentioned {mention_count}x]")
+                    chat_context_parts.append("Extracted Facts:\n" + "\n".join(facts_text))
+                
+                # Add common greetings (to help avoid repetition)
+                if chat_narrative.get("recent_greetings"):
+                    greetings = ", ".join(chat_narrative["recent_greetings"])
+                    chat_context_parts.append(f"Recent Greetings Used: {greetings}")
+                    chat_context_parts.append("⚠️ Suggest DIFFERENT greeting variations to avoid repetition")
+                
+                # Add answered questions with better formatting for LLM comprehension
+                if chat_narrative.get("answered_questions"):
+                    qa_pairs = []
+                    # Convert shorthand keys to natural language for better LLM understanding
+                    key_mappings = {
+                        "city_to_visit": "City they want to visit",
+                        "favorite_music": "Favorite music",
+                        "favorite_food": "Favorite food",
+                        "favorite_color": "Favorite color",
+                        "favorite_sport": "Favorite sport",
+                        "sounds_for_talker": "Sounds they want for their AAC device",
+                        "yesterday_activity": "What they did recently",
+                        "favorite_kind_of_music": "Favorite kind of music",
+                    }
+                    
+                    for q, a in chat_narrative["answered_questions"].items():
+                        # Use mapped question or original if not in mapping
+                        question_text = key_mappings.get(q, q.replace("_", " ").title())
+                        qa_pairs.append(f"  • {question_text}: {a}")
+                    
+                    chat_context_parts.append("⭐ User Preferences (from past conversations):\n" + "\n".join(qa_pairs))
+                    chat_context_parts.append("💡 USE THESE when generating relevant suggestions (e.g., include Savannah when suggesting vacation destinations)")
+                
+                context_parts.append("\n".join(chat_context_parts) + "\n")
+        
+        # NOTE: Recent chat history is NOW in DELTA context only (not cached)
+        # This reduces cache size and costs significantly since chat changes frequently
+        # Older messages are already summarized in chat_derived_narrative above
+        
         base_string = "\n".join(context_parts)
         logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
         return base_string
@@ -1811,11 +1908,12 @@ Diary Entries (most recent 15, sorted newest to oldest):
         logging.info(f"⚡ Building DELTA context (dynamic data) for {account_id}/{aac_user_id}...")
         
         # Fetch dynamic data
+        # NOTE: chat_history uses recent messages (CHAT_HISTORY_ACTIVE_DAYS) to match BASE context
+        # NOTE: pages moved to BASE cache (they rarely change, but are huge)
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
-            "chat_history": load_chat_history(account_id, aac_user_id),
-            "pages": load_pages_from_file(account_id, aac_user_id),
+            "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
         }
         results = await asyncio.gather(*tasks.values())
         context_data = dict(zip(tasks.keys(), results))
@@ -1883,37 +1981,39 @@ Diary Entries (most recent 15, sorted newest to oldest):
             ])
             delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
         
-        # SMART CHAT HISTORY: Only include messages AFTER the cache snapshot
-        # This implements the "Snapshot + Buffer" strategy to minimize costs
-        # Instead of always including last 10 messages, we calculate the "drift"
-        user_key = self._get_user_key(account_id, aac_user_id)
-        cache_data = await self._load_cache_from_firestore(user_key)
-        
-        messages_in_cache = 0
-        if cache_data:
-            messages_in_cache = cache_data.get('message_count', 0)
-            logging.info(f"📊 Cache snapshot contains {messages_in_cache} messages")
-        
+        # CHAT HISTORY: Now ALL recent messages go in DELTA (not cached)
+        # This significantly reduces cache size/cost since messages change frequently
         if context_data["chat_history"]:
-            total_messages = len(context_data['chat_history'])
+            recent_messages = context_data["chat_history"]
             
-            # Calculate NEW messages since cache was created (the "drift")
-            new_messages = context_data['chat_history'][messages_in_cache:] if messages_in_cache < total_messages else []
-            drift = len(new_messages)
+            # Extract jokes from recent messages for explicit repetition avoidance
+            recent_jokes = []
+            for msg in recent_messages:
+                response = msg.get("response", "").lower()
+                # Check if it's likely a joke (contains common joke patterns)
+                if any(pattern in response for pattern in ["why did", "what do you call", "how do you", "what's the difference"]):
+                    # Extract the full joke text
+                    joke_text = msg.get("response", "")[:200]  # First 200 chars
+                    if joke_text:
+                        recent_jokes.append(joke_text)
             
-            if new_messages:
-                delta_parts.append(f"\n💬 NEW CHAT MESSAGES (Last {drift} messages since cache):\n{json.dumps(new_messages, indent=2)}\n")
-                logging.info(f"✅ Including {drift} new messages in delta (saving {messages_in_cache} from standard input cost)")
-            else:
-                logging.info(f"✅ No new messages since cache creation (all {total_messages} messages cached)")
+            # Add explicit joke avoidance warning if jokes were found
+            if recent_jokes:
+                joke_warning = "⚠️ CRITICAL - AVOID THESE RECENTLY USED JOKES:\n"
+                for i, joke in enumerate(recent_jokes[:10], 1):  # Max 10 most recent
+                    joke_warning += f"  {i}. {joke}\n"
+                joke_warning += "\n🚫 DO NOT generate any of these jokes again. Create COMPLETELY NEW and DIFFERENT jokes.\n"
+                delta_parts.append(f"--- Recently Used Jokes (DO NOT REPEAT) ---\n{joke_warning}\n")
+            
+            delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages):\n{json.dumps(recent_messages, indent=2)}\n")
+            logging.warning(f"✅ Including ALL {len(recent_messages)} recent messages in DELTA (not cached)")
+            logging.warning(f"📊 Chat history size: {len(json.dumps(recent_messages))} chars")
         
-        # User-defined pages (frequently edited)
-        if context_data["pages"]:
-            delta_parts.append(f"\n📄 USER PAGES:\n{json.dumps(context_data['pages'], indent=2)}\n")
+        # User-defined pages moved to BASE cache (too large for DELTA)
         
         delta_string = "\n".join(delta_parts)
-        logging.info(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
-        logging.info(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
+        logging.warning(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
+        logging.warning(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
         return delta_string
 
     async def warm_up_user_cache_if_needed(self, account_id: str, aac_user_id: str) -> None:
@@ -1921,40 +2021,39 @@ Diary Entries (most recent 15, sorted newest to oldest):
         Checks if a valid cache exists for the user. If not, it builds the
         combined context and creates a new Gemini CachedContent object.
         """
-        logging.info(f"🔥 warm_up_user_cache_if_needed called for account_id={account_id}, aac_user_id={aac_user_id}")
+        print(f"DEBUG: warm_up_user_cache_if_needed ENTRY for {account_id}/{aac_user_id}", flush=True)
+        logging.warning(f"🔥 WARMUP FUNCTION CALLED for account_id={account_id}, aac_user_id={aac_user_id}")
         user_key = self._get_user_key(account_id, aac_user_id)
-        logging.info(f"🔑 Generated user_key: {user_key}")
+        logging.warning(f"🔑 Generated user_key: {user_key}")
         if await self._is_cache_valid(user_key):
-            logging.info(f"Cache for user '{user_key}' is already warm and valid.")
+            logging.warning(f"Cache for user '{user_key}' is already warm and valid.")
             return
 
-        logging.info(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
+        logging.warning(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
+        print(f"DEBUG: About to build BASE context", flush=True)
         try:
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
-            # Gemini 2.5 Flash minimum cache size - lowered to 1024 to allow smaller profiles
+            # Gemini 2.5 Flash minimum cache size - temporarily lowered to 512 for testing
             # Use a more accurate token estimation: roughly 4 chars per token for English text
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 1024
+            min_tokens_required = 512
             
-            logging.info(f"BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
+            logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
             if estimated_tokens < min_tokens_required:
                 logging.warning(f"BASE context for user '{user_key}' has {int(estimated_tokens)} tokens < {min_tokens_required} minimum. Skipping cache creation.")
                 return
             
-            logging.info(f"🚀 Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
+            logging.warning(f"🚀 Creating cache for user '{user_key}' with {int(estimated_tokens)} tokens (above {min_tokens_required} minimum)")
 
             # Create the cache using the Gemini API (BASE context only)
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
             created_at = dt.now().timestamp()
             
-            # Get current chat history count to track in cache metadata
-            chat_history = await load_chat_history(account_id, aac_user_id)
-            message_count_at_cache = len(chat_history)
-            
             # The model used for caching must match the model used for generation.
+            # NOTE: Chat history is NO LONGER cached (moved to DELTA for cost savings)
             cached_content = await asyncio.to_thread(
                 caching.CachedContent.create,
                 model=GEMINI_PRIMARY_MODEL,
@@ -1963,9 +2062,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 ttl=timedelta(seconds=self.ttl_seconds)
             )
 
-            # Save to Firestore with message count for drift tracking
-            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count_at_cache)
-            logging.info(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name}, Messages: {message_count_at_cache}")
+            # Save to Firestore (no message count since we don't cache chat anymore)
+            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count=0)
+            logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
@@ -2170,7 +2269,7 @@ RoutingTarget = Literal["personal", "system", "default"] # 'default' for fallbac
 
 collection = None # (This will be removed later, still a global variable)
 chroma_client_global = None # NEW: Keep a global chroma client for static db if needed, but per-user client is key.
-sentence_transformer_model: Optional[SentenceTransformer] = None # Global instance
+sentence_transformer_model = None # DISABLED - not currently used
 primary_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 fallback_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
@@ -3054,7 +3153,26 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         
         logging.info(f"Attempting LLM generation with primary model: {primary_llm_model_instance.model_name}")
         logging.info(f"Prompt length: {len(prompt_text)} characters")
+        logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
+        logging.info(f"⚙️ Generation config (fallback): {generation_config}")
+        
         response = await asyncio.to_thread(primary_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+        
+        # Log response details for debugging
+        logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
+        logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
+        
+        # Check for safety blocks or empty responses
+        if not response.text or response.text.strip() == "":
+            logging.error(f"❌ LLM returned empty response (fallback)! Candidates: {response.candidates}")
+            logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
+            raise Exception("LLM returned empty response")
+        
+        if response.text.strip() == "[":
+            logging.error(f"❌ LLM returned ONLY opening bracket (fallback)! This suggests the response was cut off.")
+            logging.error(f"❌ Response candidates: {response.candidates}")
+            logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
+        
         response_text = (await get_text_from_response(response)).strip()
         
         # Log detailed token usage for non-cached requests
@@ -3352,7 +3470,11 @@ CREATIVITY BOOSTERS:
         user_prompt_content = randomization_prompt + user_prompt_content
 
     # Define generation config and add JSON formatting instructions  
-    generation_config = {"response_mime_type": "application/json", "temperature": 0.9}  # Increased temperature for more creativity
+    generation_config = {
+        "response_mime_type": "application/json", 
+        "temperature": 0.9,  # Increased temperature for more creativity
+        "max_output_tokens": 4096  # Ensure enough space for complete JSON responses
+    }
     
     # Get vocabulary level instruction
     vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
@@ -3367,6 +3489,12 @@ The "keywords" key should be a list of 3-5 keywords that include BOTH the specif
 IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND punchline in the SAME "option". Format them as: "Question? Punchline!"
 
 ⚠️ CRITICAL SUMMARY RULE: NEVER include the user's name in the "summary" field. The summary is what the user will hear when the option is spoken aloud. Remove any personal names from summaries and use generic language instead. For example, if the option is "Jon is excited to learn", the summary should be "Excited to learn", not "Jon excited to learn".
+
+⚠️ CRITICAL JSON FORMATTING: Your response MUST be STRICTLY valid JSON. Pay special attention to:
+- Every object in the array must be separated by commas
+- Every property within an object must be followed by a comma EXCEPT the last one
+- Close all opened braces {{ }} and brackets [ ]
+- Do not forget commas between array elements
 
 Return ONLY valid JSON - no other text before or after the JSON array."""
     final_user_query = f"{user_prompt_content}\n\n{json_format_instructions}"
@@ -3413,12 +3541,30 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                 
                 logging.info(f"🔍 COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
+                logging.info(f"📊 USER QUERY that triggered LLM: {user_prompt_content[:500]}")
+                logging.info(f"⚙️ Generation config: {generation_config}")
                 
                 # Use cached base context + pass delta as standard input
                 model = genai.GenerativeModel.from_cached_content(cached_content_ref)
                 response = await asyncio.to_thread(
                     model.generate_content, combined_prompt, generation_config=generation_config
                 )
+                
+                # Log response details for debugging
+                logging.info(f"🤖 RAW LLM RESPONSE LENGTH: {len(response.text) if response.text else 0} chars")
+                logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
+                
+                # Check for safety blocks or empty responses
+                if not response.text or response.text.strip() == "":
+                    logging.error(f"❌ LLM returned empty response! Candidates: {response.candidates}")
+                    logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
+                    raise Exception("LLM returned empty response")
+                
+                if response.text.strip() == "[":
+                    logging.error(f"❌ LLM returned ONLY opening bracket! This suggests the response was cut off.")
+                    logging.error(f"❌ Response candidates: {response.candidates}")
+                    logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
+                
                 llm_response_json_str = response.text.strip()
                 
                 # Log detailed token usage for cached requests
@@ -3444,10 +3590,30 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content)
                     combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                     
+                    logging.info(f"🔍 NEW_CACHE COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
+                    logging.info(f"📊 USER QUERY that triggered LLM (new cache path): {user_prompt_content[:500]}")
+                    logging.info(f"⚙️ Generation config: {generation_config}")
+                    
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
                     response = await asyncio.to_thread(
                         model.generate_content, combined_prompt, generation_config=generation_config
                     )
+                    
+                    # Log response details for debugging
+                    logging.info(f"🤖 RAW LLM RESPONSE LENGTH (new cache): {len(response.text) if response.text else 0} chars")
+                    logging.info(f"🤖 RAW LLM RESPONSE (first 500 chars): {response.text[:500] if response.text else 'EMPTY'}")
+                    
+                    # Check for safety blocks or empty responses
+                    if not response.text or response.text.strip() == "":
+                        logging.error(f"❌ LLM returned empty response! Candidates: {response.candidates}")
+                        logging.error(f"❌ Prompt feedback: {response.prompt_feedback}")
+                        raise Exception("LLM returned empty response")
+                    
+                    if response.text.strip() == "[":
+                        logging.error(f"❌ LLM returned ONLY opening bracket! This suggests the response was cut off.")
+                        logging.error(f"❌ Response candidates: {response.candidates}")
+                        logging.error(f"❌ Finish reason: {response.candidates[0].finish_reason if response.candidates else 'No candidates'}")
+                    
                     llm_response_json_str = response.text.strip()
                     
                     # Log detailed token usage for newly cached requests
@@ -3489,9 +3655,116 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     clean_json_str = extract_json_from_response(llm_response_json_str)
     logging.info(f"--- Extracted clean JSON for account {account_id} and user {aac_user_id} (Clean length: {len(clean_json_str)}) ---")
 
+    def repair_json(json_str: str) -> str:
+        """Attempt to repair common JSON errors"""
+        json_str = json_str.strip()
+        
+        # Try aggressive repair: extract individual objects and rebuild array
+        # Look for pattern {..."option":"...", "summary":"...", "keywords":[...]}
+        import re
+        object_pattern = r'\{[^{}]*"option"[^{}]*"summary"[^{}]*"keywords"[^{}]*\}'
+        matches = re.findall(object_pattern, json_str, re.DOTALL)
+        
+        if matches and len(matches) > 3:  # If we found multiple valid-looking objects
+            logging.warning(f"Attempting aggressive repair: found {len(matches)} object-like patterns, rebuilding array")
+            # Try to rebuild as proper JSON array
+            rebuilt = "[\n" + ",\n".join(matches) + "\n]"
+            try:
+                # Test if this parses
+                json.loads(rebuilt)
+                logging.warning("✅ Aggressive repair successful via object extraction")
+                return rebuilt
+            except:
+                logging.warning("Aggressive repair failed, falling back to pattern-based repair")
+        
+        # Fall back to original pattern-based repair
+        # Fix missing closing braces before arrays - LLM sometimes forgets }
+        # Pattern: ]WHITESPACE[ (missing } before next object's array)
+        json_str = re.sub(r']\s*\n\s*\[', r']\n},\n{', json_str)
+        
+        # Fix missing commas between objects/arrays - be more aggressive
+        # Pattern: }WHITESPACE" (missing comma between objects)
+        json_str = re.sub(r'}\s+\"', r'},\n"', json_str)
+        # Pattern: ]WHITESPACE" (missing comma between array and next property)
+        json_str = re.sub(r']\s+\"', r'],\n"', json_str)
+        # Pattern: }WHITESPACE{ (missing comma between objects in array)
+        json_str = re.sub(r'}\s+\{', r'},\n{', json_str)
+        # Pattern: "value"WHITESPACE" (missing comma between string values and next property)
+        json_str = re.sub(r'\"([^\"]*)\"\s+\"([a-zA-Z_])', r'"\1",\n"\2', json_str)
+        # Pattern: ]WHITESPACE} (missing comma before closing brace after array)
+        json_str = re.sub(r']\s+}', r']\n}', json_str)
+        
+        # Fix truncated JSON - if ends with comma, remove it and close brackets
+        if json_str.endswith(','):
+            logging.warning("Detected trailing comma - removing and closing brackets")
+            json_str = json_str[:-1].strip()  # Remove trailing comma
+        
+        # Count brackets and add missing closers
+        open_brackets = json_str.count('[')
+        close_brackets = json_str.count(']')
+        if open_brackets > close_brackets:
+            missing = open_brackets - close_brackets
+            logging.warning(f"Adding {missing} missing closing bracket(s)")
+            json_str += ']' * missing
+            
+        open_braces = json_str.count('{')
+        close_braces = json_str.count('}')
+        if open_braces > close_braces:
+            missing = open_braces - close_braces
+            logging.warning(f"Adding {missing} missing closing brace(s)")
+            json_str += '}' * missing
+        
+        # Fix trailing commas BEFORE closing brackets (must run after adding missing brackets)
+        json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+        
+        # Fix missing quotes around keys (common LLM error)
+        json_str = re.sub(r'(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
+        
+        # Fix missing commas after closing braces/brackets within objects
+        # Pattern: } or ] followed by new line and then " at start (property name)
+        lines = json_str.split('\n')
+        fixed_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if i < len(lines) - 1:
+                next_line = lines[i + 1].strip()
+                # If this line ends with } or ] and next line starts with ", add comma
+                if (stripped.endswith('}') or stripped.endswith(']')) and next_line.startswith('"'):
+                    if not stripped.endswith(','):
+                        line = line.rstrip() + ','
+            fixed_lines.append(line)
+        json_str = '\n'.join(fixed_lines)
+        
+        return json_str
+
     try:
         parsed_llm_output = json.loads(clean_json_str)
-        
+    except json.JSONDecodeError as first_error:
+        # Try to repair the JSON
+        logging.warning(f"Initial JSON parse failed: {first_error}. Attempting repair...")
+        logging.warning(f"Original JSON (first 500 chars): {clean_json_str[:500]}")
+        repaired_json_str = repair_json(clean_json_str)
+        logging.warning(f"Repaired JSON (first 1000 chars): {repaired_json_str[:1000]}")
+        try:
+            parsed_llm_output = json.loads(repaired_json_str)
+            logging.info("✅ JSON repair successful!")
+        except json.JSONDecodeError as second_error:
+            # Repair failed, log details and re-raise
+            logging.error(f"JSON repair failed: {second_error}")
+            logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
+            logging.error(f"Repaired JSON (first 2000 chars): {repaired_json_str[:2000]}")
+            logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
+            
+            # Log the specific problematic area around the error
+            if hasattr(second_error, 'pos'):
+                start = max(0, second_error.pos - 200)
+                end = min(len(repaired_json_str), second_error.pos + 200)
+                logging.error(f"Problem area (±200 chars around error): {repaired_json_str[start:end]}")
+            
+            raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
+    
+    # Continue with processing the parsed output
+    try:
         extracted_options_list = []
         if isinstance(parsed_llm_output, dict):
             for key, value in parsed_llm_output.items():
@@ -3514,9 +3787,9 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
 
         return JSONResponse(content=extracted_options_list)
 
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse LLM response as JSON: {e}. Clean Raw: {clean_json_str[:500]}...", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(e)}")
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logging.error(f"Error processing LLM response for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing LLM response: {str(e)}")
@@ -7178,6 +7451,29 @@ async def load_chat_history(account_id: str, aac_user_id: str) -> List[Dict]:
         collection_subpath="chat_history", # Firestore subcollection path
     )
 
+async def load_recent_chat_history(account_id: str, aac_user_id: str, days: int = 7) -> List[Dict]:
+    """Load only recent chat messages within the specified number of days"""
+    all_messages = await load_chat_history(account_id, aac_user_id)
+    
+    if not all_messages:
+        return []
+    
+    from datetime import datetime, timedelta
+    cutoff_date = datetime.now() - timedelta(days=days)
+    
+    recent_messages = []
+    for msg in all_messages:
+        try:
+            msg_date = datetime.fromisoformat(msg.get("timestamp", "2000-01-01T00:00:00"))
+            if msg_date >= cutoff_date:
+                recent_messages.append(msg)
+        except:
+            # If can't parse date, include it to be safe
+            recent_messages.append(msg)
+    
+    logging.info(f"📅 Filtered chat history: {len(recent_messages)}/{len(all_messages)} messages within last {days} days")
+    return recent_messages
+
 async def save_chat_history(account_id: str, aac_user_id: str, history: List[Dict]):
     # The MAX_CHAT_HISTORY limit check should happen in the calling endpoint (e.g., record_chat_history)
     return await save_firestore_collection_items(
@@ -7186,6 +7482,114 @@ async def save_chat_history(account_id: str, aac_user_id: str, history: List[Dic
         collection_subpath="chat_history", # Firestore subcollection path
         items=history # Save all items to the subcollection
     )
+
+# --- Chat-Derived Narrative Load/Save ---
+async def load_chat_derived_narrative(account_id: str, aac_user_id: str) -> Dict:
+    """Load the AI-extracted narrative from chat history"""
+    return await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/chat_derived_narrative",
+        default_data=DEFAULT_CHAT_DERIVED_NARRATIVE.copy()
+    )
+
+async def save_chat_derived_narrative(account_id: str, aac_user_id: str, narrative_data: Dict) -> bool:
+    """Save the AI-extracted narrative from chat history"""
+    return await save_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/chat_derived_narrative",
+        data_to_save=narrative_data
+    )
+
+# --- Chat History Intelligence Helpers ---
+def classify_message_type(message_text: str) -> str:
+    """Classify message into type categories using simple heuristics"""
+    message_lower = message_text.lower().strip()
+    
+    # Greetings
+    greeting_patterns = ["hello", "hi", "hey", "good morning", "good afternoon", "good evening", 
+                        "good night", "howdy", "greetings", "what's up", "sup"]
+    if any(pattern in message_lower for pattern in greeting_patterns):
+        return "greeting"
+    
+    # Request for help
+    help_patterns = ["help", "need", "assist", "can you", "could you", "please"]
+    if any(pattern in message_lower for pattern in help_patterns):
+        return "request_help"
+    
+    # Jokes (harder to detect, look for punchline indicators)
+    joke_indicators = ["why did", "knock knock", "what do you call", "how many", "walks into a bar"]
+    if any(indicator in message_lower for indicator in joke_indicators):
+        return "joke"
+    
+    # Questions (has question mark or starts with question words)
+    question_words = ["what", "where", "when", "why", "who", "how", "is", "are", "do", "does", "can", "could"]
+    if "?" in message_text or any(message_lower.startswith(qw) for qw in question_words):
+        return "question_answer"
+    
+    # Default
+    return "statement"
+
+def classify_message_category(message_text: str, message_type: str) -> str:
+    """Classify message into semantic categories"""
+    message_lower = message_text.lower()
+    
+    if message_type == "greeting":
+        return "social"
+    
+    # Personal preferences
+    preference_keywords = ["favorite", "like", "love", "enjoy", "prefer", "hate", "dislike"]
+    if any(kw in message_lower for kw in preference_keywords):
+        return "preference"
+    
+    # Personal info
+    info_keywords = ["my name is", "i am", "i'm", "i live", "i work", "my age"]
+    if any(kw in message_lower for kw in info_keywords):
+        return "personal_info"
+    
+    # Activities
+    activity_keywords = ["doing", "going to", "playing", "watching", "reading", "listening"]
+    if any(kw in message_lower for kw in activity_keywords):
+        return "activity"
+    
+    # Emotions
+    emotion_keywords = ["feel", "happy", "sad", "angry", "excited", "tired", "frustrated"]
+    if any(kw in message_lower for kw in emotion_keywords):
+        return "emotion"
+    
+    return "other"
+
+def check_message_repetition(new_message: str, recent_messages: List[Dict], days: int = 1) -> tuple[bool, Optional[str]]:
+    """
+    Check if a message is a repetition of recent messages
+    Returns (is_repetition, similar_message_id)
+    """
+    from datetime import datetime, timedelta
+    
+    cutoff_time = dt.now() - timedelta(days=days)
+    new_message_lower = new_message.lower().strip()
+    
+    for msg in recent_messages:
+        msg_time = datetime.fromisoformat(msg.get("timestamp", "2000-01-01T00:00:00"))
+        if msg_time < cutoff_time:
+            continue
+            
+        existing_response = msg.get("response", "").lower().strip()
+        
+        # Exact match
+        if new_message_lower == existing_response:
+            return True, msg.get("id")
+        
+        # Similar (80% similarity using simple word overlap)
+        new_words = set(new_message_lower.split())
+        existing_words = set(existing_response.split())
+        if len(new_words) > 0 and len(existing_words) > 0:
+            overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
+            if overlap > 0.8:
+                return True, msg.get("id")
+    
+    return False, None
 
 
 # Update the `get_upcoming_birthdays` function to accept `user_id`
@@ -7426,6 +7830,17 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         response_data["avatarConfig"] = user_info_content_dict["avatarConfig"]
     
     return JSONResponse(content=response_data)
+
+@app.get("/api/chat-derived-narrative")
+async def get_chat_derived_narrative_api(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Get AI-extracted narrative from chat history"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    logging.info(f"GET /api/chat-derived-narrative request received for account {account_id} and user {aac_user_id}.")
+    
+    narrative_data = await load_chat_derived_narrative(account_id, aac_user_id)
+    
+    return JSONResponse(content=narrative_data)
 
 # Debug endpoint for cache inspection
 @app.get("/api/debug/cache")
@@ -8210,20 +8625,88 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         account_id = current_ids["account_id"]
         question = payload.question or ""
         response = payload.response or ""
-        if not question.strip() and not response.strip(): raise HTTPException(status_code=400, detail="Either question or response must be provided.")
+        if not question.strip() and not response.strip(): 
+            raise HTTPException(status_code=400, detail="Either question or response must be provided.")
+        
         timestamp = dt.now().isoformat()
-        log_entry = {"timestamp": timestamp, "question": question, "response": response, "id": uuid.uuid4().hex}
-        history = await load_chat_history(account_id, aac_user_id) # Pass user_id
+        
+        # Save basic entry immediately (fast - no classification needed)
+        log_entry = {
+            "timestamp": timestamp,
+            "question": question,
+            "response": response,
+            "id": uuid.uuid4().hex,
+            "metadata": {
+                "type": "pending",  # Will be updated by background task
+                "category": "pending",
+                "is_repetition": False,
+                "similar_to": None,
+                "extracted_info": {},
+                "age_days": 0
+            }
+        }
+        
+        # Load and save immediately
+        history = await load_chat_history(account_id, aac_user_id)
         history.append(log_entry)
-        if len(history) > MAX_CHAT_HISTORY: history = history[-MAX_CHAT_HISTORY:]
-        await save_chat_history(account_id, aac_user_id, history) # Pass user_id
-        logging.info(f"Chat history updated successfully for {account_id}/{aac_user_id}.")
+        if len(history) > MAX_CHAT_HISTORY: 
+            history = history[-MAX_CHAT_HISTORY:]
+        await save_chat_history(account_id, aac_user_id, history)
         
-        # NOTE: Recent chat history (last 10 turns) is in DELTA context, not cached
-        # Old history (>10 turns) is in base cache, but changes rarely so skip invalidation
-        # This prevents cache churn on every single message
+        logging.info(f"Chat history saved immediately for {account_id}/{aac_user_id}")
         
-        return JSONResponse(content={"message": "Chat history saved successfully"})
+        # Now process metadata in background (non-blocking)
+        async def process_metadata_async():
+            try:
+                # Reload history to get latest
+                history = await load_chat_history(account_id, aac_user_id)
+                
+                # Find our entry
+                for entry in reversed(history):
+                    if entry.get("id") == log_entry["id"]:
+                        # Classify the message
+                        message_type = classify_message_type(response)
+                        message_category = classify_message_category(response, message_type)
+                        is_repetition, similar_id = check_message_repetition(response, history[:-1], days=1)  # Exclude current entry
+                        
+                        # Update metadata
+                        entry["metadata"].update({
+                            "type": message_type,
+                            "category": message_category,
+                            "is_repetition": is_repetition,
+                            "similar_to": similar_id
+                        })
+                        
+                        # Update chat-derived narrative for greetings
+                        if message_type == "greeting":
+                            narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+                            if response not in narrative.get("recent_greetings", []):
+                                recent_greetings = narrative.get("recent_greetings", [])
+                                recent_greetings.append(response)
+                                if len(recent_greetings) > 5:
+                                    recent_greetings = recent_greetings[-5:]
+                                narrative["recent_greetings"] = recent_greetings
+                                narrative["last_updated"] = timestamp
+                                await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+                        
+                        break
+                
+                # Save updated history with metadata
+                await save_chat_history(account_id, aac_user_id, history)
+                logging.info(f"Chat history metadata processed for {account_id}/{aac_user_id}")
+            except Exception as e:
+                logging.error(f"Error processing chat metadata in background: {e}", exc_info=True)
+        
+        # Fire and forget the metadata processing
+        import asyncio
+        asyncio.create_task(process_metadata_async())
+        
+        return JSONResponse(content={
+            "message": "Chat history saved successfully",
+            "metadata": {
+                "type": "processing"
+            }
+        })
     except HTTPException as http_exc: raise http_exc
     except Exception as e:
         logging.error(f"Error recording chat history for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
@@ -8434,24 +8917,28 @@ class ButtonClickData(BaseModel):
 async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
-    try:
-        log_entry = click_data.model_dump()
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # Pass user_id
-        activity_log.append(log_entry)
-        print(f"Button click logged for account {account_id} and user {aac_user_id}: {log_entry}")
-        success = await save_button_activity_log(account_id, aac_user_id, activity_log)
-        if success:
-            logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
-            
-            # Cache is NOT invalidated here to preserve context during a session.
-            # It will be invalidated by other actions like changing user info, settings, etc.
-            logging.info(f"Cache not invalidated for button click for user {aac_user_id}.")
-            
-            return JSONResponse(content={"message": "Button click logged successfully."})
-        else: raise HTTPException(status_code=500, detail="Failed to save button click log.")
-    except Exception as e:
-        logging.error(f"Error logging button click for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    
+    # Log the click asynchronously (fire and forget)
+    async def save_click_async():
+        try:
+            log_entry = click_data.model_dump()
+            activity_log = await load_button_activity_log(account_id, aac_user_id)
+            activity_log.append(log_entry)
+            print(f"Button click logged for account {account_id} and user {aac_user_id}: {log_entry}")
+            success = await save_button_activity_log(account_id, aac_user_id, activity_log)
+            if success:
+                logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
+            else:
+                logging.error(f"Failed to save button click log for {account_id}/{aac_user_id}")
+        except Exception as e:
+            logging.error(f"Error logging button click in background for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+    
+    # Fire and forget
+    import asyncio
+    asyncio.create_task(save_click_async())
+    
+    # Return immediately
+    return JSONResponse(content={"message": "Button click queued for logging."})
     
 
 

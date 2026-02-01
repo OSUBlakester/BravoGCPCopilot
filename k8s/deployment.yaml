@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bravo-aac-api-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bravo-aac-api-dev
+  template:
+    metadata:
+      labels:
+        app: bravo-aac-api-dev
+    spec:
+      containers:
+      - name: bravo-aac-api-dev-container
+        image: bravo-aac-api-dev
+        ports:
+        - containerPort: 8080
+        env:
+        - name: ENVIRONMENT
+          value: "development"
+        - name: GCP_PROJECT_ID
+          value: "bravo-dev-465400"
+        - name: GOOGLE_API_KEY
+          value: "AIzaSyBBvZ7rq2w1bUBzQb4FIjXm_r9zP9c8rE4"
+        - name: GEMINI_PRIMARY_MODEL
+          value: "gemini-2.5-flash-lite"
+        - name: GEMINI_FALLBACK_MODEL
+          value: "gemini-2.0-flash-lite"
+        - name: K_SERVICE
+          value: "bravo-aac-api-dev"
+        resources:
+          limits:
+            memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bravo-aac-api-dev
+spec:
+  type: LoadBalancer
+  selector:
+    app: bravo-aac-api-dev
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
