@@ -3676,6 +3676,25 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         """Attempt to repair common JSON errors"""
         json_str = json_str.strip()
         
+        # Try aggressive repair: extract individual objects and rebuild array
+        # Look for pattern {..."option":"...", "summary":"...", "keywords":[...]}
+        import re
+        object_pattern = r'\{[^{}]*"option"[^{}]*"summary"[^{}]*"keywords"[^{}]*\}'
+        matches = re.findall(object_pattern, json_str, re.DOTALL)
+        
+        if matches and len(matches) > 3:  # If we found multiple valid-looking objects
+            logging.warning(f"Attempting aggressive repair: found {len(matches)} object-like patterns, rebuilding array")
+            # Try to rebuild as proper JSON array
+            rebuilt = "[\n" + ",\n".join(matches) + "\n]"
+            try:
+                # Test if this parses
+                json.loads(rebuilt)
+                logging.warning("✅ Aggressive repair successful via object extraction")
+                return rebuilt
+            except:
+                logging.warning("Aggressive repair failed, falling back to pattern-based repair")
+        
+        # Fall back to original pattern-based repair
         # Fix missing closing braces before arrays - LLM sometimes forgets }
         # Pattern: ]WHITESPACE[ (missing } before next object's array)
         json_str = re.sub(r']\s*\n\s*\[', r']\n},\n{', json_str)
