@@ -1878,32 +1878,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 
                 context_parts.append("\n".join(chat_context_parts) + "\n")
         
-        # Recent chat history (last CHAT_HISTORY_ACTIVE_DAYS days) - included in BASE for context
-        # Older messages are summarized in chat_derived_narrative above
-        if context_data["chat_history"]:
-            recent_messages = context_data["chat_history"]
-            
-            # Extract jokes from recent messages for explicit repetition avoidance
-            recent_jokes = []
-            for msg in recent_messages:
-                response = msg.get("response", "").lower()
-                # Check if it's likely a joke (contains common joke patterns)
-                if any(pattern in response for pattern in ["why did", "what do you call", "how do you", "what's the difference"]):
-                    # Extract the full joke text
-                    joke_text = msg.get("response", "")[:200]  # First 200 chars
-                    if joke_text:
-                        recent_jokes.append(joke_text)
-            
-            # Add explicit joke avoidance warning if jokes were found
-            if recent_jokes:
-                joke_warning = "⚠️ CRITICAL - AVOID THESE RECENTLY USED JOKES:\n"
-                for i, joke in enumerate(recent_jokes[:10], 1):  # Max 10 most recent
-                    joke_warning += f"  {i}. {joke}\n"
-                joke_warning += "\n🚫 DO NOT generate any of these jokes again. Create COMPLETELY NEW and DIFFERENT jokes.\n"
-                context_parts.append(f"--- Recently Used Jokes (DO NOT REPEAT) ---\n{joke_warning}\n")
-            
-            context_parts.append(f"--- Recent Chat History (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages) ---\n{json.dumps(recent_messages, indent=2)}\n")
-            logging.info(f"📝 Including {len(recent_messages)} recent messages in BASE context")
+        # NOTE: Recent chat history is NOW in DELTA context only (not cached)
+        # This reduces cache size and costs significantly since chat changes frequently
+        # Older messages are already summarized in chat_derived_narrative above
         
         base_string = "\n".join(context_parts)
         logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
@@ -1996,29 +1973,32 @@ Diary Entries (most recent 15, sorted newest to oldest):
             ])
             delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
         
-        # SMART CHAT HISTORY: Only include messages AFTER the cache snapshot
-        # This implements the "Snapshot + Buffer" strategy to minimize costs
-        # Instead of always including last 10 messages, we calculate the "drift"
-        user_key = self._get_user_key(account_id, aac_user_id)
-        cache_data = await self._load_cache_from_firestore(user_key)
-        
-        messages_in_cache = 0
-        if cache_data:
-            messages_in_cache = cache_data.get('message_count', 0)
-            logging.info(f"📊 Cache snapshot contains {messages_in_cache} messages")
-        
+        # CHAT HISTORY: Now ALL recent messages go in DELTA (not cached)
+        # This significantly reduces cache size/cost since messages change frequently
         if context_data["chat_history"]:
-            total_messages = len(context_data['chat_history'])
+            recent_messages = context_data["chat_history"]
             
-            # Calculate NEW messages since cache was created (the "drift")
-            new_messages = context_data['chat_history'][messages_in_cache:] if messages_in_cache < total_messages else []
-            drift = len(new_messages)
+            # Extract jokes from recent messages for explicit repetition avoidance
+            recent_jokes = []
+            for msg in recent_messages:
+                response = msg.get("response", "").lower()
+                # Check if it's likely a joke (contains common joke patterns)
+                if any(pattern in response for pattern in ["why did", "what do you call", "how do you", "what's the difference"]):
+                    # Extract the full joke text
+                    joke_text = msg.get("response", "")[:200]  # First 200 chars
+                    if joke_text:
+                        recent_jokes.append(joke_text)
             
-            if new_messages:
-                delta_parts.append(f"\n💬 NEW CHAT MESSAGES (Last {drift} messages since cache):\n{json.dumps(new_messages, indent=2)}\n")
-                logging.info(f"✅ Including {drift} new messages in delta (saving {messages_in_cache} from standard input cost)")
-            else:
-                logging.info(f"✅ No new messages since cache creation (all {total_messages} messages cached)")
+            # Add explicit joke avoidance warning if jokes were found
+            if recent_jokes:
+                joke_warning = "⚠️ CRITICAL - AVOID THESE RECENTLY USED JOKES:\n"
+                for i, joke in enumerate(recent_jokes[:10], 1):  # Max 10 most recent
+                    joke_warning += f"  {i}. {joke}\n"
+                joke_warning += "\n🚫 DO NOT generate any of these jokes again. Create COMPLETELY NEW and DIFFERENT jokes.\n"
+                delta_parts.append(f"--- Recently Used Jokes (DO NOT REPEAT) ---\n{joke_warning}\n")
+            
+            delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages):\n{json.dumps(recent_messages, indent=2)}\n")
+            logging.info(f"✅ Including ALL {len(recent_messages)} recent messages in DELTA (not cached)")
         
         # User-defined pages (frequently edited)
         if context_data["pages"]:
@@ -2065,12 +2045,8 @@ Diary Entries (most recent 15, sorted newest to oldest):
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
             created_at = dt.now().timestamp()
             
-            # Get current RECENT chat history count to track in cache metadata
-            # We only cache recent messages (CHAT_HISTORY_ACTIVE_DAYS), so we track those
-            chat_history = await load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS)
-            message_count_at_cache = len(chat_history)
-            
             # The model used for caching must match the model used for generation.
+            # NOTE: Chat history is NO LONGER cached (moved to DELTA for cost savings)
             cached_content = await asyncio.to_thread(
                 caching.CachedContent.create,
                 model=GEMINI_PRIMARY_MODEL,
@@ -2079,9 +2055,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 ttl=timedelta(seconds=self.ttl_seconds)
             )
 
-            # Save to Firestore with message count for drift tracking
-            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count_at_cache)
-            logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name}, Messages: {message_count_at_cache}")
+            # Save to Firestore (no message count since we don't cache chat anymore)
+            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count=0)
+            logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
         except Exception as e:
             logging.error(f"Failed to warm up cache for user '{user_key}': {e}", exc_info=True)
