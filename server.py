@@ -1827,6 +1827,14 @@ Diary Entries (most recent 15, sorted newest to oldest):
 """
             context_parts.append(diary_context)
         
+        # Vocabulary level instruction (replaces sending full pages/vocabulary lists)
+        # This saves ~261k tokens by using instruction instead of full word lists
+        if context_data["settings"]:
+            vocabulary_level = context_data["settings"].get("vocabularyLevel", "functional")
+            vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
+            context_parts.append(f"--- Vocabulary Guidelines ---\n{vocab_instruction}\n")
+            logging.info(f"📚 Using vocabulary level: {vocabulary_level} (instruction-based, not full pages)")
+        
         # AI-extracted chat narrative (replaces old chat history to save tokens)
         if context_data["chat_narrative"]:
             chat_narrative = context_data["chat_narrative"]
@@ -1901,11 +1909,11 @@ Diary Entries (most recent 15, sorted newest to oldest):
         
         # Fetch dynamic data
         # NOTE: chat_history uses recent messages (CHAT_HISTORY_ACTIVE_DAYS) to match BASE context
+        # NOTE: pages moved to BASE cache (they rarely change, but are huge)
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
-            "pages": load_pages_from_file(account_id, aac_user_id),
         }
         results = await asyncio.gather(*tasks.values())
         context_data = dict(zip(tasks.keys(), results))
@@ -2001,11 +2009,7 @@ Diary Entries (most recent 15, sorted newest to oldest):
             logging.warning(f"✅ Including ALL {len(recent_messages)} recent messages in DELTA (not cached)")
             logging.warning(f"📊 Chat history size: {len(json.dumps(recent_messages))} chars")
         
-        # User-defined pages (frequently edited)
-        if context_data["pages"]:
-            pages_json = json.dumps(context_data['pages'], indent=2)
-            delta_parts.append(f"\n📄 USER PAGES:\n{pages_json}\n")
-            logging.warning(f"📄 Pages size: {len(pages_json)} chars, {len(context_data['pages'])} pages")
+        # User-defined pages moved to BASE cache (too large for DELTA)
         
         delta_string = "\n".join(delta_parts)
         logging.warning(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
