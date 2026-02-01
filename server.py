@@ -1998,15 +1998,15 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 delta_parts.append(f"--- Recently Used Jokes (DO NOT REPEAT) ---\n{joke_warning}\n")
             
             delta_parts.append(f"\n💬 RECENT CHAT HISTORY (Last {CHAT_HISTORY_ACTIVE_DAYS} days, {len(recent_messages)} messages):\n{json.dumps(recent_messages, indent=2)}\n")
-            logging.info(f"✅ Including ALL {len(recent_messages)} recent messages in DELTA (not cached)")
+            logging.warning(f"✅ Including ALL {len(recent_messages)} recent messages in DELTA (not cached)")
         
         # User-defined pages (frequently edited)
         if context_data["pages"]:
             delta_parts.append(f"\n📄 USER PAGES:\n{json.dumps(context_data['pages'], indent=2)}\n")
         
         delta_string = "\n".join(delta_parts)
-        logging.info(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
-        logging.info(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
+        logging.warning(f"✅ DELTA context for {account_id}/{aac_user_id} is {len(delta_string)} chars (~{len(delta_string)//4} tokens)")
+        logging.warning(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
         return delta_string
 
     async def warm_up_user_cache_if_needed(self, account_id: str, aac_user_id: str) -> None:
