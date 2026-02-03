@@ -2074,7 +2074,12 @@
                 }
             }
 
-            addUserButton.addEventListener('click', handleAddUser);
+            // Remove any existing event listener by cloning the button
+            const newButton = addUserButton.cloneNode(true);
+            addUserButton.parentNode.replaceChild(newButton, addUserButton);
+            
+            // Add the event listener to the new button (which has no existing listeners)
+            newButton.addEventListener('click', handleAddUser);
         }
 
         function setupLogoutButton() {
