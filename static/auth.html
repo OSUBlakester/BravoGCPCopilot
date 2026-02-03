@@ -2020,7 +2020,19 @@
             const newUserNameInput = document.getElementById('newUserDisplayName');
             const addUserStatus = document.getElementById('add-user-status');
 
+            // Check if button is already initialized (prevent duplicate listeners)
+            if (addUserButton.dataset.initialized === 'true') {
+                console.log('Add user button already initialized, skipping');
+                return;
+            }
+
             async function handleAddUser() {
+                // Prevent multiple simultaneous calls
+                if (addUserButton.dataset.processing === 'true') {
+                    console.log('Add user already in progress, ignoring duplicate click');
+                    return;
+                }
+
                 const newName = newUserNameInput.value.trim();
                 if (!newName) {
                     addUserStatus.textContent = 'Please enter a display name.';
@@ -2031,6 +2043,7 @@
                 addUserStatus.textContent = 'Adding user...';
                 addUserStatus.className = 'text-sm text-center mt-2 h-4 text-blue-500';
                 addUserButton.disabled = true;
+                addUserButton.dataset.processing = 'true';
 
                 try {
                     // Check if admin has selected a target account
@@ -2071,15 +2084,13 @@
                     addUserStatus.className = 'text-sm text-center mt-2 h-4 text-red-500';
                 } finally {
                     addUserButton.disabled = false;
+                    addUserButton.dataset.processing = 'false';
                 }
             }
 
-            // Remove any existing event listener by cloning the button
-            const newButton = addUserButton.cloneNode(true);
-            addUserButton.parentNode.replaceChild(newButton, addUserButton);
-            
-            // Add the event listener to the new button (which has no existing listeners)
-            newButton.addEventListener('click', handleAddUser);
+            // Mark button as initialized
+            addUserButton.dataset.initialized = 'true';
+            addUserButton.addEventListener('click', handleAddUser);
         }
 
         function setupLogoutButton() {
