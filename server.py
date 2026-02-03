@@ -14792,12 +14792,11 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     """Create a comprehensive default tap navigation configuration based on production template"""
     from datetime import datetime
     
-    config = 
-{
-    "description": "Default tap interface navigation configuration",
-    "id": "user_config",
-    "is_active": True,
-    "buttons": [
+    config = {
+        "description": "Default tap interface navigation configuration",
+        "id": "user_config",
+        "is_active": True,
+        "buttons": [
         {
             "text_color": "#000000",
             "special_function": "spell",
