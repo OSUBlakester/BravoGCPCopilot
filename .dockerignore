@@ -5,7 +5,6 @@
 .gitignore
 
 # Development and testing folders
-AccentToBravo/
 tests/
 test_*.py
 *_test.py

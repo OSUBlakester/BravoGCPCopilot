@@ -516,11 +516,13 @@ async function authenticatedFetch(url, options = {}) {
 // Speech and announcement functions
 function addToSpeechHistory(text) {
     try {
+        // Clean [PAUSE] markers from text before adding to history
+        const cleanText = text.replace(/\[PAUSE\]/g, ' ').trim();
         const speechHistory = document.getElementById('speech-history');
         if (speechHistory && currentAacUserId) {
             const storageKey = `speechHistory_${currentAacUserId}`;
             let history = (localStorage.getItem(storageKey) || '').split('\n').filter(Boolean);
-            history.unshift(text); // Add to top
+            history.unshift(cleanText); // Add to top
             if (history.length > 20) { 
                 history = history.slice(0, 20); // Keep only last 20 entries
             }
@@ -981,8 +983,10 @@ async function loadHelpContent() {
 function addToSpeechHistory(text) {
     if (!speechHistoryElement) return;
     
+    // Clean [PAUSE] markers from text before adding to history
+    const cleanText = text.replace(/\[PAUSE\]/g, ' ').trim();
     const history = speechHistoryElement.value.split('\n').filter(Boolean);
-    history.unshift(text);
+    history.unshift(cleanText);
     if (history.length > 20) {
         history.splice(20);
     }

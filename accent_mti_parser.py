@@ -36,7 +36,148 @@ class AccentMTIParser:
             'Format 5 - Function-based': 0,
             'Complex format': 0
         }
+
+    def _sanitize_text(self, text: Optional[str]) -> Optional[str]:
+        """Normalize MTI text by trimming and removing embedded control chars."""
+        if not text:
+            return text
+
+        # Preserve special markers like «WAIT-ANY-KEY» and «PROMPT-MARKER»
+        has_control = any(ord(ch) < 32 for ch in text)
+        if not has_control:
+            return text.strip()
+
+        # Strip control characters but keep printable text
+        parts = []
+        current = []
+        for ch in text:
+            if ord(ch) < 32:
+                if current:
+                    parts.append(''.join(current))
+                    current = []
+            else:
+                current.append(ch)
+
+        if current:
+            parts.append(''.join(current))
+
+        # Return first non-empty part
+        for part in parts:
+            stripped = part.strip()
+            if stripped:
+                return stripped
+
+        return text.strip()
+
+    def _sanitize_speech(self, speech: Optional[str]) -> Optional[str]:
+        """
+        Sanitize speech value by handling special markers and control characters.
         
+        - Special markers (byte sequences and UTF-8 text) become spaces (pause for effect)
+        - Control characters are stripped
+        """
+        if not speech:
+            return speech
+        
+        # Remove/normalize marker byte sequences
+        # \xff\x80\x1c\xfe appears to be a wait/pause marker (like «WAIT-ANY-KEY»)
+        speech = speech.replace("\xff\x80\x1c\xfe", "[PAUSE]")
+        # \xff\x80{\xfe appears to be PROMPT-MARKER
+        speech = speech.replace("\xff\x80{\xfe", "{")
+
+        # Normalize UTF-8 encoded special markers
+        speech = speech.replace("«WAIT-ANY-KEY»", "[PAUSE]")
+        # Keep PROMPT-MARKER for later splitting in _post_process_button
+        # Do not remove it here
+        
+        # Strip any remaining control characters (not printable)
+        cleaned = ""
+        for ch in speech:
+            if ord(ch) >= 32 or ch in '\n\t':
+                cleaned += ch
+        
+        speech = cleaned.strip()
+        
+        # Normalize multiple spaces to single space
+        while "  " in speech:
+            speech = speech.replace("  ", " ")
+        
+        return speech if speech else None
+
+    def _post_process_button(self, button: Dict) -> Dict:
+        """
+        Apply Accent-specific cleanup and marker handling after parsing.
+        """
+        speech = button.get("speech")
+        name = button.get("name")
+
+        if speech:
+            # Normalize WAIT-ANY-KEY markers to [PAUSE]
+            speech = speech.replace("\x1c", "[PAUSE]")
+            speech = speech.replace("«WAIT-ANY-KEY»", "[PAUSE]")
+
+            # Handle PROMPT-MARKER (either literal or replaced '{')
+            if "«PROMPT-MARKER»" in speech:
+                parts = speech.split("«PROMPT-MARKER»", 1)
+                speech = parts[0].strip()
+                if len(parts) > 1:
+                    prompt_raw = parts[1].strip()
+                    prompt_name = " ".join("".join(ch for ch in prompt_raw if ch.isalpha() or ch == " ").split())
+                    if prompt_name and (not name or name in ["GO-BACK-PAGE", "CLEAR-DISPLAY", "", None]):
+                        name = prompt_name
+            elif "{" in speech:
+                parts = speech.split("{", 1)
+                speech = parts[0].strip()
+                if len(parts) > 1:
+                    prompt_raw = parts[1].strip()
+                    prompt_name = " ".join("".join(ch for ch in prompt_raw if ch.isalpha() or ch == " ").split())
+                    if prompt_name and (not name or name in ["GO-BACK-PAGE", "CLEAR-DISPLAY", "", None]):
+                        name = prompt_name
+
+            # Extract VOICE-SET-TEMPORARY (0x03) and VOICE-CLEAR-TEMPORARY (0x04)
+            if "\x03" in speech:
+                parts = speech.split("\x03", 1)
+                if len(parts) > 1:
+                    voice_params = parts[1]
+                    param_end = 0
+                    for i, ch in enumerate(voice_params):
+                        if ch == "u" and i > 0:
+                            param_end = i + 1
+                            break
+                    if param_end > 0:
+                        voice_setting = voice_params[:param_end].strip()
+                        functions = button.get("functions") or []
+                        functions.append(f"VOICE-SET-TEMPORARY({voice_setting})")
+                        button["functions"] = functions
+                        speech = (parts[0] + voice_params[param_end:]).strip()
+
+            if "\x04" in speech:
+                speech = speech.replace("\x04", "")
+                functions = button.get("functions") or []
+                functions.append("VOICE-CLEAR-TEMPORARY")
+                button["functions"] = functions
+
+        # Clear speech for navigation buttons if speech matches name
+        if speech and name:
+            speech_lower = speech.strip().lower()
+            name_lower = name.strip().lower()
+            if speech_lower == name_lower and name_lower in ["home", "go back", "goback", "back", "return", "go home", "previous"]:
+                speech = None
+
+        button["speech"] = speech
+        button["name"] = name
+        return button
+        
+    def _post_process_merged_buttons(self) -> None:
+        """
+        Post-process pages to split merged button data.
+
+        NOTE: Disabled. The current MTI parsing logic already handles button
+        boundaries correctly, and this post-processor was causing duplicates
+        and corrupted speech (e.g., "Home HOME").
+        """
+        return
+    
     def parse_file(self, file_path: str) -> Dict:
         """
         Parse an MTI file and extract all pages and buttons.
@@ -90,9 +231,15 @@ class AccentMTIParser:
             logger.info(f"Extracted {total_buttons} buttons from {len(real_pages)} pages")
             logger.info(f"Format breakdown: {self.format_stats}")
             
+            # Post-process to split merged buttons (disabled)
+            self._post_process_merged_buttons()
+
+            # Recalculate totals after splitting (no-op when disabled)
+            total_buttons = sum(p['button_count'] for p in self.pages.values())
+            
             return {
-                'pages': real_pages,
-                'total_pages': len(real_pages),
+                'pages': self.pages,
+                'total_pages': len(self.pages),
                 'total_buttons': total_buttons,
                 'metadata_pages': self.metadata_pages,
                 'format_stats': self.format_stats
@@ -399,11 +546,18 @@ class AccentMTIParser:
                 text_start = pos_cursor
                 while pos_cursor < len(data) - 2:
                     if data[pos_cursor:pos_cursor+2] == b'\r\n':
-                        break
+                        # Check if this is a merged button (next byte is \x01, indicating another button follows)
+                        if pos_cursor + 2 < len(data) and data[pos_cursor + 2] == 0x01:
+                            # This is a merged button - keep reading past the CRLF
+                            pos_cursor += 2  # Skip the CRLF
+                        else:
+                            # Regular end of button data
+                            break
                     pos_cursor += 1
                 
                 # Decode the text
                 full_text = data[text_start:pos_cursor].decode('ascii', errors='ignore')
+                
                 # Remove trailing control characters
                 while full_text and ord(full_text[-1]) < 32:
                     full_text = full_text[:-1]
@@ -421,23 +575,98 @@ class AccentMTIParser:
             # Format 1: Standard (byte_9 1-49)
             elif 1 <= byte_9 <= 49:
                 name_len = byte_9
+                
+                # For merged buttons, we need to read more than just name_len bytes
+                # The merged button structure is: button1_data + CRLF + button2_data + ...
+                # We need to detect where the merged button REALLY ends
+                
+                # Start by reading the declared name_len
                 button_name = data[pos+10:pos+10+name_len].decode('ascii', errors='ignore')
                 pos_cursor = pos + 10 + name_len
+                icon_name = ""
                 
-                # Skip 0x00 separator
+                # Check if there's merged button data by looking for CRLF pattern
+                # In merged buttons: button_data + icon_name + MARKER + CRLF + more_button_data
+                # Look ahead to find CRLF
+                temp_cursor = pos_cursor
+                crlf_found_at = -1
+                marker_before_crlf = -1
+                
+                while temp_cursor < len(data) - 2:
+                    if data[temp_cursor:temp_cursor+2] == b'\r\n':
+                        crlf_found_at = temp_cursor
+                        marker_before_crlf = data[temp_cursor-1] if temp_cursor > 0 else -1
+                        break
+                    temp_cursor += 1
+                
+                # DEBUG
+                if page_id == 1317 and "go back" in button_name:
+                    logger.info(f"DEBUG: go back button - name_len={name_len}, pos_cursor={pos_cursor}, crlf_at={crlf_found_at}")
+                    logger.info(f"DEBUG: Data from pos+10 to crlf: {repr(data[pos+10:crlf_found_at if crlf_found_at > 0 else pos+50])}")
+                
+                # If we found CRLF relatively soon (within icon + some buffer), it might be merged
+                if crlf_found_at > 0 and crlf_found_at - pos_cursor < 50:
+                    # This looks like a merged button - read the entire first part before CRLF
+                    # This includes: icon_len + icon_name + markers
+                    button_name = data[pos+10:crlf_found_at].decode('ascii', errors='ignore')
+                    pos_cursor = crlf_found_at  # Will be moved past CRLF next
+                    
+                    # DEBUG
+                    if page_id == 1317 and "go back" in button_name:
+                        logger.info(f"DEBUG: Detected merged button! button_name now has {len(button_name)} chars")
+                    
+                    # Now check if there's more data after CRLF (merged button continuation)
+                    if crlf_found_at + 2 < len(data):
+                        # Look ahead to see if this is truly a merged button
+                        # After CRLF, there's usually some garbage bytes then another button's data
+                        check_pos = crlf_found_at + 2
+                        
+                        # Skip garbage bytes (look for next printable or numeric pattern)
+                        while check_pos < len(data) and check_pos < crlf_found_at + 10:
+                            b = data[check_pos]
+                            # Look for: byte in range 1-49 (next name_len) or printable ASCII
+                            if (1 <= b <= 49) or (32 <= b < 127):
+                                break
+                            check_pos += 1
+                        
+                        # If we found what looks like the start of another button, read until END of merged data
+                        # Merged data ends at next CRLF or record boundary
+                        if check_pos < len(data):
+                            # Find the END of merged button data
+                            search_end = check_pos
+                            while search_end < len(data) - 2:
+                                # Look for the next CRLF or end pattern
+                                if data[search_end:search_end+2] == b'\r\n' or data[search_end] == 0x25:  # Page marker
+                                    break
+                                search_end += 1
+                            
+                            # Include all merged button data
+                            merged_all = data[pos+10:search_end]
+                            button_name = merged_all.decode('ascii', errors='ignore')
+                            pos_cursor = search_end
+                            
+                            # DEBUG
+                            if page_id == 1317:
+                                logger.info(f"DEBUG: Extended merged button to {len(button_name)} chars, search_end={search_end}")
+                else:
+                    # Not a merged button, parse normally
+                    # Skip past icon if present
+                    pos_cursor = pos + 10 + name_len
+                    if pos_cursor < len(data) and data[pos_cursor] == 0:
+                        pos_cursor += 1
+                    
+                    if pos_cursor < len(data):
+                        potential_icon_len = data[pos_cursor]
+                        if 1 <= potential_icon_len <= 30:
+                            icon_len = potential_icon_len
+                            pos_cursor += 1
+                            if pos_cursor + icon_len < len(data):
+                                icon_name = data[pos_cursor:pos_cursor+icon_len].decode('ascii', errors='ignore')
+                                pos_cursor += icon_len
+                
+                # Skip 0x00 separator if at one
                 if pos_cursor < len(data) and data[pos_cursor] == 0:
                     pos_cursor += 1
-                
-                # Check if icon exists: if next byte is 0 or printable ASCII (>= 32), no icon
-                if pos_cursor < len(data):
-                    potential_icon_len = data[pos_cursor]
-                    if 1 <= potential_icon_len <= 30:
-                        # This is an icon length byte
-                        icon_len = potential_icon_len
-                        pos_cursor += 1
-                        if pos_cursor + icon_len < len(data):
-                            icon_name = data[pos_cursor:pos_cursor+icon_len].decode('ascii', errors='ignore')
-                            pos_cursor += icon_len
                 
                 # Check for 0xA4 function markers (same as Format 5)
                 marker_start = pos_cursor
@@ -528,21 +757,43 @@ class AccentMTIParser:
             # Format 4: Simple speech (name_len 50-100)
             elif 50 <= byte_9 <= 100:
                 name_len = byte_9
-                button_name = data[pos+10:pos+10+name_len].decode('ascii', errors='ignore')
-                pos_cursor = pos + 10 + name_len
                 
-                # Skip 0x00 separator
-                if pos_cursor < len(data) and data[pos_cursor] == 0:
-                    pos_cursor += 1
+                # For Format 4, find the actual end of button data by looking for CRLF marker
+                # The name_len might extend past the button boundary, so limit it
+                search_limit = pos + 10 + name_len + 10  # Search up to name_len + small buffer
+                crlf_pos = data.find(b'\r\n', pos + 10)
                 
-                # Read speech directly (ASCII until CRLF)
+                if crlf_pos > 0 and crlf_pos < search_limit:
+                    # Use CRLF as the boundary - read only up to CRLF
+                    button_name = data[pos+10:crlf_pos].decode('ascii', errors='ignore').strip()
+                    pos_cursor = crlf_pos + 2  # Move past CRLF
+                else:
+                    # Fallback: use name_len
+                    button_name = data[pos+10:pos+10+name_len].decode('ascii', errors='ignore').strip()
+                    pos_cursor = pos + 10 + name_len
+                    
+                    # Skip 0x00 separator
+                    if pos_cursor < len(data) and data[pos_cursor] == 0:
+                        pos_cursor += 1
+                
+                # Read speech - look for ^ marker which indicates actual speech start
                 speech_start = pos_cursor
-                while pos_cursor < len(data) - 2:
-                    if data[pos_cursor:pos_cursor+2] == b'\r\n':
-                        break
-                    pos_cursor += 1
+                caret_pos = data.find(b'^', pos_cursor)
                 
-                speech = data[speech_start:pos_cursor].decode('ascii', errors='ignore').strip()
+                if caret_pos > 0 and caret_pos < pos_cursor + 100:
+                    # Found caret marker, speech starts after it
+                    speech_start = caret_pos + 1
+                
+                # Find end of speech (next CRLF or m-record)
+                speech_end = speech_start
+                while speech_end < len(data) - 2:
+                    if data[speech_end:speech_end+2] == b'\r\n':
+                        break
+                    if data[speech_end:speech_end+4] == b'm\x00\x04\xfd':  # Next button marker
+                        break
+                    speech_end += 1
+                
+                speech = data[speech_start:speech_end].decode('ascii', errors='ignore').strip()
                 
                 if not speech:
                     speech = button_name
@@ -593,6 +844,20 @@ class AccentMTIParser:
             else:
                 self.format_stats['Complex format'] += 1
                 return None
+
+            # DON'T sanitize here - let server handle special markers like «PROMPT-MARKER» and «WAIT-ANY-KEY»
+            # Just strip leading/trailing whitespace and control chars at edges
+            # BUT: Preserve CRLF and null bytes that are embedded (used for merged button detection)
+            if button_name:
+                # Only strip regular whitespace (space, tab), not control chars like \r\n or \x00
+                button_name = button_name.strip(' \t')
+            if speech:
+                speech = speech.strip()
+                if not speech:
+                    speech = None
+                else:
+                    # Sanitize speech to handle special markers
+                    speech = self._sanitize_speech(speech)
             
             button_data = {
                 'page_id': page_id,
@@ -606,6 +871,9 @@ class AccentMTIParser:
                 'navigation_type': navigation_type,
                 'navigation_target': navigation_target
             }
+
+            # Accent-specific cleanup (PROMPT-MARKER, [PAUSE], voice functions, nav speech)
+            button_data = self._post_process_button(button_data)
             
             # Debug logging for GOTO-HOME buttons and beginning button
             if button_name == "beginning" or (functions and 'GOTO-HOME' in functions):

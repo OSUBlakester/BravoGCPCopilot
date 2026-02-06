@@ -2479,7 +2479,8 @@ async function processAnnouncementQueue() {
     }
 
     isAnnouncingNow = true;
-    const { textToAnnounce, announcementType, recordHistory, showSplash, resolve, reject } = announcementQueue.shift(); 
+    const announcement = announcementQueue.shift();
+    const { textToAnnounce, announcementType, recordHistory, showSplash, resolve, reject, historyText } = announcement;
 
     console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
@@ -2515,8 +2516,10 @@ async function processAnnouncementQueue() {
         if (recordHistory) {
             const speechHistory = document.getElementById('speech-history');
             if (speechHistory) {
+                // Use historyText if provided (for PAUSE-split announcements), otherwise clean the current text
+                const textForHistory = historyText || textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
                 let history = (localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId)) || '').split('\n').filter(Boolean);
-                history.unshift(textToAnnounce);
+                history.unshift(textForHistory);
                 if (history.length > 20) { history = history.slice(0, 20); }
                 speechHistory.value = history.join('\n');
                 localStorage.setItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId), speechHistory.value);
@@ -2570,6 +2573,52 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
         console.warn('RANDOM CHOICE: Pattern detected but regex failed to match');
         console.warn('RANDOM CHOICE DEBUG: Text =', JSON.stringify(textToAnnounce));
         console.warn('RANDOM CHOICE DEBUG: Trimmed =', JSON.stringify(trimmedText));
+    }
+    
+    // Special handling for [PAUSE] markers - split and announce each segment separately
+    if (textToAnnounce.includes('[PAUSE]')) {
+        const parts = textToAnnounce.split('[PAUSE]').map(p => p.trim()).filter(p => p.length > 0);
+        
+        if (parts.length > 1) {
+            console.log(`PAUSE DETECTED: Split into ${parts.length} segments`);
+            
+            // Announce all parts except the last with pauses between them
+            for (let i = 0; i < parts.length - 1; i++) {
+                await new Promise((resolve, reject) => {
+                    announcementQueue.push({
+                        textToAnnounce: parts[i],
+                        announcementType,
+                        recordHistory: false, // Don't record the split parts
+                        showSplash: showSplash,
+                        resolve,
+                        reject
+                    });
+                    processAnnouncementQueue();
+                });
+                
+                // Add 1.5-second pause between segments
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            }
+            
+            // Announce the last part and record the FULL clean text to history
+            const cleanText = textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
+            const lastPart = parts[parts.length - 1];
+            
+            return new Promise((resolve, reject) => {
+                // Override textToAnnounce for history recording while playing the last part
+                const lastAnnouncement = {
+                    textToAnnounce: lastPart,
+                    announcementType,
+                    recordHistory: recordHistory,
+                    showSplash: showSplash,
+                    resolve,
+                    reject,
+                    historyText: cleanText // Add custom property for clean history text
+                };
+                announcementQueue.push(lastAnnouncement);
+                processAnnouncementQueue();
+            });
+        }
     }
     
     // Special handling for jokes - detect if text contains a question followed by an answer
