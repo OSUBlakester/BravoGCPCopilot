@@ -16506,10 +16506,10 @@ async def upload_mti_file(
 
             script_dir = os.path.dirname(os.path.abspath(__file__))
             extractor_candidates = [
-                os.path.join(script_dir, "AccentToBravo", "extract_mti_to_json.py"),
-                os.path.join(os.getcwd(), "AccentToBravo", "extract_mti_to_json.py"),
-                "/workspace/AccentToBravo/extract_mti_to_json.py",
-                "/app/AccentToBravo/extract_mti_to_json.py",
+                os.path.join(script_dir, "extract_mti_to_json.py"),
+                os.path.join(os.getcwd(), "extract_mti_to_json.py"),
+                "/workspace/extract_mti_to_json.py",
+                "/app/extract_mti_to_json.py",
             ]
             extractor_path = next((p for p in extractor_candidates if os.path.exists(p)), None)
 
