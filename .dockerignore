@@ -93,3 +93,7 @@ birthdays.json
 audio_config.json
 model_config.json
 APIKEYS.reg
+
+# Always include AccentToBravo parser in images
+!AccentToBravo/
+!AccentToBravo/**

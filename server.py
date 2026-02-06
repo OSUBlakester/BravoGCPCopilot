@@ -16505,7 +16505,22 @@ async def upload_mti_file(
             import os
 
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            extractor_path = os.path.join(script_dir, "AccentToBravo", "extract_mti_to_json.py")
+            extractor_candidates = [
+                os.path.join(script_dir, "AccentToBravo", "extract_mti_to_json.py"),
+                os.path.join(os.getcwd(), "AccentToBravo", "extract_mti_to_json.py"),
+                "/workspace/AccentToBravo/extract_mti_to_json.py",
+                "/app/AccentToBravo/extract_mti_to_json.py",
+            ]
+            extractor_path = next((p for p in extractor_candidates if os.path.exists(p)), None)
+
+            if not extractor_path:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Failed to parse MTI file: extractor not found. "
+                        f"Checked: {', '.join(extractor_candidates)}"
+                    )
+                )
 
             spec = importlib.util.spec_from_file_location("extract_mti_to_json", extractor_path)
             if spec is None or spec.loader is None:
