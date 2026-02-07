@@ -1593,6 +1593,23 @@ def extract_mti_file(mti_file_path):
                         prompt_name = ' '.join(''.join(clean_chars).split())
                         if prompt_name:
                             button['name'] = prompt_name
+                
+                # Handle «SET-PAGE(...)», «CLEAR-DISPLAY», etc. markers in name/speech
+                # These should be extracted as functions, not left in the text
+                import re
+                markers = re.findall(r'«([A-Z\-]+)(?:\(([^)]*)\))?»', button['name'] or '')
+                for marker_match in markers:
+                    func_name = marker_match[0]
+                    func_param = marker_match[1] if marker_match[1] else ''
+                    if func_name == 'SET-PAGE' and func_param:
+                        # Extract page reference and add as function
+                        if not button['functions']:
+                            button['functions'] = []
+                        # Trim trailing space from param
+                        func_param = func_param.strip()
+                        button['functions'].append(f'SET-PAGE({func_param})')
+                    # Remove the marker from name
+                    button['name'] = re.sub(r'«[A-Z\-]+(?:\([^)]*\))?»', '', button['name']).strip()
             
             # If speech only contains the button name and it's a navigation button, clear speech
             # Common navigation button names that should have no speech

@@ -134,6 +134,24 @@ class AccentMTIParser:
                     if prompt_name and (not name or name in ["GO-BACK-PAGE", "CLEAR-DISPLAY", "", None]):
                         name = prompt_name
 
+            # Handle «SET-PAGE(...)», «CLEAR-DISPLAY», etc. markers in name/speech
+            # These should be extracted as functions, not left in the text
+            import re
+            markers = re.findall(r"«([A-Z\-]+)(?:\(([^)]*)\))?»", name or "")
+            for marker_match in markers:
+                func_name = marker_match[0]
+                func_param = marker_match[1] if marker_match[1] else ""
+                if func_name == "SET-PAGE" and func_param:
+                    # Extract page reference and add as function
+                    functions = button.get("functions") or []
+                    # Trim trailing space from param
+                    func_param = func_param.strip()
+                    functions.append(f"SET-PAGE({func_param})")
+                    button["functions"] = functions
+            # Remove the markers from name
+            if name:
+                name = re.sub(r"«[A-Z\-]+(?:\([^)]*\))?»", "", name).strip()
+
             # Extract VOICE-SET-TEMPORARY (0x03) and VOICE-CLEAR-TEMPORARY (0x04)
             if "\x03" in speech:
                 parts = speech.split("\x03", 1)
