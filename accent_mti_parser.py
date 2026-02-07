@@ -183,6 +183,43 @@ class AccentMTIParser:
             if speech_lower == name_lower and name_lower in ["home", "go back", "goback", "back", "return", "go home", "previous"]:
                 speech = None
 
+        # Clean malformed name artifacts (PROMPT-MARKER / SET-PAGE / duplicated words)
+        if name:
+            import re
+            original_name = name
+            cleaned_name = original_name
+
+            # Remove guillemet markers like «SET-PAGE(...)» or «PROMPT-MARKER»
+            cleaned_name = re.sub(r'«[A-Z\-]+(?:\([^)]*\))?»', '', cleaned_name).strip()
+
+            # Remove raw SET-PAGE(...) text if present
+            cleaned_name = re.sub(r'\bSET-PAGE\s*\([^)]*\)', '', cleaned_name, flags=re.IGNORECASE).strip()
+
+            # If marker brace is present, keep text before it (or after if before is empty)
+            if '{' in cleaned_name:
+                left, right = cleaned_name.split('{', 1)
+                cleaned_name = left.strip() if left.strip() else right.strip()
+
+            # If navigation target text leaked in, keep leading alphabetic words only
+            if re.search(r'\bpage\b', cleaned_name, re.IGNORECASE) or re.search(r'\b0\s+[a-z]', cleaned_name):
+                alpha_match = re.match(r"[A-Za-z ]+", cleaned_name)
+                if alpha_match:
+                    cleaned_name = alpha_match.group(0).strip()
+
+            # Collapse duplicate word sequences (e.g., "this weekthis week" -> "this week")
+            words = [w for w in cleaned_name.split() if w]
+            if len(words) % 2 == 0 and words[:len(words)//2] == words[len(words)//2:]:
+                cleaned_name = " ".join(words[:len(words)//2])
+
+            # Also collapse exact string duplication (no word-boundary split)
+            if cleaned_name and len(cleaned_name) % 2 == 0:
+                half = len(cleaned_name) // 2
+                if cleaned_name[:half] == cleaned_name[half:]:
+                    cleaned_name = cleaned_name[:half].strip()
+
+            if cleaned_name:
+                name = cleaned_name
+
         button["speech"] = speech
         button["name"] = name
         return button
