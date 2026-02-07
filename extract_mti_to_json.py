@@ -1549,18 +1549,69 @@ def extract_mti_file(mti_file_path):
             }
             
             # Clean up speech: Replace WAIT-ANY-KEY markers with [PAUSE]
-            if button['speech']:
+            if button['speech'] or button['name']:
                 # Replace 0x1C control character (WAIT-ANY-KEY marker) with [PAUSE]
-                button['speech'] = button['speech'].replace('\x1c', '[PAUSE]')
+                if button['speech']:
+                    button['speech'] = button['speech'].replace('\x1c', '[PAUSE]')
                 
-                # Detect and remove VOICE-SET-TEMPORARY marker (0x03 followed by voice params)
-                if '\x03' in button['speech']:
-                    # Extract voice parameters (format: \x03VoiceName,PersonName\x20ActualSpeech)
-                    parts = button['speech'].split('\x03', 1)
-                    if len(parts) > 1:
-                        voice_and_speech = parts[1]
-                        # Voice params end at the first space character
-                        space_idx = voice_and_speech.find(' ')
+                # Handle PROMPT-MARKER anywhere in the data (both forms: « » guillemets and { binary)
+                # Format: [speech before]«PROMPT-MARKER»[name after][functions]
+                # or: [speech before]{[name after][functions]
+                full_text = (button['speech'] or '') + (button['name'] or '')
+                has_prompt_marker = '«PROMPT-MARKER»' in full_text or '{' in full_text
+                
+                if has_prompt_marker:
+                    import re
+                    # Look for PROMPT-MARKER in either form
+                    if '«PROMPT-MARKER»' in full_text:
+                        prompt_parts = re.split(r'«PROMPT-MARKER»', full_text)
+                    else:
+                        prompt_parts = full_text.split('{', 1)
+                    
+                    if len(prompt_parts) >= 2:
+                        # Text before PROMPT-MARKER is speech (if it's not in name already)
+                        speech_text = prompt_parts[0].strip()
+                        # Text after PROMPT-MARKER contains name and functions
+                        remaining = prompt_parts[1].strip()
+                        
+                        # If button name is not set or is generic, extract from remaining
+                        if not button['name'] or button['name'] in ['GO-BACK-PAGE', 'CLEAR-DISPLAY', '']:
+                            # Extract clean name from remaining (take only alphabetic + spaces until special char)
+                            name_chars = []
+                            for ch in remaining:
+                                if ch.isalpha() or ch == ' ':
+                                    name_chars.append(ch)
+                                elif name_chars:
+                                    break
+                            extracted_name = ' '.join(''.join(name_chars).split())
+                            if extracted_name:
+                                button['name'] = extracted_name
+                        
+                        # Extract SET-PAGE from remaining
+                        set_page_match = re.search(r'SET-PAGE\s*\(\s*([^)]+)\s*\)', remaining)
+                        set_page_target = None
+                        if set_page_match:
+                            set_page_target = set_page_match.group(1).strip()
+                        
+                        # Update speech and navigation
+                        if speech_text and not any(ord(ch) < 32 for ch in speech_text):
+                            button['speech'] = speech_text
+                        if set_page_target:
+                            button['navigation_type'] = 'PERMANENT'
+                            button['navigation_target'] = set_page_target
+                            if not button['functions']:
+                                button['functions'] = []
+                            button['functions'].append(f'SET-PAGE({set_page_target})')
+                
+                if button['speech']:
+                    # Detect and remove VOICE-SET-TEMPORARY marker (0x03 followed by voice params)
+                    if '\x03' in button['speech']:
+                        # Extract voice parameters (format: \x03VoiceName,PersonName\x20ActualSpeech)
+                        parts = button['speech'].split('\x03', 1)
+                        if len(parts) > 1:
+                            voice_and_speech = parts[1]
+                            # Voice params end at the first space character
+                            space_idx = voice_and_speech.find(' ')
                         if space_idx > 0:
                             voice_setting = voice_and_speech[:space_idx].strip()
                             speech_after = voice_and_speech[space_idx:].strip()
@@ -1592,17 +1643,24 @@ def extract_mti_file(mti_file_path):
                     if button['speech'] and (any(ord(ch) < 32 for ch in button['speech']) or 'SUN' in button['speech'] or len(button['speech'].split()) > 10):
                         button['speech'] = None
                     
-                    # If there's a PROMPT-MARKER with SET-PAGE in the name/button,
-                    # the speech before marker is typically navigation-related metadata, not actual speech
-                    # Check if the full raw data contains SET-PAGE marker (before it was converted to {)
-                    if button['speech'] and button['name'] and '«SET-PAGE' in button['name']:
-                        # Speech before PROMPT-MARKER in SET-PAGE buttons is navigation metadata, clear it
-                        button['speech'] = None
-                    
                     # If the original name contained the marker, it needs updating
                     if len(parts) > 1 and '{' in button['name']:
                         # Extract name from after marker
                         raw_name = parts[-1].strip()
+                        
+                        # Check if SET-PAGE function appears in the raw data BEFORE we clean it
+                        import re
+                        set_page_match = re.search(r'SET-PAGE\s*\(\s*([^)]+)\s*\)', raw_name)
+                        if set_page_match:
+                            set_page_target = set_page_match.group(1).strip()
+                            if not button['navigation_target']:
+                                button['navigation_type'] = 'PERMANENT'
+                                button['navigation_target'] = set_page_target
+                            if not button['functions']:
+                                button['functions'] = []
+                            button['functions'].append(f'SET-PAGE({set_page_target})')
+                        
+                        # Now clean the name by extracting only alphabetic characters
                         clean_chars = []
                         for ch in raw_name:
                             if ch.isalpha() or ch == ' ':
@@ -1616,7 +1674,7 @@ def extract_mti_file(mti_file_path):
                 # Handle «SET-PAGE(...)», «CLEAR-DISPLAY», etc. markers in name/speech
                 # These should be extracted as functions, not left in the text
                 import re
-                # Check both name and speech for markers
+                # Check both name and speech for markers with guillemets
                 markers_in_name = re.findall(r'«([A-Z\-]+)(?:\(([^)]*)\))?»', button['name'] or '')
                 markers_in_speech = re.findall(r'«([A-Z\-]+)(?:\(([^)]*)\))?»', button['speech'] or '')
                 
@@ -1858,6 +1916,14 @@ def extract_mti_file(mti_file_path):
                                     clean_speech = prefix_part
                             else:
                                 clean_speech = speech[:match.start()].strip()
+                            
+                            # If prefix contains the button name (like "My places 0 my places"), 
+                            # it's metadata not real speech - clear it
+                            if clean_speech and btn.get('name'):
+                                btn_name_words = btn['name'].lower().split()
+                                clean_lower = clean_speech.lower()
+                                if all(word in clean_lower for word in btn_name_words):
+                                    clean_speech = None
                 
                 # Pattern 3: :PageName with trailing punctuation (e.g., ":WP- Clothes,")
                 if not nav_target and speech.startswith(':'):
