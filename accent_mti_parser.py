@@ -138,18 +138,19 @@ class AccentMTIParser:
             if "\x03" in speech:
                 parts = speech.split("\x03", 1)
                 if len(parts) > 1:
-                    voice_params = parts[1]
-                    param_end = 0
-                    for i, ch in enumerate(voice_params):
-                        if ch == "u" and i > 0:
-                            param_end = i + 1
-                            break
-                    if param_end > 0:
-                        voice_setting = voice_params[:param_end].strip()
+                    # Voice params format: VoiceName,PersonName followed by space then actual speech
+                    voice_and_speech = parts[1]
+                    space_idx = voice_and_speech.find(' ')
+                    if space_idx > 0:
+                        voice_setting = voice_and_speech[:space_idx].strip()
+                        speech_after = voice_and_speech[space_idx:].strip()
                         functions = button.get("functions") or []
                         functions.append(f"VOICE-SET-TEMPORARY({voice_setting})")
                         button["functions"] = functions
-                        speech = (parts[0] + voice_params[param_end:]).strip()
+                        speech = (parts[0] + speech_after).strip()
+                    else:
+                        # No space found, just remove the marker
+                        speech = parts[0] + voice_and_speech
 
             if "\x04" in speech:
                 speech = speech.replace("\x04", "")
