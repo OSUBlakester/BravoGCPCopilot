@@ -1220,6 +1220,11 @@ def extract_mti_file(mti_file_path):
                             if prompt_marker_str.encode('utf-8') in speech_bytes:
                                 parts = speech_bytes.split(prompt_marker_str.encode('utf-8'))
                                 speech_bytes = parts[0]  # Keep only speech before marker
+                                # Remove SET-PAGE markers from speech
+                                import re
+                                speech_text = speech_bytes.decode('utf-8', errors='ignore')
+                                speech_text = re.sub(r'«SET-PAGE\([^)]*\)»', '', speech_text).strip()
+                                speech_bytes = speech_text.encode('utf-8')
                                 # Extract name from after marker
                                 if len(parts) > 1:
                                     raw_name_bytes = parts[-1].strip()
@@ -1408,6 +1413,9 @@ def extract_mti_file(mti_file_path):
                 if prompt_token:
                     speech_parts = speech.split(prompt_token)
                     speech_before_marker = speech_parts[0].strip()
+                    # Remove SET-PAGE markers from speech
+                    import re
+                    speech_before_marker = re.sub(r'«SET-PAGE\([^)]*\)»', '', speech_before_marker).strip()
                     if len(speech_parts) > 1:
                         raw_prompt_name = speech_parts[-1].strip()
                         # Take all alphabetic words and spaces only
@@ -1580,6 +1588,17 @@ def extract_mti_file(mti_file_path):
                     speech_before_marker = parts[0].strip()
                     button['speech'] = speech_before_marker
                     
+                    # If speech looks like SET-PAGE parameter data (contains control chars or looks corrupted), clear it
+                    if button['speech'] and (any(ord(ch) < 32 for ch in button['speech']) or 'SUN' in button['speech'] or len(button['speech'].split()) > 10):
+                        button['speech'] = None
+                    
+                    # If there's a PROMPT-MARKER with SET-PAGE in the name/button,
+                    # the speech before marker is typically navigation-related metadata, not actual speech
+                    # Check if the full raw data contains SET-PAGE marker (before it was converted to {)
+                    if button['speech'] and button['name'] and '«SET-PAGE' in button['name']:
+                        # Speech before PROMPT-MARKER in SET-PAGE buttons is navigation metadata, clear it
+                        button['speech'] = None
+                    
                     # If the original name contained the marker, it needs updating
                     if len(parts) > 1 and '{' in button['name']:
                         # Extract name from after marker
@@ -1597,19 +1616,42 @@ def extract_mti_file(mti_file_path):
                 # Handle «SET-PAGE(...)», «CLEAR-DISPLAY», etc. markers in name/speech
                 # These should be extracted as functions, not left in the text
                 import re
-                markers = re.findall(r'«([A-Z\-]+)(?:\(([^)]*)\))?»', button['name'] or '')
-                for marker_match in markers:
+                # Check both name and speech for markers
+                markers_in_name = re.findall(r'«([A-Z\-]+)(?:\(([^)]*)\))?»', button['name'] or '')
+                markers_in_speech = re.findall(r'«([A-Z\-]+)(?:\(([^)]*)\))?»', button['speech'] or '')
+                
+                for marker_match in markers_in_name + markers_in_speech:
                     func_name = marker_match[0]
                     func_param = marker_match[1] if marker_match[1] else ''
                     if func_name == 'SET-PAGE' and func_param:
-                        # Extract page reference and add as function
+                        # Extract page reference and add as function/navigation
+                        func_param = func_param.strip()
+                        if not button['navigation_target']:
+                            button['navigation_type'] = 'PERMANENT'
+                            button['navigation_target'] = func_param
                         if not button['functions']:
                             button['functions'] = []
-                        # Trim trailing space from param
-                        func_param = func_param.strip()
                         button['functions'].append(f'SET-PAGE({func_param})')
-                    # Remove the marker from name
+                
+                # Remove the markers from both name and speech
+                original_speech = button['speech']
+                had_set_page_in_speech = '«SET-PAGE' in (button['speech'] or '')
+                if button['name']:
                     button['name'] = re.sub(r'«[A-Z\-]+(?:\([^)]*\))?»', '', button['name']).strip()
+                if button['speech']:
+                    button['speech'] = re.sub(r'«[A-Z\-]+(?:\([^)]*\))?»', '', button['speech']).strip()
+                    # If speech becomes empty after removing markers, set to None
+                    if not button['speech']:
+                        button['speech'] = None
+                
+                # If SET-PAGE was the ONLY content in speech (no real speech before it)
+                # and there's navigation, clear the speech
+                if had_set_page_in_speech and button.get('navigation_type'):
+                    # Check if there was actual speech content before SET-PAGE marker
+                    speech_before_marker = (original_speech or '').split('«SET-PAGE')[0].strip()
+                    if not speech_before_marker:
+                        # No real speech before the marker, clear it
+                        button['speech'] = None
             
             # If speech only contains the button name and it's a navigation button, clear speech
             # Common navigation button names that should have no speech
@@ -1674,6 +1716,7 @@ def extract_mti_file(mti_file_path):
     # Build page name to ID map
     page_name_to_id = {page_data['inferred_name'].lower().strip(): page_id 
                        for page_id, page_data in pages.items()}
+    page_id_to_name = {page_id: page_data['inferred_name'] for page_id, page_data in pages.items()}
     
     for page_id, page_data in pages.items():
         for btn in page_data['buttons']:
@@ -1690,6 +1733,35 @@ def extract_mti_file(mti_file_path):
                            btn['speech'].split('\ufffd')[0].strip().endswith(('.', '?')):
                             btn['speech'] = None
                         break
+
+            # Clean up name/speech if navigation target name is appended
+            try:
+                target_name = None
+                nav_target = btn.get('navigation_target')
+                if nav_target in page_id_to_name:
+                    target_name = page_id_to_name[nav_target]
+                elif nav_target and nav_target.lower().strip() in page_name_to_id:
+                    target_name = nav_target
+
+                if target_name:
+                    import re
+                    def _strip_target(text: str) -> str:
+                        if not text:
+                            return text
+                        # Remove target name if appended (case-insensitive)
+                        pattern = re.compile(r"\s*" + re.escape(target_name) + r"\s*$", re.IGNORECASE)
+                        text = pattern.sub("", text).strip()
+                        # Collapse duplicated prefix like "peoplepeople"
+                        dup = re.match(r"^([A-Za-z]{4,})\1(\b|\s)", text)
+                        if dup:
+                            text = text[len(dup.group(1)):]  # remove one occurrence
+                            text = text.strip()
+                        return text
+
+                    btn['name'] = _strip_target(btn.get('name'))
+                    btn['speech'] = _strip_target(btn.get('speech'))
+            except Exception:
+                pass
             
             # Check implicit SET-PAGE (speech == name and name matches page)
             # Skip if button has GOTO-HOME function (navigation already set to 'home')
@@ -1710,6 +1782,26 @@ def extract_mti_file(mti_file_path):
                     btn['navigation_type'] = 'PERMANENT'
                     btn['navigation_target'] = page_name_to_id[f"0 {name_lower}"]
                     btn['speech'] = None
+            
+            # Check for "go to [page]" patterns in button name (even if speech is None)
+            if btn['name'] and not btn['navigation_type']:
+                import re
+                name_lower = btn['name'].strip().lower()
+                go_to_match = re.match(r'go\s*to\s+(.+)', name_lower)
+                if go_to_match:
+                    target_name = go_to_match.group(1).strip()
+                    # Try direct match
+                    if target_name in page_name_to_id:
+                        btn['navigation_type'] = 'PERMANENT'
+                        btn['navigation_target'] = page_name_to_id[target_name]
+                        if not btn['speech']:
+                            btn['speech'] = None
+                    # Try with "0 " prefix
+                    elif f"0 {target_name}" in page_name_to_id:
+                        btn['navigation_type'] = 'PERMANENT'
+                        btn['navigation_target'] = page_name_to_id[f"0 {target_name}"]
+                        if not btn['speech']:
+                            btn['speech'] = None
             
             # Extract navigation from speech patterns
             if btn['speech'] and not btn['navigation_type']:
@@ -1835,6 +1927,35 @@ def extract_mti_file(mti_file_path):
                 target_clean = btn['navigation_target'].split(')')[0].strip().lower()
                 if target_clean in page_name_to_id:
                     btn['navigation_target'] = page_name_to_id[target_clean]
+
+            # Final cleanup: remove appended navigation target name and duplicate prefixes
+            try:
+                nav_target = btn.get('navigation_target')
+                target_name = page_id_to_name.get(nav_target) if nav_target else None
+                if target_name:
+                    import re
+                    def _strip_target_final(text: str) -> str:
+                        if not text:
+                            return text
+                        pattern = re.compile(r"\s*" + re.escape(target_name) + r"\s*$", re.IGNORECASE)
+                        text = pattern.sub("", text).strip()
+                        dup = re.match(r"^([A-Za-z]{4,})\1(\b|\s)", text)
+                        if dup:
+                            text = text[len(dup.group(1)):]  # remove one occurrence
+                            text = text.strip()
+                        return text
+
+                    btn['name'] = _strip_target_final(btn.get('name'))
+                    btn['speech'] = _strip_target_final(btn.get('speech'))
+            except Exception:
+                pass
+            
+            # Clear speech for navigation-only buttons
+            if btn.get('navigation_type') in ['PERMANENT', 'TEMPORARY', 'GO-BACK-PAGE']:
+                # Keep speech only if it's different from the button name
+                if btn.get('speech') and btn.get('name'):
+                    if btn['speech'].strip().lower() == btn['name'].strip().lower():
+                        btn['speech'] = None
     
     # Separate metadata pages (40XX range)
     metadata_pages = {pid: pdata for pid, pdata in pages.items() if pid.startswith('4')}
