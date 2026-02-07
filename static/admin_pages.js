@@ -1206,15 +1206,14 @@ async function updatePage() {
 }
 
 async function deletePage() {
-    // Use display name to generate page name
-    const displayName = newPageDisplayNameInput.value.trim();
-    const pageName = displayName.toLowerCase().replace(/[^a-z]/g, '');
+    // Use the actual page name from selectPage, not a regenerated one
+    const pageName = selectPage.value;
     if (!pageName) {
         alert('No page selected to delete.');
         return;
     }
 
-    if (pageName === 'home') {
+    if (pageName.toLowerCase() === 'home') {
         alert('The home page cannot be deleted.');
         return;
     }
