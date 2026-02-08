@@ -931,9 +931,22 @@ class AccentMTIParser:
             # Accent-specific cleanup (PROMPT-MARKER, [PAUSE], voice functions, nav speech)
             button_data = self._post_process_button(button_data)
             
+            # Heuristic: Detect GOTO-HOME buttons that weren't caught by byte pattern matching
+            # Characteristics: icon="HOME", speech=null, name contains "home" (case-insensitive)
+            if (not button_data.get('functions') or 'GOTO-HOME' not in button_data.get('functions', [])):
+                if (button_data.get('icon') == 'HOME' and 
+                    not button_data.get('speech') and 
+                    button_data.get('name') and 
+                    'home' in button_data['name'].lower()):
+                    # This is a GOTO-HOME button
+                    button_data['functions'] = ['GOTO-HOME']
+                    button_data['navigation_type'] = 'PERMANENT'
+                    button_data['navigation_target'] = '0400'  # Home page
+                    logger.info(f"HEURISTIC: Detected GOTO-HOME button '{button_name}' on page {page_id} (icon=HOME, speech=null)")
+            
             # Debug logging for GOTO-HOME buttons and beginning button
-            if button_name == "beginning" or (functions and 'GOTO-HOME' in functions):
-                logger.info(f"BUTTON PARSE: name={button_name}, speech={speech}, functions={functions}, has_goto_home={has_goto_home}, nav_type={navigation_type}, nav_target={navigation_target}")
+            if button_name == "beginning" or (button_data.get('functions') and 'GOTO-HOME' in button_data.get('functions', [])):
+                logger.info(f"BUTTON PARSE: name={button_name}, speech={button_data.get('speech')}, functions={button_data.get('functions')}, nav_type={button_data.get('navigation_type')}, nav_target={button_data.get('navigation_target')}")
             
             return button_data
             

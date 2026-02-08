@@ -16436,6 +16436,7 @@ def _sanitize_migration_button(button: Dict) -> Dict:
             
             button["speech"] = actual_speech
             button["name"] = actual_name
+            # Preserve other button properties including functions
             return button
     
     # Standard sanitization
@@ -16454,6 +16455,7 @@ def _sanitize_migration_button(button: Dict) -> Dict:
             if len(speech) > 20 and speech.strip().lower() != name_lower:
                 button["speech"] = name
 
+    # Preserve all other button properties including functions, navigation_target, etc.
     return button
 
 
