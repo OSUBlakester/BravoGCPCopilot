@@ -10,14 +10,72 @@ let mtiData = null;
 let currentPageData = null;
 let selectedButtons = new Set();
 let existingBravoPages = [];
+let currentTab = 'upload'; // Track current tab
+
+// ===================================
+// TAB MANAGEMENT
+// ===================================
+
+function showTab(tabName) {
+    // Hide all tab content
+    document.querySelectorAll('.tab-content').forEach(el => {
+        el.classList.remove('active');
+    });
+    
+    // Remove active state from all buttons
+    document.querySelectorAll('.tab-button').forEach(el => {
+        el.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    const tabElement = document.querySelector(`.tab-content[data-tab="${tabName}"]`);
+    if (tabElement) {
+        tabElement.classList.add('active');
+    }
+    
+    // Activate corresponding tab button
+    const tabBtn = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+    if (tabBtn) {
+        tabBtn.classList.add('active');
+    }
+    
+    currentTab = tabName;
+}
+
+function enableTab(tabName) {
+    const tabBtn = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+    if (tabBtn) {
+        tabBtn.disabled = false;
+    }
+}
+
+function disableTab(tabName) {
+    const tabBtn = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+    if (tabBtn) {
+        tabBtn.disabled = true;
+    }
+}
 
 // Wait for auth to be ready
 document.addEventListener('migrationAuthReady', initializeMigrationTool);
 
 function initializeMigrationTool() {
     console.log('Migration tool initialized');
+    setupTabListeners();
     setupEventListeners();
     loadExistingBravoPages();
+}
+
+function setupTabListeners() {
+    // Add click handlers to tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            if (!btn.disabled) {
+                const tabName = btn.getAttribute('data-tab');
+                showTab(tabName);
+            }
+        });
+    });
 }
 
 // ===================================
@@ -25,21 +83,6 @@ function initializeMigrationTool() {
 // ===================================
 
 function setupEventListeners() {
-    // Hamburger menu
-    const hamburgerBtn = document.getElementById('hamburger-btn');
-    const dropdown = document.getElementById('admin-nav-dropdown');
-    
-    if (hamburgerBtn && dropdown) {
-        hamburgerBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            dropdown.classList.toggle('show');
-        });
-        
-        document.addEventListener('click', () => {
-            dropdown.classList.remove('show');
-        });
-    }
-
     // Upload zone
     const uploadZone = document.getElementById('uploadZone');
     const fileInput = document.getElementById('fileInput');
@@ -206,8 +249,9 @@ function displayMTIData(data) {
     // Populate page dropdown
     populatePageDropdown(data.pages);
 
-    // Show page selection section
-    document.getElementById('pageSelectionSection').classList.remove('hidden');
+    // Enable Pages tab and move to it
+    enableTab('pages');
+    showTab('pages');
 }
 
 function populatePageDropdown(pages) {
@@ -240,8 +284,8 @@ function handlePageSelect(event) {
     const pageId = event.target.value;
     
     if (!pageId) {
-        document.getElementById('buttonSelectionSection').classList.add('hidden');
-        document.getElementById('migrationConfigSection').classList.add('hidden');
+        disableTab('buttons');
+        disableTab('config');
         return;
     }
 
@@ -249,8 +293,8 @@ function handlePageSelect(event) {
     selectedButtons.clear();
     displayButtons(currentPageData);
 
-    // Show button selection section
-    document.getElementById('buttonSelectionSection').classList.remove('hidden');
+    // Enable button selection tab (don't auto-navigate)
+    enableTab('buttons');
     updateSelectedCount();
 }
 
@@ -315,12 +359,12 @@ function toggleButtonSelection(index) {
     
     updateSelectedCount();
     
-    // Show/hide migration config section
+    // Enable/disable migration config tab
     if (selectedButtons.size > 0) {
-        document.getElementById('migrationConfigSection').classList.remove('hidden');
+        enableTab('config');
         updateMigrationPreview();
     } else {
-        document.getElementById('migrationConfigSection').classList.add('hidden');
+        disableTab('config');
     }
 }
 
@@ -332,7 +376,8 @@ function selectAllButtons() {
         document.getElementById(`button-${index}`).classList.add('selected');
     });
     updateSelectedCount();
-    document.getElementById('migrationConfigSection').classList.remove('hidden');
+    enableTab('config');
+
     updateMigrationPreview();
 }
 
@@ -344,7 +389,7 @@ function deselectAllButtons() {
         document.getElementById(`button-${index}`).classList.remove('selected');
     });
     updateSelectedCount();
-    document.getElementById('migrationConfigSection').classList.add('hidden');
+    disableTab('config');
 }
 
 function updateSelectedCount() {
@@ -538,7 +583,7 @@ function resetForNextMigration() {
     loadExistingBravoPages();
     
     // Reset migration config inputs
-    document.getElementById('migrationConfigSection').classList.add('hidden');
+    disableTab('config');
     document.getElementById('newPageName').value = '';
     
     // Keep page selection visible so user can select another page
@@ -560,9 +605,11 @@ function resetMigration() {
         document.getElementById('totalButtons').textContent = '0';
         document.getElementById('selectedButtons').textContent = '0';
         
-        document.getElementById('pageSelectionSection').classList.add('hidden');
-        document.getElementById('buttonSelectionSection').classList.add('hidden');
-        document.getElementById('migrationConfigSection').classList.add('hidden');
+        // Reset tabs
+        disableTab('pages');
+        disableTab('buttons');
+        disableTab('config');
+        showTab('upload');
 
         const uploadedFileName = document.getElementById('uploadedFileName');
         const uploadedFileNameText = document.getElementById('uploadedFileNameText');
