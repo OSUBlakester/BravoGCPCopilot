@@ -82,6 +82,12 @@ function setupEventListeners() {
     document.getElementById('newPageName').addEventListener('input', updateMigrationPreview);
     document.getElementById('existingPageSelect').addEventListener('change', updateMigrationPreview);
 
+    // Use source page name button
+    const useSourcePageNameBtn = document.getElementById('useSourcePageNameBtn');
+    if (useSourcePageNameBtn) {
+        useSourcePageNameBtn.addEventListener('click', fillNewPageNameFromSource);
+    }
+
     // Migration execution
     document.getElementById('executeMigrationBtn').addEventListener('click', executeMigration);
     document.getElementById('resetBtn').addEventListener('click', resetMigration);
@@ -151,6 +157,14 @@ async function handleFile(file) {
 
         mtiData = await dataResponse.json();
         updateProgress(100, 'Complete!');
+
+        // Show uploaded file name
+        const uploadedFileName = document.getElementById('uploadedFileName');
+        const uploadedFileNameText = document.getElementById('uploadedFileNameText');
+        if (uploadedFileName && uploadedFileNameText) {
+            uploadedFileNameText.textContent = file.name;
+            uploadedFileName.classList.remove('hidden');
+        }
 
         // Update UI
         setTimeout(() => {
@@ -412,6 +426,24 @@ function updateMigrationPreview() {
     document.getElementById('previewContent').innerHTML = previewHTML;
 }
 
+function fillNewPageNameFromSource() {
+    if (!currentPageData) {
+        showError('Please select a source page first');
+        return;
+    }
+
+    const sourceName = (currentPageData.inferred_name || currentPageData.page_id || '').toString().trim();
+    if (!sourceName) {
+        showError('Source page name is not available');
+        return;
+    }
+
+    const input = document.getElementById('newPageName');
+    input.value = sourceName;
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+}
+
 // ===================================
 // MIGRATION EXECUTION
 // ===================================
@@ -531,6 +563,13 @@ function resetMigration() {
         document.getElementById('pageSelectionSection').classList.add('hidden');
         document.getElementById('buttonSelectionSection').classList.add('hidden');
         document.getElementById('migrationConfigSection').classList.add('hidden');
+
+        const uploadedFileName = document.getElementById('uploadedFileName');
+        const uploadedFileNameText = document.getElementById('uploadedFileNameText');
+        if (uploadedFileName && uploadedFileNameText) {
+            uploadedFileNameText.textContent = '';
+            uploadedFileName.classList.add('hidden');
+        }
         
         document.getElementById('fileInput').value = '';
     }
