@@ -1714,6 +1714,14 @@ def extract_mti_file(mti_file_path):
                 # If speech exactly matches name and it's a navigation-like name, clear it
                 if speech_lower == name_lower and name_lower in nav_button_names:
                     button['speech'] = None
+
+            # Heuristic: Detect GOTO-HOME buttons by icon/speech pattern
+            if (button.get('icon') == 'HOME' and
+                button.get('speech') is None and
+                (not button.get('functions') or len(button.get('functions')) == 0)):
+                button['functions'] = ['GOTO-HOME']
+                button['navigation_type'] = 'PERMANENT'
+                button['navigation_target'] = '0400'
             
             # Skip buttons with unsupported functions (like DELETE-LAST-SELECTION)
             # These don't have corresponding app functionality
