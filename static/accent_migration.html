@@ -167,6 +167,75 @@
     .dropdown-content a:hover {
       background-color: #f0f0f0;
     }
+
+    /* Tab Styling */
+    .tab-button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 16px 20px;
+      border: none;
+      background: white;
+      color: #6b7280;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-bottom: 3px solid transparent;
+      position: relative;
+      white-space: nowrap;
+    }
+
+    .tab-button:hover:not(:disabled) {
+      color: #3b82f6;
+      background: #f0f7ff;
+    }
+
+    .tab-button.active {
+      color: #3b82f6;
+      border-bottom-color: #3b82f6;
+    }
+
+    .tab-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      background: #e5e7eb;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 600;
+      color: #6b7280;
+    }
+
+    .tab-button.active .step-number {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+      animation: fadeIn 0.2s ease-in;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -247,34 +316,8 @@
     })();
   </script>
 
-  <!-- Header -->
-  <div class="bg-[#002244] text-white px-6 py-4 shadow-lg">
-    <div class="max-w-7xl mx-auto flex items-center justify-between">
-      <div class="flex items-center gap-4">
-        <a href="gridpage.html?page=home" class="h-10 w-10 flex items-center justify-center text-white bg-[#FB4F14] rounded-full hover:bg-orange-200 hover:text-orange-700 transition-colors duration-200">
-          <i class="fas fa-home"></i>
-        </a>
-        <h1 class="text-2xl font-bold">Accent to Bravo Migration</h1>
-      </div>
-      
-      <div class="hamburger-menu">
-        <button id="hamburger-btn" aria-label="Menu">
-          <i class="fas fa-bars"></i>
-        </button>
-        <div id="admin-nav-dropdown" class="dropdown-content">
-          <a href="admin_pages.html">Page & Button Admin</a>
-          <a href="user_info_admin.html">User Info Admin</a>
-          <a href="user_favorites_admin.html">Favorites Admin</a>
-          <a href="/accent_migration.html" style="background-color: #e8f4f8; font-weight: bold;">Accent Migration</a>
-          <hr>
-          <a href="gridpage.html?page=home">Return to App</a>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Main Content -->
-  <div class="max-w-7xl mx-auto p-6">
+  <div class="max-w-4xl mx-auto p-6">
     
     <!-- Statistics Cards (Hidden - shown via internal interface only) -->
     <div id="statisticsCards" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 hidden">
@@ -296,18 +339,42 @@
       </div>
     </div>
 
+    <!-- Tab Navigation -->
+    <div class="bg-white rounded-t-lg border-b border-gray-200 mb-0 sticky top-0 z-10">
+      <div class="flex overflow-x-auto">
+        <button class="tab-button active" data-tab="upload">
+          <span class="step-number">1</span>
+          Upload
+        </button>
+        <button class="tab-button" data-tab="pages" disabled>
+          <span class="step-number">2</span>
+          Pages
+        </button>
+        <button class="tab-button" data-tab="buttons" disabled>
+          <span class="step-number">3</span>
+          Buttons
+        </button>
+        <button class="tab-button" data-tab="config" disabled>
+          <span class="step-number">4</span>
+          Execute
+        </button>
+      </div>
+    </div>
+
     <!-- Step 1: Upload File -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6" id="uploadSection">
-      <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-        <span class="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm">1</span>
-        Upload Accent Data
-      </h2>
+    <div class="bg-white rounded-b-lg shadow-md p-6 mb-6 tab-content active" id="uploadSection" data-tab="upload">
+      <h2 class="text-xl font-bold mb-4">Upload Accent Data</h2>
       
       <div class="upload-zone" id="uploadZone">
         <i class="fas fa-cloud-upload-alt text-2xl text-gray-400 mb-1"></i>
         <p class="text-sm font-medium text-gray-700 mb-1">Drop MTI file here or click to browse</p>
         <p class="text-xs text-gray-500">Accent MTI configuration file (.mti)</p>
         <input type="file" id="fileInput" accept=".mti" class="hidden">
+      </div>
+
+      <div id="uploadedFileName" class="hidden mt-3 text-sm text-gray-700">
+        <i class="fas fa-file-alt mr-2 text-gray-400"></i>
+        Uploaded file: <span class="font-medium" id="uploadedFileNameText"></span>
       </div>
 
       <div id="uploadProgress" class="hidden mt-4">
@@ -319,23 +386,52 @@
     </div>
 
     <!-- Step 2: Select Page -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6 hidden" id="pageSelectionSection">
-      <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-        <span class="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm">2</span>
-        Select Accent Page
-      </h2>
+    <div class="bg-white rounded-b-lg shadow-md p-6 mb-6 tab-content" id="pageSelectionSection" data-tab="pages">
+      <h2 class="text-xl font-bold mb-4">Source Page</h2>
       
-      <select id="pageSelect" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+      <select id="pageSelect" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-6">
         <option value="">-- Select a page --</option>
       </select>
+
+      <div class="border-t border-gray-200 pt-6">
+        <h3 class="text-lg font-semibold mb-4">Destination Page</h3>
+        
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Destination Type</label>
+            <div class="space-y-2">
+              <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                <input type="radio" name="destinationType" value="new" checked class="mr-3">
+                <span>Create New Bravo Page</span>
+              </label>
+              <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                <input type="radio" name="destinationType" value="existing" class="mr-3">
+                <span>Add to Existing Bravo Page</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="newPageGroup">
+            <label class="block text-sm font-medium text-gray-700 mb-2">New Page Name</label>
+            <input type="text" id="newPageName" placeholder="Enter page name..." class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <button id="useSourcePageNameBtn" type="button" class="mt-2 px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+              Use source page name
+            </button>
+          </div>
+
+          <div id="existingPageGroup" class="hidden">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Select Existing Page</label>
+            <select id="existingPageSelect" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+              <option value="">-- Loading pages... --</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Step 3: Select Buttons -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6 hidden" id="buttonSelectionSection">
-      <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-        <span class="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm">3</span>
-        Select Buttons to Migrate
-      </h2>
+    <div class="bg-white rounded-b-lg shadow-md p-6 mb-6 tab-content" id="buttonSelectionSection" data-tab="buttons">
+      <h2 class="text-xl font-bold mb-4">Select Buttons to Migrate</h2>
       
       <div class="flex gap-3 mb-4">
         <button id="selectAllBtn" class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">
@@ -351,40 +447,11 @@
       </div>
     </div>
 
-    <!-- Step 4: Configure Migration -->
-    <div class="bg-white rounded-lg shadow-md p-6 mb-6 hidden" id="migrationConfigSection">
-      <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-        <span class="bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm">4</span>
-        Configure Migration
-      </h2>
+    <!-- Step 4: Execute Migration -->
+    <div class="bg-white rounded-b-lg shadow-md p-6 mb-6 tab-content" id="migrationConfigSection" data-tab="config">
+      <h2 class="text-xl font-bold mb-4">Execute Migration</h2>
 
       <div class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">Destination Type</label>
-          <div class="space-y-2">
-            <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-              <input type="radio" name="destinationType" value="new" checked class="mr-3">
-              <span>Create New Bravo Page</span>
-            </label>
-            <label class="flex items-center p-3 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-              <input type="radio" name="destinationType" value="existing" class="mr-3">
-              <span>Add to Existing Bravo Page</span>
-            </label>
-          </div>
-        </div>
-
-        <div id="newPageGroup">
-          <label class="block text-sm font-medium text-gray-700 mb-2">New Page Name</label>
-          <input type="text" id="newPageName" placeholder="Enter page name..." class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-        </div>
-
-        <div id="existingPageGroup" class="hidden">
-          <label class="block text-sm font-medium text-gray-700 mb-2">Select Existing Page</label>
-          <select id="existingPageSelect" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            <option value="">-- Loading pages... --</option>
-          </select>
-        </div>
-
         <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4" id="migrationPreview">
           <h3 class="font-bold text-yellow-800 mb-2">📋 Migration Preview</h3>
           <div id="previewContent" class="text-sm text-yellow-700">

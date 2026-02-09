@@ -5,7 +5,6 @@
 .gitignore
 
 # Development and testing folders
-AccentToBravo/
 tests/
 test_*.py
 *_test.py
@@ -94,3 +93,7 @@ birthdays.json
 audio_config.json
 model_config.json
 APIKEYS.reg
+
+# Always include AccentToBravo parser in images
+!AccentToBravo/
+!AccentToBravo/**

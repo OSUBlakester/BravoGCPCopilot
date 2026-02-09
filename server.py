@@ -123,6 +123,8 @@ import aiohttp
 import asyncio
 from urllib.parse import urljoin, urlparse
 import uuid
+import io
+import wave
 from pydantic import BaseModel, Field, field_validator, validator, conint # Import field_validator
 from pydantic_core.core_schema import ValidationInfo # For more complex V2 validators if needed
 from typing import List, Optional, Dict, Any, Union, Literal, Annotated
@@ -5526,8 +5528,14 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
         # Save audio to a unique file in the static directory
         filename = f"play_audio_{uuid.uuid4().hex}.wav"
         file_path = os.path.join(static_file_path, filename)
-        with open(file_path, "wb") as f:
-            f.write(audio_bytes)
+        
+        # Write raw audio with WAV header
+        import wave
+        with wave.open(file_path, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)   # 16-bit = 2 bytes
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_bytes)
 
 
         audio_url = f"https://{DOMAIN}/static/{filename}"
@@ -5565,26 +5573,71 @@ async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int) 
     elif pyttsx3_wpm_rate > 230: speaking_rate_google = 1.15
 
     logging.info(f"Using Google Cloud TTS. Voice: {voice_name}, Rate: {speaking_rate_google}")
-    synthesis_input = google_tts.SynthesisInput(text=text)
-    voice_params = google_tts.VoiceSelectionParams(language_code="en-US", name=voice_name)
-    
-    sample_rate_hertz = 24000
-    if "Standard" in voice_name:
-        sample_rate_hertz = 16000
 
-    audio_config = google_tts.AudioConfig(
-        audio_encoding=google_tts.AudioEncoding.LINEAR16,
-        speaking_rate=speaking_rate_google,
-        sample_rate_hertz=sample_rate_hertz
-    )
-    
-    # This call should be wrapped to run in a thread to not block the event loop
-    response = await asyncio.to_thread(
-        tts_client.synthesize_speech,
-        input=synthesis_input, voice=voice_params, audio_config=audio_config
-    )
+    # Normalize smart quotes for SSML compatibility
+    if text:
+        text = text.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
 
-    return response.audio_content, sample_rate_hertz
+    async def _synthesize_segment(segment_text: str) -> tuple[bytes, int]:
+        # Use SSML when break markers are present
+        if "<break" in segment_text or "<speak" in segment_text:
+            ssml = segment_text.strip()
+            if not ssml.startswith("<speak"):
+                ssml = f"<speak>{ssml}</speak>"
+            synthesis_input = google_tts.SynthesisInput(ssml=ssml)
+        else:
+            synthesis_input = google_tts.SynthesisInput(text=segment_text)
+
+        voice_params = google_tts.VoiceSelectionParams(language_code="en-US", name=voice_name)
+
+        sample_rate_hertz = 24000
+        if "Standard" in voice_name:
+            sample_rate_hertz = 16000
+
+        audio_config = google_tts.AudioConfig(
+            audio_encoding=google_tts.AudioEncoding.LINEAR16,
+            speaking_rate=speaking_rate_google,
+            sample_rate_hertz=sample_rate_hertz
+        )
+
+        response = await asyncio.to_thread(
+            tts_client.synthesize_speech,
+            input=synthesis_input, voice=voice_params, audio_config=audio_config
+        )
+
+        return response.audio_content, sample_rate_hertz
+
+    # Split on [PAUSE] to mimic joke setup/punchline behavior
+    if "[PAUSE]" in text:
+        parts = [p.strip() for p in text.split("[PAUSE]") if p.strip()]
+        if not parts:
+            return b"", 24000
+
+        audio_chunks = []
+        sample_rate = None
+        pause_seconds = 1.0
+
+        for idx, part in enumerate(parts):
+            audio_part, part_rate = await _synthesize_segment(part)
+            if sample_rate is None:
+                sample_rate = part_rate
+            elif part_rate != sample_rate:
+                logging.warning(f"Sample rate mismatch in split TTS: {part_rate} vs {sample_rate}")
+
+            audio_chunks.append(audio_part)
+
+            if idx < len(parts) - 1:
+                # Generate proper silence (not null bytes) - use struct.pack for signed 16-bit samples
+                import struct
+                num_samples = int(sample_rate * pause_seconds)
+                silence_bytes = struct.pack(f'<{num_samples}h', *([0] * num_samples))
+                audio_chunks.append(silence_bytes)
+
+        return b"".join(audio_chunks), sample_rate
+
+    # Single segment
+    return await _synthesize_segment(text)
+    
 
 
 
@@ -16292,6 +16345,135 @@ except ImportError as e:
 migration_sessions = {}  # Format: {session_id: {parsed_data, mapper, timestamp}}
 
 
+def load_existing_json(json_data: Dict) -> Dict:
+    """
+    Load and validate pre-parsed JSON data from extract_mti_to_json.py
+    
+    Expects format:
+    {
+        "file": "filename.mti",
+        "extraction_date": "YYYY-MM-DD",
+        "total_pages": N,
+        "total_buttons": N,
+        "pages": {
+            "page_id": {
+                "page_id": "...",
+                "inferred_name": "...",
+                "button_count": N,
+                "buttons": [...]
+            }
+        }
+    }
+    """
+    required_fields = ["file", "extraction_date", "total_pages", "total_buttons", "pages"]
+    for field in required_fields:
+        if field not in json_data:
+            raise ValueError(f"Missing required field: {field}")
+    
+    if not isinstance(json_data["pages"], dict):
+        raise ValueError("'pages' must be a dictionary")
+    
+    # Validate pages structure
+    for page_id, page_data in json_data["pages"].items():
+        if not isinstance(page_data, dict):
+            raise ValueError(f"Page {page_id} data must be a dictionary")
+        if "buttons" not in page_data:
+            raise ValueError(f"Page {page_id} missing 'buttons' field")
+        if not isinstance(page_data["buttons"], list):
+            raise ValueError(f"Page {page_id} buttons must be a list")
+    
+    return json_data
+
+
+def _sanitize_migration_text(value: Optional[str]) -> Optional[str]:
+    """Remove control characters but preserve Accent special markers."""
+    if not value or not isinstance(value, str):
+        return value
+    
+    # Don't strip if no control characters (preserve special markers like «WAIT-ANY-KEY»)
+    if not any(ord(ch) < 32 for ch in value):
+        return value.strip()
+
+    # Strip control characters but keep printable text
+    parts = []
+    current = []
+    for ch in value:
+        if ord(ch) < 32:  # Control character
+            if current:
+                parts.append(''.join(current))
+                current = []
+        else:
+            current.append(ch)
+
+    if current:
+        parts.append(''.join(current))
+
+    # Return first non-empty part
+    for part in parts:
+        stripped = part.strip()
+        if stripped:
+            return stripped
+
+    return value.strip()
+
+
+def _sanitize_migration_button(button: Dict) -> Dict:
+    """Sanitize button text and handle Accent special markers."""
+    speech = _sanitize_migration_text(button.get("speech"))
+    name = _sanitize_migration_text(button.get("name"))
+    
+    # Handle Accent «PROMPT-MARKER» - text after it is the button label
+    # (This is legacy format - new extraction already handles this)
+    if speech and "«PROMPT-MARKER»" in speech:
+        parts = speech.split("«PROMPT-MARKER»")
+        if len(parts) == 2:
+            actual_speech = parts[0].strip()
+            actual_name = parts[1].strip()
+            
+            # Normalize pause markers to [PAUSE] token
+            if "«WAIT-ANY-KEY»" in actual_speech:
+                actual_speech = actual_speech.replace("«WAIT-ANY-KEY»", "[PAUSE]")
+            
+            button["speech"] = actual_speech
+            button["name"] = actual_name
+            # Preserve other button properties including functions
+            return button
+    
+    # Standard sanitization
+    if name is not None:
+        button["name"] = name
+    if speech is not None:
+        # Normalize Accent pause markers
+        if "«WAIT-ANY-KEY»" in speech:
+            speech = speech.replace("«WAIT-ANY-KEY»", "[PAUSE]")
+        button["speech"] = speech
+
+    # Fix navigation buttons with short labels but long speech
+    if name and speech:
+        name_lower = name.strip().lower()
+        if name_lower in {"go back", "back", "home", "go home", "previous"}:
+            if len(speech) > 20 and speech.strip().lower() != name_lower:
+                button["speech"] = name
+
+    # Preserve all other button properties including functions, navigation_target, etc.
+    return button
+
+
+def _split_merged_buttons(page_data: Dict) -> None:
+    """
+    Post-process buttons that have multiple button data merged together.
+    
+    Some MTI pages pack multiple button data into a single record, separated by
+    CRLF and null bytes. This function detects and splits them.
+    
+    NOTE: This function is disabled because it was causing data corruption.
+    The new extract_mti_to_json.py already properly handles all button parsing.
+    """
+    # This function is intentionally disabled - the MTI parsing is already correct
+    # from extract_mti_to_json.py. Keeping this as a stub for compatibility.
+    pass
+
+
 @app.post("/api/migration/upload-mti")
 async def upload_mti_file(
     file: UploadFile = File(...),
@@ -16319,9 +16501,57 @@ async def upload_mti_file(
             tmp_path = tmp_file.name
         
         try:
-            # Parse the MTI file
-            parser = AccentMTIParser()
-            parsed_data = parser.parse_file(tmp_path)
+            # Parse the MTI file using the validated extraction logic
+            # (directly load extract_mti_to_json.py to avoid subprocess/path issues)
+            import importlib.util
+            import os
+
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            extractor_candidates = [
+                os.path.join(script_dir, "extract_mti_to_json.py"),
+                os.path.join(os.getcwd(), "extract_mti_to_json.py"),
+                "/workspace/extract_mti_to_json.py",
+                "/app/extract_mti_to_json.py",
+            ]
+            extractor_path = next((p for p in extractor_candidates if os.path.exists(p)), None)
+
+            if not extractor_path:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        "Failed to parse MTI file: extractor not found. "
+                        f"Checked: {', '.join(extractor_candidates)}"
+                    )
+                )
+
+            spec = importlib.util.spec_from_file_location("extract_mti_to_json", extractor_path)
+            if spec is None or spec.loader is None:
+                raise HTTPException(status_code=500, detail="Failed to load MTI extractor")
+
+            extractor = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(extractor)
+
+            parsed_data = extractor.extract_mti_file(tmp_path)
+            if not parsed_data:
+                raise HTTPException(status_code=500, detail="Failed to parse MTI file: extractor returned no data")
+
+            # Sanitize button text in parsed data
+            for page_id, page_data in parsed_data.get("pages", {}).items():
+                for btn in page_data.get("buttons", []):
+                    _sanitize_migration_button(btn)
+                    # Log all HOME icon buttons to debug
+                    if btn.get("icon") == "HOME":
+                        logging.warning(
+                            "🏠 HOME ICON BUTTON: page=%s row=%s col=%s name='%s' speech='%s' functions=%s nav_type=%s nav_target=%s",
+                            page_id,
+                            btn.get("row"),
+                            btn.get("col"),
+                            btn.get("name"),
+                            btn.get("speech"),
+                            btn.get("functions"),
+                            btn.get("navigation_type"),
+                            btn.get("navigation_target"),
+                        )
             
             # Add metadata for compatibility
             parsed_data['file'] = file.filename
@@ -16335,6 +16565,13 @@ async def upload_mti_file(
                 page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
                 for page_id, page_data in parsed_data["pages"].items()
             }
+            # Override: Home page (0400 in Accent) should map to "home"
+            if '0400' in page_name_map:
+                page_name_map['0400'] = 'home'
+            
+            # Override: Home page (0400 in Accent) should map to "home"
+            if '0400' in page_name_map:
+                page_name_map['0400'] = 'home'
             
             # Store in session (with timestamp for cleanup)
             migration_sessions[session_id] = {
@@ -16396,6 +16633,15 @@ async def upload_json_data(
     try:
         # Validate and load the JSON data
         parsed_data = load_existing_json(json_data)
+
+        # Sanitize button text in parsed data
+        for page_id, page_data in parsed_data.get("pages", {}).items():
+            # First, split any merged buttons in this page
+            _split_merged_buttons(page_data)
+            
+            # Then sanitize the (now properly split) buttons
+            for btn in page_data.get("buttons", []):
+                _sanitize_migration_button(btn)
         
         # Create session ID
         session_id = str(uuid.uuid4())
@@ -16405,6 +16651,9 @@ async def upload_json_data(
             page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
             for page_id, page_data in parsed_data["pages"].items()
         }
+        # Override: Home page (0400 in Accent) should map to "home"
+        if '0400' in page_name_map:
+            page_name_map['0400'] = 'home'
         
         # Store in session
         migration_sessions[session_id] = {
@@ -16414,6 +16663,76 @@ async def upload_json_data(
             "account_id": account_id,
             "aac_user_id": aac_user_id
         }
+        
+        return JSONResponse(content={
+            "session_id": session_id,
+            "summary": {
+                "file": parsed_data["file"],
+                "total_pages": parsed_data["total_pages"],
+                "total_buttons": parsed_data["total_buttons"],
+                "extraction_date": parsed_data["extraction_date"]
+            }
+        })
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error loading JSON data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to load JSON data: {str(e)}")
+
+
+@app.post("/api/migration/upload-json-test")
+async def upload_json_data_test(
+    json_data: Dict = Body(...)
+):
+    """
+    TEST ENDPOINT - Upload pre-parsed JSON data without authentication
+    
+    This is for local testing only. Use the /api/migration/upload-json endpoint
+    for production with proper authentication.
+    """
+    if not MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="Migration functionality not available")
+    
+    # Use test account/user IDs for local testing
+    account_id = "test-account"
+    aac_user_id = "test-user"
+    
+    try:
+        # Validate and load the JSON data
+        parsed_data = load_existing_json(json_data)
+
+        # Sanitize button text in parsed_data
+        # NOTE: Do NOT call _split_merged_buttons here because the JSON is already properly parsed
+        # _split_merged_buttons is only needed for raw MTI parsing output
+        for page_id, page_data in parsed_data.get("pages", {}).items():
+            # Sanitize the buttons
+            for btn in page_data.get("buttons", []):
+                _sanitize_migration_button(btn)
+        
+        # Create session ID
+        session_id = str(uuid.uuid4())
+        
+        # Build page name mapping: Accent page ID -> inferred name
+        page_name_map = {
+            page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
+            for page_id, page_data in parsed_data["pages"].items()
+        }
+        # Override: Home page (0400 in Accent) should map to "home"
+        if '0400' in page_name_map:
+            page_name_map['0400'] = 'home'
+        
+        # Store in session
+        migration_sessions[session_id] = {
+            "parsed_data": parsed_data,
+            "mapper": create_mapper(page_name_map, parsed_data["pages"]),
+            "timestamp": dt.now(timezone.utc),
+            "account_id": account_id,
+            "aac_user_id": aac_user_id
+        }
+        
+        logging.info(f"[TEST] Created migration session {session_id} for test account")
+        logging.info(f"[TEST] Session contains {len(parsed_data['pages'])} pages, {parsed_data['total_buttons']} buttons")
         
         return JSONResponse(content={
             "session_id": session_id,
@@ -16460,6 +16779,12 @@ async def get_migration_pages(
         raise HTTPException(status_code=403, detail="Not authorized to access this migration session")
     
     logging.info(f"Returning session data with {len(session['parsed_data']['pages'])} pages")
+
+    # Sanitize button text for display (strip control chars)
+    for page_data in session["parsed_data"]["pages"].values():
+        for btn in page_data.get("buttons", []):
+            _sanitize_migration_button(btn)
+    
     return JSONResponse(content=session["parsed_data"])
 
 
@@ -16489,8 +16814,13 @@ async def import_buttons(
     
     # Extract request parameters
     session_id = request_data.get("session_id")
+    print(f"🔍 IMPORT_BUTTONS CALLED with request_data keys: {request_data.keys()}", flush=True)
+    print(f"🔍 Full request_data: {request_data}", flush=True)
+    
+    session_id = request_data.get("session_id")
     accent_page_id = request_data.get("accent_page_id")
     selected_indices = request_data.get("selected_button_indices", [])
+    print(f"🔍 IMPORT: session_id={session_id}, page_id={accent_page_id}, selected_indices={selected_indices}", flush=True)
     destination_type = request_data.get("destination_type", "new")
     destination_page_name = request_data.get("destination_page_name")
     create_nav_pages = request_data.get("create_navigation_pages", False)
@@ -16523,7 +16853,12 @@ async def import_buttons(
         sorted_buttons = sorted(accent_page["buttons"], key=lambda b: (b["row"], b["col"]))
         
         # Get selected buttons
-        selected_buttons = [sorted_buttons[i] for i in selected_indices if i < len(sorted_buttons)]
+        selected_buttons = [_sanitize_migration_button(sorted_buttons[i]) for i in selected_indices if i < len(sorted_buttons)]
+        
+        # DEBUG: Print all selected buttons
+        print(f"🔍 IMPORT: Selected {len(selected_buttons)} buttons from indices {selected_indices}", flush=True)
+        for idx, btn in enumerate(selected_buttons):
+            print(f"🔍 IMPORT Button {idx}: name='{btn.get('name')}' functions={btn.get('functions')} row={btn.get('row')} col={btn.get('col')}", flush=True)
         
         if not selected_buttons:
             raise HTTPException(status_code=400, detail="No valid buttons selected")
@@ -16567,6 +16902,12 @@ async def import_buttons(
             }
             
             for accent_button in selected_buttons:
+                # Skip navigation conflict check if button has GOTO-HOME function
+                functions = accent_button.get("functions") or []
+                if 'GOTO-HOME' in functions:
+                    # GOTO-HOME will be mapped to 'home', no conflict needed
+                    continue
+                
                 if accent_button.get("navigation_target"):
                     # The navigation_target is an Accent page ID (e.g., "0201")
                     target_page_id = accent_button["navigation_target"]
@@ -16658,6 +16999,10 @@ async def import_buttons(
             
             # Map and add buttons
             for accent_button in selected_buttons:
+                # Debug: Print button data before mapping
+                if "Home" in accent_button.get("name", ""):
+                    print(f"🔍 SERVER (new): Home button - {repr(accent_button)}", flush=True)
+                
                 # Apply name change if there's a rename resolution
                 if conflict_resolutions and accent_button.get("name") in button_name_changes:
                     accent_button = accent_button.copy()
@@ -16695,6 +17040,10 @@ async def import_buttons(
             
             # Map and add buttons
             for accent_button in selected_buttons:
+                # Debug: Print button data before mapping
+                if "Home" in accent_button.get("name", ""):
+                    print(f"🔍 SERVER (existing): Home button - {repr(accent_button)}", flush=True)
+                
                 # Apply name change if there's a rename resolution
                 if conflict_resolutions and accent_button.get("name") in button_name_changes:
                     accent_button = accent_button.copy()
@@ -16721,6 +17070,9 @@ async def import_buttons(
         
         # Get unmapped icons for reporting
         unmapped_icons = mapper.get_unmapped_icons()
+        print(f"🔍 FINAL IMPORT SUCCESS: {len(selected_buttons)} buttons imported to page '{destination_page_name}'", flush=True)
+        for btn in selected_buttons:
+            print(f"🔍 FINAL Button: name='{btn.get('name')}' functions={btn.get('functions')}", flush=True)
         
         return JSONResponse(content={
             "success": True,

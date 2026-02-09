@@ -2184,7 +2184,9 @@ async function processAnnouncementQueue() {
             }
 
             if (recordHistory && announcementType === "personal") {
-                await recordChatHistory(textToAnnounce, null);
+                // Clean [PAUSE] markers from text before recording to history
+                const cleanText = textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
+                await recordChatHistory(cleanText, null);
             }
 
         } catch (error) {

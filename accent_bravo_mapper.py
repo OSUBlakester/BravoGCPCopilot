@@ -194,6 +194,7 @@ class AccentToBravoMapper:
         # Check for GOTO-HOME function
         functions = accent_button.get("functions") or []
         if 'GOTO-HOME' in functions:
+            logger.warning(f"🏠 MAPPER: GOTO-HOME detected for '{accent_button.get('name')}' → returning 'home'")
             return "home"
         
         # Check for GO-BACK-PAGE function
