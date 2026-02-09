@@ -16553,6 +16553,10 @@ async def upload_mti_file(
                 for page_id, page_data in parsed_data["pages"].items()
             }
             
+            # Override: Home page (0400 in Accent) should map to "home"
+            if '0400' in page_name_map:
+                page_name_map['0400'] = 'home'
+            
             # Store in session (with timestamp for cleanup)
             migration_sessions[session_id] = {
                 "parsed_data": parsed_data,
