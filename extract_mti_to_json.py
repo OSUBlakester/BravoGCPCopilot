@@ -1717,7 +1717,7 @@ def extract_mti_file(mti_file_path):
 
             # Heuristic: Detect GOTO-HOME buttons by icon/speech pattern
             if (button.get('icon') == 'HOME' and
-                button.get('speech') is None and
+                not button.get('speech') and
                 (not button.get('functions') or len(button.get('functions')) == 0)):
                 button['functions'] = ['GOTO-HOME']
                 button['navigation_type'] = 'PERMANENT'
