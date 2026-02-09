@@ -16902,6 +16902,12 @@ async def import_buttons(
             }
             
             for accent_button in selected_buttons:
+                # Skip navigation conflict check if button has GOTO-HOME function
+                functions = accent_button.get("functions") or []
+                if 'GOTO-HOME' in functions:
+                    # GOTO-HOME will be mapped to 'home', no conflict needed
+                    continue
+                
                 if accent_button.get("navigation_target"):
                     # The navigation_target is an Accent page ID (e.g., "0201")
                     target_page_id = accent_button["navigation_target"]
