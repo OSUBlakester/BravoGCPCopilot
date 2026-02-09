@@ -648,6 +648,7 @@ class EditUserDisplayNameRequest(BaseModel):
 
 class DeleteUserRequest(BaseModel):
     aac_user_id: str = Field(..., min_length=1)
+    account_id: Optional[str] = None  # For admin use only
 
 class CopyUserRequest(BaseModel):
     source_aac_user_id: str = Field(..., min_length=1)
@@ -2487,8 +2488,14 @@ async def delete_user_account(
     request_data: DeleteUserRequest,
     token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]
 ):
-    account_id = token_info["account_id"]
     user_email = token_info.get("email", "")
+    
+    # Admin can specify which account to manage
+    if user_email == "admin@talkwithbravo.com" and request_data.account_id:
+        account_id = request_data.account_id
+        logging.info(f"Admin deleting user from account: {account_id}")
+    else:
+        account_id = token_info["account_id"]
     
     # Demo mode restriction (non-breaking for Flutter)
     # Only demoreadonly is restricted, demo@ can make changes for content creation
@@ -16334,7 +16341,6 @@ async def generate_options(
 
 # Import migration utilities
 try:
-    from accent_mti_parser import AccentMTIParser
     from accent_bravo_mapper import create_mapper
     MIGRATION_AVAILABLE = True
 except ImportError as e:
@@ -16505,6 +16511,7 @@ async def upload_mti_file(
             # (directly load extract_mti_to_json.py to avoid subprocess/path issues)
             import importlib.util
             import os
+            import sys
 
             script_dir = os.path.dirname(os.path.abspath(__file__))
             extractor_candidates = [
@@ -16524,7 +16531,12 @@ async def upload_mti_file(
                     )
                 )
 
-            spec = importlib.util.spec_from_file_location("extract_mti_to_json", extractor_path)
+            # Always load a fresh copy to ensure the latest parsing logic is used
+            module_name = "extract_mti_to_json_runtime"
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+
+            spec = importlib.util.spec_from_file_location(module_name, extractor_path)
             if spec is None or spec.loader is None:
                 raise HTTPException(status_code=500, detail="Failed to load MTI extractor")
 
