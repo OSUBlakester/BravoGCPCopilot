@@ -16539,6 +16539,19 @@ async def upload_mti_file(
             for page_id, page_data in parsed_data.get("pages", {}).items():
                 for btn in page_data.get("buttons", []):
                     _sanitize_migration_button(btn)
+                    # Log all HOME icon buttons to debug
+                    if btn.get("icon") == "HOME":
+                        logging.warning(
+                            "🏠 HOME ICON BUTTON: page=%s row=%s col=%s name='%s' speech='%s' functions=%s nav_type=%s nav_target=%s",
+                            page_id,
+                            btn.get("row"),
+                            btn.get("col"),
+                            btn.get("name"),
+                            btn.get("speech"),
+                            btn.get("functions"),
+                            btn.get("navigation_type"),
+                            btn.get("navigation_target"),
+                        )
             
             # Add metadata for compatibility
             parsed_data['file'] = file.filename
@@ -16552,6 +16565,13 @@ async def upload_mti_file(
                 page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
                 for page_id, page_data in parsed_data["pages"].items()
             }
+            # Override: Home page (0400 in Accent) should map to "home"
+            if '0400' in page_name_map:
+                page_name_map['0400'] = 'home'
+            
+            # Override: Home page (0400 in Accent) should map to "home"
+            if '0400' in page_name_map:
+                page_name_map['0400'] = 'home'
             
             # Store in session (with timestamp for cleanup)
             migration_sessions[session_id] = {
@@ -16631,6 +16651,9 @@ async def upload_json_data(
             page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
             for page_id, page_data in parsed_data["pages"].items()
         }
+        # Override: Home page (0400 in Accent) should map to "home"
+        if '0400' in page_name_map:
+            page_name_map['0400'] = 'home'
         
         # Store in session
         migration_sessions[session_id] = {
@@ -16695,6 +16718,9 @@ async def upload_json_data_test(
             page_id: page_data.get("inferred_name", f"Page_{page_id}").lower().replace(' ', '')
             for page_id, page_data in parsed_data["pages"].items()
         }
+        # Override: Home page (0400 in Accent) should map to "home"
+        if '0400' in page_name_map:
+            page_name_map['0400'] = 'home'
         
         # Store in session
         migration_sessions[session_id] = {
@@ -16876,6 +16902,12 @@ async def import_buttons(
             }
             
             for accent_button in selected_buttons:
+                # Skip navigation conflict check if button has GOTO-HOME function
+                functions = accent_button.get("functions") or []
+                if 'GOTO-HOME' in functions:
+                    # GOTO-HOME will be mapped to 'home', no conflict needed
+                    continue
+                
                 if accent_button.get("navigation_target"):
                     # The navigation_target is an Accent page ID (e.g., "0201")
                     target_page_id = accent_button["navigation_target"]
