@@ -651,12 +651,6 @@ function showSuccess(result) {
     const message = `
         <p class="mb-2"><strong>${result.buttons_imported}</strong> buttons successfully migrated to page:</p>
         <p class="font-semibold text-lg">"${result.destination_page}"</p>
-        ${result.unmapped_icons && result.unmapped_icons.length > 0 ? `
-            <p class="mt-4 text-sm text-orange-600">
-                <i class="fas fa-exclamation-triangle mr-1"></i>
-                Note: ${result.unmapped_icons.length} unmapped icons: ${result.unmapped_icons.join(', ')}
-            </p>
-        ` : ''}
     `;
     
     document.getElementById('successMessage').innerHTML = message;

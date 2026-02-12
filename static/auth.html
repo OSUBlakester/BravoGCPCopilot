@@ -1893,15 +1893,24 @@
             }
 
             try {
+                // Check if admin has selected a target account
+                const adminSelectedAccountId = sessionStorage.getItem('adminSelectedAccountId');
+                const requestBody = {
+                    aac_user_id: userId
+                };
+                
+                // If admin, include the target account_id
+                if (adminSelectedAccountId) {
+                    requestBody.account_id = adminSelectedAccountId;
+                }
+                
                 const response = await fetch('/api/account/delete-user', {
                     method: 'DELETE',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${window.currentIdToken}`
                     },
-                    body: JSON.stringify({
-                        aac_user_id: userId
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (response.ok) {

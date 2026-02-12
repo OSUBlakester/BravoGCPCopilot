@@ -14,6 +14,7 @@ import sys
 import zlib
 import struct
 import json
+import re
 from datetime import datetime
 
 
@@ -175,9 +176,14 @@ def extract_mti_file(mti_file_path):
                 print(f"\nDEBUG 0400/0: byte_9={byte_9} (0x{byte_9:02x})")
                 print(f"  Button data: {data[pos:pos+100]}")
             
-            # DEBUG for page 0500 seq 0
+            # DEBUG for page 0400 seq 0
             if page_id_str == '0500' and sequence == 0:
                 print(f"\nDEBUG 0500/0: byte_9={byte_9} (0x{byte_9:02x})")
+                print(f"  Button data: {data[pos:pos+80]}")
+
+            # DEBUG for page 2516 seq 1
+            if page_id_str == '2516' and sequence == 1:
+                print(f"\nDEBUG 2516/1: byte_9={byte_9} (0x{byte_9:02x}), pos={pos}")
                 print(f"  Button data: {data[pos:pos+80]}")
             
             button_name = ""
@@ -208,8 +214,17 @@ def extract_mti_file(mti_file_path):
                     test_name = data[pos+14:pos+14+name_len_13]
                     byte_after = data[pos+14+name_len_13] if pos+14+name_len_13 < len(data) else 0xff
                     if (b'\x00' in test_name or byte_after == 0x00) and 0 < name_len_10 < 500 and name_len_10 > name_len_13:
-                        # Name has embedded null or ends at null, use 2-byte length which should span the full text
-                        name_len = name_len_10
+                        # If the next bytes after the null look like function markers, keep name_len_13
+                        next_after_null = data[pos+14+name_len_13+1:pos+14+name_len_13+3]
+                        looks_like_marker = byte_after == 0x00 and (
+                            next_after_null.startswith(b'\xff') or next_after_null.startswith(b'\xa4') or next_after_null.startswith(b'\xa0')
+                        )
+                        # If the next bytes repeat the name (duplication), keep name_len_13
+                        next_after_null_long = data[pos+14+name_len_13+1:pos+14+name_len_13+1+len(test_name)]
+                        looks_like_duplicate = byte_after == 0x00 and test_name and next_after_null_long.lower().startswith(test_name.lower())
+                        if not looks_like_marker and not looks_like_duplicate:
+                            # Name has embedded null or ends at null, use 2-byte length which should span the full text
+                            name_len = name_len_10
                 
                 if 0 < name_len < 500:
                     # Extract name using the length - don't stop at \r\n since it might be intentional line break
@@ -239,9 +254,9 @@ def extract_mti_file(mti_file_path):
                     # Check for GO-BACK-PAGE pattern: FF 81 05 FE (before icon/functions)
                     button_end = data.find(b'\r\n', pos_cursor)
                     if button_end == -1:
-                        button_end = min(pos_cursor + 50, len(data))
+                        button_end = min(pos_cursor + 120, len(data))
                     else:
-                        button_end = min(button_end, pos_cursor + 50)
+                        button_end = min(button_end, pos_cursor + 120)
                     
                     search_region = data[pos_cursor:button_end]
                     go_back_page_pos = search_region.find(b'\xff\x81\x05\xfe')
@@ -290,9 +305,44 @@ def extract_mti_file(mti_file_path):
                                 navigation_type = 'TEMPORARY'
                                 navigation_target = target_name
                                 functions.append(f'SET-PAGE({target_name})')
+
+                        # Handle PROMPT-MARKER in the search region (speech before, name after)
+                        prompt_marker_pos = search_region.find(b'\xff\x80{\xfe')
+                        has_prompt_marker = prompt_marker_pos != -1
+                        set_page_pos = set_page_perm_pos if set_page_perm_pos != -1 else set_page_temp_pos
+                        if has_prompt_marker:
+                            # Speech is before PROMPT-MARKER; if SET-PAGE appears earlier, stop there
+                            speech_end = prompt_marker_pos
+                            if set_page_pos != -1 and set_page_pos < prompt_marker_pos:
+                                speech_end = set_page_pos
+                            speech_bytes = search_region[:speech_end]
+                            # Remove the SET-PAGE marker if it's at the end of speech_bytes
+                            if set_page_perm_pos != -1 and b'\xff\x80\x8c' in speech_bytes:
+                                marker_pos = speech_bytes.rfind(b'\xff\x80\x8c')
+                                if marker_pos >= 0:
+                                    speech_bytes = speech_bytes[:marker_pos]
+                            elif set_page_temp_pos != -1 and b'\xff\x80\x8d' in speech_bytes:
+                                marker_pos = speech_bytes.rfind(b'\xff\x80\x8d')
+                                if marker_pos >= 0:
+                                    speech_bytes = speech_bytes[:marker_pos]
+                            speech_bytes = speech_bytes.replace(b'\x00', b'').strip()
+                            if speech_bytes:
+                                speech = speech_bytes.decode('ascii', errors='ignore').strip()
+
+                            # Name is after PROMPT-MARKER; if SET-PAGE appears after it, stop there
+                            name_bytes = search_region[prompt_marker_pos + 4:]
+                            if set_page_pos != -1 and set_page_pos > prompt_marker_pos:
+                                name_bytes = search_region[prompt_marker_pos + 4:set_page_pos]
+                            # Remove null bytes and filter control characters (< 0x20, except space)
+                            name_bytes = bytes(b for b in name_bytes if b >= 0x20 or b == 0x09)
+                            name_bytes = name_bytes.strip()
+                            if name_bytes:
+                                name_text = name_bytes.decode('ascii', errors='ignore').strip()
+                                if name_text:
+                                    button_name = name_text
                         
                         # Extract speech if present (between CLEAR-DISPLAY and SET-PAGE or vice versa)
-                        if clear_display_pos != -1 and (set_page_perm_pos != -1 or set_page_temp_pos != -1):
+                        if not speech and clear_display_pos != -1 and (set_page_perm_pos != -1 or set_page_temp_pos != -1):
                             set_page_pos = set_page_perm_pos if set_page_perm_pos != -1 else set_page_temp_pos
                             if clear_display_pos < set_page_pos:
                                 # Speech is between CLEAR-DISPLAY and SET-PAGE
@@ -304,9 +354,18 @@ def extract_mti_file(mti_file_path):
                             else:
                                 # SET-PAGE comes before CLEAR-DISPLAY, no speech
                                 speech = None
+
+                        # If no explicit speech extracted, fall back to button name
+                        # BUT: if PROMPT-MARKER is present, do NOT force speech = button_name
+                        if not speech and button_name and button_name not in ['CLEAR-DISPLAY', 'GO-BACK-PAGE', ''] and not has_prompt_marker:
+                            speech = button_name
                         else:
-                            # Only one pattern present, no inline speech
-                            speech = None
+                            # Only one pattern present (SET-PAGE without CLEAR-DISPLAY or vice versa)
+                            # Use button_name as speech if it exists and is meaningful
+                            if button_name and button_name not in ['CLEAR-DISPLAY', 'GO-BACK-PAGE', ''] and not has_prompt_marker:
+                                speech = button_name
+                            else:
+                                speech = None
                     else:
                         # Normal Format 5 processing (icon + function markers)
                         # Reset pos_cursor to after name for icon extraction
@@ -408,6 +467,9 @@ def extract_mti_file(mti_file_path):
                         
                         # If no speech was found via markers, check for inline speech
                         if not speech and button_name and not has_goto_home:
+                            # Debug for page 2516 seq 5
+                            if page_id_str == '2516' and sequence == 5:
+                                print(f"DEBUG Format 5 normal path seq 5: button_name={repr(button_name)}, speech={repr(speech)}, has_goto_home={has_goto_home}, pos_cursor={hex(pos_cursor)}")
                             # Check if there's text after the icon that could be speech
                             # Look for text up to the next CRLF or 0xA4
                             speech_end = pos_cursor
@@ -544,38 +606,195 @@ def extract_mti_file(mti_file_path):
                 # Example: "Merry Christ-\x00mas" should become "Merry Christ-mas"
                 text_bytes = text_bytes.replace(b'\x00', b'')
                 
-                # Decode and clean the text
-                full_text = text_bytes.decode('ascii', errors='ignore')
-                # Remove trailing control characters and high-ASCII
-                while full_text and (ord(full_text[-1]) < 32 or ord(full_text[-1]) >= 127):
-                    full_text = full_text[:-1]
-                # Remove trailing whitespace
-                full_text = full_text.rstrip()
-                # Remove trailing special characters that appear to be garbage
-                # Pattern 1: Single non-alphanumeric char preceded by space (like " <")
-                while full_text and len(full_text) >= 2:
-                    if full_text[-2] == ' ' and not full_text[-1].isalnum() and full_text[-1] not in ["'", "!", "?", ".", ","]:
-                        full_text = full_text[:-1].rstrip()
-                    else:
-                        break
-                # Pattern 1b: Single lowercase letter preceded by space (like " r") - likely garbage
-                if full_text and len(full_text) >= 2:
-                    if full_text[-2] == ' ' and len(full_text[-1]) == 1 and full_text[-1].islower():
-                        full_text = full_text[:-1].rstrip()
-                # Pattern 1c: Single digit or single uppercase letter preceded by space - likely garbage
-                # This handles cases like "Monday 8" or "Thursday G"
-                if full_text and len(full_text) >= 2:
-                    if full_text[-2] == ' ' and len(full_text[-1]) == 1 and (full_text[-1].isdigit() or full_text[-1].isupper()):
-                        full_text = full_text[:-1].rstrip()
-                # Pattern 2: Trailing punctuation that looks like garbage (single char, not common punctuation)
-                # Remove characters like '}', '<', etc. that appear at the end
-                if full_text and not full_text[-1].isalnum() and full_text[-1] not in ["'", "!", "?", ".", ",", ")", '"']:
-                    # Check if the char before the special char is alphanumeric (suggests it's garbage)
-                    if len(full_text) >= 2 and full_text[-2].isalnum():
-                        full_text = full_text[:-1]
+                # Check for PROMPT-MARKER (FF 80 7B FE) which separates speech from button name
+                # Structure: [speech]«PROMPT-MARKER»[button_name]
+                # Or with navigation: [speech]«SET-PAGE(target)»«PROMPT-MARKER»[button_name]
+                prompt_marker = text_bytes.find(b'\xff\x80{\xfe')
                 
-                button_name = full_text
-                speech = full_text  # Button speaks its own name
+                if prompt_marker != -1:
+                    # PROMPT-MARKER found - extract name from AFTER marker, speech from BEFORE marker
+                    # Debug for buttons with "today"
+                    if b'today' in text_bytes or page_id_str == '0917':
+                        print(f"DEBUG PROMPT-MARKER: page {page_id_str} seq {sequence}")
+                        print(f"  Full text_bytes: {text_bytes.hex()}")
+                        print(f"  prompt_marker pos: {prompt_marker}")
+                    
+                    # Button name is everything after PROMPT-MARKER (strip control chars and whitespace)
+                    name_bytes = text_bytes[prompt_marker + 4:]  # Skip the 4-byte marker
+                    # Remove control characters
+                    name_clean = []
+                    for byte_val in name_bytes:
+                        if byte_val >= 0x20:
+                            name_clean.append(byte_val)
+                        else:
+                            break  # Stop at first control char
+                    button_name = bytes(name_clean).decode('ascii', errors='ignore').strip()
+                    
+                    # Check for navigation markers in the content before PROMPT-MARKER
+                    speech_bytes = text_bytes[:prompt_marker]
+                    # Extract navigation if present
+                    set_page_perm_marker = speech_bytes.find(b'\xff\x80\x8c')
+                    set_page_temp_marker = speech_bytes.find(b'\xff\x80\x8d')
+                    nav_marker_pos = -1
+                    if set_page_perm_marker != -1 and set_page_temp_marker != -1:
+                        nav_marker_pos = min(set_page_perm_marker, set_page_temp_marker)
+                        navigation_type = 'PERMANENT' if set_page_perm_marker < set_page_temp_marker else 'TEMPORARY'
+                    elif set_page_perm_marker != -1:
+                        nav_marker_pos = set_page_perm_marker
+                        navigation_type = 'PERMANENT'
+                    elif set_page_temp_marker != -1:
+                        nav_marker_pos = set_page_temp_marker
+                        navigation_type = 'TEMPORARY'
+                    
+                    if nav_marker_pos != -1:
+                        # Extract navigation target between marker and FE terminator
+                        target_start = nav_marker_pos + 3  # Skip FF 80 8C/8D
+                        target_end = speech_bytes.find(b'\xfe', target_start)
+                        if target_end != -1:
+                            navigation_target = speech_bytes[target_start:target_end].decode('ascii', errors='ignore')
+                        # Speech is everything before navigation marker
+                        speech_bytes = speech_bytes[:nav_marker_pos]
+                    
+                    # Clean and decode speech
+                    speech_text = speech_bytes.decode('ascii', errors='ignore').strip()
+                    # Only set speech if there's actual text (not empty or just whitespace)
+                    if speech_text:
+                        speech = speech_text
+                    else:
+                        speech = None
+                    
+                    # Set text_bytes to just button_name for downstream processing
+                    text_bytes = button_name.encode('ascii', errors='ignore')
+                
+                # Check for navigation function markers and truncate text before them
+                # SET-PAGE markers: FF 80 8C (PERMANENT) or FF 80 8D (TEMPORARY)
+                # These appear in Format 2 buttons with navigation
+                set_page_perm_marker = text_bytes.find(b'\xff\x80\x8c')
+                set_page_temp_marker = text_bytes.find(b'\xff\x80\x8d')
+                set_page_marker = -1
+                if set_page_perm_marker != -1 and set_page_temp_marker != -1:
+                    set_page_marker = min(set_page_perm_marker, set_page_temp_marker)
+                elif set_page_perm_marker != -1:
+                    set_page_marker = set_page_perm_marker
+                elif set_page_temp_marker != -1:
+                    set_page_marker = set_page_temp_marker
+                
+                # If navigation marker found, keep only text before it (strip trailing space)
+                # BUT: Only if PROMPT-MARKER doesn't come after it!
+                # First check if PROMPT-MARKER exists in text_bytes (before any truncation)
+                has_prompt_marker = b'\xff\x80{\xfe' in text_bytes
+                
+                if set_page_marker != -1 and not has_prompt_marker:
+                    # Only truncate if there's no PROMPT-MARKER after the SET-PAGE
+                    text_bytes = text_bytes[:set_page_marker].rstrip()
+                
+                # Handle PROMPT-MARKER pattern in Format 2 (similar to Formats 5 and 3)
+                # PROMPT-MARKER: FF 80 7B FE - speech before, name after
+                prompt_marker_pos = text_bytes.find(b'\xff\x80{\xfe')
+                
+                
+                if prompt_marker_pos != -1:
+                    # Speech is everything before PROMPT-MARKER (but after any SET-PAGE)
+                    # First check if SET-PAGE appears before PROMPT-MARKER
+                    set_page_in_speech_perm = text_bytes.find(b'\xff\x80\x8c')
+                    set_page_in_speech_temp = text_bytes.find(b'\xff\x80\x8d')
+                    set_page_in_speech = -1
+                    if set_page_in_speech_perm != -1 and set_page_in_speech_temp != -1:
+                        set_page_in_speech = min(set_page_in_speech_perm, set_page_in_speech_temp)
+                    elif set_page_in_speech_perm != -1:
+                        set_page_in_speech = set_page_in_speech_perm
+                    elif set_page_in_speech_temp != -1:
+                        set_page_in_speech = set_page_in_speech_temp
+                    
+                    # If SET-PAGE appears before PROMPT-MARKER, extract speech before SET-PAGE
+                    if set_page_in_speech != -1 and set_page_in_speech < prompt_marker_pos:
+                        speech_bytes = text_bytes[:set_page_in_speech].strip()
+                    else:
+                        # Otherwise, speech is everything before PROMPT-MARKER
+                        speech_bytes = text_bytes[:prompt_marker_pos].strip()
+                    
+                    if speech_bytes:
+                        speech = speech_bytes.decode('ascii', errors='ignore').strip()
+                    
+                    # Name is everything after PROMPT-MARKER, up to null terminator or control char
+                    name_start = prompt_marker_pos + 4  # Skip the 4-byte PROMPT-MARKER
+                    # Find end of name (null terminator or control char)
+                    name_end = name_start
+                    while name_end < len(text_bytes) and text_bytes[name_end] >= 0x20:
+                        name_end += 1
+                    name_bytes = text_bytes[name_start:name_end]
+                    # Filter out control characters from name
+                    name_bytes = bytes(b for b in name_bytes if b >= 0x20 or b == 0x09)
+                    if name_bytes:
+                        button_name = name_bytes.decode('ascii', errors='ignore').strip()
+                        full_text = button_name
+                    else:
+                        # If no name after marker, use the speech as button name
+                        full_text = button_name
+                
+                # Only do duplicate checking and further text cleaning if PROMPT-MARKER wasn't found
+                # (since PROMPT-MARKER handling already set button_name and speech)
+                if prompt_marker_pos == -1:
+                    # Pattern 5: Check for exact word duplication AFTER navigation marker removal
+                    # (e.g., "peoplepeople" after marker stripped)
+                    if icon_name is None:  # Only if we haven't extracted an icon yet
+                        decoded = text_bytes.decode('ascii', errors='ignore')
+                        # Check if first half equals second half (exact duplication)
+                        if len(decoded) % 2 == 0 and len(decoded) >= 6:
+                            half_len = len(decoded) // 2
+                            first_half = decoded[:half_len]
+                            second_half = decoded[half_len:]
+                            if first_half == second_half:
+                                # Duplicated word found, keep only first half
+                                text_bytes = first_half.encode('ascii', errors='ignore')
+                    
+                    # Decode and clean the text
+                    full_text = text_bytes.decode('ascii', errors='ignore')
+                    # Remove trailing control characters and high-ASCII
+                    while full_text and (ord(full_text[-1]) < 32 or ord(full_text[-1]) >= 127):
+                        full_text = full_text[:-1]
+                    # Remove trailing whitespace
+                    full_text = full_text.rstrip()
+                    # Remove trailing special characters that appear to be garbage
+                    # Pattern 1: Single non-alphanumeric char preceded by space (like " <")
+                    while full_text and len(full_text) >= 2:
+                        if full_text[-2] == ' ' and not full_text[-1].isalnum() and full_text[-1] not in ["'", "!", "?", ".", ","]:
+                            full_text = full_text[:-1].rstrip()
+                        else:
+                            break
+                    # Pattern 1b: Single lowercase letter preceded by space (like " r") - likely garbage
+                    if full_text and len(full_text) >= 2:
+                        if full_text[-2] == ' ' and len(full_text[-1]) == 1 and full_text[-1].islower():
+                            full_text = full_text[:-1].rstrip()
+                    # Pattern 1c: Single digit or single uppercase letter preceded by space - likely garbage
+                    # This handles cases like "Monday 8" or "Thursday G"
+                    if full_text and len(full_text) >= 2:
+                        if full_text[-2] == ' ' and len(full_text[-1]) == 1 and (full_text[-1].isdigit() or full_text[-1].isupper()):
+                            full_text = full_text[:-1].rstrip()
+                    # Pattern 2: Trailing punctuation that looks like garbage (single char, not common punctuation)
+                    # Remove characters like '}', '<', etc. that appear at the end
+                    if full_text and not full_text[-1].isalnum() and full_text[-1] not in ["'", "!", "?", ".", ",", ")", '"']:
+                        # Check if the char before the special char is alphanumeric (suggests it's garbage)
+                        if len(full_text) >= 2 and full_text[-2].isalnum():
+                            full_text = full_text[:-1]
+                    
+                    # Pattern 3: Remove embedded control characters and anything after them
+                    # This handles cases like "Jokes \x05SUN1B" where icon marker appears mid-string
+                    control_char_pos = -1
+                    for i, ch in enumerate(full_text):
+                        if ord(ch) < 0x20:
+                            control_char_pos = i
+                            break
+                    if control_char_pos != -1:
+                        # Found control character, truncate at that position and strip trailing space
+                        full_text = full_text[:control_char_pos].rstrip()
+                    
+                    button_name = full_text
+                    speech = full_text  # Button speaks its own name
+                else:
+                    # PROMPT-MARKER was found, so button_name and speech already set above
+                    pass
+
                 
                 format_stats['Format 2 - Null-terminated'] += 1
                 
@@ -788,6 +1007,34 @@ def extract_mti_file(mti_file_path):
                         if page_end > page_start:
                             navigation_target = search_region[page_start:page_end].decode('ascii', errors='ignore')
                             functions.append(f'SET-PAGE({navigation_target})')
+
+                    # Handle PROMPT-MARKER in search region (speech before, name after)
+                    prompt_marker_pos = search_region.find(b'\xff\x80{\xfe')
+                    if prompt_marker_pos != -1:
+                        speech_bytes = search_region[:prompt_marker_pos]
+                        # Remove SET-PAGE markers from speech if they appear before PROMPT-MARKER
+                        if b'\xff\x80\x8c' in speech_bytes:
+                            marker_pos = speech_bytes.rfind(b'\xff\x80\x8c')
+                            if marker_pos >= 0:
+                                speech_bytes = speech_bytes[:marker_pos]
+                        elif b'\xff\x80\x8d' in speech_bytes:
+                            marker_pos = speech_bytes.rfind(b'\xff\x80\x8d')
+                            if marker_pos >= 0:
+                                speech_bytes = speech_bytes[:marker_pos]
+                        speech_bytes = speech_bytes.replace(b'\x00', b'').strip()
+                        if speech_bytes:
+                            speech = speech_bytes.decode('ascii', errors='ignore').strip()
+
+                        name_bytes = search_region[prompt_marker_pos + 4:]
+                        if 'set_page_pos' in locals() and set_page_pos != -1 and set_page_pos > prompt_marker_pos:
+                            name_bytes = search_region[prompt_marker_pos + 4:set_page_pos]
+                        # Remove null bytes and filter control characters (< 0x20, except space)
+                        name_bytes = bytes(b for b in name_bytes if b >= 0x20 or b == 0x09)
+                        name_bytes = name_bytes.strip()
+                        if name_bytes:
+                            name_text = name_bytes.decode('ascii', errors='ignore').strip()
+                            if name_text:
+                                button_name = name_text
                     
                     # Check for INSERT-DATE and SPEAK-DATE
                     if insert_date_pos != -1:
@@ -801,12 +1048,15 @@ def extract_mti_file(mti_file_path):
                     if speak_time_pos != -1:
                         functions.append('SPEAK-TIME')
                     
-                    # If navigation commands exist but no speech extracted, use button name
-                    if not speech and navigation_type:
-                        speech = button_name
-                    # If no CLEAR DISPLAY and no speech, preserve speech as button name
-                    elif clear_display_pos == -1 and not speech:
-                        speech = button_name
+                    # Navigation-only buttons should only have speech if there was actual text outside function markers
+                    if not speech:
+                        has_prompt_marker = b'\xff\x80{\xfe' in search_region
+                        if button_name and has_prompt_marker:
+                            speech = button_name
+                        elif button_name:
+                            speech = button_name
+                        else:
+                            speech = None
                 
                 else:
                     # Normal Format 3 processing
@@ -878,6 +1128,17 @@ def extract_mti_file(mti_file_path):
                             
                             speech = speech_bytes.decode('ascii', errors='ignore')
                             pos_cursor += speech_len
+                            
+                            # Check if speech looks like icon/metadata junk
+                            # This happens when the binary speech field contains icon names instead of actual speech
+                            if speech:
+                                # If original speech_bytes had control chars (before stripping), it's likely junk
+                                had_control_chars = any(b < 0x20 for b in speech_bytes_orig)
+                                # Also check if it's very short and looks like an icon name (mostly uppercase)
+                                is_short_uppercase = len(speech) <= 15 and sum(1 for c in speech if c.isupper()) > len(speech) * 0.5
+                                
+                                if had_control_chars or is_short_uppercase:
+                                    speech = None
                     
                     # Extract navigation
                     if pos_cursor < len(data):
@@ -895,8 +1156,10 @@ def extract_mti_file(mti_file_path):
                                 pos_cursor += 1
                             navigation_target = data[target_start:pos_cursor].decode('ascii', errors='ignore')
                     
+                    # Don't set speech to button_name for navigation-only buttons
+                    # Speech should only contain text that was explicitly extracted
                     if not speech:
-                        speech = button_name
+                        speech = None
                 
                 format_stats['Format 3 - Offset name'] += 1
                 
@@ -932,6 +1195,7 @@ def extract_mti_file(mti_file_path):
                     pos_cursor = pos + 10 + name_len
                     
                 else:
+                    
                     # Normal Format 1 processing with icon stripping
                     # Try new method first (name at pos+14, length at pos+13)
                     name_len_new = data[pos+13] if pos+13 < len(data) else 0
@@ -984,6 +1248,33 @@ def extract_mti_file(mti_file_path):
                     else:
                         is_valid_new = False
                     
+                    # Try middle method (name at pos+10, length at pos+9)
+                    # This handles buttons where byte_8=56-57 (Voice variant buttons)
+                    name_len_middle = data[pos+9] if pos+9 < len(data) else 0
+                    if 0 < name_len_middle < 100 and pos+10+name_len_middle < len(data):
+                        # Extract name, but stop at \r\n terminator
+                        name_start = pos + 10
+                        name_end = name_start
+                        while name_end < name_start + name_len_middle and name_end < len(data):
+                            if data[name_end:name_end+2] == b'\r\n':
+                                break
+                            name_end += 1
+                        name_bytes_middle = data[name_start:name_end]
+                        
+                        # Remove embedded null bytes
+                        name_bytes_middle = name_bytes_middle.replace(b'\x00', b'')
+                        
+                        # Strip everything from first control character onwards
+                        for i, byte_val in enumerate(name_bytes_middle):
+                            if byte_val < 0x20:
+                                name_bytes_middle = name_bytes_middle[:i]
+                                break
+                        
+                        name_middle = name_bytes_middle.decode('ascii', errors='replace').rstrip()
+                        is_valid_middle = all(32 <= ord(c) < 127 or c == '\n' for c in name_middle) if name_middle else False
+                    else:
+                        is_valid_middle = False
+                    
                     # Try old method (name at pos+10, length=byte_9)
                     if pos+10+byte_9 < len(data):
                         # Extract name, but stop at \r\n terminator
@@ -1034,20 +1325,73 @@ def extract_mti_file(mti_file_path):
                     else:
                         is_valid_old = False
                     
-                    # Choose the valid one
-                    # For Format 1 (byte_9 1-49), prefer old method since byte_9 IS the name length
-                    if is_valid_old:
+                    # Choose the valid one - prefer MIDDLE method if valid (longer name)
+                    # MIDDLE method handles voice variant buttons (byte_7=56-57)
+                    if is_valid_middle:
+                        # Use middle method (name_len at pos+9)
+                        name_len = name_len_middle
+                        button_name = name_middle
+                        pos_cursor = pos + 10 + name_len
+                        
+                        # Extract icon for middle method
+                        if pos_cursor < len(data):
+                            # Check for 0x00 separator first
+                            if data[pos_cursor] == 0:
+                                pos_cursor += 1
+                            
+                            if pos_cursor < len(data):
+                                potential_icon_len = data[pos_cursor]
+                                
+                                # Check if this looks like a length byte (1-30) or ASCII text (>= 32)
+                                if 1 <= potential_icon_len <= 30:
+                                    # Looks like a length byte
+                                    icon_len = potential_icon_len
+                                    pos_cursor += 1
+                                    icon_name = data[pos_cursor:pos_cursor+icon_len].decode('ascii', errors='ignore')
+                                    pos_cursor += icon_len
+                                # If byte is >= 32 (printable ASCII), it's likely the start of speech, not icon
+                                # In this case, don't extract icon here - use button name as fallback later
+                    elif is_valid_old:
+                        # Fallback to old method (name_len at byte_9)
                         name_len = byte_9
                         button_name = name_old
                         if icon_name_old:
                             icon_name = icon_name_old
                         pos_cursor = pos + 10 + name_len
+                        
+                        # Extract icon for old method (same as middle method)
+                        # Even if we already have icon_name from the name field, we need to skip over the icon data
+                        if pos_cursor < len(data):
+                            # Check for 0x00 separator first
+                            if data[pos_cursor] == 0:
+                                pos_cursor += 1
+                            
+                            if pos_cursor < len(data):
+                                potential_icon_len = data[pos_cursor]
+                                
+                                # Check if this looks like a length byte (1-30) or ASCII text (>= 32)
+                                if 1 <= potential_icon_len <= 30:
+                                    # Looks like a length byte
+                                    icon_len = potential_icon_len
+                                    pos_cursor += 1
+                                    icon_data = data[pos_cursor:pos_cursor+icon_len].decode('ascii', errors='ignore')
+                                    if not icon_name:
+                                        icon_name = icon_data
+                                    pos_cursor += icon_len
+                                    
+                                    # Check if next byte is a separator (! or ^) and skip it
+                                    if pos_cursor < len(data) and data[pos_cursor] in [0x21, 0x5e]:  # ! or ^
+                                        pos_cursor += 1
+                                # If byte is >= 32 (printable ASCII), it's likely the start of speech, not icon
+                                # In this case, don't extract icon here - keep existing icon_name or use button name later
+                                        pos_cursor += 1
                     elif is_valid_new:
                         # DEBUG
                         if page_id_str == '0201' and sequence == 32:
                             print(f"DEBUG 0201/32: Using NEW method")
                             print(f"  name_new='{name_new}', name_len_new={name_len_new}")
                         
+                        # Fallback to new method (name_len at pos+13)
                         name_len = name_len_new
                         button_name = name_new
                         if icon_name_new:
@@ -1057,14 +1401,8 @@ def extract_mti_file(mti_file_path):
                         # DEBUG
                         if page_id_str == '0201' and sequence == 32:
                             print(f"DEBUG 0201/32: After name extraction (NEW), pos_cursor={pos_cursor} (pos={pos}, name_len={name_len})")
-                    elif is_valid_old:
-                        name_len = byte_9
-                        button_name = name_old
-                        if icon_name_old:
-                            icon_name = icon_name_old
-                        pos_cursor = pos + 10 + name_len
                     else:
-                        # Neither valid, skip
+                        # None valid, skip
                         format_stats['Complex format'] += 1
                         pos += 1
                         continue
@@ -1076,13 +1414,42 @@ def extract_mti_file(mti_file_path):
                 # Find the end of this button (CRLF terminator) to limit search window
                 button_end = data.find(b'\r\n', pos_cursor)
                 if button_end == -1:
-                    button_end = min(pos_cursor + 50, len(data))
+                    button_end = min(pos_cursor + 120, len(data))  # Increased from 50 to 120 for PROMPT-MARKER support
                 else:
-                    button_end = min(button_end, pos_cursor + 50)
+                    button_end = min(button_end, pos_cursor + 120)  # Increased from 50 to 120
                 
                 # Check for GO-BACK-PAGE pattern: FF 81 05 FE (search only within this button)
                 search_region = data[pos_cursor:button_end]
+                
+                # Check for VOICE-SET-TEMPORARY (FF 81 03 ... FE) and VOICE-CLEAR-TEMPORARY (FF 81 04 FE)
+                # These should be stripped from search_region but tracked in functions
+                voice_set_temp_pos = search_region.find(b'\xff\x81\x03')
+                voice_clear_temp_pos = search_region.find(b'\xff\x81\x04\xfe')
+                
+                # Strip VOICE markers from search region before icon/speech extraction
+                cleaned_search_region = search_region
+                if voice_set_temp_pos != -1:
+                    # Find the end of VOICE-SET-TEMPORARY parameter (FE marker)
+                    param_end = search_region.find(b'\xfe', voice_set_temp_pos + 3)
+                    if param_end != -1:
+                        # Remove the entire VOICE-SET-TEMPORARY function (FF 81 03 ... FE)
+                        cleaned_search_region = cleaned_search_region[:voice_set_temp_pos] + cleaned_search_region[param_end+1:]
+                        functions.append('VOICE-SET-TEMPORARY')
+                
+                if voice_clear_temp_pos != -1:
+                    # Remove VOICE-CLEAR-TEMPORARY marker (4 bytes: FF 81 04 FE)
+                    voice_clear_in_cleaned = cleaned_search_region.find(b'\xff\x81\x04\xfe')
+                    if voice_clear_in_cleaned != -1:
+                        cleaned_search_region = cleaned_search_region[:voice_clear_in_cleaned] + cleaned_search_region[voice_clear_in_cleaned+4:]
+                        functions.append('VOICE-CLEAR-TEMPORARY')
+                
+                # Use cleaned_search_region for all subsequent pattern matching
+                search_region = cleaned_search_region
+                
                 go_back_page_pos = search_region.find(b'\xff\x81\x05\xfe')
+                
+                # Check for GOTO-HOME pattern: FF 80 85 FE
+                goto_home_pos = search_region.find(b'\xff\x80\x85\xfe')
                 
                 # Check for CLEAR DISPLAY pattern: FF 80 3A FE
                 clear_display_pos = search_region.find(b'\xff\x80\x3a\xfe')
@@ -1112,6 +1479,14 @@ def extract_mti_file(mti_file_path):
                     if not button_name:
                         button_name = "GO-BACK-PAGE"
                     speech = None  # GO-BACK-PAGE buttons have no speech
+                elif goto_home_pos != -1:
+                    # Found GOTO-HOME pattern
+                    navigation_target = '0400'
+                    navigation_type = 'PERMANENT'
+                    functions.append('GOTO-HOME')
+                    if not button_name:
+                        button_name = "home"
+                    speech = None  # GOTO-HOME buttons have no speech
                 elif clear_display_pos != -1 or set_page_perm_pos != -1 or set_page_temp_pos != -1:
                     # Found CLEAR DISPLAY and/or SET-PAGE patterns
                     # These can appear in either order
@@ -1184,13 +1559,125 @@ def extract_mti_file(mti_file_path):
                     if speak_time_pos != -1:
                         functions.append('SPEAK-TIME')
                     
-                    # If no CLEAR DISPLAY, preserve speech as button name
+                    # If no CLEAR DISPLAY, check for PROMPT-MARKER or use button name as speech
                     if clear_display_pos == -1 and not speech:
-                        speech = button_name
+                        
+                        # Check if there's a PROMPT-MARKER pattern (speech before, name after)
+                        has_prompt_marker = b'\xff\x80{\xfe' in search_region
+                        if has_prompt_marker:
+                            prompt_pos = search_region.find(b'\xff\x80{\xfe')
+                            original_button_name = button_name
+                            # Speech is everything before PROMPT-MARKER, but stop at SET-PAGE if present
+                            # First, skip the icon if present
+                            speech_start = 0
+                            if len(search_region) > 0 and search_region[0] < 0x20 and search_region[0] > 0:
+                                # First byte might be icon length
+                                icon_len = search_region[0]
+                                if icon_len < 50 and len(search_region) > 1 + icon_len:
+                                    # Skip the icon length byte and the icon name
+                                    speech_start = 1 + icon_len
+                            
+                            set_page_pos = set_page_perm_pos if set_page_perm_pos != -1 else set_page_temp_pos
+                            
+                            if set_page_pos != -1 and set_page_pos < prompt_pos:
+                                # SET-PAGE comes before PROMPT-MARKER
+                                # Speech is everything from speech_start to SET-PAGE marker
+                                speech_bytes = search_region[speech_start:set_page_pos]
+                            else:
+                                # PROMPT-MARKER comes first, extract everything from speech_start to it
+                                speech_bytes = search_region[speech_start:prompt_pos]
+                            
+                            
+                            # Clean up the speech bytes
+                            speech_bytes = speech_bytes.replace(b'\x00', b'').strip()
+                            
+                            if speech_bytes:
+                                speech_text = speech_bytes.decode('ascii', errors='ignore').strip()
+                                if speech_text:
+                                    speech = speech_text
+                            
+                            # Name is after PROMPT-MARKER; stop at first control char
+                            name_start = prompt_pos + 4
+                            name_end = name_start
+                            while name_end < len(search_region) and search_region[name_end] >= 0x20:
+                                name_end += 1
+                            name_bytes = search_region[name_start:name_end]
+                            name_bytes = bytes(b for b in name_bytes if b >= 0x20 or b == 0x09)
+                            if name_bytes:
+                                prompt_name = name_bytes.decode('ascii', errors='ignore').strip()
+                                # Remove trailing single-letter junk
+                                # Case 1: "word h" (space before letter)
+                                if prompt_name and len(prompt_name) >= 2 and prompt_name[-2] == ' ':
+                                    if prompt_name[-1].islower() or prompt_name[-1].isupper():
+                                        prompt_name = prompt_name[:-2].rstrip()
+                                # Case 2: "voiceA" (uppercase letter after lowercase word, no space)
+                                elif prompt_name and len(prompt_name) >= 2 and prompt_name[-1].isupper() and prompt_name[-2].islower():
+                                    prompt_name = prompt_name[:-1]
+                                if prompt_name:
+                                    button_name = prompt_name
+                                    # If icon not set yet, treat original name as icon label
+                                    if original_button_name and not icon_name:
+                                        icon_name = original_button_name
+                        
+                        # If still no speech, fall back to button name
+                        # BUT: if PROMPT-MARKER exists, do not force speech = button_name
+                        if not speech and not has_prompt_marker:
+                            speech = button_name
+
+                
+                elif b'\xff\x80{\xfe' in search_region and go_back_page_pos == -1 and clear_display_pos == -1 and set_page_perm_pos == -1 and set_page_temp_pos == -1:
+                    # PROMPT-MARKER ONLY (no CLEAR-DISPLAY, SET-PAGE, or GO-BACK-PAGE)
+                    # Extract name and speech from PROMPT-MARKER pattern
+                    prompt_pos = search_region.find(b'\xff\x80{\xfe')
+                    original_button_name = button_name
+                    
+                    # Speech is everything before PROMPT-MARKER
+                    speech_bytes = search_region[:prompt_pos].replace(b'\x00', b'').strip()
+                    if speech_bytes:
+                        speech_text = speech_bytes.decode('ascii', errors='ignore').strip()
+                        if speech_text:
+                            speech = speech_text
+                    
+                    # Name is after PROMPT-MARKER; stop at first control char or 0x7F+
+                    name_start = prompt_pos + 4
+                    name_end = name_start
+                    while name_end < len(search_region):
+                        byte_val = search_region[name_end]
+                        # Stop at control character (< 0x20) or extended ASCII (>= 0x7F)
+                        if byte_val < 0x20 or byte_val >= 0x7F:
+                            break
+                        name_end += 1
+                    
+                    name_bytes = search_region[name_start:name_end]
+                    if name_bytes:
+                        prompt_name = name_bytes.decode('ascii', errors='ignore').strip()
+                        # Remove trailing single-letter junk
+                        # Case 1: "word h" (space before letter)
+                        if prompt_name and len(prompt_name) >= 2 and prompt_name[-2] == ' ':
+                            if prompt_name[-1].islower() or prompt_name[-1].isupper():
+                                prompt_name = prompt_name[:-2].rstrip()
+                        # Case 2: "voiceA" (uppercase letter after lowercase word, no space)
+                        elif prompt_name and len(prompt_name) >= 2 and prompt_name[-1].isupper() and prompt_name[-2].islower():
+                            prompt_name = prompt_name[:-1]
+                        if prompt_name:
+                            button_name = prompt_name
+                            # If icon not set yet, treat original name as icon label
+                            if original_button_name and not icon_name:
+                                icon_name = original_button_name
+
                 
                 else:
                     # Extract icon (if present)
                     # If byte is 0 or >= 32 (printable ASCII), it's the start of speech
+                    # Ensure search_region is defined if we haven't entered a CLEAR-DISPLAY/SET-PAGE block
+                    if 'search_region' not in locals():
+                        button_end = data.find(b'\r\n', pos_cursor)
+                        if button_end == -1:
+                            button_end = min(pos_cursor + 120, len(data))
+                        else:
+                            button_end = min(button_end, pos_cursor + 120)
+                        search_region = data[pos_cursor:button_end]
+                    
                     if pos_cursor < len(data):
                         potential_icon_len = data[pos_cursor]
                         if 1 <= potential_icon_len <= 30:
@@ -1255,15 +1742,86 @@ def extract_mti_file(mti_file_path):
                         functions.append('CLEAR-DISPLAY')
                         pos_cursor += 1
                     
-                    # If we processed function markers, skip the old speech extraction
-                    if pos_cursor > marker_start:
-                        # We processed some function markers, don't extract raw speech
-                        if not speech:
-                            speech = None
-                    else:
+                    # Check for A4 7B speech marker within this button (used by control buttons)
+                    if not speech:
+                        a4_speech_pos = search_region.find(b'\xa4\x7b')
+                        if a4_speech_pos != -1:
+                            speech_start = a4_speech_pos + 2
+                            speech_end = speech_start
+                            while speech_end < len(search_region):
+                                byte_val = search_region[speech_end]
+                                if byte_val < 0x20 or byte_val >= 0x80:
+                                    break
+                                speech_end += 1
+                            speech_bytes = search_region[speech_start:speech_end]
+                            speech_text = speech_bytes.decode('ascii', errors='ignore').strip()
+                            if speech_text.endswith('}'):
+                                speech_text = speech_text[:-1].rstrip()
+                            if speech_text:
+                                speech = speech_text
+                    
+                    
+                    # Always check for PROMPT-MARKER pattern, whether we found 0xA4 markers or not
+                    # This handles buttons with PROMPT-MARKER but no 0xA4 function markers
+                    if not speech:
+                        # Check if there's a PROMPT-MARKER pattern in the search region
+                        search_start = marker_start if pos_cursor <= marker_start else marker_start
+                        # Look ahead from current position to find PROMPT-MARKER
+                        search_end = min(pos_cursor + 100, len(data))
+                        search_region_data = data[search_start:search_end]
+                        
+                        
+                        if b'\xff\x80{\xfe' in search_region_data:
+                            # PROMPT-MARKER found - try to extract speech before it
+                            prompt_pos = search_region_data.find(b'\xff\x80{\xfe')
+                            speech_bytes = search_region_data[:prompt_pos]
+                            
+                            # Remove SET-PAGE markers from speech if present
+                            if b'\xff\x80\x8c' in speech_bytes:
+                                marker_pos = speech_bytes.rfind(b'\xff\x80\x8c')
+                                if marker_pos >= 0:
+                                    speech_bytes = speech_bytes[:marker_pos]
+                            elif b'\xff\x80\x8d' in speech_bytes:
+                                marker_pos = speech_bytes.rfind(b'\xff\x80\x8d')
+                                if marker_pos >= 0:
+                                    speech_bytes = speech_bytes[:marker_pos]
+                            
+                            # Extract button name from after PROMPT-MARKER
+                            name_bytes = search_region_data[prompt_pos + 4:]
+                            # Find end of name (null byte or control char)
+                            name_end = 0
+                            for b in name_bytes:
+                                if b < 0x20:
+                                    break
+                                name_end += 1
+                            name_bytes = name_bytes[:name_end]
+                            
+                            speech_bytes = speech_bytes.replace(b'\x00', b'').strip()
+                            if speech_bytes:
+                                speech = speech_bytes.decode('ascii', errors='ignore').strip()
+
+                            
+                            if name_bytes:
+                                button_name = name_bytes.decode('ascii', errors='ignore').strip()
+                    elif pos_cursor == marker_start and not speech:
                         # No function markers, do normal speech extraction
                         # Extract speech - direct ASCII text until CRLF (0x0d 0x0a)
-                        if pos_cursor < len(data):
+                        a4_speech_pos = search_region.find(b'\xa4\x7b')
+                        if a4_speech_pos != -1:
+                            speech_start = a4_speech_pos + 2
+                            speech_end = speech_start
+                            while speech_end < len(search_region):
+                                byte_val = search_region[speech_end]
+                                if byte_val < 0x20 or byte_val >= 0x80:
+                                    break
+                                speech_end += 1
+                            speech_bytes = search_region[speech_start:speech_end]
+                            speech_text = speech_bytes.decode('ascii', errors='ignore').strip()
+                            if speech_text.endswith('}'):
+                                speech_text = speech_text[:-1].rstrip()
+                            if speech_text:
+                                speech = speech_text
+                        if not speech and pos_cursor < len(data):
                             speech_start = pos_cursor
                             while pos_cursor < len(data) - 2:
                                 if data[pos_cursor:pos_cursor+2] == b'\r\n':
@@ -1376,6 +1934,15 @@ def extract_mti_file(mti_file_path):
                         
                             if not speech:
                                 speech = button_name
+                    
+                    # Fallback for icon buttons: if still no speech after all extraction attempts, use button_name
+                    # This handles icon buttons with 0xA4 function markers that don't have explicit speech
+                    # Use a marker value to indicate this is a fallback, not extracted speech
+                    if not speech and button_name:
+                        speech = f"«FALLBACK:{button_name}»"
+                        # DEBUG
+                        if page_id_str == '0001' and sequence == 11:
+                            print(f"DEBUG 0001/11: Set speech = fallback marker for '{button_name}'")
                 
                 format_stats['Format 1 - Standard'] += 1
                 
@@ -1595,6 +2162,85 @@ def extract_mti_file(mti_file_path):
                 pos += 1
                 continue
             
+            # NEW LOGIC: Extract speech and name based on PROMPT-MARKER presence
+            # Rule: Speech = text OUTSIDE of ALL functions/markers
+            #       If PROMPT-MARKER exists: its parameter becomes the button name
+            #       If NO PROMPT-MARKER: the text is BOTH speech and name
+            if speech:
+                speech_str = speech
+                has_prompt_marker = '«PROMPT-MARKER»' in speech_str
+                
+                if has_prompt_marker:
+                    # Extract text outside of functions (before first marker or between markers)
+                    # and the PROMPT-MARKER parameter as name
+                    
+                    # Split by « to identify all markers
+                    parts = speech_str.split('«')
+                    text_outside = []
+                    prompt_param = None
+                    
+                    for i, part in enumerate(parts):
+                        if i == 0:
+                            # First part, before any marker
+                            if part.strip():
+                                text_outside.append(part.strip())
+                        else:
+                            # Part after a « marker
+                            # Format: "FUNCTION(params)»rest" or "FUNCTION»rest"
+                            if '»' in part:
+                                marker_part, rest = part.split('»', 1)
+                                # rest is text after this marker
+                                if rest.strip() and marker_part != 'PROMPT-MARKER':
+                                    # Text after non-PROMPT-MARKER functions is outside
+                                    text_outside.append(rest.strip())
+                                elif marker_part == 'PROMPT-MARKER':
+                                    # PROMPT-MARKER parameter is the rest until next marker/end
+                                    prompt_param = rest.strip()
+                    
+                    # Extract speech as concatenation of outside text
+                    speech = ' '.join(text_outside) if text_outside else None
+                    
+                    # If PROMPT-MARKER parameter exists, use it as name
+                    if prompt_param and prompt_param not in ['', None]:
+                        if not button_name or button_name == '':
+                            button_name = prompt_param
+                    
+                else:
+                    # NO PROMPT-MARKER: text is BOTH speech and name
+                    if not button_name or button_name == '':
+                        button_name = speech
+                    # If name is very short (1-3 chars) but speech is meaningful, use speech as name
+                    # This handles cases where parsing picked up junk in the name field
+                    elif button_name and speech and len(button_name) <= 3 and len(speech) > len(button_name):
+                        button_name = speech
+                    
+                    # Clean speech to remove control characters (stop at first control char)
+                    if speech:
+                        clean_speech = []
+                        for ch in speech:
+                            if ord(ch) < 0x20 and ord(ch) not in [0x09]:  # Stop at control chars except tab
+                                break
+                            clean_speech.append(ch)
+                        speech = ''.join(clean_speech).strip() if clean_speech else None
+                        
+                        # Also update button_name if it came from speech
+                        if button_name and speech and button_name != speech:
+                            # button_name might have the junk too, so clean it the same way
+                            clean_name = []
+                            for ch in button_name:
+                                if ord(ch) < 0x20 and ord(ch) not in [0x09]:
+                                    break
+                                clean_name.append(ch)
+                            button_name = ''.join(clean_name).strip() if clean_name else button_name
+            
+            # Ensure GOTO-HOME buttons have a proper name for display
+            if 'GOTO-HOME' in (functions or []) and (not button_name or button_name == ''):
+                button_name = 'home'
+            
+            # If no icon was extracted, use button name as icon
+            if not icon_name and button_name:
+                icon_name = button_name
+            
             # Create button object
             button = {
                 'page_id': page_id_str,
@@ -1609,10 +2255,27 @@ def extract_mti_file(mti_file_path):
                 'navigation_target': navigation_target
             }
             
+            # DEBUG
+            if page_id_str == '0001' and sequence == 11:
+                print(f"DEBUG 0001/11: Created button with speech='{speech}' (repr: {repr(speech)})")
+            
             # Clean up speech: Replace WAIT-ANY-KEY markers with [PAUSE]
             if button['speech']:
-                # Replace 0x1C control character (WAIT-ANY-KEY marker) with [PAUSE]
-                button['speech'] = button['speech'].replace('\x1c', '[PAUSE]')
+                # Stop speech at CRLF or any control character (except space, tab)
+                # This prevents reading past button boundaries
+                clean_speech = []
+                for ch in button['speech']:
+                    if ord(ch) < 0x20 and ord(ch) not in [0x09]:  # Stop at control chars except tab
+                        break
+                    clean_speech.append(ch)
+                button['speech'] = ''.join(clean_speech).strip() if clean_speech else None
+                
+                if not button['speech']:
+                    # If speech became empty, skip further processing
+                    pass
+                else:
+                    # Replace 0x1C control character (WAIT-ANY-KEY marker) with [PAUSE]
+                    button['speech'] = button['speech'].replace('\x1c', '[PAUSE]')
                 
                 # Detect and remove VOICE-SET-TEMPORARY marker (0x03 followed by voice params)
                 if '\x03' in button['speech']:
@@ -1651,7 +2314,8 @@ def extract_mti_file(mti_file_path):
                 if '{' in button['speech']:
                     parts = button['speech'].split('{', 1)  # Split only on first {
                     speech_before_marker = parts[0].strip()
-                    button['speech'] = speech_before_marker
+                    # Only keep speech if there's actual text before the marker
+                    button['speech'] = speech_before_marker if speech_before_marker else None
                     
                     # If the original name contained the marker, it needs updating
                     if len(parts) > 1 and '{' in button['name']:
@@ -1704,8 +2368,6 @@ def extract_mti_file(mti_file_path):
                 if cleaned_name:
                     button['name'] = cleaned_name
 
-            
-            # If speech only contains the button name and it's a navigation button, clear speech
             # Common navigation button names that should have no speech
             nav_button_names = ['home', 'go back', 'goback', 'back', 'return']
             if speech and button_name:
@@ -1714,14 +2376,42 @@ def extract_mti_file(mti_file_path):
                 # If speech exactly matches name and it's a navigation-like name, clear it
                 if speech_lower == name_lower and name_lower in nav_button_names:
                     button['speech'] = None
+            
+            # Clear speech for navigation buttons only when it appears to be navigation junk
+            # (e.g., speech is the nav target itself, not the button label)
+            if button.get('navigation_type') and button.get('speech'):
+                speech_lower = button['speech'].strip().lower()
+                nav_target = button.get('navigation_target', '').strip().lower()
+                
+                # Clear if speech is contained IN navigation target (like nav target leaked into speech)
+                # But DON'T clear just because speech matches button name
+                if nav_target and (speech_lower in nav_target or nav_target in speech_lower):
+                    button['speech'] = None
+                # Clear if speech is the nav target with "0 " prefix removed
+                elif nav_target.startswith('0 ') and speech_lower == nav_target[2:].strip():
+                    button['speech'] = None
 
-            # Heuristic: Detect GOTO-HOME buttons by icon/speech pattern
+            # Heuristic: Detect GOTO-HOME buttons by icon/speech/label patterns
             if (button.get('icon') == 'HOME' and
                 not button.get('speech') and
                 (not button.get('functions') or len(button.get('functions')) == 0)):
                 button['functions'] = ['GOTO-HOME']
                 button['navigation_type'] = 'PERMANENT'
                 button['navigation_target'] = '0400'
+
+            if not button.get('functions') and not button.get('navigation_type'):
+                name_lower = (button.get('name') or '').strip().lower()
+                icon_lower = (button.get('icon') or '').strip().lower()
+                if name_lower:
+                    is_home_label = name_lower in ['home', 'go home', 'go to home'] or (
+                        'home' in name_lower and 'go' in name_lower
+                    )
+                    has_home_icon = 'home' in icon_lower or 'house' in icon_lower
+                    if is_home_label and has_home_icon:
+                        button['functions'] = ['GOTO-HOME']
+                        button['navigation_type'] = 'PERMANENT'
+                        button['navigation_target'] = '0400'
+                        button['speech'] = None
             
             # Skip buttons with unsupported functions (like DELETE-LAST-SELECTION)
             # These don't have corresponding app functionality
@@ -1741,6 +2431,19 @@ def extract_mti_file(mti_file_path):
                 not button.get('navigation_type') and
                 not button.get('navigation_target')
             )
+            
+            # Clean up button name and speech: remove all control characters (bytes < 0x20 except tab/newline/CR)
+            # This ensures stray control chars don't make it into the final JSON
+            if button.get('name'):
+                cleaned_name = ''.join(c for c in button['name'] if ord(c) >= 0x20 or c in '\t\n\r')
+                button['name'] = cleaned_name.rstrip() if cleaned_name else None
+            
+            if button.get('speech'):
+                # Clean the speech
+                cleaned_speech = ''.join(c for c in button['speech'] if ord(c) >= 0x20 or c in '\t\n\r')
+                button['speech'] = cleaned_speech.rstrip() if cleaned_speech else None
+
+
             
             if not (skip_delete_last_selection or skip_delete_last_selection_icon):
                 # Add to page
@@ -1776,6 +2479,35 @@ def extract_mti_file(mti_file_path):
     
     print(f"Extracted {button_count} buttons from {len(pages)} pages")
     
+    # POST-PROCESSING: Ensure home/home-like buttons have GOTO-HOME function
+    # This catches buttons that might have been parsed but not properly flagged as GOTO-HOME
+    for page_id, page_data in pages.items():
+        for btn in page_data['buttons']:
+            name_lower = (btn.get('name') or '').lower().strip()
+            # Clean up the name for checking - keep spaces and alphanumeric
+            name_clean = ''.join(c if c.isalnum() or c.isspace() else '' for c in name_lower)
+            words = name_clean.split()
+            
+            # Check if this is specifically a "home" or "go to home" button
+            # More precise: "home" alone, or "go to home", or "go home"
+            is_home_button = (
+                'home' in words and len(words) <= 3 and 
+                not any(w in words for w in ['homework', 'homes', 'homemade', 'homeless'])
+            )
+            
+            if is_home_button and (not btn.get('functions') or 'GOTO-HOME' not in btn.get('functions', [])):
+                # This is a home button that doesn't have GOTO-HOME function
+                # Assign it now
+                if not btn.get('functions'):
+                    btn['functions'] = []
+                if 'GOTO-HOME' not in btn['functions']:
+                    btn['functions'] = ['GOTO-HOME']
+                    btn['navigation_type'] = 'PERMANENT'
+                    btn['navigation_target'] = '0400'
+                    # DEBUG: Only print if this looks right (not "homes" or "my home" variations)
+                    if len(words) <= 3:
+                        print(f"[POST] Assigned GOTO-HOME to {page_id} seq={btn['sequence']}: '{btn['name']}'")
+    
     # PHASE 3: Apply metadata overlays to buttons
     print("Phase 3: Applying metadata overlays to buttons...")
     metadata_applied_count = 0
@@ -1808,12 +2540,79 @@ def extract_mti_file(mti_file_path):
         if target_page_id in pages:
             pages[target_page_id]['inferred_name'] = name
             print(f"  Page {target_page_id} → '{name}'")
+
+    # Exclude standard Accent template pages from output
+    # Exclusion patterns: 84, VS, 45, COMPUTER ACCESS, IT, SCENE BLANK, XPVERB, ZZ
+    excluded_pages = []
+    for page_id, page_data in list(pages.items()):
+        inferred_name = (page_data.get('inferred_name') or '').strip()
+        if re.match(r'(?i)^(84|vs|45|computer access|it|scene blank|xpverb|zz)', inferred_name):
+            excluded_pages.append({'page_id': page_id, 'inferred_name': inferred_name})
+            del pages[page_id]
+    if excluded_pages:
+        print(f"\nExcluded {len(excluded_pages)} template pages:")
+        # Group by prefix
+        excluded_84 = [p for p in excluded_pages if re.match(r'(?i)^84', p['inferred_name'])]
+        excluded_vs = [p for p in excluded_pages if re.match(r'(?i)^vs', p['inferred_name'])]
+        excluded_45 = [p for p in excluded_pages if re.match(r'(?i)^45', p['inferred_name'])]
+        excluded_ca = [p for p in excluded_pages if re.match(r'(?i)^computer access', p['inferred_name'])]
+        excluded_it = [p for p in excluded_pages if re.match(r'(?i)^it', p['inferred_name'])]
+        excluded_sb = [p for p in excluded_pages if re.match(r'(?i)^scene blank', p['inferred_name'])]
+        excluded_xp = [p for p in excluded_pages if re.match(r'(?i)^xpverb', p['inferred_name'])]
+        excluded_zz = [p for p in excluded_pages if re.match(r'(?i)^zz', p['inferred_name'])]
+        
+        if excluded_84:
+            print(f"  - Pages starting with '84': {len(excluded_84)}")
+            for p in sorted(excluded_84, key=lambda x: x['inferred_name'])[:10]:
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+            if len(excluded_84) > 10:
+                print(f"    ... and {len(excluded_84) - 10} more")
+        
+        if excluded_vs:
+            print(f"  - Pages starting with 'VS': {len(excluded_vs)}")
+            for p in sorted(excluded_vs, key=lambda x: x['inferred_name'])[:10]:
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+            if len(excluded_vs) > 10:
+                print(f"    ... and {len(excluded_vs) - 10} more")
+        
+        if excluded_45:
+            print(f"  - Pages starting with '45': {len(excluded_45)}")
+            for p in sorted(excluded_45, key=lambda x: x['inferred_name']):
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+        
+        if excluded_ca:
+            print(f"  - Pages starting with 'COMPUTER ACCESS': {len(excluded_ca)}")
+            for p in sorted(excluded_ca, key=lambda x: x['inferred_name']):
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+        
+        if excluded_it:
+            print(f"  - Pages starting with 'IT': {len(excluded_it)}")
+            for p in sorted(excluded_it, key=lambda x: x['inferred_name']):
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+        
+        if excluded_sb:
+            print(f"  - Pages starting with 'SCENE BLANK': {len(excluded_sb)}")
+            for p in sorted(excluded_sb, key=lambda x: x['inferred_name']):
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+        
+        if excluded_xp:
+            print(f"  - Pages starting with 'XPVERB': {len(excluded_xp)}")
+            for p in sorted(excluded_xp, key=lambda x: x['inferred_name']):
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+        
+        if excluded_zz:
+            print(f"  - Pages starting with 'ZZ': {len(excluded_zz)}")
+            for p in sorted(excluded_zz, key=lambda x: x['inferred_name']):
+                print(f"    {p['page_id']}: {p['inferred_name']}")
+        print()
     
     # Process navigation and SET-PAGE functions
     print("Processing navigation targets...")
     
-    # Build page name to ID map
+    # Build page name to ID map and reverse ID to name map
     page_name_to_id = {page_data['inferred_name'].lower().strip(): page_id 
+                       for page_id, page_data in pages.items()}
+    page_id_to_name = {page_id: page_data['inferred_name'].lower().strip()
                        for page_id, page_data in pages.items()}
     
     for page_id, page_data in pages.items():
@@ -1834,10 +2633,21 @@ def extract_mti_file(mti_file_path):
             
             # Check implicit SET-PAGE (speech == name and name matches page)
             # Skip if button has GOTO-HOME function (navigation already set to 'home')
-            if btn['speech'] and btn['name'] and \
+            # CRITICAL FIX: Only apply if button already has navigation indicators (functions, etc)
+            # Don't treat speech==name as navigation if the button looks like a regular button
+            #  (i.e., has extracted speech/name content with no navigation markers)
+            implicit_set_check = (btn['speech'] and btn['name'] and \
                btn['speech'].strip().lower() == btn['name'].strip().lower() and \
                not btn['navigation_type'] and \
-               not (btn.get('functions') and 'GOTO-HOME' in btn['functions']):
+               not (btn.get('functions') and 'GOTO-HOME' in btn['functions']))
+            
+            # Additional check: Only apply if button has functions indicating navigation
+            # Regular buttons with extracted text should NOT be treated as implicit navigation
+            has_nav_functions = btn.get('functions') and any(
+                f for f in btn['functions'] if f in ['GO-BACK-PAGE', 'SET-PAGE', 'GOTO-HOME']
+            )
+            
+            if implicit_set_check and has_nav_functions:
                 
                 name_lower = btn['name'].strip().lower()
                 
@@ -1945,25 +2755,32 @@ def extract_mti_file(mti_file_path):
                 
                 # Pattern 6: "text... page_name[digit]" - navigation target at end with trailing digit/letter
                 # (e.g., "I want to spell my message, ok? 84 KEYBOARD SCAN7")
+                # Guard: only run when speech contains uppercase codes or digits to avoid
+                # accidentally matching normal phrases that happen to be page names.
                 if not nav_target and ' ' in speech:
-                    # Look for pattern: sentence ending with space + potential page name + optional trailing char
                     words = speech.split()
-                    # Try last 2-5 words as potential page name (with optional trailing char)
-                    for word_count in range(5, 1, -1):
-                        if len(words) >= word_count:
-                            potential_with_marker = ' '.join(words[-word_count:])
-                            # Try with and without last character
-                            for name_to_try in [potential_with_marker, potential_with_marker[:-1]]:
-                                test_target = find_page_id(name_to_try)
-                                if test_target:
-                                    nav_target = test_target
-                                    # Clean speech is everything before the navigation
-                                    clean_speech = ' '.join(words[:-word_count]).strip()
-                                    if not clean_speech:
-                                        clean_speech = None
+                    has_nav_marker_word = any(
+                        any(ch.isdigit() for ch in w) or (w.isupper() and len(w) > 1)
+                        for w in words
+                    )
+                    if has_nav_marker_word:
+                        # Look for pattern: sentence ending with space + potential page name + optional trailing char
+                        # Try last 2-5 words as potential page name (with optional trailing char)
+                        for word_count in range(5, 1, -1):
+                            if len(words) >= word_count:
+                                potential_with_marker = ' '.join(words[-word_count:])
+                                # Try with and without last character
+                                for name_to_try in [potential_with_marker, potential_with_marker[:-1]]:
+                                    test_target = find_page_id(name_to_try)
+                                    if test_target:
+                                        nav_target = test_target
+                                        # Clean speech is everything before the navigation
+                                        clean_speech = ' '.join(words[:-word_count]).strip()
+                                        if not clean_speech:
+                                            clean_speech = None
+                                        break
+                                if nav_target:
                                     break
-                            if nav_target:
-                                break
                 
                 if nav_target:
                     btn['navigation_type'] = 'PERMANENT'
@@ -1980,6 +2797,29 @@ def extract_mti_file(mti_file_path):
                 elif f"0 {target_clean}" in page_name_to_id:
                     # Try with "0 " prefix (metadata overlays strip this prefix)
                     btn['navigation_target'] = page_name_to_id[f"0 {target_clean}"]
+
+            # Clear speech if it's obviously junk (contains full navigation target or control chars)
+            # This handles Format 3 buttons where speech field may contain page names or junk data
+            if btn['navigation_target'] and btn['speech']:
+                # Remove control characters from speech for comparison
+                speech_clean = ''.join(ch for ch in btn['speech'] if ord(ch) >= 0x20 or ch in '\n\r\t')
+                has_control_chars = speech_clean != btn['speech']
+                
+                # Clear if has control chars (definite junk)
+                if has_control_chars:
+                    btn['speech'] = None
+                # Check if speech is duplicated junk or contains the full page name
+                elif btn['navigation_target'] in page_id_to_name:
+                    nav_target_page_name = page_id_to_name[btn['navigation_target']]
+                    speech_lower = speech_clean.lower().strip()
+                    
+                    # Only clear if:
+                    # 1. Speech is longer than the page name (has extra junk like "peoplepeople 0 people 7-21")
+                    # 2. Speech contains the full page name as a substring
+                    if len(speech_lower) > len(nav_target_page_name) and \
+                       (nav_target_page_name in speech_lower or \
+                        nav_target_page_name.replace('0 ', '', 1) in speech_lower):
+                        btn['speech'] = None
     
     # Separate metadata pages (40XX range)
     metadata_pages = {pid: pdata for pid, pdata in pages.items() if pid.startswith('4')}

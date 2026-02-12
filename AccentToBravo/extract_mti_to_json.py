@@ -1780,8 +1780,10 @@ def extract_mti_file(mti_file_path):
     # Process navigation and SET-PAGE functions
     print("Processing navigation targets...")
     
-    # Build page name to ID map
+    # Build page name to ID map and reverse ID to name map
     page_name_to_id = {page_data['inferred_name'].lower().strip(): page_id 
+                       for page_id, page_data in pages.items()}
+    page_id_to_name = {page_id: page_data['inferred_name'].lower().strip()
                        for page_id, page_data in pages.items()}
     
     for page_id, page_data in pages.items():
@@ -1948,6 +1950,21 @@ def extract_mti_file(mti_file_path):
                 elif f"0 {target_clean}" in page_name_to_id:
                     # Try with "0 " prefix (metadata overlays strip this prefix)
                     btn['navigation_target'] = page_name_to_id[f"0 {target_clean}"]
+            
+            # Clear speech if it matches the navigation target page name
+            # This handles Format 3 buttons where speech field contains the target page name
+            if btn['navigation_target'] and btn['speech']:
+                # Look up the page name for this navigation target ID
+                nav_target_id = btn['navigation_target']
+                if nav_target_id in page_id_to_name:
+                    nav_target_page_name = page_id_to_name[nav_target_id]
+                    speech_lower = btn['speech'].lower().strip()
+                    
+                    # Clear speech if it matches the navigation target's page name
+                    # Handle both "0 my places" and "my places" variations
+                    if speech_lower == nav_target_page_name or \
+                       speech_lower == nav_target_page_name.replace('0 ', '', 1):
+                        btn['speech'] = None
     
     # Separate metadata pages (40XX range)
     metadata_pages = {pid: pdata for pid, pdata in pages.items() if pid.startswith('4')}
