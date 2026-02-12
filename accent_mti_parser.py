@@ -119,7 +119,9 @@ class AccentMTIParser:
             # Handle PROMPT-MARKER (either literal or replaced '{')
             if "«PROMPT-MARKER»" in speech:
                 parts = speech.split("«PROMPT-MARKER»", 1)
-                speech = parts[0].strip()
+                # Text before marker is speech, text after is button name
+                speech_before = parts[0].strip()
+                speech = speech_before if speech_before else None
                 if len(parts) > 1:
                     prompt_raw = parts[1].strip()
                     prompt_name = " ".join("".join(ch for ch in prompt_raw if ch.isalpha() or ch == " ").split())
@@ -127,7 +129,9 @@ class AccentMTIParser:
                         name = prompt_name
             elif "{" in speech:
                 parts = speech.split("{", 1)
-                speech = parts[0].strip()
+                # Text before marker is speech, text after is button name
+                speech_before = parts[0].strip()
+                speech = speech_before if speech_before else None
                 if len(parts) > 1:
                     prompt_raw = parts[1].strip()
                     prompt_name = " ".join("".join(ch for ch in prompt_raw if ch.isalpha() or ch == " ").split())
@@ -207,6 +211,13 @@ class AccentMTIParser:
             speech_lower = speech.strip().lower()
             name_lower = name.strip().lower()
             if speech_lower == name_lower and name_lower in ["home", "go back", "goback", "back", "return", "go home", "previous"]:
+                speech = None
+        
+        # Clear speech for any button with navigation but no actual speech text
+        # (speech was set to button_name as a fallback, but should be None)
+        if button.get("navigation_type") and speech:
+            if speech.strip().lower() == (name or "").strip().lower():
+                # Speech is just the button name - clear it for navigation buttons
                 speech = None
 
         # Clean malformed name artifacts (PROMPT-MARKER / SET-PAGE / duplicated words)
