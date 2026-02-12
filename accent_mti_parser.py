@@ -119,7 +119,9 @@ class AccentMTIParser:
             # Handle PROMPT-MARKER (either literal or replaced '{')
             if "«PROMPT-MARKER»" in speech:
                 parts = speech.split("«PROMPT-MARKER»", 1)
-                speech = parts[0].strip()
+                # Text before marker is speech, text after is button name
+                speech_before = parts[0].strip()
+                speech = speech_before if speech_before else None
                 if len(parts) > 1:
                     prompt_raw = parts[1].strip()
                     prompt_name = " ".join("".join(ch for ch in prompt_raw if ch.isalpha() or ch == " ").split())
@@ -127,30 +129,58 @@ class AccentMTIParser:
                         name = prompt_name
             elif "{" in speech:
                 parts = speech.split("{", 1)
-                speech = parts[0].strip()
+                # Text before marker is speech, text after is button name
+                speech_before = parts[0].strip()
+                speech = speech_before if speech_before else None
                 if len(parts) > 1:
                     prompt_raw = parts[1].strip()
                     prompt_name = " ".join("".join(ch for ch in prompt_raw if ch.isalpha() or ch == " ").split())
                     if prompt_name and (not name or name in ["GO-BACK-PAGE", "CLEAR-DISPLAY", "", None]):
                         name = prompt_name
 
-            # Handle «SET-PAGE(...)», «CLEAR-DISPLAY», etc. markers in name/speech
+            # Handle «SET-PAGE(...)», «CLEAR-DISPLAY», «GOTO-HOME», etc. markers in name/speech
             # These should be extracted as functions, not left in the text
             import re
-            markers = re.findall(r"«([A-Z\-]+)(?:\(([^)]*)\))?»", name or "")
+            
+            # Check both name and speech for function markers
+            text_to_check = (name or "") + " " + (speech or "")
+            markers = re.findall(r"«([A-Z\-]+)(?:\(([^)]*)\))?»", text_to_check)
+            
             for marker_match in markers:
                 func_name = marker_match[0]
                 func_param = marker_match[1] if marker_match[1] else ""
+                functions = button.get("functions") or []
+                
                 if func_name == "SET-PAGE" and func_param:
                     # Extract page reference and add as function
-                    functions = button.get("functions") or []
-                    # Trim trailing space from param
                     func_param = func_param.strip()
                     functions.append(f"SET-PAGE({func_param})")
                     button["functions"] = functions
-            # Remove the markers from name
+                elif func_name == "GOTO-HOME":
+                    # GOTO-HOME navigates to page 0400 (home)
+                    functions.append("GOTO-HOME")
+                    button["functions"] = functions
+                    button["navigation_type"] = "PERMANENT"
+                    button["navigation_target"] = "0400"
+                    # Clear speech for navigation buttons
+                    speech = None
+                elif func_name == "GO-BACK-PAGE":
+                    functions.append("GO-BACK-PAGE")
+                    button["functions"] = functions
+                    button["navigation_type"] = "GO-BACK-PAGE"
+                    button["navigation_target"] = None
+                    speech = None
+                elif func_name == "CLEAR-DISPLAY":
+                    functions.append("CLEAR-DISPLAY")
+                    button["functions"] = functions
+            
+            # Remove the markers from name and speech
             if name:
                 name = re.sub(r"«[A-Z\-]+(?:\([^)]*\))?»", "", name).strip()
+            if speech:
+                speech = re.sub(r"«[A-Z\-]+(?:\([^)]*\))?»", "", speech).strip()
+                if not speech:  # If speech becomes empty after removing markers
+                    speech = None
 
             # Extract VOICE-SET-TEMPORARY (0x03) and VOICE-CLEAR-TEMPORARY (0x04)
             if "\x03" in speech:
@@ -181,6 +211,13 @@ class AccentMTIParser:
             speech_lower = speech.strip().lower()
             name_lower = name.strip().lower()
             if speech_lower == name_lower and name_lower in ["home", "go back", "goback", "back", "return", "go home", "previous"]:
+                speech = None
+        
+        # Clear speech for any button with navigation but no actual speech text
+        # (speech was set to button_name as a fallback, but should be None)
+        if button.get("navigation_type") and speech:
+            if speech.strip().lower() == (name or "").strip().lower():
+                # Speech is just the button name - clear it for navigation buttons
                 speech = None
 
         # Clean malformed name artifacts (PROMPT-MARKER / SET-PAGE / duplicated words)
@@ -219,6 +256,22 @@ class AccentMTIParser:
 
             if cleaned_name:
                 name = cleaned_name
+
+        # Heuristic: GOTO-HOME buttons embedded as plain text (markers stripped)
+        # Example: name/speech "go to home" with a HOUSE/HOME icon
+        if not button.get("functions") and not button.get("navigation_type"):
+            name_lower = (name or "").strip().lower()
+            icon_lower = (button.get("icon") or "").strip().lower()
+            if name_lower:
+                is_home_label = name_lower in ["home", "go home", "go to home"] or (
+                    "home" in name_lower and "go" in name_lower
+                )
+                has_home_icon = "home" in icon_lower or "house" in icon_lower
+                if is_home_label and has_home_icon:
+                    button["functions"] = ["GOTO-HOME"]
+                    button["navigation_type"] = "PERMANENT"
+                    button["navigation_target"] = "0400"
+                    speech = None
 
         button["speech"] = speech
         button["name"] = name
