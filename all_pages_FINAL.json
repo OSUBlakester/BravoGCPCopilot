@@ -1951,7 +1951,7 @@
           "col": 0,
           "name": "I want",
           "icon": "I want",
-          "speech": "I want my vaccine.",
+          "speech": "I want my vaccine. [PAUSE] I am ready and excited.",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -3869,7 +3869,7 @@
           "col": 8,
           "name": "MINI",
           "icon": "SMD&R",
-          "speech": "MINI",
+          "speech": "[PAUSE]",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -16064,7 +16064,7 @@
           "col": 0,
           "name": "mickey joke",
           "icon": "Mickey Joke",
-          "speech": "Why did Mickey Mouse cross Disney World?",
+          "speech": "Why did Mickey Mouse cross Disney World? [PAUSE] To get to the other ride!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -16076,7 +16076,7 @@
           "col": 1,
           "name": "Aladdin joke",
           "icon": "Aladdin Joke",
-          "speech": "What does Aladdin wear to tne office on casual Fridays?",
+          "speech": "What does Aladdin wear to tne office on casual Fridays? [PAUSE] Blue Genies!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -16088,7 +16088,7 @@
           "col": 3,
           "name": "princess joke",
           "icon": "PRINC17^",
-          "speech": "who won the princess race?",
+          "speech": "who won the princess race?[PAUSE]rapunzel......by a hair!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -16100,7 +16100,7 @@
           "col": 4,
           "name": "simba joke9",
           "icon": "ROCK_2^",
-          "speech": "why did simba cross the road?",
+          "speech": "why did simba cross the road?[PAUSE]to get to the other pride...rock!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -16112,7 +16112,7 @@
           "col": 5,
           "name": "minnie joke",
           "icon": "MINNIE_^",
-          "speech": "what is minnie mouse's favorite game?",
+          "speech": "what is minnie mouse's favorite game?[PAUSE] hide and sqeak!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -16902,7 +16902,7 @@
           "col": 4,
           "name": "Mixed Up Disney",
           "icon": "MINNIE_^",
-          "speech": "I wrote a play: Mixed Up Disney this year.",
+          "speech": "I wrote a play: Mixed Up Disney this year. [PAUSE]  with Danielle!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -17774,7 +17774,7 @@
           "col": 0,
           "name": "blueberry",
           "icon": "blueberry",
-          "speech": "why didn't the blueberry participate in the NFL draft?",
+          "speech": "why didn't the blueberry participate in the NFL draft?[PAUSE]it didn't want to be picked!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -17786,7 +17786,7 @@
           "col": 1,
           "name": "lemon",
           "icon": "lemon",
-          "speech": "whats a lemons favorite dance?",
+          "speech": "whats a lemons favorite dance?[PAUSE]the twist!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -18725,7 +18725,7 @@
           "col": 6,
           "name": "Autobiography",
           "icon": "SLEIGH",
-          "speech": "I'm reading An Autobiography of Santa Claus. It has a lot of history!",
+          "speech": "I'm reading An Autobiography of Santa Claus. It has a lot of history![PAUSE] Its magical!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24108,7 +24108,7 @@
           "col": 3,
           "name": "baseball",
           "icon": "BASEBA4^",
-          "speech": "Which baseball team would win a tug of war?",
+          "speech": "Which baseball team would win a tug of war? [PAUSE] The New York Yankees!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24120,7 +24120,7 @@
           "col": 4,
           "name": "fence",
           "icon": "FENCE1",
-          "speech": "How did the fence get so popular on social media?",
+          "speech": "How did the fence get so popular on social media? [PAUSE] Lots of posts!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24132,7 +24132,7 @@
           "col": 5,
           "name": "lone wolf",
           "icon": "WOLF^",
-          "speech": "I asked the lone wolf for a stick of gum but...",
+          "speech": "I asked the lone wolf for a stick of gum but...[PAUSE]  she didn't have a pack!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24144,7 +24144,7 @@
           "col": 6,
           "name": "amoeba",
           "icon": "BLOB",
-          "speech": "How do you talk to an amoeba?",
+          "speech": "How do you talk to an amoeba? [PAUSE]With a microbe phone!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24156,7 +24156,7 @@
           "col": 7,
           "name": "zombie &",
           "icon": "ZOMBIE",
-          "speech": "Why don't Zombies take Amtrak?",
+          "speech": "Why don't Zombies take Amtrak? [PAUSE] They prefer the Gory ient express!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24168,7 +24168,7 @@
           "col": 8,
           "name": "dinosaur ?",
           "icon": "DINOSA2^",
-          "speech": "What do you call a sleeping dinosaur?",
+          "speech": "What do you call a sleeping dinosaur? [PAUSE] A Z-Rex!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24180,7 +24180,7 @@
           "col": 9,
           "name": "library",
           "icon": "LIBRAR1^",
-          "speech": "What is the tallest building?",
+          "speech": "What is the tallest building? [PAUSE] The library! It has the most stories!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24192,7 +24192,7 @@
           "col": 10,
           "name": "Nar whale",
           "icon": "WHALE",
-          "speech": "Why didn't the Narwhal invite the unicorn to his birthday party?",
+          "speech": "Why didn't the Narwhal invite the unicorn to his birthday party? [PAUSE] He wanted to keep it real!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24204,7 +24204,7 @@
           "col": 0,
           "name": "Why did the cat stop playing basketball?",
           "icon": "CAT_FO1^",
-          "speech": "Why did the cat stop playing basketball?",
+          "speech": "Why did the cat stop playing basketball? [PAUSE] It was throwing up too many hairballs!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24216,7 +24216,7 @@
           "col": 1,
           "name": "mixers",
           "icon": "MIXER^",
-          "speech": "What happens when bakers lose control of their mixers?",
+          "speech": "What happens when bakers lose control of their mixers? [PAUSE] Their funnel cakes become tornados!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24228,7 +24228,7 @@
           "col": 3,
           "name": "Lego",
           "icon": "LEGO",
-          "speech": "Why did the Lego people cross the road?",
+          "speech": "Why did the Lego people cross the road? [PAUSE] They were on the wrong block!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24240,7 +24240,7 @@
           "col": 4,
           "name": "spiders",
           "icon": "SPIDERS^",
-          "speech": "Why did the spiders have such a strong connection?",
+          "speech": "Why did the spiders have such a strong connection? [PAUSE]They see eye to eye to eye...",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24252,7 +24252,7 @@
           "col": 5,
           "name": "lumber jacks",
           "icon": "MAN",
-          "speech": "How do lumber jacks work from home ?",
+          "speech": "How do lumber jacks work from home ? [PAUSE] They login!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24264,7 +24264,7 @@
           "col": 8,
           "name": "mickey +",
           "icon": "MICKEY_^",
-          "speech": "Why did Mickey Mouse go to space?",
+          "speech": "Why did Mickey Mouse go to space? [PAUSE] To Find Pluto!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24288,7 +24288,7 @@
           "col": 10,
           "name": "elphaba",
           "icon": "WITCH",
-          "speech": "Why was Elphaba's broom late?",
+          "speech": "Why was Elphaba's broom late? [PAUSE] It over swept!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24300,7 +24300,7 @@
           "col": 11,
           "name": "lamb",
           "icon": "LAMB^",
-          "speech": "What do you call one hundred little sheep rolling down a hill?",
+          "speech": "What do you call one hundred little sheep rolling down a hill?[PAUSE]A lamb-slide!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24312,7 +24312,7 @@
           "col": 0,
           "name": "baby corn",
           "icon": "CORN1^",
-          "speech": "What did the popcorn say to the baby corn?",
+          "speech": "What did the popcorn say to the baby corn? [PAUSE] You have your mother's ears!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24324,7 +24324,7 @@
           "col": 1,
           "name": "ship",
           "icon": "SHIP",
-          "speech": "What did the ocean say to the cruise ship?",
+          "speech": "What did the ocean say to the cruise ship? [PAUSE] Nothing! It just waved!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24336,7 +24336,7 @@
           "col": 2,
           "name": "wizard",
           "icon": "WIZARD1",
-          "speech": "Why did the wizard get a job as a cook?",
+          "speech": "Why did the wizard get a job as a cook? [PAUSE] Because he was good at saucery!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24348,7 +24348,7 @@
           "col": 3,
           "name": "Homer",
           "icon": "SIMPSON^",
-          "speech": "What did Homer Simpson Say when he bumped into a pecan tree?",
+          "speech": "What did Homer Simpson Say when he bumped into a pecan tree? [PAUSE]Dohohohoh! Nuts!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24360,7 +24360,7 @@
           "col": 4,
           "name": "Buzzkill",
           "icon": "FLY",
-          "speech": "Do you know what's a real buzz kill?",
+          "speech": "Do you know what's a real buzz kill? [PAUSE] A flyswatter!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24372,7 +24372,7 @@
           "col": 5,
           "name": "ice-cream",
           "icon": "EIS^",
-          "speech": "Where do you learn to make ice cream?",
+          "speech": "Where do you learn to make ice cream? [PAUSE] Sundae school!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24384,7 +24384,7 @@
           "col": 6,
           "name": "tennis ]",
           "icon": "TENNI12^",
-          "speech": "Never marry a tennis player.",
+          "speech": "Never marry a tennis player. [PAUSE] Love means nothing to them!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24396,7 +24396,7 @@
           "col": 7,
           "name": "Why did the dog chase his own tail?",
           "icon": "DOG_3^",
-          "speech": "Why did the dog chase his own tail?",
+          "speech": "Why did the dog chase his own tail? [PAUSE] He was trying to make both ends meet!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24408,7 +24408,7 @@
           "col": 8,
           "name": "color blind",
           "icon": "BLIND^",
-          "speech": "I just got diagnosed as colorblind!",
+          "speech": "I just got diagnosed as colorblind! [PAUSE]Boy, that came out of the purple!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24420,7 +24420,7 @@
           "col": 9,
           "name": "ski instructor",
           "icon": "SKIER^",
-          "speech": "Why did the ski instructor go to college?",
+          "speech": "Why did the ski instructor go to college? [PAUSE] Because knowledge is powder!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24432,7 +24432,7 @@
           "col": 10,
           "name": "Arrgh",
           "icon": "PIRATE_^",
-          "speech": "How do you know if you're a pirate?",
+          "speech": "How do you know if you're a pirate? [PAUSE] You just Arrrgh!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24444,7 +24444,7 @@
           "col": 11,
           "name": "sharks",
           "icon": "SHARKS^",
-          "speech": "What is a shark's favorite sandwich?",
+          "speech": "What is a shark's favorite sandwich? [PAUSE] Peanut butter and Jellyfish!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24456,7 +24456,7 @@
           "col": 0,
           "name": "What did the sun say to the tree?",
           "icon": "SUN1B",
-          "speech": "What did the sun say to the tree?",
+          "speech": "What did the sun say to the tree? [PAUSE] Why do you always throw shade when I'm around?!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24468,7 +24468,7 @@
           "col": 1,
           "name": "knight",
           "icon": "KNIGHT^",
-          "speech": "Who was the roundest knight at King Arthur's round table?",
+          "speech": "Who was the roundest knight at King Arthur's round table?[PAUSE] Sir Cumference!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24480,7 +24480,7 @@
           "col": 2,
           "name": "dandelion",
           "icon": "DANDEL3^",
-          "speech": "Why did the dandelion take up gymnastics?",
+          "speech": "Why did the dandelion take up gymnastics?[PAUSE] To be a tumble weed!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24492,7 +24492,7 @@
           "col": 3,
           "name": "computer mouse",
           "icon": "MOUSE_C^",
-          "speech": "What did the computer mouse say to the keyboard?",
+          "speech": "What did the computer mouse say to the keyboard? [PAUSE] You're just my type!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24504,7 +24504,7 @@
           "col": 4,
           "name": "Jabba",
           "icon": "STAR_10^",
-          "speech": "What's the favorite football play on Tatooine?",
+          "speech": "What's the favorite football play on Tatooine? [PAUSE] Jabba the \"hut hut hike\"!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24516,7 +24516,7 @@
           "col": 7,
           "name": "firefighters",
           "icon": "FIREMEN^",
-          "speech": "What do you call firefighters that become influencers?",
+          "speech": "What do you call firefighters that become influencers? [PAUSE] Stop drop and roll models!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24528,7 +24528,7 @@
           "col": 8,
           "name": "zombie",
           "icon": "ZOMBIE",
-          "speech": "What's a zombie's favorite weather?",
+          "speech": "What's a zombie's favorite weather? [PAUSE]Cloudy with a chance of brain!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24540,7 +24540,7 @@
           "col": 10,
           "name": "cow fun^",
           "icon": "COW^",
-          "speech": "what does a cow do for fun?",
+          "speech": "what does a cow do for fun?[PAUSE]go to the mooo vees.",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24552,7 +24552,7 @@
           "col": 0,
           "name": "spicy knight",
           "icon": "KNIGHT^",
-          "speech": "Who was the spiciest knight at the round table?",
+          "speech": "Who was the spiciest knight at the round table? [PAUSE] sriracha",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24564,7 +24564,7 @@
           "col": 1,
           "name": "headstone",
           "icon": "GRAVE",
-          "speech": "What do you call a typo on a headstone?",
+          "speech": "What do you call a typo on a headstone? [PAUSE]A grave mistake!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24576,7 +24576,7 @@
           "col": 3,
           "name": "What did the tea plant say when the farmer gave it some water?",
           "icon": "TEA_2^",
-          "speech": "What did the tea plant say when the farmer gave it some water?",
+          "speech": "What did the tea plant say when the farmer gave it some water? [PAUSE] Much obliged!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24588,7 +24588,7 @@
           "col": 4,
           "name": "gymnast <",
           "icon": "GYMNAS1^",
-          "speech": "What do gymnasts like to put on their popcorn?",
+          "speech": "What do gymnasts like to put on their popcorn? [PAUSE] Somersault!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24600,7 +24600,7 @@
           "col": 5,
           "name": "cheese=",
           "icon": "CHEESE",
-          "speech": "What kind of cheese can play the piano?",
+          "speech": "What kind of cheese can play the piano?[PAUSE] Lindberachi!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -24612,7 +24612,7 @@
           "col": 8,
           "name": "where should a dog never go shopping?",
           "icon": "FLEA^",
-          "speech": "where should a dog never go shopping?",
+          "speech": "where should a dog never go shopping?[PAUSE] A flea market!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -31618,7 +31618,7 @@
           "col": 10,
           "name": "Mini",
           "icon": "Mini",
-          "speech": "Mini",
+          "speech": "[PAUSE]",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47137,7 +47137,7 @@
           "col": 0,
           "name": "starship",
           "icon": "SPACESHI",
-          "speech": "What do you call a starship with student loan debt?",
+          "speech": "What do you call a starship with student loan debt? [PAUSE]A millennial falcon!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47149,7 +47149,7 @@
           "col": 2,
           "name": "knight",
           "icon": "CASTLE",
-          "speech": "Who is the roundest knight at King Arthur's table?",
+          "speech": "Who is the roundest knight at King Arthur's table? [PAUSE] Sir Cumference!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47161,7 +47161,7 @@
           "col": 3,
           "name": "toothbrush",
           "icon": "TOOTHBR~",
-          "speech": "Why did the toothbrush cross the road?",
+          "speech": "Why did the toothbrush cross the road? [PAUSE]Just for a change of paste!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47173,7 +47173,7 @@
           "col": 4,
           "name": "mittenb",
           "icon": "MITTENS",
-          "speech": "What did the hat say to the mitten ?",
+          "speech": "What did the hat say to the mitten ? [PAUSE] You sty here I'll go on a head!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47185,7 +47185,7 @@
           "col": 5,
           "name": "tooth fairy",
           "icon": "FAIRY1",
-          "speech": "What's the tooth fairy's favorite dance?",
+          "speech": "What's the tooth fairy's favorite dance?[PAUSE] The Floss!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47197,7 +47197,7 @@
           "col": 6,
           "name": "panda",
           "icon": "PANDA",
-          "speech": "How do you scare a panda?",
+          "speech": "How do you scare a panda? [PAUSE] With some bam BOO!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47209,7 +47209,7 @@
           "col": 7,
           "name": "turkey",
           "icon": "TURKEY",
-          "speech": "What did the turkey say to the farmer?",
+          "speech": "What did the turkey say to the farmer? [PAUSE] Why isn't there anything on my calendar after November?",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47221,7 +47221,7 @@
           "col": 8,
           "name": "hobbit",
           "icon": "ELF2",
-          "speech": "What do you call a hobbit playing fiddle?",
+          "speech": "What do you call a hobbit playing fiddle? [PAUSE] Lord of the strings!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47233,7 +47233,7 @@
           "col": 0,
           "name": "astrologer",
           "icon": "STAR-",
-          "speech": "Why did the astrologer cross the road?",
+          "speech": "Why did the astrologer cross the road? [PAUSE] To get to the other sign!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47245,7 +47245,7 @@
           "col": 2,
           "name": "elephant",
           "icon": "ELEPHANT",
-          "speech": "What do you call an elephant on hockey skates?",
+          "speech": "What do you call an elephant on hockey skates? [PAUSE] An ice breaker!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47269,7 +47269,7 @@
           "col": 4,
           "name": "grumpy",
           "icon": "GRUMPY",
-          "speech": "What did the grumpy guy eat on his birthday?",
+          "speech": "What did the grumpy guy eat on his birthday? [PAUSE]Crab cake!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47281,7 +47281,7 @@
           "col": 6,
           "name": "cantaloupe",
           "icon": "CANTELO",
-          "speech": "Why did the cantaloupe go to the spa?",
+          "speech": "Why did the cantaloupe go to the spa? [PAUSE] It wanted to un-rind!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47293,7 +47293,7 @@
           "col": 7,
           "name": "tooth fairy",
           "icon": "FAIRY1",
-          "speech": "How does the tooth fairy get to the North Pole?",
+          "speech": "How does the tooth fairy get to the North Pole? [PAUSE]On the Molar Express!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47305,7 +47305,7 @@
           "col": 8,
           "name": "boat",
           "icon": "BOAT",
-          "speech": "how did the dad justify buying a boat?",
+          "speech": "how did the dad justify buying a boat?[PAUSE]There was a sail!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47317,7 +47317,7 @@
           "col": 0,
           "name": "Mississippi",
           "icon": "BOAT",
-          "speech": "Why did the optometrist move to Mississippi?",
+          "speech": "Why did the optometrist move to Mississippi? [PAUSE]Because it has the most   eyes!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47329,7 +47329,7 @@
           "col": 1,
           "name": "banana",
           "icon": "BANANA",
-          "speech": "Why did the banana go to the doctor?",
+          "speech": "Why did the banana go to the doctor? [PAUSE] He wasn't peeling well!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47341,7 +47341,7 @@
           "col": 2,
           "name": "las vegasa",
           "icon": "WORK",
-          "speech": "Why did the chef go to Las Vegas?",
+          "speech": "Why did the chef go to Las Vegas?[PAUSE]He wanted to wisk it all!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47353,7 +47353,7 @@
           "col": 3,
           "name": "sheep",
           "icon": "SHEEP",
-          "speech": "What keeps a sheep up at night?",
+          "speech": "What keeps a sheep up at night? [PAUSE]Velcro fences!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47365,7 +47365,7 @@
           "col": 4,
           "name": "Little horse",
           "icon": "HORSESHO",
-          "speech": "What time was it when the little horse lost the bet?",
+          "speech": "What time was it when the little horse lost the bet? [PAUSE] Time to pony up!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47377,7 +47377,7 @@
           "col": 5,
           "name": "kittens",
           "icon": "KITTEN",
-          "speech": "What do you call a big pile of kittens?",
+          "speech": "What do you call a big pile of kittens? [PAUSE] A Meow-ntain!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47389,7 +47389,7 @@
           "col": 6,
           "name": "twins",
           "icon": "TWINS",
-          "speech": "What letter do twins like the most?",
+          "speech": "What letter do twins like the most? [PAUSE]W Get it? Double You!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47401,7 +47401,7 @@
           "col": 7,
           "name": "number joke",
           "icon": "NUMBR_M1",
-          "speech": "why is 6 afraid of 7?",
+          "speech": "why is 6 afraid of 7? [PAUSE]because 7 ate 9!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -47413,7 +47413,7 @@
           "col": 8,
           "name": "english teachers",
           "icon": "TEACHER",
-          "speech": "How do English teachers get married?",
+          "speech": "How do English teachers get married?[PAUSE]They exchange vowels!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50132,7 +50132,7 @@
           "col": 5,
           "name": "marry dana",
           "icon": "WEDDING^",
-          "speech": "Big smile!",
+          "speech": "Big smile! [PAUSE] I told Dana I loved her.[PAUSE]I asked her to marry me! [PAUSE]She said yes!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50144,7 +50144,7 @@
           "col": 0,
           "name": "greetings!",
           "icon": "greetings!",
-          "speech": "It's so great to see you!",
+          "speech": "It's so great to see you![PAUSE]How have you been?",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50182,7 +50182,7 @@
           "col": 3,
           "name": "photo[",
           "icon": "CAMERA",
-          "speech": "Please take a photo",
+          "speech": "Please take a photo[PAUSE]let's take a selfie!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50194,7 +50194,7 @@
           "col": 4,
           "name": "facebook_",
           "icon": "FACEB3-",
-          "speech": "Let's be friends on facebook!",
+          "speech": "Let's be friends on facebook![PAUSE]My handle is Max Grange.[PAUSE]Add me!",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50400,7 +50400,7 @@
           "col": 0,
           "name": "name",
           "icon": "name",
-          "speech": "My name is Max",
+          "speech": "My name is Max[PAUSE]What is your name?",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50412,7 +50412,7 @@
           "col": 2,
           "name": "live",
           "icon": "live",
-          "speech": "I live in beautiful Snowmass Colorado.",
+          "speech": "I live in beautiful Snowmass Colorado.[PAUSE]Where do you live?",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null
@@ -50424,7 +50424,7 @@
           "col": 6,
           "name": "plays and concerts3",
           "icon": "theater and plays",
-          "speech": "I really like  to go to plays and concerts.",
+          "speech": "I really like  to go to plays and concerts.[PAUSE]do you?",
           "functions": null,
           "navigation_type": null,
           "navigation_target": null

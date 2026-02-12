@@ -79,6 +79,9 @@ class AccentMTIParser:
         if not speech:
             return speech
         
+        # Normalize WAIT-ANY-KEY control char before stripping control chars
+        speech = speech.replace("\x1c", "[PAUSE]")
+
         # Remove/normalize marker byte sequences
         # \xff\x80\x1c\xfe appears to be a wait/pause marker (like «WAIT-ANY-KEY»)
         speech = speech.replace("\xff\x80\x1c\xfe", "[PAUSE]")

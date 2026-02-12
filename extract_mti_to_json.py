@@ -482,13 +482,30 @@ def extract_mti_file(mti_file_path):
                                 speech_bytes = data[pos_cursor:speech_end]
                                 speech_bytes = speech_bytes.replace(b'\x00', b'')
                                 
-                                # Strip everything from first control character onwards (metadata)
-                                for i, byte_val in enumerate(speech_bytes):
-                                    if byte_val < 0x20:
-                                        speech_bytes = speech_bytes[:i]
+                                # Strip everything from first control character onwards (metadata),
+                                # but preserve WAIT-ANY-KEY markers as [PAUSE]
+                                clean_bytes = bytearray()
+                                i = 0
+                                while i < len(speech_bytes):
+                                    # PROMPT-MARKER starts the name portion; stop speech here
+                                    if speech_bytes[i:i+4] == b'\xff\x80{\xfe':
                                         break
+                                    # WAIT-ANY-KEY marker sequence
+                                    if speech_bytes[i:i+4] == b'\xff\x80\x1c\xfe':
+                                        clean_bytes.extend(b'[PAUSE]')
+                                        i += 4
+                                        continue
+                                    byte_val = speech_bytes[i]
+                                    if byte_val == 0x1c:
+                                        clean_bytes.extend(b'[PAUSE]')
+                                        i += 1
+                                        continue
+                                    if byte_val < 0x20:
+                                        break
+                                    clean_bytes.append(byte_val)
+                                    i += 1
                                 
-                                speech_candidate = speech_bytes.decode('ascii', errors='ignore').strip()
+                                speech_candidate = clean_bytes.decode('ascii', errors='ignore').strip()
                                 # Only use if it's different from name and non-empty
                                 if speech_candidate and speech_candidate != button_name:
                                     speech = speech_candidate
@@ -1120,13 +1137,30 @@ def extract_mti_file(mti_file_path):
                             # Remove embedded null bytes
                             speech_bytes = speech_bytes.replace(b'\x00', b'')
                             
-                            # Strip everything from first control character onwards (metadata)
-                            for i, byte_val in enumerate(speech_bytes):
-                                if byte_val < 0x20:
-                                    speech_bytes = speech_bytes[:i]
+                            # Strip everything from first control character onwards (metadata),
+                            # but preserve WAIT-ANY-KEY markers as [PAUSE]
+                            clean_bytes = bytearray()
+                            i = 0
+                            while i < len(speech_bytes):
+                                # PROMPT-MARKER starts the name portion; stop speech here
+                                if speech_bytes[i:i+4] == b'\xff\x80{\xfe':
                                     break
+                                # WAIT-ANY-KEY marker sequence
+                                if speech_bytes[i:i+4] == b'\xff\x80\x1c\xfe':
+                                    clean_bytes.extend(b'[PAUSE]')
+                                    i += 4
+                                    continue
+                                byte_val = speech_bytes[i]
+                                if byte_val == 0x1c:
+                                    clean_bytes.extend(b'[PAUSE]')
+                                    i += 1
+                                    continue
+                                if byte_val < 0x20:
+                                    break
+                                clean_bytes.append(byte_val)
+                                i += 1
                             
-                            speech = speech_bytes.decode('ascii', errors='ignore')
+                            speech = clean_bytes.decode('ascii', errors='ignore')
                             pos_cursor += speech_len
                             
                             # Check if speech looks like icon/metadata junk
@@ -2214,10 +2248,14 @@ def extract_mti_file(mti_file_path):
                     elif button_name and speech and len(button_name) <= 3 and len(speech) > len(button_name):
                         button_name = speech
                     
-                    # Clean speech to remove control characters (stop at first control char)
+                    # Clean speech to remove control characters (stop at first control char),
+                    # but preserve WAIT-ANY-KEY markers as [PAUSE]
                     if speech:
                         clean_speech = []
                         for ch in speech:
+                            if ch == '\x1c':
+                                clean_speech.append('[PAUSE]')
+                                continue
                             if ord(ch) < 0x20 and ord(ch) not in [0x09]:  # Stop at control chars except tab
                                 break
                             clean_speech.append(ch)
@@ -2261,10 +2299,13 @@ def extract_mti_file(mti_file_path):
             
             # Clean up speech: Replace WAIT-ANY-KEY markers with [PAUSE]
             if button['speech']:
-                # Stop speech at CRLF or any control character (except space, tab)
-                # This prevents reading past button boundaries
+                # Stop speech at CRLF or any control character (except tab and WAIT-ANY-KEY)
+                # This prevents reading past button boundaries while preserving pause markers
                 clean_speech = []
                 for ch in button['speech']:
+                    if ch == '\x1c':
+                        clean_speech.append('[PAUSE]')
+                        continue
                     if ord(ch) < 0x20 and ord(ch) not in [0x09]:  # Stop at control chars except tab
                         break
                     clean_speech.append(ch)
@@ -2274,7 +2315,7 @@ def extract_mti_file(mti_file_path):
                     # If speech became empty, skip further processing
                     pass
                 else:
-                    # Replace 0x1C control character (WAIT-ANY-KEY marker) with [PAUSE]
+                    # Replace any remaining 0x1C control character (WAIT-ANY-KEY marker) with [PAUSE]
                     button['speech'] = button['speech'].replace('\x1c', '[PAUSE]')
                 
                 # Detect and remove VOICE-SET-TEMPORARY marker (0x03 followed by voice params)
