@@ -312,6 +312,7 @@ template_user_data_paths = {
     {
         "name": "home",
         "displayName": "Home",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "", "targetPage": "greetings", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "Going On", "LLMQuery": "", "targetPage": "goingon", "queryType": "", "speechPhrase": "Let's talk about things that are going on", "customAudioFile": None, "hidden": False},
@@ -333,6 +334,7 @@ template_user_data_paths = {
     {
         "name": "greetings",
         "displayName": "Greetings",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
@@ -347,6 +349,7 @@ template_user_data_paths = {
     {
         "name": "goingon",
         "displayName": "Going On",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
@@ -358,6 +361,7 @@ template_user_data_paths = {
     {
         "name": "describe",
         "displayName": "Describe",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "Positive", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something positive, as if someone was very excited", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
@@ -373,6 +377,7 @@ template_user_data_paths = {
     {
         "name": "questions",
         "displayName": "Questions",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "What?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with what, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as What is That?  Phrase each question as if it was asked by the user. All options must begin with What...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
@@ -9949,6 +9954,8 @@ class GameQuestionRequest(BaseModel):
     category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
     asked_questions: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Previously asked questions and answers")
     question_count: Optional[int] = Field(default=0, description="Number of questions asked so far")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Questions to exclude from generation")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Questions to exclude from generation")
 
 class GameGuessRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
@@ -9956,11 +9963,13 @@ class GameGuessRequest(BaseModel):
     asked_questions: List[Dict[str, str]] = Field(..., description="All asked questions and answers")
     guess_count: Optional[int] = Field(default=0, description="Number of guesses made so far")
     previous_guesses: Optional[List[str]] = Field(default_factory=list, description="Previously guessed items that were wrong")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Guesses to exclude from generation")
 
 class GameOptionsRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
     category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
     request_different: Optional[bool] = Field(default=False, description="Request different options from previous")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Options to exclude from generation")
 
 class GameAnswerRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
@@ -9989,6 +9998,12 @@ async def generate_game_questions(
             for qa in request.asked_questions:
                 qa_pairs.append(f"Q: {qa.get('question', '')} A: {qa.get('answer', '')}")
             previous_qa_context = f"\n\nPreviously asked questions and answers:\n" + "\n".join(qa_pairs)
+        
+        # Build exclusion instruction for current options
+        exclusion_instruction = ""
+        if request.exclude_options and len(request.exclude_options) > 0:
+            excluded_list = ", ".join(f'"{opt}"' for opt in request.exclude_options)
+            exclusion_instruction = f"\n\nDo NOT include any of these questions: {excluded_list}. Generate completely different questions."
         
         # Determine if this is the initial round (no previous questions) or we need category-determining questions
         is_initial_round = not request.asked_questions or len(request.asked_questions) == 0
@@ -10027,7 +10042,7 @@ Then include broader questions that work across categories:
 - Is it something you can eat?
 - Is it something you use every day?
 
-{previous_qa_context}
+{previous_qa_context}{exclusion_instruction}
 
 The questions should:
 1. Be simple, clear yes/no questions
@@ -10061,7 +10076,7 @@ Make them varied in approach and difficulty."""
 
 IMPORTANT: Use the previous answers as ESTABLISHED FACTS about the target {request.category}. Build upon what we already know to ask more specific, targeted questions that will help narrow down the exact answer.
 
-{previous_qa_context}
+{previous_qa_context}{exclusion_instruction}
 
 STRATEGIC LOGIC RULES:
 - If something is NOT found indoors, don't ask if it's found outdoors (it must be)
@@ -10097,11 +10112,10 @@ Return your response as a simple JSON array of strings. Each question should be 
 
 Make them build strategically on the established facts using logical deduction."""
 
-        # Generate response using the same pattern as /llm endpoint
+        # Generate response using direct LLM call (NOT using AAC system prompt wrapper)
+        # This avoids conflicts with the AAC response format requirements for game requests
         try:
-            full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-            logging.info(f"Games questions prompt built successfully, length: {len(full_prompt)}")
-            response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+            response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
             logging.info(f"Games questions LLM response received, length: {len(response_text)}")
             
             # DEBUG: Log the LLM response
@@ -10227,6 +10241,11 @@ async def generate_game_guesses(
             exclusion_list = ", ".join(f'"{guess}"' for guess in request.previous_guesses)
             exclusion_context = f"\n\nIMPORTANT: Do NOT include these previously guessed (wrong) options: {exclusion_list}\nThese have already been tried and were incorrect."
         
+        # Add context for exclude_options (currently displayed guesses to exclude)
+        if request.exclude_options and len(request.exclude_options) > 0:
+            excluded_list = ", ".join(f'"{guess}"' for guess in request.exclude_options)
+            exclusion_context += f"\n\nAlso, do NOT include any of these currently displayed options: {excluded_list}. Generate completely different guesses."
+        
         llm_query = f"""Based on the following 20 Questions game Q&A session, generate exactly {llm_options} specific {request.category} guesses that match ALL the given answers.
 
 Question and Answer History:
@@ -10254,9 +10273,9 @@ Return your response as a simple JSON array of strings. Each guess should be jus
 
 Do NOT use objects with "option" or "summary" fields. Just return a simple array of {request.category} names."""
 
-        # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        # For game requests, use direct LLM call without AAC system prompts
+        # This avoids conflicts with the AAC response format requirements
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
         
         logging.info(f"Games guesses LLM response: {response_text[:500]}...")
         
@@ -10363,6 +10382,12 @@ async def generate_game_options(
         if request.request_different:
             variety_instruction = " Generate completely different options from what might have been shown before. Be creative and varied."
         
+        # Build exclusion instruction if options to exclude are provided
+        exclusion_instruction = ""
+        if request.exclude_options and len(request.exclude_options) > 0:
+            excluded_list = ", ".join(f'"{opt}"' for opt in request.exclude_options)
+            exclusion_instruction = f"\n\nDo NOT include any of these options: {excluded_list}. Generate completely different options."
+        
         category_descriptions = {
             "person": "famous people, historical figures, fictional characters, or well-known individuals",
             "place": "locations, landmarks, cities, buildings, or geographical features", 
@@ -10380,7 +10405,7 @@ Focus on {category_desc} that are:
 4. Specific (not generic categories)
 5. Fun and engaging for games
 
-{variety_instruction}
+{variety_instruction}{exclusion_instruction}
 
 Format as just the name/title, one per line. Examples:
 - Person: "Albert Einstein", "Wonder Woman", "Michael Jordan"
@@ -10389,11 +10414,9 @@ Format as just the name/title, one per line. Examples:
 
 Provide exactly {llm_options} options:"""
 
-        # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
-        
-        # Parse options from response (handle JSON or plain text)
+        # Generate response using direct LLM call (NOT using AAC system prompt wrapper)
+        # This avoids conflicts with the AAC response format requirements for game requests
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
         options = []
         response_text = response_text.strip()
         
@@ -10485,9 +10508,9 @@ Be accurate and consistent. If the question is ambiguous, answer based on the mo
 
 Answer:"""
 
-        # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        # Generate response using direct LLM call (NOT using AAC system prompt wrapper)
+        # This avoids conflicts with the AAC response format requirements for game requests
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
         
         # Extract yes/no answer
         answer = response_text.strip().lower()
@@ -10509,6 +10532,310 @@ Answer:"""
     except Exception as e:
         logging.error(f"Error answering game question: {e}", exc_info=True)
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+class GameResponseOptionsRequest(BaseModel):
+    game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
+    response_type: str = Field(..., description="Type of response: 'question_response', 'guess_response', 'player1_win', 'player2_win'")
+    category: Optional[str] = Field(None, description="Category of the selected item")
+    selected_item: Optional[str] = Field(None, description="The selected person, place, or thing")
+    player_question_or_guess: Optional[str] = Field(None, description="The question asked or guess made")
+    questions_remaining: Optional[int] = Field(None, description="Number of questions remaining")
+    guesses_remaining: Optional[int] = Field(None, description="Number of guesses remaining")
+    questions_asked: Optional[int] = Field(None, description="Total questions asked so far")
+    guesses_made: Optional[int] = Field(None, description="Total guesses made so far")
+
+
+@app.post("/api/games/response-options")
+async def generate_response_options(
+    request: GameResponseOptionsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate fun, conversational response options for Player 1 in 20 Questions game
+    
+    Response types:
+    - question_response: Mixed yes/no response options for Player 1 to answer a question
+    - guess_response: Mixed correct/incorrect response options for Player 1 to respond to a guess
+    - player1_win: Player 1 selected item was guessed
+    - player2_win: Player 2 ran out of guesses
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 5)
+        
+        # Ensure we have at least 5-7 response options
+        num_options = max(5, min(llm_options, 7))  # 5-7 response options
+
+        # Decide the answer type first so all options are consistent
+        target_answer_type = None
+        if request.response_type == 'question_response':
+            target_answer_type = await decide_question_answer_type(
+                request.player_question_or_guess,
+                request.selected_item,
+                request.category,
+                account_id,
+                aac_user_id
+            )
+        elif request.response_type == 'guess_response':
+            target_answer_type = decide_guess_answer_type(
+                request.player_question_or_guess,
+                request.selected_item
+            )
+            if not target_answer_type:
+                target_answer_type = await decide_guess_answer_type_with_llm(
+                    request.player_question_or_guess,
+                    request.selected_item,
+                    account_id,
+                    aac_user_id
+                )
+        
+        # Build context message based on response type
+        context_message = ""
+        if request.response_type == 'question_response':
+            context_message = f"""Player 2 asked you a yes/no question: "{request.player_question_or_guess}"
+
+Your selected {request.category} is: "{request.selected_item}"
+
+You must respond with ONLY '{target_answer_type.upper()}' to answer their question."""
+        elif request.response_type == 'guess_response':
+            context_message = f"""Player 2 just made a guess: "{request.player_question_or_guess}"
+
+Your selected item is: "{request.selected_item}"
+
+You must respond with ONLY '{target_answer_type.upper()}' to answer their guess."""
+        elif request.response_type == 'player1_win':
+            context_message = f"Congratulations! Player 2 successfully guessed your selected item!"
+            if request.selected_item:
+                context_message += f"\nYour item: {request.selected_item}"
+            context_message += f"\nThey used {request.guesses_made} out of {request.guesses_made + request.guesses_remaining} guesses"
+        elif request.response_type == 'player2_win':
+            context_message = f"Player 2 ran out of guesses and did not figure out your item."
+            if request.selected_item:
+                context_message += f"\nYour item was: {request.selected_item}"
+        
+        llm_query = f"""You are helping a person using an AAC (Augmentative and Alternative Communication) device play 20 Questions.
+
+{context_message}
+
+Generate exactly {num_options} FUN and CONVERSATIONAL response options for them to choose from. These should be natural, engaging responses that make the game more interactive and entertaining.
+
+CRITICAL: All responses must communicate ONLY "{target_answer_type}". Do NOT include the opposite type.
+
+Guidelines for response options:
+1. Make them conversational and fun - avoid robotic responses
+2. Vary the tone within each type - mix playful, witty, encouraging, and surprised responses
+3. Use natural language a person would actually say
+4. Keep each response SHORT (1-5 words preferred)
+5. Keep all options consistent with the same answer type
+6. Make it obvious which type they belong to through word choice
+
+Examples for question responses:
+- YES type: "You got it!", "That's right!", "Exactly!", "Yes!", "Well done!", "Correct!"
+- NO type: "Not quite", "You're close", "Wrong!", "Nope", "Not that one", "Incorrect"
+
+Examples for guess responses:
+- CORRECT type: "You got it!", "Nice guess!", "That's it!", "Exactly right!", "Correct!", "Nailed it!"
+- INCORRECT type: "Not quite", "Good try!", "Keep guessing!", "That's not it", "Try again!", "Nope"
+
+IMPORTANT FORMATTING: Return your response as a simple JSON array of objects. Each object MUST have:
+- "text": the response option (string)  
+- "answer_type": one of ["yes", "no"] for questions, or ["correct", "incorrect"] for guesses
+
+Example format for questions (must have exactly {num_options} items, all the same type):
+[
+    {{"text": "You got it!", "answer_type": "yes"}},
+    {{"text": "That's right!", "answer_type": "yes"}},
+    {{"text": "Exactly!", "answer_type": "yes"}},
+    {{"text": "Well done!", "answer_type": "yes"}},
+    {{"text": "Correct!", "answer_type": "yes"}}
+]
+
+Return ONLY the JSON array, no other text. Make sure to include the answer_type for each option."""
+
+        # Generate response using direct LLM call
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        
+        # Parse JSON response
+        try:
+            response_text = response_text.strip()
+            if response_text.startswith('['):
+                options = json.loads(response_text)
+            else:
+                # If not a JSON array, try to find JSON in the response
+                start_idx = response_text.find('[')
+                end_idx = response_text.rfind(']') + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    options = json.loads(json_str)
+                else:
+                    # Fallback to predefined options
+                    options = generate_default_response_options_with_types(request.response_type, num_options)
+        except (json.JSONDecodeError, ValueError) as e:
+            logging.warning(f"Failed to parse response options JSON: {e}. Using defaults.")
+            options = generate_default_response_options_with_types(request.response_type, num_options)
+        
+        # Validate options format and ensure they match target_answer_type
+        validated_options = []
+        for opt in options:
+            if isinstance(opt, dict) and 'text' in opt and 'answer_type' in opt:
+                if target_answer_type and opt['answer_type'] != target_answer_type:
+                    continue
+                validated_options.append(opt)
+            elif isinstance(opt, str):
+                # If just a string, assume target type
+                if target_answer_type:
+                    validated_options.append({"text": opt, "answer_type": target_answer_type})
+        
+        if not validated_options:
+            validated_options = generate_default_response_options_with_types(
+                request.response_type,
+                num_options,
+                target_answer_type=target_answer_type
+            )
+        
+        # Trim to requested number
+        validated_options = validated_options[:num_options]
+        
+        return JSONResponse(content={
+            "success": True,
+            "response_options": validated_options,
+            "response_type": request.response_type,
+            "answer_type": target_answer_type
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating response options: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+def generate_default_response_options_with_types(
+    response_type: str,
+    num_options: int = 5,
+    target_answer_type: Optional[str] = None
+) -> List[Dict[str, str]]:
+    """Fallback function to generate default response options with answer types"""
+    defaults = {
+        'question_response': [
+            {"text": "You got it!", "answer_type": "yes"},
+            {"text": "That's right!", "answer_type": "yes"},
+            {"text": "Exactly!", "answer_type": "yes"},
+            {"text": "Well done!", "answer_type": "yes"},
+            {"text": "Not quite", "answer_type": "no"},
+            {"text": "You're close", "answer_type": "no"},
+            {"text": "Nope, try again", "answer_type": "no"}
+        ][:num_options],
+        'guess_response': [
+            {"text": "You got it!", "answer_type": "correct"},
+            {"text": "That's it!", "answer_type": "correct"},
+            {"text": "You're brilliant!", "answer_type": "correct"},
+            {"text": "Wow, nice guess!", "answer_type": "correct"},
+            {"text": "Not quite", "answer_type": "incorrect"},
+            {"text": "Good try!", "answer_type": "incorrect"},
+            {"text": "Keep guessing!", "answer_type": "incorrect"}
+        ][:num_options],
+        'player1_win': [
+            {"text": "Well done!", "answer_type": "correct"},
+            {"text": "You solved it!", "answer_type": "correct"},
+            {"text": "Fantastic!", "answer_type": "correct"},
+            {"text": "Amazing work!", "answer_type": "correct"},
+            {"text": "Great game!", "answer_type": "correct"}
+        ][:num_options],
+        'player2_win': [
+            {"text": "Better luck next time!", "answer_type": "incorrect"},
+            {"text": "You were close!", "answer_type": "incorrect"},
+            {"text": "Nice try!", "answer_type": "incorrect"},
+            {"text": "That was tricky!", "answer_type": "incorrect"},
+            {"text": "Good effort!", "answer_type": "incorrect"}
+        ][:num_options]
+    }
+    
+    options = defaults.get(response_type, defaults['question_response'])
+
+    if target_answer_type:
+        options = [opt for opt in options if opt.get("answer_type") == target_answer_type]
+        if not options:
+            options = defaults.get(response_type, defaults['question_response'])
+
+    return options[:num_options]
+
+
+def _normalize_guess_text(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    lowered = text.lower().strip()
+    for prefix in ["is it ", "is it a ", "is it an ", "is it the ", "is it my "]:
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix):]
+            break
+    cleaned = re.sub(r"[^a-z0-9]+", "", lowered)
+    return cleaned
+
+
+async def decide_question_answer_type(
+    question: Optional[str],
+    selected_item: Optional[str],
+    category: Optional[str],
+    account_id: str,
+    aac_user_id: str
+) -> str:
+    if not question or not selected_item or not category:
+        return "no"
+
+    llm_query = f"""Answer this yes/no question for 20 Questions.
+
+Selected {category}: "{selected_item}"
+Question: "{question}"
+
+Respond ONLY with "yes" or "no". No other words."""
+
+    response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+    normalized = response_text.strip().lower()
+    if normalized.startswith("y"):
+        return "yes"
+    if normalized.startswith("n"):
+        return "no"
+    return "no"
+
+
+def decide_guess_answer_type(guess: Optional[str], selected_item: Optional[str]) -> Optional[str]:
+    if not guess or not selected_item:
+        return None
+    normalized_guess = _normalize_guess_text(guess)
+    normalized_item = _normalize_guess_text(selected_item)
+    if normalized_guess and normalized_item and normalized_guess == normalized_item:
+        return "correct"
+    return "incorrect"
+
+
+async def decide_guess_answer_type_with_llm(
+    guess: Optional[str],
+    selected_item: Optional[str],
+    account_id: str,
+    aac_user_id: str
+) -> str:
+    if not guess or not selected_item:
+        return "incorrect"
+
+    llm_query = f"""Determine if the guess matches the selected item.
+
+Selected item: "{selected_item}"
+Guess: "{guess}"
+
+Respond ONLY with "correct" or "incorrect". No other words."""
+
+    response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+    normalized = response_text.strip().lower()
+    if normalized.startswith("c"):
+        return "correct"
+    if normalized.startswith("i"):
+        return "incorrect"
+    return "incorrect"
+
+
 
 
 class FreestyleCategoryWordsRequest(BaseModel):

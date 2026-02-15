@@ -372,7 +372,7 @@
                 </div>
                 <div class="game-button" onclick="selectRole('answer')">
                     <i class="fas fa-lightbulb"></i>
-                    You ask the questions
+                    They ask the questions
                 </div>
             </div>
 
@@ -395,6 +395,11 @@
             <!-- Options Selection (for questions, guesses, or P/P/T options) -->
             <div id="optionsSelection" class="game-grid hidden">
                 <!-- Options will be populated dynamically -->
+            </div>
+
+            <!-- Response Options (for Player 1 to choose their response) -->
+            <div id="responseOptions" class="game-grid hidden">
+                <!-- Response options will be populated dynamically -->
             </div>
 
             <!-- Question History -->
@@ -433,6 +438,10 @@
                 <div id="makeGuessBtn" class="game-button" onclick="makeGuess()">
                     <i class="fas fa-lightbulb"></i>
                     Make a Guess
+                </div>
+                <div class="game-button" style="background-color: #dc2626; color: white;" onclick="exitGame()">
+                    <i class="fas fa-times"></i>
+                    Exit Game
                 </div>
             </div>
         </div>
@@ -734,21 +743,10 @@
             } else if (gameState.currentPhase === 'listening_for_guess') {
                 // Listening for the actual guess
                 handlePlayerGuess(transcript);
-            } else if (gameState.currentPhase === 'awaiting_result') {
-                // Waiting for "right" or "wrong"
-                if (transcript.includes('right') || transcript.includes('correct')) {
-                    handleGuessResult(true);
-                } else if (transcript.includes('wrong') || transcript.includes('incorrect')) {
-                    handleGuessResult(false);
-                } else {
-                    announce("Please say 'right' or 'wrong'");
-                    // Restart listening after a delay
-                    setTimeout(() => {
-                        if (gameState.currentPhase === 'awaiting_result') {
-                            startListening();
-                        }
-                    }, 2000);
-                }
+            } else if (gameState.currentPhase === 'selecting_response') {
+                // Ignore speech while selecting response options via scanning
+                // Do nothing - let the user scan through options
+                return;
             }
         }
 
@@ -756,9 +754,9 @@
         function startListening() {
             console.log(`LISTENING: startListening() called in phase: ${gameState.currentPhase}`);
             
-            // Completely prevent listening during action selection phase
-            if (gameState.currentPhase === 'action_selection') {
-                console.log('LISTENING: Blocked during action_selection phase');
+            // Completely prevent listening during action selection and response selection phases
+            if (gameState.currentPhase === 'action_selection' || gameState.currentPhase === 'selecting_response') {
+                console.log(`LISTENING: Blocked during ${gameState.currentPhase} phase`);
                 return;
             }
             
@@ -1032,6 +1030,8 @@
                 guessCount: 0,
                 maxQuestions: 20,
                 maxGuesses: 3,
+                previousGuesses: [],
+                currentGuess: null,
                 wakeWord: gameState.wakeWord,
                 scanDelay: gameState.scanDelay || 3500, // Preserve or default scan delay
                 isListening: false,
@@ -1080,12 +1080,19 @@
                 // User will answer questions - show category selection with scanning (no listening)
                 gameState.currentPhase = 'category';
                 document.getElementById('statusText').textContent = 'What type of thing are you thinking of?';
-                document.getElementById('categorySelection').classList.remove('hidden');
                 
-                // Start scanning for category selection (no listening - user taps/uses switch)
+                // Announce that Player 2 will ask questions
+                announce("Let's see if you can guess what I am thinking. Give me a moment to pick something");
+                
+                // Delay before showing category selection so announcement plays
                 setTimeout(() => {
-                    startScanning('categorySelection');
-                }, 500);
+                    document.getElementById('categorySelection').classList.remove('hidden');
+                    
+                    // Start scanning for category selection (no listening - user taps/uses switch)
+                    setTimeout(() => {
+                        startScanning('categorySelection');
+                    }, 500);
+                }, 3500);
             }
         }
 
@@ -1178,7 +1185,8 @@
                     game_type: '20_questions',
                     category: gameState.category,
                     asked_questions: gameState.askedQuestions,
-                    question_count: gameState.questionCount
+                    question_count: gameState.questionCount,
+                    exclude_options: gameState.currentOptions || []
                 };
                 
                 console.log('Sending questions request:', requestPayload);
@@ -1220,7 +1228,8 @@
                         category: gameState.category,
                         asked_questions: gameState.askedQuestions,
                         guess_count: gameState.guessCount,
-                        previous_guesses: gameState.previousGuesses
+                        previous_guesses: gameState.previousGuesses,
+                        exclude_options: gameState.currentOptions || []
                     })
                 });
                 
@@ -1243,6 +1252,9 @@
 
         // Display options (questions, guesses, or selections)
         function displayOptions(options, type) {
+            // Store current options for exclusion when requesting different ones
+            gameState.currentOptions = options;
+            
             const container = document.getElementById('optionsSelection');
             container.innerHTML = '';
             container.classList.remove('hidden');
@@ -1334,7 +1346,8 @@
                     body: JSON.stringify({
                         game_type: '20_questions',
                         category: gameState.category,
-                        request_different: true
+                        request_different: true,
+                        exclude_options: gameState.currentOptions || []
                     })
                 });
                 
@@ -1409,102 +1422,29 @@
         async function handlePlayerQuestion(question) {
             gameState.questionCount++;
             updateQuestionCounter();
+            gameState.currentQuestion = question; // Store the question
             
-            // Get answer from LLM
-            try {
-                const response = await authenticatedFetch('/api/games/answer', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        game_type: '20_questions',
-                        selected_item: gameState.selectedItem,
-                        player_question: question
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-                
-                const data = await response.json();
-                const answer = data.answer;
-                
-                // Add to history
-                gameState.askedQuestions.push({
-                    question: question,
-                    answer: answer
-                });
-                
-                // Announce answer
-                announce(answer);
-                
-                // Update question history display
-                updateQuestionHistory();
-                
-                // Announce remaining questions
-                const remaining = gameState.maxQuestions - gameState.questionCount;
-                if (remaining > 0) {
-                    setTimeout(() => {
-                        announce(`You have ${remaining} questions left`);
-                        
-                        // Continue waiting for wake word
-                        gameState.currentPhase = 'awaiting_wake_word';
-                        setTimeout(() => {
-                            startListening();
-                        }, 2000);
-                    }, 2000);
-                } else {
-                    // No more questions left
-                    setTimeout(() => {
-                        announce("That was your last question. Time to make your final guess!");
-                        gameState.currentPhase = 'listening_for_guess';
-                        setTimeout(() => {
-                            startListening();
-                        }, 2000);
-                    }, 2000);
-                }
-                
-            } catch (error) {
-                console.error('Error getting answer:', error);
-                announce("Sorry, I didn't understand that question. Please try again.");
-                
-                gameState.currentPhase = 'awaiting_wake_word';
-                setTimeout(() => {
-                    startListening();
-                }, 2000);
-            }
+            // Announce the question back to Player 1
+            announce(`Ok. Your question is ${question}. Give me a moment to respond`);
+            
+            // Load response options after small delay (instead of calling /api/games/answer)
+            setTimeout(() => {
+                loadResponseOptions('question_response');
+            }, 2000);
         }
 
         // Handle player guess
         function handlePlayerGuess(guess) {
             gameState.guessCount++;
+            gameState.currentGuess = guess; // Store the guess
             
-            // Check if guess is correct
-            const isCorrect = guess.toLowerCase().includes(gameState.selectedItem.toLowerCase()) ||
-                             gameState.selectedItem.toLowerCase().includes(guess.toLowerCase());
+            // Announce the guess
+            announce(`Ok. They guessed ${guess}. Give me a moment to respond`);
             
-            if (isCorrect) {
-                announce("You got it! Great job!");
-                setTimeout(() => {
-                    goBackToMenu();
-                }, 3000);
-            } else {
-                const remaining = gameState.maxGuesses - gameState.guessCount;
-                if (remaining > 0) {
-                    announce(`Sorry, not right. You have ${remaining} guesses left`);
-                    
-                    // Continue waiting for wake word
-                    gameState.currentPhase = 'awaiting_wake_word';
-                    setTimeout(() => {
-                        startListening();
-                    }, 2000);
-                } else {
-                    // No more guesses
-                    announce(`Sorry, the correct answer was ${gameState.selectedItem}. Better luck next time!`);
-                    setTimeout(() => {
-                        goBackToMenu();
-                    }, 4000);
-                }
-            }
+            // Load response options (both correct and incorrect options) after small delay
+            setTimeout(() => {
+                loadResponseOptions('guess_response');
+            }, 2000);
         }
 
         // Ask a question (user asking mode)
@@ -1562,7 +1502,199 @@
             gameState.currentQuestion = question;
         }
 
-        // Modified askQuestion to store current question
+        // Load response options for Player 1 to choose their response
+        async function loadResponseOptions(responseType) {
+            // Stop any active listening immediately and set proper phase
+            stopListening();
+            hideListening();
+            gameState.currentPhase = 'response_selection';
+            
+            // Show loading state
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('responseOptions').classList.add('hidden');
+            
+            try {
+                // Prepare request data
+                const requestData = {
+                    game_type: "20_questions",
+                    response_type: responseType,
+                    category: gameState.category,
+                    selected_item: gameState.selectedItem,
+                    player_question_or_guess: responseType === 'question_response' ? gameState.currentQuestion : gameState.currentGuess,
+                    questions_remaining: gameState.maxQuestions - gameState.questionCount,
+                    guesses_remaining: gameState.maxGuesses - gameState.guessCount,
+                    questions_asked: gameState.questionCount,
+                    guesses_made: gameState.guessCount
+                };
+                
+                console.log('Loading response options for:', responseType);
+                
+                const response = await authenticatedFetch('/api/games/response-options', {
+                    method: 'POST',
+                    body: JSON.stringify(requestData)
+                });
+                
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to load response options');
+                }
+                
+                // Hide loading
+                document.getElementById('loadingState').classList.add('hidden');
+                
+                // Store response type for later
+                gameState.currentResponseType = responseType;
+                gameState.responseOptions = data.response_options;
+                
+                console.log('Response options loaded:', data.response_options);
+                
+                // Display response options
+                displayResponseOptions(data.response_options);
+                
+            } catch (error) {
+                console.error('Error loading response options:', error);
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('errorState').classList.remove('hidden');
+                document.getElementById('errorMessage').textContent = 'Failed to generate response options. Try again.';
+                
+                // Retry after delay
+                setTimeout(() => {
+                    document.getElementById('errorState').classList.add('hidden');
+                    loadResponseOptions(responseType);
+                }, 2000);
+            }
+        }
+
+        // Display response options in the grid
+        function displayResponseOptions(options) {
+            const container = document.getElementById('responseOptions');
+            container.innerHTML = '';
+            
+            options.forEach((option, index) => {
+                const button = document.createElement('div');
+                button.className = 'game-button';
+                // Store both answer_type in data attribute for retrieval
+                if (option.answer_type) {
+                    button.setAttribute('data-answer-type', option.answer_type);
+                }
+                // Handle both object format {text, answer_type} and string format
+                const displayText = option.text || option;
+                button.textContent = displayText;
+                button.onclick = () => selectResponseOption(option, index);
+                container.appendChild(button);
+            });
+            
+            container.classList.remove('hidden');
+            
+            // Start scanning for response selection
+            setTimeout(() => {
+                startScanning('responseOptions');
+            }, 500);
+        }
+
+        // Handle selection of a response option
+        function selectResponseOption(selectedOption, index) {
+            // Stop scanning
+            stopScanning();
+            
+            // Hide response options
+            document.getElementById('responseOptions').classList.add('hidden');
+            
+            // Extract response text and answer type
+            let responseText, answerType;
+            if (typeof selectedOption === 'object' && selectedOption.text) {
+                responseText = selectedOption.text;
+                answerType = selectedOption.answer_type;
+            } else if (typeof selectedOption === 'string') {
+                responseText = selectedOption;
+                // Try to get from button's data attribute
+                const buttons = document.querySelectorAll('#responseOptions .game-button');
+                if (buttons[index]) {
+                    answerType = buttons[index].getAttribute('data-answer-type');
+                }
+            }
+            
+            console.log('Selected:', responseText, 'Answer type:', answerType);
+            
+            // Store selection
+            gameState.selectedResponse = responseText;
+            gameState.selectedAnswerType = answerType;
+            
+            // Get remaining counts
+            const questionsRemaining = gameState.maxQuestions - gameState.questionCount;
+            const guessesRemaining = gameState.maxGuesses - gameState.guessCount;
+            
+            // Build announcement
+            let announcement = responseText;
+            
+            // Handle based on response type
+            if (gameState.currentResponseType === 'question_response') {
+                // Question answer response
+                announcement += `. You have ${questionsRemaining} question${questionsRemaining !== 1 ? 's' : ''} left.`;
+                announce(announcement);
+                
+                setTimeout(() => {
+                    // After responding to Player 2's question, listen for next question or guess
+                    // Player 2 will either ask another question or make a guess
+                    gameState.currentPhase = 'awaiting_wake_word';
+                    hideListening();
+                    document.getElementById('statusText').textContent = 'Listening for next question or guess...';
+                    announce(`To ask another question or make a guess, start with ${gameState.wakeWord}.`);
+                    showListening();
+                    startListening();
+                }, 3500);
+                
+            } else if (gameState.currentResponseType === 'guess_response') {
+                // Guess response
+                if (answerType === 'correct') {
+                    // Guess was correct - Player 2 wins
+                    announce(responseText);
+                    setTimeout(() => {
+                        announce(`You successfully guessed it! It was ${gameState.selectedItem}!`);
+                        setTimeout(() => {
+                            goBackToMenu();
+                        }, 3000);
+                    }, 2000);
+                } else {
+                    // Guess was incorrect
+                    // Add to previous guesses
+                    if (gameState.currentGuess) {
+                        if (!gameState.previousGuesses) {
+                            gameState.previousGuesses = [];
+                        }
+                        if (!gameState.previousGuesses.includes(gameState.currentGuess)) {
+                            gameState.previousGuesses.push(gameState.currentGuess);
+                        }
+                    }
+                    
+                    if (guessesRemaining > 1) {
+                        // More guesses available - continue with Player 2 asking questions or guessing
+                        announcement += `. ${guessesRemaining - 1} guess${guessesRemaining !== 2 ? 'es' : ''} left.`;
+                        announce(announcement);
+                        setTimeout(() => {
+                            // After incorrect guess, listen for Player 2's next question or guess
+                            gameState.currentPhase = 'awaiting_wake_word';
+                            hideListening();
+                            document.getElementById('statusText').textContent = 'Listening for next question or guess...';
+                            announce(`To ask another question or make a guess, start with ${gameState.wakeWord}.`);
+                            showListening();
+                            startListening();
+                        }, 3500);
+                    } else {
+                        // No more guesses - Player 1 wins
+                        announce(responseText);
+                        setTimeout(() => {
+                            announce(`You ran out of guesses. The answer was ${gameState.selectedItem}. Great game!`);
+                            setTimeout(() => {
+                                goBackToMenu();
+                            }, 3000);
+                        }, 2000);
+                    }
+                }
+            }
+        }
+
+        // Modified askQuestion to load response options instead of listening
         function askQuestion(question) {
             gameState.questionCount++;
             gameState.currentPhase = 'awaiting_answer';
@@ -1574,10 +1706,10 @@
             // Announce the question
             announce(question);
             
-            // Start listening for yes/no after announcement
+            // Load response options after announcement
             setTimeout(() => {
-                startListening();
-            }, 3000);
+                loadResponseOptions('question_response');  // Load mixed yes/no response options
+            }, 3500);
         }
 
         // Show action buttons
@@ -1616,7 +1748,7 @@
         function makeGuessAttempt(guess) {
             gameState.guessCount++;
             gameState.currentPhase = 'awaiting_result';
-            gameState.currentGuess = guess; // Store current guess for potential addition to previousGuesses
+            gameState.currentGuess = guess; // Store current guess
             
             // Hide options
             document.getElementById('optionsSelection').classList.add('hidden');
@@ -1624,10 +1756,10 @@
             // Announce the guess as a proper question
             announce(`Is it ${guess}?`);
             
-            // Start listening for right/wrong after announcement
+            // Load response options after announcement (both correct and incorrect options)
             setTimeout(() => {
-                startListening();
-            }, 3000);
+                loadResponseOptions('guess_response');
+            }, 3500);
         }
 
         // Handle guess result
@@ -1639,10 +1771,15 @@
                 }, 3000);
             } else {
                 // Add wrong guess to previousGuesses to avoid repeating it
-                if (gameState.currentGuess && !gameState.previousGuesses.includes(gameState.currentGuess)) {
-                    gameState.previousGuesses.push(gameState.currentGuess);
-                    console.log(`Added wrong guess to previousGuesses: ${gameState.currentGuess}`);
-                    console.log(`Previous guesses now: ${JSON.stringify(gameState.previousGuesses)}`);
+                if (gameState.currentGuess) {
+                    if (!gameState.previousGuesses) {
+                        gameState.previousGuesses = [];
+                    }
+                    if (!gameState.previousGuesses.includes(gameState.currentGuess)) {
+                        gameState.previousGuesses.push(gameState.currentGuess);
+                        console.log(`Added wrong guess to previousGuesses: ${gameState.currentGuess}`);
+                        console.log(`Previous guesses now: ${JSON.stringify(gameState.previousGuesses)}`);
+                    }
                 }
                 
                 if (gameState.guessCount >= gameState.maxGuesses) {
@@ -1651,10 +1788,24 @@
                         goBackToMenu();
                     }, 3000);
                 } else {
-                    announce("Oops, trying one more time");
+                    // Stop scanning and show action buttons
+                    stopScanning();
+                    
+                    // Show action buttons for another question or guess
+                    const actionButtons = document.getElementById('actionButtons');
+                    if (actionButtons) {
+                        actionButtons.classList.remove('hidden');
+                    }
+                    
+                    announce("Darn. Give me a moment to pick another question or guess.");
+                    
+                    // Update phase and prepare for scanning
+                    gameState.currentPhase = 'action_selection';
+                    
+                    // Start scanning for action selection
                     setTimeout(() => {
-                        loadGuesses();
-                    }, 2000);
+                        startScanning('actionButtons');
+                    }, 3500);
                 }
             }
         }

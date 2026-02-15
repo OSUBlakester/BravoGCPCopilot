@@ -1024,6 +1024,7 @@ function handlePageSelected() {
     if (!selectedPageName) {
         // Clear display name and grid for new page creation
         newPageDisplayNameInput.value = '';
+        document.getElementById('scanPattern').value = 'column';
         currentPageData = null;
         buttonGrid.innerHTML = '';
         for (let row = 0; row < GRID_ROWS; row++) {
@@ -1038,6 +1039,7 @@ function handlePageSelected() {
     currentPageData = allUserPages.find(page => page.name === selectedPageName);
     if (currentPageData) {
         newPageDisplayNameInput.value = currentPageData.displayName || currentPageData.name;
+        document.getElementById('scanPattern').value = currentPageData.scan_pattern || 'column';
         initialPageDataString = JSON.stringify(currentPageData);
         
         // Check for buttons outside normal grid bounds
@@ -1172,6 +1174,7 @@ async function updatePage() {
     const pageData = {
         name: selectedPageName,
         displayName: displayName,
+        scan_pattern: document.getElementById('scanPattern').value || 'column',
         buttons: currentPageData ? currentPageData.buttons : [],
         originalName: selectedPageName
     };

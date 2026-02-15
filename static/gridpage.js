@@ -32,6 +32,13 @@ let currentButtonIndex = -1; // Tracks the index for scanning
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
 let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to scan limit
+// --- NEW: Row-Column Scanning Variables ---
+let currentScanPattern = 'column'; // 'column' or 'row-column'
+let currentRowScanMode = false; // true if currently in row-scan phase
+let currentRow = -1; // Current row being scanned (-1 = not in row mode)
+let currentButtonInRow = -1; // Current button index within the row
+let rowLoopCount = 0; // Tracks row-scan cycles for row-pattern
+let columnLoopCount = 0; // Tracks column-scan cycles for row-pattern
 let gamepadIndex = null; // To store the index of the connected gamepad
 let gamepadPollInterval = null; // Interval ID for gamepad polling
 const ANNOUNCE_RELOAD_DELAY = 2000; // Delay in ms after announce before reload (adjust as needed)
@@ -844,16 +851,22 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         let pageToDisplay = userPages.find(p => p.name === pageName);
 
+        // Load scan pattern from page metadata
+        currentScanPattern = pageToDisplay?.scan_pattern || 'column';
+        console.log(`Loaded scan pattern for page '${pageName}': ${currentScanPattern}`);
+
         if (!pageToDisplay) {
             console.warn(`Requested page '${pageName}' not found.`);
             const homePage = userPages.find(p => p.name === "home");
             if (homePage) {
                 pageToDisplay = homePage; // Corrected variable name
                 pageName = "home"; // Update pageName to reflect the fallback
+                currentScanPattern = pageToDisplay?.scan_pattern || 'column'; // Load scan pattern for fallback page
                 console.warn(`Defaulting to 'home' page.`);
             } else if (userPages.length > 0) {
                 pageToDisplay = userPages[0];
                 pageName = pageToDisplay.name; // Update pageName
+                currentScanPattern = pageToDisplay?.scan_pattern || 'column'; // Load scan pattern for fallback page
                 console.warn(`No 'home' page. Defaulting to first available page: '${pageName}'.`);
             } else {
                 console.error(`No pages found for current user. Cannot display any content.`);
@@ -1261,6 +1274,8 @@ async function generateGrid(page, container) {
         button.dataset.targetPage = buttonData.targetPage || '';
         button.dataset.speechPhrase = buttonData.speechPhrase || '';
         button.dataset.queryType = buttonData.queryType || '';
+        button.dataset.row = currentRow;
+        button.dataset.col = currentCol;
         button.classList.add('grid-button'); // Add class for CSS styling (preserves sight-word-button if already set)
         button.style.gridRowStart = currentRow + 1;
         button.style.gridColumnStart = currentCol + 1;
@@ -1324,6 +1339,14 @@ async function handleButtonClick(buttonData) {
         debugTimes.resumeScan = performance.now();
         console.log('[DEBUG] handleButtonClick: resumeAuditoryScanning only, total:', (debugTimes.resumeScan - debugTimes.start).toFixed(2), 'ms');
         return; // Don't process the button click, just resume scanning
+    }
+
+    // NEW: Check if we're in row-phase scanning and handle row selection
+    if (currentRowScanMode && currentRow >= 0) {
+        console.log(`Row phase: User selected row ${currentRow}, switching to column-phase scanning...`);
+        stopAuditoryScanning();
+        startColumnPhaseForRow(currentRow);
+        return; // Return early, don't execute button action
     }
 
     // IMMEDIATELY stop scanning when any button is clicked
@@ -2697,15 +2720,138 @@ function tryResumeAudioContext() {
 
 
 
+// --- Row-Column Scanning Helper Functions ---
+function getVisibleRowIndices() {
+    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+    if (buttons.length === 0) return [];
+    
+    const rowSet = new Set();
+    buttons.forEach(btn => {
+        const row = parseInt(btn.dataset.row, 10);
+        if (!isNaN(row)) rowSet.add(row);
+    });
+    
+    return Array.from(rowSet).sort((a, b) => a - b);
+}
+
+function getButtonsInRow(rowIndex) {
+    return Array.from(document.querySelectorAll(`#gridContainer button[data-row="${rowIndex}"]:not([style*="display: none"])`))
+        .sort((a, b) => {
+            const colA = parseInt(a.dataset.col, 10);
+            const colB = parseInt(b.dataset.col, 10);
+            return colA - colB;
+        });
+}
+
+function getVisibleButtons() {
+    return Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+}
+
+
 // --- Auditory Scanning ---
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { console.log("Auditory scanning is off."); return; }
-    console.log("Starting auditory scanning...");
-    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
-    if (buttons.length === 0) { console.log("No visible buttons found."); currentlyScannedButton = null; return; }
+    console.log("Starting auditory scanning...", `Pattern: ${currentScanPattern}`);
     
-    // Reset cycle tracking when starting fresh
+    // Check which scanning pattern to use
+    if (currentScanPattern === 'row-column') {
+        startRowPhaseScanning();
+    } else {
+        startColumnPhaseScanning();
+    }
+}
+
+function startRowPhaseScanning() {
+    console.log("Starting ROW-PHASE scanning...");
+    const rowIndices = getVisibleRowIndices();
+    if (rowIndices.length === 0) { 
+        console.log("No rows found for row-phase scanning."); 
+        currentlyScannedButton = null;
+        return;
+    }
+    
+    currentRowScanMode = true;
+    currentRow = -1;
+    rowLoopCount = 0;
+    isPausedFromScanLimit = false;
+
+    const scanStep = async () => {
+        // Remove previous highlight (if it was on a button from the previous row)
+        if (currentlyScannedButton) { 
+            currentlyScannedButton.classList.remove('scanning');
+            // Also remove row highlights from all buttons
+            document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+                btn.classList.remove('scanning-row');
+            });
+        }
+        
+        currentRow++;
+        
+        // Check if we've completed a full cycle through all rows
+        if (currentRow >= rowIndices.length) {
+            currentRow = 0;
+            rowLoopCount++;
+            
+            // Check scan loop limit
+            if (scanLoopLimit > 0 && rowLoopCount >= scanLoopLimit) {
+                console.log(`Row scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                isPausedFromScanLimit = true;
+                stopAuditoryScanning();
+                
+                try {
+                    await announce("Scanning paused", "system", false, false);
+                } catch (e) { 
+                    console.error("Speech synthesis error:", e); 
+                }
+                
+                // Highlight first button for restart capability
+                const firstRowButtons = getButtonsInRow(rowIndices[0]);
+                if (firstRowButtons.length > 0) {
+                    currentlyScannedButton = firstRowButtons[0];
+                    firstRowButtons.forEach(btn => btn.classList.add('scanning-row'));
+                    currentRow = 0;
+                }
+                return;
+            }
+        }
+        
+        const rowIndex = rowIndices[currentRow];
+        const buttonsInRow = getButtonsInRow(rowIndex);
+        
+        if (buttonsInRow.length > 0) {
+            // Highlight all buttons in this row
+            buttonsInRow.forEach(btn => btn.classList.add('scanning-row'));
+            // Set currentlyScannedButton to the first button in the row (for switch handling)
+            currentlyScannedButton = buttonsInRow[0];
+            
+            // Announce the row
+            try {
+                const rowNumber = currentRow + 1;
+                await announce(`Row ${rowNumber}`, "system", false, false);
+            } catch (e) { 
+                console.error("Speech synthesis error:", e); 
+            }
+        } else {
+            console.warn("No buttons found in row:", rowIndex);
+        }
+    };
+    
+    console.log(`Scan delay set to: ${defaultDelay}ms`);
+    scanStep(); // Perform first scan immediately
+    scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function startColumnPhaseScanning() {
+    console.log("Starting COLUMN-PHASE scanning...");
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) { 
+        console.log("No visible buttons found."); 
+        currentlyScannedButton = null; 
+        return; 
+    }
+    
+    currentRowScanMode = false;
     currentButtonIndex = -1;
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
@@ -2716,32 +2862,28 @@ function startAuditoryScanning() {
         
         // Check if we've completed a full cycle
         if (currentButtonIndex >= buttons.length) { 
-            currentButtonIndex = 0; 
+            currentButtonIndex = 0;
             scanCycleCount++;
             
             // Check scan loop limit
             if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
-                console.log(`Scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                console.log(`Column scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
                 isPausedFromScanLimit = true;
                 stopAuditoryScanning();
                 
-                // Announce that scanning is paused using the proper audio system
                 try {
                     await announce("Scanning paused", "system", false, false);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
                 
-                // Set focus and highlight on the first button so user can restart scanning
+                // Set focus on first button for restart capability
                 if (buttons.length > 0) {
                     currentButtonIndex = 0;
                     buttons[0].focus();
-                    // Add visual highlight to show focus is on first button
                     currentlyScannedButton = buttons[0];
                     currentlyScannedButton.classList.add('scanning');
-                    console.log("Focus and highlight set on first button for restart capability");
                 }
-                
                 return;
             }
         }
@@ -2749,8 +2891,81 @@ function startAuditoryScanning() {
         if (buttons[currentButtonIndex]) {
             currentlyScannedButton = buttons[currentButtonIndex];
             speakAndHighlight(currentlyScannedButton);
-        } else { console.warn("Button not found at index:", currentButtonIndex); currentButtonIndex = -1; }
+        } else { 
+            console.warn("Button not found at index:", currentButtonIndex); 
+            currentButtonIndex = -1; 
+        }
     };
+    
+    console.log(`Scan delay set to: ${defaultDelay}ms`);
+    scanStep(); // Perform first scan immediately
+    scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function startColumnPhaseForRow(rowIndex) {
+    console.log(`Starting COLUMN-PHASE for row ${rowIndex}...`);
+    // Stop any existing scanning interval (row phase) before switching modes
+    stopAuditoryScanning();
+    const buttonsInRow = getButtonsInRow(rowIndex);
+    
+    if (buttonsInRow.length === 0) {
+        console.log("No buttons found in row, resuming row scanning.");
+        startRowPhaseScanning();
+        return;
+    }
+    
+    // Clear row highlighting
+    document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+        btn.classList.remove('scanning-row');
+    });
+    
+    currentRowScanMode = false;
+    currentRow = rowIndex;
+    currentButtonInRow = -1;
+    columnLoopCount = 0;
+    isPausedFromScanLimit = false;
+
+    const scanStep = async () => {
+        if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); }
+        currentButtonInRow++;
+        
+        // Check if we've completed a full cycle through buttons in this row
+        if (currentButtonInRow >= buttonsInRow.length) {
+            currentButtonInRow = 0;
+            columnLoopCount++;
+            
+            // Check scan loop limit
+            if (scanLoopLimit > 0 && columnLoopCount >= scanLoopLimit) {
+                console.log(`Column scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                isPausedFromScanLimit = true;
+                stopAuditoryScanning();
+                
+                try {
+                    await announce("Scanning paused", "system", false, false);
+                } catch (e) { 
+                    console.error("Speech synthesis error:", e); 
+                }
+                
+                // Highlight first button in row for restart
+                if (buttonsInRow.length > 0) {
+                    currentButtonInRow = 0;
+                    buttonsInRow[0].focus();
+                    currentlyScannedButton = buttonsInRow[0];
+                    currentlyScannedButton.classList.add('scanning');
+                }
+                return;
+            }
+        }
+        
+        if (buttonsInRow[currentButtonInRow]) {
+            currentlyScannedButton = buttonsInRow[currentButtonInRow];
+            speakAndHighlight(currentlyScannedButton);
+        } else {
+            console.warn("Button not found at index:", currentButtonInRow);
+            currentButtonInRow = -1;
+        }
+    };
+    
     console.log(`Scan delay set to: ${defaultDelay}ms`);
     scanStep(); // Perform first scan immediately
     scanningInterval = setInterval(scanStep, defaultDelay);
@@ -2770,6 +2985,9 @@ function stopAuditoryScanning() {
     console.log("Stopping auditory scanning.");
     clearInterval(scanningInterval); scanningInterval = null;
     if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); currentlyScannedButton = null; }
+    document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+        btn.classList.remove('scanning-row');
+    });
     currentButtonIndex = -1;
     // Note: No need to cancel speech here as backend TTS handles its own queue
 }
@@ -2782,10 +3000,17 @@ async function resumeAuditoryScanning() {
         return;
     }
     
-    console.log("Resuming scanning from first option with cycle reset...");
+    console.log("Resuming scanning with cycle reset...");
     isPausedFromScanLimit = false;
-    scanCycleCount = 0; // Reset cycle count
-    currentButtonIndex = -1; // Reset to start from first option
+    
+    // Reset appropriate counters based on current mode
+    if (currentRowScanMode) {
+        rowLoopCount = 0;
+        currentRow = -1;
+    } else {
+        scanCycleCount = 0;
+        currentButtonIndex = -1;
+    }
     
     // Announce that scanning is resumed using the proper audio system
     try {
@@ -3891,9 +4116,13 @@ if (!document.getElementById('scanning-styles')) {
     const styleSheet = document.createElement("style");
     styleSheet.id = 'scanning-styles';
     styleSheet.textContent = `
-        .scanning { /* Highlight style */
+        .scanning { /* Highlight style for individual buttons */
             box-shadow: 0 0 10px 4px #FB4F14 !important; /* Orange glow, !important to override base button shadow */
             outline: none !important; /* Prevent default browser focus outline, !important for specificity */
+        }
+        .scanning-row { /* Highlight style for entire row during row-phase scanning */
+            box-shadow: 0 0 8px 3px #FFA500 !important; /* Slightly different orange glow for row highlight */
+            outline: none !important;
         }
         .active { /* Optional style for click feedback */
              transform: scale(0.95);
