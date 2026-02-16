@@ -121,6 +121,9 @@ server*.py.txt
 BravoImages/
 AccentToBravo/
 
+# Development/temporary scripts and test files
+_scratch/
+
 # Test and debug files
 test_*.py
 debug_*.py

@@ -1831,8 +1831,16 @@
                 <input type="text" id="newPageDisplayName" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="e.g., Daily Greetings, What to Eat">
                 <p class="mt-1 text-sm text-gray-500">Update the display name for the currently selected page</p>
             </div>
+            <div class="mb-4">
+                <label for="scanPattern" class="block text-sm font-medium text-gray-700">Scanning Pattern:</label>
+                <select id="scanPattern" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                    <option value="column">Column-First Scanning (Default)</option>
+                    <option value="row-column">Row-First Scanning (scan rows, then columns within selected row)</option>
+                </select>
+                <p class="mt-1 text-sm text-gray-500">Choose how button scanning works on this page. Column scanning scans left-to-right, top-to-bottom. Row scanning announces each row, then scans buttons within the selected row.</p>
+            </div>
             <div class="flex space-x-3">
-                <button type="button" id="updatePageBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Save Page Name</button>
+                <button type="button" id="updatePageBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Save Page Settings</button>
                 <button type="button" id="deletePage" class="px-4 py-2 bg-red-600 text-white rounded-md shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">Delete Page</button>
                 <button type="button" id="revertPageBtn" class="px-4 py-2 bg-gray-500 text-white rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">Revert Changes</button>
             </div>
