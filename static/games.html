@@ -477,7 +477,8 @@
             wakeWord: 'bravo', // Will be loaded from settings
             isListening: false,
             currentPhase: 'menu', // 'menu', 'role', 'category', 'ready', 'playing', 'guessing', 'finished'
-            scanDelay: 3500 // Will be loaded from settings
+            scanDelay: 3500, // Will be loaded from settings
+            awaitingAnswerType: null // 'question' or 'guess'
         };
 
         // Speech recognition setup
@@ -1069,7 +1070,7 @@
                 gameState.currentPhase = 'ready';
                 gameState.category = 'thing'; // Default to 'thing', LLM will ask "Is it a person?" etc.
                 document.getElementById('statusText').textContent = 'Say "ready" when you have selected something for me to guess';
-                announce('Say "ready" when you have selected something for me to guess');
+                announce('I will ask the questions, say "ready" when you have selected something for me to guess');
                 
                 // Start listening for "ready"
                 setTimeout(() => {
@@ -1420,6 +1421,13 @@
 
         // Handle player question
         async function handlePlayerQuestion(question) {
+            // This function should ONLY be called on the 'answer' role path (You Guess)
+            // On the 'ask' role path (I Guess), questions are handled via loadQuestions + askQuestion
+            if (gameState.role !== 'answer') {
+                console.error('handlePlayerQuestion called on wrong role:', gameState.role);
+                return;
+            }
+            
             gameState.questionCount++;
             updateQuestionCounter();
             gameState.currentQuestion = question; // Store the question
@@ -1435,6 +1443,13 @@
 
         // Handle player guess
         function handlePlayerGuess(guess) {
+            // This function should ONLY be called on the 'answer' role path (You Guess)
+            // On the 'ask' role path (I Guess), guesses are handled via loadGuesses + makeGuessAttempt
+            if (gameState.role !== 'answer') {
+                console.error('handlePlayerGuess called on wrong role:', gameState.role);
+                return;
+            }
+            
             gameState.guessCount++;
             gameState.currentGuess = guess; // Store the guess
             
@@ -1451,6 +1466,8 @@
         function askQuestion(question) {
             gameState.questionCount++;
             gameState.currentPhase = 'awaiting_answer';
+            gameState.awaitingAnswerType = 'question';
+            gameState.currentQuestion = question; // Store the question for history/LLM context
             
             // Hide options
             document.getElementById('optionsSelection').classList.add('hidden');
@@ -1458,9 +1475,14 @@
             // Announce the question
             announce(question);
             
-            // Start listening for yes/no after announcement
+            // Wait for first announcement to finish, then announce the instruction
             setTimeout(() => {
-                startListening();
+                announce('Say yes or no to answer the question');
+                
+                // Start listening for yes/no after the instruction announcement
+                setTimeout(() => {
+                    startListening();
+                }, 3000);
             }, 3000);
         }
 
@@ -1468,6 +1490,14 @@
         function handleAnswer(answer) {
             // Stop listening since we got an answer
             stopListening();
+
+            // If the last prompt was a guess, resolve the guess result and stop here
+            if (gameState.awaitingAnswerType === 'guess') {
+                const isCorrect = answer.toLowerCase() === 'yes';
+                gameState.awaitingAnswerType = null;
+                handleGuessResult(isCorrect);
+                return;
+            }
             
             // Add to question history
             const lastQuestion = gameState.askedQuestions.length > 0 ? 
@@ -1483,6 +1513,8 @@
                 question: gameState.currentQuestion,
                 answer: answer
             });
+
+            gameState.awaitingAnswerType = null;
             
             updateQuestionHistory();
             updateQuestionCounter();
@@ -1694,24 +1726,6 @@
             }
         }
 
-        // Modified askQuestion to load response options instead of listening
-        function askQuestion(question) {
-            gameState.questionCount++;
-            gameState.currentPhase = 'awaiting_answer';
-            gameState.currentQuestion = question; // Store the question
-            
-            // Hide options
-            document.getElementById('optionsSelection').classList.add('hidden');
-            
-            // Announce the question
-            announce(question);
-            
-            // Load response options after announcement
-            setTimeout(() => {
-                loadResponseOptions('question_response');  // Load mixed yes/no response options
-            }, 3500);
-        }
-
         // Show action buttons
         function showActionButtons() {
             // Ensure listening is stopped before showing action buttons
@@ -1747,7 +1761,6 @@
         // Make a guess attempt
         function makeGuessAttempt(guess) {
             gameState.guessCount++;
-            gameState.currentPhase = 'awaiting_result';
             gameState.currentGuess = guess; // Store current guess
             
             // Hide options
@@ -1756,10 +1769,23 @@
             // Announce the guess as a proper question
             announce(`Is it ${guess}?`);
             
-            // Load response options after announcement (both correct and incorrect options)
-            setTimeout(() => {
-                loadResponseOptions('guess_response');
-            }, 3500);
+            if (gameState.role === 'answer') {
+                gameState.currentPhase = 'awaiting_result';
+                // Load response options after announcement (both correct and incorrect options)
+                setTimeout(() => {
+                    loadResponseOptions('guess_response');
+                }, 3500);
+            } else {
+                gameState.currentPhase = 'awaiting_answer';
+                gameState.awaitingAnswerType = 'guess';
+                // Ask Player 2 to answer and listen for yes/no
+                setTimeout(() => {
+                    announce('Say yes or no to answer the question');
+                    setTimeout(() => {
+                        startListening();
+                    }, 3000);
+                }, 3000);
+            }
         }
 
         // Handle guess result
