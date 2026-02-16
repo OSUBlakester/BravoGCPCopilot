@@ -9976,6 +9976,20 @@ class GameAnswerRequest(BaseModel):
     selected_item: str = Field(..., description="The person, place, or thing selected by user")
     player_question: str = Field(..., description="The yes/no question asked by the player")
 
+def _coerce_question_summary(question: str, summary: Optional[str]) -> str:
+    if summary:
+        summary_text = re.sub(r"\s+", " ", summary.strip())
+    else:
+        summary_text = ""
+
+    if not summary_text:
+        summary_text = re.sub(r"[?]+$", "", question.strip())
+
+    words = [word for word in summary_text.split() if word]
+    if len(words) <= 5:
+        return " ".join(words)
+    return " ".join(words[:5])
+
 @app.post("/api/games/questions")
 async def generate_game_questions(
     request: GameQuestionRequest,
@@ -10052,11 +10066,15 @@ The questions should:
 5. Avoid repeating information from previous questions
 6. Progress logically from general to more specific
 
-Return your response as a simple JSON array of strings. Each question should be a complete sentence ending with a question mark. Example format:
+Return your response as a JSON array of objects with two fields:
+- "text": the full question, a complete sentence ending with a question mark
+- "summary": a short label, 5 words or fewer
+
+Example format:
 [
-  "Is it a person?",
-  "Is it a place?",
-  "Is it a thing?"
+    {{"text": "Is it a person?", "summary": "Person?"}},
+    {{"text": "Is it a place?", "summary": "Place?"}},
+    {{"text": "Is it a thing?", "summary": "Thing?"}}
 ]
 
 Make them varied in approach and difficulty."""
@@ -10103,11 +10121,15 @@ For example, if we know "It is a person" and "It is NOT alive", the next questio
 
 NOT: "How old is this person?" (they're not alive)
 
-Return your response as a simple JSON array of strings. Each question should be a complete sentence ending with a question mark. Example format:
+Return your response as a JSON array of objects with two fields:
+- "text": the full question, a complete sentence ending with a question mark
+- "summary": a short label, 5 words or fewer
+
+Example format:
 [
-  "Is it a man?",
-  "Is this person famous?",
-  "Is this person still alive?"
+    {{"text": "Is it a man?", "summary": "Man?"}},
+    {{"text": "Is this person famous?", "summary": "Famous?"}},
+    {{"text": "Is this person still alive?", "summary": "Still alive?"}}
 ]
 
 Make them build strategically on the established facts using logical deduction."""
@@ -10126,6 +10148,7 @@ Make them build strategically on the established facts using logical deduction."
         
         # Parse questions from response
         questions = []
+        question_summaries = {}
         
         # First try to parse as JSON in case LLM returned structured data
         try:
@@ -10153,11 +10176,40 @@ Make them build strategically on the established facts using logical deduction."
             
             parsed_json = json.loads(json_text)
             if isinstance(parsed_json, list):
-                questions = [q for q in parsed_json if isinstance(q, str) and q.endswith('?')]
-                logging.info(f"Successfully parsed {len(questions)} questions from JSON format")
+                if parsed_json and isinstance(parsed_json[0], dict):
+                    for item in parsed_json:
+                        if not isinstance(item, dict):
+                            continue
+                        question_text = item.get("text") or item.get("question") or ""
+                        question_text = question_text.strip()
+                        if question_text and not question_text.endswith("?"):
+                            question_text = f"{question_text}?"
+                        if question_text:
+                            summary_text = item.get("summary") or item.get("label") or ""
+                            questions.append(question_text)
+                            question_summaries[question_text] = summary_text
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON object list")
+                else:
+                    questions = [q for q in parsed_json if isinstance(q, str) and q.endswith('?')]
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON format")
             elif isinstance(parsed_json, dict) and 'questions' in parsed_json:
-                questions = [q for q in parsed_json['questions'] if isinstance(q, str) and q.endswith('?')]
-                logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
+                raw_questions = parsed_json['questions']
+                if raw_questions and isinstance(raw_questions[0], dict):
+                    for item in raw_questions:
+                        if not isinstance(item, dict):
+                            continue
+                        question_text = item.get("text") or item.get("question") or ""
+                        question_text = question_text.strip()
+                        if question_text and not question_text.endswith("?"):
+                            question_text = f"{question_text}?"
+                        if question_text:
+                            summary_text = item.get("summary") or item.get("label") or ""
+                            questions.append(question_text)
+                            question_summaries[question_text] = summary_text
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
+                else:
+                    questions = [q for q in raw_questions if isinstance(q, str) and q.endswith('?')]
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
         except (json.JSONDecodeError, TypeError) as e:
             logging.info(f"JSON parsing failed: {e}, trying text parsing")
         
@@ -10203,9 +10255,15 @@ Make them build strategically on the established facts using logical deduction."
                     "Is it made of metal?"
                 ][:llm_options]
         
+        question_options = []
+        for question in questions[:llm_options]:
+            summary = _coerce_question_summary(question, question_summaries.get(question))
+            question_options.append({"text": question, "summary": summary})
+
         return JSONResponse(content={
             "success": True,
-            "questions": questions[:llm_options],
+            "questions": question_options,
+            "question_texts": [item["text"] for item in question_options],
             "question_count": request.question_count
         })
         
