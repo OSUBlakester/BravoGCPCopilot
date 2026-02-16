@@ -846,7 +846,7 @@
                 currentButton.classList.add('scanning');
                 
                 // Get button text for speech synthesis (like gridpage - use speechSynthesis, not announce)
-                let buttonText = currentButton.textContent || currentButton.innerText || '';
+                let buttonText = currentButton.dataset.scanLabel || currentButton.textContent || currentButton.innerText || '';
                 // Clean up the text (remove extra whitespace)
                 buttonText = buttonText.trim().replace(/\s+/g, ' ');
                 
@@ -1254,7 +1254,16 @@
         // Display options (questions, guesses, or selections)
         function displayOptions(options, type) {
             // Store current options for exclusion when requesting different ones
-            gameState.currentOptions = options;
+            if (type === 'question') {
+                gameState.currentOptions = options.map(option => {
+                    if (option && typeof option === 'object') {
+                        return option.text || option.question || '';
+                    }
+                    return option;
+                }).filter(Boolean);
+            } else {
+                gameState.currentOptions = options;
+            }
             
             const container = document.getElementById('optionsSelection');
             container.innerHTML = '';
@@ -1264,10 +1273,20 @@
             options.forEach((option, index) => {
                 const button = document.createElement('div');
                 button.className = 'game-button';
-                button.onclick = () => handleOptionClick(option, type);
+                let optionLabel = option;
+                let optionText = option;
+
+                if (type === 'question' && option && typeof option === 'object') {
+                    optionText = option.text || option.question || '';
+                    optionLabel = option.summary || option.label || optionText;
+                }
+
+                button.dataset.fullOption = optionText || '';
+                button.dataset.scanLabel = optionLabel || '';
+                button.onclick = () => handleOptionClick(optionText, type);
                 
                 if (type === 'question') {
-                    button.innerHTML = `<i class="fas fa-question"></i>${option}`;
+                    button.innerHTML = `<i class="fas fa-question"></i>${optionLabel}`;
                 } else if (type === 'guess') {
                     button.innerHTML = `<i class="fas fa-lightbulb"></i>Is it ${option}?`;
                 } else if (type === 'select') {
