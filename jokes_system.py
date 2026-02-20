@@ -767,7 +767,7 @@ async def bulk_import_icanhazdadjoke():
                 logging.error(f"❌ Error fetching from icanhazdadjoke: {e}", exc_info=True)
                 return {"success": False, "error": str(e), "imported_count": 0}
         
-        # Now import all jokes (with auto-tagging disabled for speed, tagging=True for manual tags only)
+        # Now import all jokes (WITHOUT auto-tagging for speed - tag later with batch script)
         for idx, joke in enumerate(all_jokes, 1):
             if idx % 50 == 0:
                 logging.info(f"📝 Processing joke {idx}/{len(all_jokes)}...")
@@ -787,12 +787,12 @@ async def bulk_import_icanhazdadjoke():
                 # 2. Replace escaped double quotes with single quotes
                 joke_text = joke_text.replace('""', '"')
                 
-                # Add joke with auto-tagging (will tag in background)
+                # Add joke WITHOUT auto-tagging (significantly faster)
                 result = await db.add_joke(
                     joke_text,
                     tags=['dad_joke', 'clean'],  # icanhazdadjoke is always clean
                     source='icanhazdadjoke',
-                    auto_tag=True  # Enable LLM tagging
+                    auto_tag=False  # DISABLED for speed - use batch tagging script after import
                 )
                 if result.get("success"):
                     jokes_added += 1
