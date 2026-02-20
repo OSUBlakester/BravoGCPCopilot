@@ -11174,11 +11174,23 @@ async def import_icanhazdadjoke_endpoint(
         )
     
     try:
-        result = await bulk_import_icanhazdadjoke()
+        logging.info(f"🎯 Starting icanhazdadjoke import for admin user...")
+        # Run import with timeout to prevent 504
+        result = await asyncio.wait_for(bulk_import_icanhazdadjoke(), timeout=300)  # 5 minute timeout
+        logging.info(f"✅ Import completed: {result}")
         return JSONResponse(content=result)
+    except asyncio.TimeoutError:
+        logging.error(f"❌ Import timed out after 5 minutes")
+        return JSONResponse(
+            content={"success": False, "error": "Import timed out. Try again with fewer jokes or check the API.", "imported_count": 0},
+            status_code=504
+        )
     except Exception as e:
-        logging.error(f"Error importing from icanhazdadjoke: {e}", exc_info=True)
-        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+        logging.error(f"❌ Error importing from icanhazdadjoke: {e}", exc_info=True)
+        return JSONResponse(
+            content={"success": False, "error": str(e), "imported_count": 0},
+            status_code=500
+        )
 
 
 @app.post("/api/jokes/cleanup-quotes")

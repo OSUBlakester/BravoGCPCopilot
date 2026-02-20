@@ -701,7 +701,7 @@ RULES:
 
 
 async def bulk_import_icanhazdadjoke():
-    """One-time bulk import from icanhazdadjoke.com API with pagination."""
+    """One-time bulk import from icanhazdadjoke.com API with pagination and auto-tagging."""
     try:
         import aiohttp
         import asyncio
@@ -716,77 +716,107 @@ async def bulk_import_icanhazdadjoke():
         # icanhazdadjoke.com requires Accept header for JSON response
         headers = {
             'Accept': 'application/json',
-            'User-Agent': 'Bravo AAC App (github.com/your-repo)'
+            'User-Agent': 'Bravo AAC App'
         }
         
-        async with aiohttp.ClientSession() as session:
-            # First request to get total count
-            logging.info("🌐 Fetching jokes from icanhazdadjoke.com API...")
-            async with session.get('https://icanhazdadjoke.com/search?limit=30&page=1', headers=headers) as resp:
-                data = await resp.json()
-                total_jokes = data.get('total_jokes', 0)
-                total_pages = data.get('total_pages', 1)
-                all_jokes.extend(data.get('results', []))
-                
-                logging.info(f"📊 Found {total_jokes} total jokes across {total_pages} pages")
-            
-            # Fetch remaining pages
-            if total_pages > 1:
-                for page in range(2, total_pages + 1):
-                    logging.info(f"📥 Fetching page {page}/{total_pages}...")
-                    async with session.get(f'https://icanhazdadjoke.com/search?limit=30&page={page}', headers=headers) as resp:
-                        data = await resp.json()
-                        all_jokes.extend(data.get('results', []))
-                    
-                    # Be nice to their API
-                    await asyncio.sleep(0.5)
-            
-            logging.info(f"📥 Retrieved {len(all_jokes)} total jokes from API")
-            
-            # Now import all jokes
-            for idx, joke in enumerate(all_jokes, 1):
-                if idx % 50 == 0:
-                    logging.info(f"📝 Processing joke {idx}/{len(all_jokes)}...")
-                
-                try:
-                    # Clean the joke text
-                    joke_text = joke['joke'].strip()
-                    
-                    # 1. Remove leading/trailing quotes if they're wrapping the entire text
-                    if joke_text.startswith('"') and joke_text.endswith('"'):
-                        joke_text = joke_text[1:-1].strip()
-                    elif joke_text.startswith("'") and joke_text.endswith("'"):
-                        joke_text = joke_text[1:-1].strip()
-                    
-                    # 2. Replace escaped double quotes with single quotes
-                    joke_text = joke_text.replace('""', '"')
-                    
-                    result = await db.add_joke(
-                        joke_text,
-                        tags=['dad_joke', 'clean'],  # icanhazdadjoke is always clean
-                        source='icanhazdadjoke',
-                        auto_tag=True
-                    )
-                    if result["success"]:
-                        jokes_added += 1
-                    else:
-                        errors.append(str(result.get('error', 'Unknown error')))
-                except Exception as e:
-                    errors.append(str(e))
+        # Use timeout for API calls
+        timeout = aiohttp.ClientTimeout(total=120)  # 2 minute timeout for entire session
         
-        logging.info(f"✅ Imported {jokes_added} jokes from icanhazdadjoke")
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                # First request to get total count
+                logging.info("🌐 Fetching jokes from icanhazdadjoke.com API...")
+                async with session.get('https://icanhazdadjoke.com/search?limit=30&page=1', headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"API returned status {resp.status}")
+                    data = await resp.json()
+                    total_jokes = data.get('total_jokes', 0)
+                    total_pages = data.get('total_pages', 1)
+                    all_jokes.extend(data.get('results', []))
+                    
+                    logging.info(f"📊 Found {total_jokes} total jokes across {total_pages} pages")
+                
+                # Fetch remaining pages (limit to first 10 pages for safety)
+                pages_to_fetch = min(total_pages, 10)
+                if pages_to_fetch > 1:
+                    for page in range(2, pages_to_fetch + 1):
+                        logging.info(f"📥 Fetching page {page}/{pages_to_fetch}...")
+                        try:
+                            async with session.get(f'https://icanhazdadjoke.com/search?limit=30&page={page}', headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    all_jokes.extend(data.get('results', []))
+                                else:
+                                    logging.warning(f"⚠️ Page {page} returned status {resp.status}")
+                        except asyncio.TimeoutError:
+                            logging.warning(f"⚠️ Timeout fetching page {page}, continuing...")
+                            continue
+                        
+                        # Be nice to their API
+                        await asyncio.sleep(0.5)
+                
+                logging.info(f"📥 Retrieved {len(all_jokes)} total jokes from API")
+                
+                if not all_jokes:
+                    return {"success": False, "error": "No jokes retrieved from icanhazdadjoke.com", "imported_count": 0}
+                
+            except asyncio.TimeoutError as e:
+                logging.error(f"❌ Timeout fetching from icanhazdadjoke: {e}")
+                return {"success": False, "error": "Timeout fetching from API", "imported_count": 0}
+            except Exception as e:
+                logging.error(f"❌ Error fetching from icanhazdadjoke: {e}", exc_info=True)
+                return {"success": False, "error": str(e), "imported_count": 0}
+        
+        # Now import all jokes (with auto-tagging disabled for speed, tagging=True for manual tags only)
+        for idx, joke in enumerate(all_jokes, 1):
+            if idx % 50 == 0:
+                logging.info(f"📝 Processing joke {idx}/{len(all_jokes)}...")
+            
+            try:
+                # Clean the joke text
+                joke_text = joke.get('joke', '').strip()
+                if not joke_text:
+                    continue
+                
+                # 1. Remove leading/trailing quotes if they're wrapping the entire text
+                if joke_text.startswith('"') and joke_text.endswith('"'):
+                    joke_text = joke_text[1:-1].strip()
+                elif joke_text.startswith("'") and joke_text.endswith("'"):
+                    joke_text = joke_text[1:-1].strip()
+                
+                # 2. Replace escaped double quotes with single quotes
+                joke_text = joke_text.replace('""', '"')
+                
+                # Add joke with auto-tagging (will tag in background)
+                result = await db.add_joke(
+                    joke_text,
+                    tags=['dad_joke', 'clean'],  # icanhazdadjoke is always clean
+                    source='icanhazdadjoke',
+                    auto_tag=True  # Enable LLM tagging
+                )
+                if result.get("success"):
+                    jokes_added += 1
+                else:
+                    errors.append(f"Joke {idx}: {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                logging.error(f"❌ Error adding joke {idx}: {e}", exc_info=True)
+                errors.append(f"Joke {idx}: {str(e)}")
+        
+        logging.info(f"✅ Imported {jokes_added} jokes from icanhazdadjoke.com")
         if errors:
             logging.warning(f"⚠️ {len(errors)} import errors occurred")
+            logging.warning(f"First error: {errors[0] if errors else 'None'}")
         
         return {
             "success": True,
             "imported_count": jokes_added,
-            "errors": errors
+            "total_processed": len(all_jokes),
+            "errors": errors[:10]  # Return first 10 errors only
         }
         
     except Exception as e:
         logging.error(f"❌ Error bulk importing from icanhazdadjoke: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "imported_count": 0}
 
 
 async def cleanup_joke_quotes():
