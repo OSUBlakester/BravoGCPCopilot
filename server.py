@@ -145,6 +145,7 @@ import openai # Add OpenAI import
 
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
 from routes import router as static_router # Import static pages router
+from jokes_system import jokes_db, JokesDatabase, bulk_import_icanhazdadjoke, cleanup_joke_quotes
 
 oauth2_scheme = HTTPBearer()
 
@@ -9976,6 +9977,27 @@ class GameAnswerRequest(BaseModel):
     selected_item: str = Field(..., description="The person, place, or thing selected by user")
     player_question: str = Field(..., description="The yes/no question asked by the player")
 
+
+# --- Jokes Database Models ---
+class JokeQueryRequest(BaseModel):
+    location: Optional[str] = Field(None, description="Location tag filter (e.g., 'home', 'beach')")
+    time_period: Optional[str] = Field(None, description="Time tag filter (e.g., 'winter', 'holiday')")
+    limit: int = Field(default=10, description="Number of jokes to return")
+
+class AddJokeRequest(BaseModel):
+    text: str = Field(..., description="The joke text")
+    tags: Optional[List[str]] = Field(None, description="Manual tags (optional; auto-tagged otherwise)")
+    auto_tag: bool = Field(default=True, description="Use LLM to auto-tag")
+
+class UpdateJokeRequest(BaseModel):
+    text: Optional[str] = Field(None, description="Updated joke text")
+    tags: Optional[List[str]] = Field(None, description="Updated tags")
+    enabled: Optional[bool] = Field(None, description="Enable/disable joke")
+    summary: Optional[str] = Field(None, description="Updated joke summary (5 words or less)")
+
+class ImportJokesRequest(BaseModel):
+    csv_content: str = Field(..., description="CSV content: one joke per line or 'joke text,tag1,tag2'")
+
 def _coerce_question_summary(question: str, summary: Optional[str]) -> str:
     if summary:
         summary_text = re.sub(r"\s+", " ", summary.strip())
@@ -10894,6 +10916,293 @@ Respond ONLY with "correct" or "incorrect". No other words."""
     return "incorrect"
 
 
+# --- Jokes API Endpoints ---
+
+@app.post("/api/jokes/query")
+async def query_jokes(
+    request: JokeQueryRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Query jokes by location/time tags, with fallback to random jokes."""
+    try:
+        jokes = await jokes_db.get_jokes_by_tags(
+            location=request.location,
+            time_period=request.time_period,
+            limit=request.limit
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "jokes": jokes,
+            "count": len(jokes)
+        })
+    except Exception as e:
+        logging.error(f"Error querying jokes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/jokes/contextual")
+async def get_contextual_jokes_endpoint(
+    limit: int = 10,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Return jokes tailored to current location, people, activity, and time."""
+    try:
+        if current_ids is None:
+            current_ids = {}
+
+        aac_user_id = current_ids.get("aac_user_id", "")
+        account_id = current_ids.get("account_id", "")
+
+        limit = max(1, min(50, int(limit)))
+
+        user_current_content_dict = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/current_state",
+            default_data=DEFAULT_USER_CURRENT.copy()
+        )
+
+        jokes = await jokes_db.get_contextual_jokes(
+            location=user_current_content_dict.get("location", ""),
+            people=user_current_content_dict.get("people", ""),
+            activity=user_current_content_dict.get("activity", ""),
+            limit=limit
+        )
+
+        return JSONResponse(content={
+            "success": True,
+            "jokes": jokes,
+            "count": len(jokes)
+        })
+    except Exception as e:
+        logging.error(f"Error fetching contextual jokes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/jokes/add")
+async def add_joke_endpoint(
+    request: AddJokeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Add a new joke (admin only)."""
+    try:
+        logging.info(f"🎯 /api/jokes/add endpoint START")
+        
+        aac_user_id = current_ids.get("aac_user_id", "")
+        user_email = current_ids.get("email", "")
+        
+        logging.info(f"📝 Admin check: aac_user_id={aac_user_id}, email={user_email}")
+        
+        # Check if user is admin
+        if user_email != "admin@talkwithbravo.com":
+            logging.warning(f"❌ Non-admin user {user_email} attempted to add joke")
+            return JSONResponse(
+                content={"success": False, "error": "Admin access required"},
+                status_code=403
+            )
+        
+        logging.info(f"📝 Validated admin. Processing joke...")
+        logging.info(f"  text: {request.text[:50]}...")
+        logging.info(f"  tags: {request.tags}")
+        logging.info(f"  auto_tag: {request.auto_tag}")
+        
+        logging.info(f"📝 Calling jokes_db.add_joke()...")
+        result = await jokes_db.add_joke(
+            text=request.text,
+            tags=request.tags,
+            auto_tag=request.auto_tag
+        )
+        logging.info(f"✅ Joke added successfully: {result}")
+        return JSONResponse(content=result)
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logging.error(f"❌ Error adding joke: {e}")
+        logging.error(f"Traceback:\n{error_trace}")
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": str(e),
+                "details": error_trace
+            },
+            status_code=500
+        )
+
+
+@app.put("/api/jokes/{joke_id}")
+async def update_joke_endpoint(
+    joke_id: str,
+    request: UpdateJokeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Update a joke (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await jokes_db.update_joke(
+            joke_id=joke_id,
+            text=request.text,
+            tags=request.tags,
+            enabled=request.enabled,
+            summary=request.summary
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error updating joke: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/jokes/{joke_id}")
+async def delete_joke_endpoint(
+    joke_id: str,
+    retire: bool = True,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Delete or retire a joke (admin only)."""
+    if current_ids is None:
+        current_ids = {}
+    
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await jokes_db.delete_joke(joke_id=joke_id, retire=retire)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error deleting joke: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/jokes")
+async def get_all_jokes_endpoint(
+    include_disabled: bool = False,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Get all jokes for admin management (admin only)."""
+    try:
+        if current_ids is None:
+            current_ids = {}
+        
+        user_email = current_ids.get("email", "")
+        
+        logging.info(f"🎯 /api/jokes endpoint called - include_disabled={include_disabled}, user={user_email}")
+        
+        # Check if user is admin
+        if user_email != "admin@talkwithbravo.com":
+            logging.warning(f"❌ Non-admin user {user_email} attempted to fetch jokes")
+            return JSONResponse(
+                content={"success": False, "error": "Admin access required"},
+                status_code=403
+            )
+        
+        logging.info(f"📝 Fetching jokes from database...")
+        jokes = await jokes_db.get_all_jokes(include_disabled=include_disabled)
+        logging.info(f"✅ Retrieved {len(jokes)} jokes")
+        
+        return JSONResponse(content={
+            "success": True,
+            "jokes": jokes,
+            "count": len(jokes)
+        })
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logging.error(f"❌ Error fetching all jokes: {e}")
+        logging.error(f"Traceback:\n{error_trace}")
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": str(e),
+                "details": error_trace
+            },
+            status_code=500
+        )
+
+
+@app.post("/api/jokes/import")
+async def import_jokes_endpoint(
+    request: ImportJokesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Import jokes from CSV (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await jokes_db.import_jokes_from_csv(request.csv_content)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error importing jokes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/jokes/import-icanhazdadjoke")
+async def import_icanhazdadjoke_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """One-time bulk import from icanhazdadjoke API (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await bulk_import_icanhazdadjoke()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error importing from icanhazdadjoke: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/jokes/cleanup-quotes")
+async def cleanup_quotes_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Clean up extra quotes from all jokes in the database (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        logging.info("🧹 Admin requested quote cleanup")
+        result = await cleanup_joke_quotes()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error cleaning up quotes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 class FreestyleCategoryWordsRequest(BaseModel):
