@@ -855,6 +855,49 @@ async def bulk_import_icanhazdadjoke():
             logging.info(f"✅ Tagged {tagged_count} jokes successfully")
             if tagging_errors:
                 logging.warning(f"⚠️ {len(tagging_errors)} tagging errors occurred")
+            
+            # NOW: Generate summaries for jokes that still have "Joke" as summary
+            logging.info(f"📝 Starting to generate summaries for imported jokes...")
+            summary_count = 0
+            summary_errors = []
+            
+            def _fetch_jokes_without_summaries():
+                query = db.db.collection("jokes").where("enabled", "==", True)
+                docs = query.stream()
+                return [
+                    {"id": doc.id, "text": doc.to_dict().get("text", "")}
+                    for doc in docs
+                    if doc.to_dict().get("summary", "").strip().lower() in ["joke", ""]
+                ]
+            
+            jokes_needing_summaries = await asyncio.to_thread(_fetch_jokes_without_summaries)
+            logging.info(f"📝 Found {len(jokes_needing_summaries)} jokes needing summaries")
+            
+            for sum_idx, joke_item in enumerate(jokes_needing_summaries, 1):
+                if sum_idx % 10 == 0:
+                    logging.info(f"📝 Generating summary {sum_idx}/{len(jokes_needing_summaries)}...")
+                
+                try:
+                    joke_id = joke_item["id"]
+                    joke_text = joke_item["text"]
+                    
+                    # Generate summary using LLM
+                    new_summary = await db._generate_joke_summary(joke_text)
+                    
+                    # Update in Firestore
+                    def _update_summary():
+                        db.db.collection("jokes").document(joke_id).update({"summary": new_summary})
+                    
+                    await asyncio.to_thread(_update_summary)
+                    summary_count += 1
+                    
+                except Exception as e:
+                    logging.error(f"❌ Error generating summary for joke {sum_idx}: {e}")
+                    summary_errors.append(str(e))
+            
+            logging.info(f"✅ Generated {summary_count} summaries successfully")
+            if summary_errors:
+                logging.warning(f"⚠️ {len(summary_errors)} summary generation errors occurred")
         
         return {
             "success": True,
