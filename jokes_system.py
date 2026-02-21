@@ -815,7 +815,7 @@ async def bulk_import_icanhazdadjoke():
             
             def _fetch_untagged():
                 # Fetch all jokes with minimal tags (just dad_joke + clean)
-                query = db.collection("jokes").where("enabled", "==", True)
+                query = db.db.collection("jokes").where("enabled", "==", True)
                 docs = query.stream()
                 return [
                     {"id": doc.id, "text": doc.to_dict().get("text", "")}
@@ -843,7 +843,7 @@ async def bulk_import_icanhazdadjoke():
                     
                     # Update in Firestore
                     def _update_tags():
-                        db.collection("jokes").document(joke_id).update({"tags": combined_tags})
+                        db.db.collection("jokes").document(joke_id).update({"tags": combined_tags})
                     
                     await asyncio.to_thread(_update_tags)
                     tagged_count += 1
