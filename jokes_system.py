@@ -767,7 +767,7 @@ async def bulk_import_icanhazdadjoke():
                 logging.error(f"❌ Error fetching from icanhazdadjoke: {e}", exc_info=True)
                 return {"success": False, "error": str(e), "imported_count": 0}
         
-        # Now import all jokes (WITHOUT auto-tagging for speed - tag later with batch script)
+        # Now import all jokes (without auto-tagging first for speed)
         for idx, joke in enumerate(all_jokes, 1):
             if idx % 50 == 0:
                 logging.info(f"📝 Processing joke {idx}/{len(all_jokes)}...")
@@ -787,12 +787,12 @@ async def bulk_import_icanhazdadjoke():
                 # 2. Replace escaped double quotes with single quotes
                 joke_text = joke_text.replace('""', '"')
                 
-                # Add joke WITHOUT auto-tagging (significantly faster)
+                # Add joke WITHOUT auto-tagging initially (to be fast)
                 result = await db.add_joke(
                     joke_text,
                     tags=['dad_joke', 'clean'],  # icanhazdadjoke is always clean
                     source='icanhazdadjoke',
-                    auto_tag=False  # DISABLED for speed - use batch tagging script after import
+                    auto_tag=False  # DISABLED for speed - we'll tag after all are imported
                 )
                 if result.get("success"):
                     jokes_added += 1
@@ -807,11 +807,61 @@ async def bulk_import_icanhazdadjoke():
             logging.warning(f"⚠️ {len(errors)} import errors occurred")
             logging.warning(f"First error: {errors[0] if errors else 'None'}")
         
+        # NOW: Add LLM tags to all imported jokes (after they're all in the database)
+        if jokes_added > 0:
+            logging.info(f"🏷️ Starting to tag {jokes_added} imported jokes...")
+            tagged_count = 0
+            tagging_errors = []
+            
+            def _fetch_untagged():
+                # Fetch all jokes with minimal tags (just dad_joke + clean)
+                query = db.collection("jokes").where("enabled", "==", True)
+                docs = query.stream()
+                return [
+                    {"id": doc.id, "text": doc.to_dict().get("text", "")}
+                    for doc in docs
+                    if set(doc.to_dict().get("tags", [])) == {"dad_joke", "clean"} or 
+                       set(doc.to_dict().get("tags", [])) == {"clean", "dad_joke"}
+                ]
+            
+            untagged_jokes = await asyncio.to_thread(_fetch_untagged)
+            logging.info(f"🏷️ Found {len(untagged_jokes)} jokes to tag")
+            
+            for tag_idx, joke_item in enumerate(untagged_jokes, 1):
+                if tag_idx % 10 == 0:
+                    logging.info(f"🏷️ Tagging joke {tag_idx}/{len(untagged_jokes)}...")
+                
+                try:
+                    joke_id = joke_item["id"]
+                    joke_text = joke_item["text"]
+                    
+                    # Generate tags using LLM
+                    new_tags = await db._auto_tag_joke(joke_text)
+                    
+                    # Combine: keep dad_joke + clean, add LLM-generated tags
+                    combined_tags = list(set(["dad_joke", "clean"] + new_tags))
+                    
+                    # Update in Firestore
+                    def _update_tags():
+                        db.collection("jokes").document(joke_id).update({"tags": combined_tags})
+                    
+                    await asyncio.to_thread(_update_tags)
+                    tagged_count += 1
+                    
+                except Exception as e:
+                    logging.error(f"❌ Error tagging joke {tag_idx}: {e}")
+                    tagging_errors.append(str(e))
+            
+            logging.info(f"✅ Tagged {tagged_count} jokes successfully")
+            if tagging_errors:
+                logging.warning(f"⚠️ {len(tagging_errors)} tagging errors occurred")
+        
         return {
             "success": True,
             "imported_count": jokes_added,
             "total_processed": len(all_jokes),
-            "errors": errors[:10]  # Return first 10 errors only
+            "import_errors": errors[:10],  # Return first 10 errors only
+            "status": "Import and tagging complete"
         }
         
     except Exception as e:
