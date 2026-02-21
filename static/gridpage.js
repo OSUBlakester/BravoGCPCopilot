@@ -55,6 +55,58 @@ const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening'; // CSS class for highli
 let activeOriginatingButtonText = null; // NEW: To store the text of the button that initiated the LLM query
 let activeLLMPromptForContext = null; // Store the prompt that generated current LLM buttons
 
+function addPauseToJokeText(text) {
+    if (!text) return '';
+    if (text.includes('[PAUSE]')) return text;
+
+    const questionIndex = text.indexOf('?');
+    if (questionIndex !== -1 && questionIndex < text.length - 1) {
+        return `${text.slice(0, questionIndex + 1)} [PAUSE] ${text.slice(questionIndex + 1).trim()}`;
+    }
+
+    if (text.includes(' - ')) {
+        return text.replace(' - ', ' [PAUSE] ');
+    }
+
+    if (text.includes(' — ')) {
+        return text.replace(' — ', ' [PAUSE] ');
+    }
+
+    if (text.includes(': ')) {
+        return text.replace(': ', ': [PAUSE] ');
+    }
+
+    return text;
+}
+
+function isJokeQuestion(questionText) {
+    if (!questionText) return false;
+    const lowered = questionText.toLowerCase();
+    return /\b(joke|jokes|funny|pun|dad joke|tell me a joke|make me laugh)\b/.test(lowered);
+}
+
+async function fetchJokeOptions(limit, questionContext) {
+    const response = await authenticatedFetch(`/api/jokes/contextual?limit=${limit}`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch jokes: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const jokes = (data && data.jokes) ? data.jokes : [];
+
+    return jokes.map(joke => {
+        const jokeText = (joke.text || '').trim();
+        return {
+            option: addPauseToJokeText(jokeText),
+            summary: (joke.summary || 'Joke').trim() || 'Joke',
+            keywords: joke.tags ? (Array.isArray(joke.tags) ? joke.tags : [joke.tags]) : ['joke', 'humor'],
+            isLLMGenerated: true,
+            originalPrompt: questionContext,
+            originatingButtonText: activeOriginatingButtonText
+        };
+    }).filter(option => option.option && option.summary);
+}
+
 // --- NEW GLOBAL VARIABLES FOR ANNOUNCEMENT QUEUE & AUDIO CONTEXT FIX ---
 let announcementQueue = [];       // Queue for sequential announcements
 let isAnnouncingNow = false;      // Flag to prevent concurrent announce playback
@@ -883,6 +935,38 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         await generateGrid(pageToDisplay, gridContainer);
 
+        const jokesParam = params.get('jokes');
+        if (jokesParam) {
+            document.getElementById('loading-indicator').style.display = 'flex';
+            try {
+                currentQuestion = 'tell me a joke';
+                activeLLMPromptForContext = currentQuestion;
+                activeOriginatingButtonText = 'Special Jokes';
+                querytype = 'jokes';
+
+                sessionStorage.setItem('currentPageDisplayNameForBanner', 'Jokes');
+                setBannerAndPageTitle();
+
+                const questionDisplay = document.getElementById('question-display');
+                if (questionDisplay) {
+                    questionDisplay.value = 'Tell me a joke';
+                }
+
+                const jokeOptions = await fetchJokeOptions(LLMOptions, currentQuestion);
+                if (jokeOptions.length > 0) {
+                    await generateLlmButtons(jokeOptions);
+                } else {
+                    console.warn('No jokes returned for special jokes navigation.');
+                    announce('I could not find any jokes right now.', 'system', false);
+                }
+            } catch (error) {
+                console.error('Error loading jokes for special navigation:', error);
+                announce('Error loading jokes.', 'system', false);
+            } finally {
+                document.getElementById('loading-indicator').style.display = 'none';
+            }
+        }
+
         const optionsParam = params.get('options');
         if (optionsParam) {
             const options = decodeURIComponent(optionsParam).split('\n')
@@ -1690,6 +1774,10 @@ async function handleButtonClick(buttonData) {
                 if (specialPage === 'favorites') {
                     const currentUrl = window.location.href;
                     window.location.href = `${specialPage}.html?from=${encodeURIComponent(currentUrl)}`;
+                } else if (specialPage === 'jokes') {
+                    const params = new URLSearchParams();
+                    params.set('jokes', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions
                     console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
@@ -2144,6 +2232,20 @@ function setupQuestionRecognition() {
                 : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
                 activeLLMPromptForContext = currentQuestion; // Set context to just the user's question
                 activeOriginatingButtonText = "Voice Input"; // Mark as voice-initiated
+
+                if (isJokeQuestion(currentQuestion)) {
+                    querytype = "jokes";
+                    const jokeOptions = await fetchJokeOptions(LLMOptions, currentQuestion);
+                    if (jokeOptions.length > 0) {
+                        await generateLlmButtons(jokeOptions);
+                    } else {
+                        console.warn("No jokes returned for joke request.");
+                        announce("I couldn't find any jokes right now.", "system", false);
+                        isRestartingKeyword = true;
+                        setupSpeechRecognition();
+                    }
+                    return;
+                }
 
                 const promptForLLM = `
                     Provide up to "${LLMOptions}" short, single-phrase options related to: "${currentQuestion}".
@@ -3025,6 +3127,80 @@ async function resumeAuditoryScanning() {
     }, 1500);
 }
 
+async function createHomeButton() {
+    const homeButton = document.createElement('button');
+    homeButton.className = '';
+
+    const homeImageUrl = await getSymbolImageForText('Home', ['home', 'house', 'main', 'start']);
+    if (homeImageUrl) {
+        const buttonContent = document.createElement('div');
+        buttonContent.style.position = 'relative';
+        buttonContent.style.width = '100%';
+        buttonContent.style.height = '100%';
+        buttonContent.style.display = 'flex';
+        buttonContent.style.flexDirection = 'column';
+
+        const imageContainer = document.createElement('div');
+        imageContainer.style.flex = '1';
+        imageContainer.style.width = '100%';
+        imageContainer.style.overflow = 'hidden';
+        imageContainer.style.borderRadius = '8px 8px 0 0';
+        imageContainer.style.display = 'flex';
+        imageContainer.style.alignItems = 'center';
+        imageContainer.style.justifyContent = 'center';
+
+        const imageElement = document.createElement('img');
+        imageElement.src = homeImageUrl;
+        imageElement.alt = 'Home';
+        imageElement.style.width = '100%';
+        imageElement.style.height = '100%';
+        imageElement.style.objectFit = 'cover';
+        imageElement.onerror = () => {
+            homeButton.textContent = 'Home';
+        };
+
+        const textFooter = document.createElement('div');
+        textFooter.style.height = '28px';
+        textFooter.style.width = '100%';
+        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        textFooter.style.color = 'white';
+        textFooter.style.display = 'flex';
+        textFooter.style.alignItems = 'center';
+        textFooter.style.justifyContent = 'center';
+        textFooter.style.padding = '2px 4px';
+        textFooter.style.position = 'absolute';
+        textFooter.style.bottom = '0';
+        textFooter.style.left = '0';
+        textFooter.style.right = '0';
+
+        const textSpan = document.createElement('span');
+        textSpan.textContent = 'Home';
+        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontWeight = 'bold';
+        textSpan.style.textAlign = 'center';
+        textSpan.style.lineHeight = '1.1';
+
+        imageContainer.appendChild(imageElement);
+        textFooter.appendChild(textSpan);
+        buttonContent.appendChild(imageContainer);
+        buttonContent.appendChild(textFooter);
+        homeButton.appendChild(buttonContent);
+    } else {
+        homeButton.textContent = 'Home';
+    }
+
+    homeButton.addEventListener('click', () => {
+        activeOriginatingButtonText = null;
+        activeLLMPromptForContext = null;
+        localStorage.removeItem('llm_currentQueryType');
+        localStorage.removeItem('llm_currentQuestion');
+        localStorage.removeItem('llm_currentOptions');
+        window.location.href = 'gridpage.html?page=home';
+    });
+
+    return homeButton;
+}
+
 // --- LLM Button Generation ---
 async function generateLlmButtons(options) {
     document.getElementById('loading-indicator').style.display = 'none';
@@ -3162,6 +3338,12 @@ async function generateLlmButtons(options) {
     // Wait for all buttons to be created
     const buttonResults = await Promise.all(buttonPromises);
     const validButtons = buttonResults.filter(result => result !== null);
+    const fragment = document.createDocumentFragment();
+
+    if (querytype === 'jokes') {
+        const homeButton = await createHomeButton();
+        fragment.appendChild(homeButton);
+    }
     
     // Add event listeners and append buttons
     validButtons.forEach(({ button, optionData }) => {
@@ -3222,7 +3404,7 @@ async function generateLlmButtons(options) {
             console.log('🔊 About to announce option...');
             try {
                 // Announce the selected option (using the full option text for clarity)
-                await announce(optionData.option, "system"); // Use optionData.option directly
+                await announce(optionData.option, "system", true); // Use optionData.option directly
                 console.log("✅ Announcement finished for:", button.dataset.option);
 
                 console.log('🔄 About to reload page...');
@@ -3231,9 +3413,13 @@ async function generateLlmButtons(options) {
                 const questionDisplay = document.getElementById('question-display');
                 if (questionDisplay) { questionDisplay.value = ''; }
 
-                // Reload the page to go back to the initial state
-                // Consider if this is always the desired behavior
-                window.location.reload(true);
+                if (querytype === 'jokes') {
+                    window.location.href = 'gridpage.html?page=home';
+                } else {
+                    // Reload the page to go back to the initial state
+                    // Consider if this is always the desired behavior
+                    window.location.reload(true);
+                }
 
             } catch (error) {
                  console.error("❌ Error during announcement or reload:", error);
@@ -3243,8 +3429,9 @@ async function generateLlmButtons(options) {
                 isAnnouncing = false; // Reset flag  
             }
         }, clickDebounceDelay)); // Apply debounce
-        gridContainer.appendChild(button);
+        fragment.appendChild(button);
     });
+    gridContainer.appendChild(fragment);
 
     // --- Generate Special Buttons ---
     // (Ensure these also have the base class and appropriate color classes)
@@ -3321,6 +3508,15 @@ async function generateLlmButtons(options) {
                 // should still be the category button that initiated it.
                 console.log("Getting next set of current events for type:", eventtype);
                 await getCurrentEvents(eventtype); // This calls generateLlmButtons, which starts scanning
+            } else if (querytype === "jokes") {
+                document.getElementById('loading-indicator').style.display = 'flex';
+                const jokeOptions = await fetchJokeOptions(LLMOptions, currentQuestion);
+                if (jokeOptions.length > 0) {
+                    await generateLlmButtons(jokeOptions);
+                } else {
+                    console.warn("No jokes returned for refresh.");
+                    announce("Sorry, I couldn't find any other jokes.", "system", false);
+                }
             } else if (querytype === "question" || querytype === "options") {
                 document.getElementById('loading-indicator').style.display = 'flex';
                 try {
@@ -3528,77 +3724,10 @@ async function generateLlmButtons(options) {
         gridContainer.appendChild(askAgainButton);
     }
 
-    const goBackButton = document.createElement('button');
-    // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
-    goBackButton.className = '';
-    
-    // Apply image matching to Go Back button
-    const goBackImageUrl = await getSymbolImageForText('Go Back', ['back', 'return', 'previous', 'arrow']);
-    if (goBackImageUrl) {
-        const buttonContent = document.createElement('div');
-        buttonContent.style.position = 'relative';
-        buttonContent.style.width = '100%';
-        buttonContent.style.height = '100%';
-        buttonContent.style.display = 'flex';
-        buttonContent.style.flexDirection = 'column';
-        
-        const imageContainer = document.createElement('div');
-        imageContainer.style.flex = '1';
-        imageContainer.style.width = '100%';
-        imageContainer.style.overflow = 'hidden';
-        imageContainer.style.borderRadius = '8px 8px 0 0';
-        imageContainer.style.display = 'flex';
-        imageContainer.style.alignItems = 'center';
-        imageContainer.style.justifyContent = 'center';
-        
-        const imageElement = document.createElement('img');
-        imageElement.src = goBackImageUrl;
-        imageElement.alt = 'Go Back';
-        imageElement.style.width = '100%';
-        imageElement.style.height = '100%';
-        imageElement.style.objectFit = 'cover';
-        imageElement.onerror = () => {
-            goBackButton.textContent = 'Go Back';
-        };
-        
-        const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
-        textFooter.style.width = '100%';
-        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-        textFooter.style.color = 'white';
-        textFooter.style.display = 'flex';
-        textFooter.style.alignItems = 'center';
-        textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
-        textFooter.style.position = 'absolute';
-        textFooter.style.bottom = '0';
-        textFooter.style.left = '0';
-        textFooter.style.right = '0';
-        
-        const textSpan = document.createElement('span');
-        textSpan.textContent = 'Go Back';
-        textSpan.style.fontSize = '0.7em';
-        textSpan.style.fontWeight = 'bold';
-        textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
-        
-        imageContainer.appendChild(imageElement);
-        textFooter.appendChild(textSpan);
-        buttonContent.appendChild(imageContainer);
-        buttonContent.appendChild(textFooter);
-        goBackButton.appendChild(buttonContent);
-    } else {
-        goBackButton.textContent = 'Go Back';
+    if (querytype !== 'jokes') {
+        const homeButton = await createHomeButton();
+        gridContainer.appendChild(homeButton);
     }
-    goBackButton.addEventListener('click', () => {
-        activeOriginatingButtonText = null; // Reset on navigation
-        activeLLMPromptForContext = null; // Clear context on navigation
-        localStorage.removeItem('llm_currentQueryType');
-        localStorage.removeItem('llm_currentQuestion');
-        localStorage.removeItem('llm_currentOptions');
-        window.location.reload(true);
-    })
-    gridContainer.appendChild(goBackButton);
 
 
     // --- Start Auditory Scanning ---
