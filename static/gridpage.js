@@ -967,6 +967,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
+        const guessWhoParam = params.get('guess_who');
+        if (guessWhoParam) {
+            // Redirect to Guess Who game page (session tokens preserved in sessionStorage)
+            window.location.href = 'guess_who.html';
+        }
+
         const optionsParam = params.get('options');
         if (optionsParam) {
             const options = decodeURIComponent(optionsParam).split('\n')
@@ -1777,6 +1783,10 @@ async function handleButtonClick(buttonData) {
                 } else if (specialPage === 'jokes') {
                     const params = new URLSearchParams();
                     params.set('jokes', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'guess-who' || specialPage === 'guesswho') {
+                    const params = new URLSearchParams();
+                    params.set('guess_who', '1');
                     window.location.href = `gridpage.html?${params.toString()}`;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions

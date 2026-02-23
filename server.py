@@ -9978,6 +9978,25 @@ class GameAnswerRequest(BaseModel):
     player_question: str = Field(..., description="The yes/no question asked by the player")
 
 
+# --- Guess Who Game Models ---
+class GuessWhoCategoriesRequest(BaseModel):
+    pass  # No parameters needed, retrieves default + user custom categories
+
+class GuessWhoGeneratePeopleRequest(BaseModel):
+    category: str = Field(..., description="Category name (e.g., 'Animals', 'Sports', 'History')")
+    previous_people: Optional[List[str]] = Field(default_factory=list, description="Previously generated people to exclude")
+
+class GuessWhoGenerateCluesRequest(BaseModel):
+    category: str = Field(..., description="Category name")
+    selected_person: str = Field(..., description="The person/character selected in the game")
+    previous_clues: Optional[List[str]] = Field(default_factory=list, description="Previously used clues to exclude")
+
+class GuessWhoGenerateGuessesRequest(BaseModel):
+    category: str = Field(..., description="Category name")
+    clues: List[str] = Field(..., description="The 3 clues that Player 2 gave about the mystery person")
+    previous_guesses: Optional[List[str]] = Field(default_factory=list, description="Previously guessed people to exclude")
+
+
 # --- Jokes Database Models ---
 class JokeQueryRequest(BaseModel):
     location: Optional[str] = Field(None, description="Location tag filter (e.g., 'home', 'beach')")
@@ -14718,9 +14737,11 @@ async def button_symbol_search(
         
         search_type = "keyword_array_fast" if keyword_list else ("semantic_fast" if query_lower in semantic_mappings else "keyword_fast")
         
-        # Log missing images when no symbols are found
-        # Use the processed query_lower which is the canonical search term
+        # Log missing images ONLY when NO matches found across entire search
+        # This includes main query, keywords, and all fallback phases.
+        # Individual keywords that fail are NOT logged if other keywords/phrases succeed.
         if len(matched_symbols) == 0:
+            logging.warning(f"🚨 No image found for query '{query_lower}' (with keywords: {keyword_list}) - logging to missing_images")
             await log_missing_image(query_lower)
         
         return JSONResponse(content={
@@ -17825,6 +17846,574 @@ async def delete_migration_session(
             raise HTTPException(status_code=403, detail="Not authorized")
     
     raise HTTPException(status_code=404, detail="Session not found")
+
+
+# --- Guess Games Endpoints (Who/Where/What) ---
+
+DEFAULT_GUESS_WHO_CATEGORIES = [
+    "Movie Character",
+    "TV Character",
+    "Fictional Character",
+    "Sports Figure",
+    "Musician",
+    "Superhero",
+    "Historical Figure"
+]
+
+DEFAULT_GUESS_WHERE_CATEGORIES = [
+    "Cities",
+    "States",
+    "Countries",
+    "Vacation Spots",
+    "Stores",
+    "Restaurants",
+    "Landmarks",
+    "National Parks"
+]
+
+DEFAULT_GUESS_WHAT_CATEGORIES = [
+    "Food",
+    "Animals",
+    "Electronics",
+    "Toys",
+    "Sports Equipment",
+    "Movies",
+    "TV Shows",
+    "Things you wear"
+]
+
+@app.post("/api/guess-who/categories")
+async def get_guess_who_categories(
+    request: GuessWhoCategoriesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get default Guess Who categories + user-customized categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user's custom categories from profile
+        custom_categories = []
+        try:
+            user_doc = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+                account_id
+            ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id).get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                custom_categories = user_data.get("guess_who_categories", [])
+        except Exception as e:
+            logging.warning(f"Could not load custom categories for {aac_user_id}: {e}")
+        
+        # Use custom categories if available, otherwise use defaults
+        # Custom categories completely replace defaults (not added to them)
+        if custom_categories and len(custom_categories) > 0:
+            all_categories = custom_categories
+        else:
+            all_categories = DEFAULT_GUESS_WHO_CATEGORIES.copy()
+        
+        return JSONResponse(content={
+            "default_categories": DEFAULT_GUESS_WHO_CATEGORIES,
+            "custom_categories": custom_categories,
+            "all_categories": all_categories
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting Guess Who categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
+
+
+@app.post("/api/guess-who/custom-categories")
+async def save_custom_guess_who_categories(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save custom Guess Who categories to user profile"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        body = await request.json()
+        categories = body.get("categories", [])
+        
+        if not isinstance(categories, list):
+            raise HTTPException(status_code=400, detail="Categories must be a list")
+        
+        if len(categories) == 0:
+            raise HTTPException(status_code=400, detail="At least one category is required")
+        
+        # Validate categories
+        for cat in categories:
+            if not isinstance(cat, str) or len(cat.strip()) == 0:
+                raise HTTPException(status_code=400, detail="All categories must be non-empty strings")
+        
+        # Save to user profile
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({
+            "guess_who_categories": categories
+        })
+        
+        logging.info(f"Saved {len(categories)} custom Guess Who categories for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "categories": categories,
+            "count": len(categories)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error saving custom Guess Who categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save categories: {str(e)}")
+
+
+@app.delete("/api/guess-who/custom-categories")
+async def delete_custom_guess_who_categories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Delete custom Guess Who categories (reset to defaults)"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Remove custom categories from user profile
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({
+            "guess_who_categories": firestore.DELETE_FIELD
+        })
+        
+        logging.info(f"Deleted custom Guess Who categories for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Custom categories deleted, using defaults"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error deleting custom Guess Who categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete categories: {str(e)}")
+
+
+@app.post("/api/guess-who/generate-people")
+async def generate_guess_who_people(
+    request: GuessWhoGeneratePeopleRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate people/characters for Guess Who game using LLM"""
+    return await _generate_items(request, current_ids, item_type="person", item_type_plural="people")
+
+
+@app.post("/api/guess-who/generate-clues")
+async def generate_guess_who_clues(
+    request: GuessWhoGenerateCluesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate clues about the selected person for Player 1 to use"""
+    return await _generate_clues(request, current_ids, item_type="person")
+
+
+@app.post("/api/guess-who/generate-guesses")
+async def generate_guess_who_guesses(
+    request: GuessWhoGenerateGuessesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate guess options for Mode B based on the clues given by Player 2"""
+    return await _generate_guesses(request, current_ids, item_type="person", item_type_plural="people")
+
+
+# --- Guess Where Game Endpoints (Places) ---
+
+@app.post("/api/guess-where/categories")
+async def get_guess_where_categories(
+    request: GuessWhoCategoriesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get Guess Where categories for places"""
+    return await _get_categories(current_ids, DEFAULT_GUESS_WHERE_CATEGORIES, "guess_where_categories")
+
+@app.post("/api/guess-where/custom-categories")
+async def save_custom_guess_where_categories(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save custom Guess Where categories"""
+    return await _save_custom_categories(request, current_ids, "guess_where_categories")
+
+@app.delete("/api/guess-where/custom-categories")
+async def delete_custom_guess_where_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Delete custom Guess Where categories"""
+    return await _delete_custom_categories(current_ids, "guess_where_categories")
+
+@app.post("/api/guess-where/generate-people")
+async def generate_guess_where_places(request: GuessWhoGeneratePeopleRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate places for Guess Where game"""
+    return await _generate_items(request, current_ids, item_type="place", item_type_plural="places")
+
+@app.post("/api/guess-where/generate-clues")
+async def generate_guess_where_clues(request: GuessWhoGenerateCluesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate clues for Guess Where game"""
+    return await _generate_clues(request, current_ids, item_type="place")
+
+@app.post("/api/guess-where/generate-guesses")
+async def generate_guess_where_guesses(request: GuessWhoGenerateGuessesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate guesses for Guess Where game"""
+    return await _generate_guesses(request, current_ids, item_type="place", item_type_plural="places")
+
+
+# --- Guess What Game Endpoints (Things) ---
+
+@app.post("/api/guess-what/categories")
+async def get_guess_what_categories(
+    request: GuessWhoCategoriesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get Guess What categories for things"""
+    return await _get_categories(current_ids, DEFAULT_GUESS_WHAT_CATEGORIES, "guess_what_categories")
+
+@app.post("/api/guess-what/custom-categories")
+async def save_custom_guess_what_categories(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save custom Guess What categories"""
+    return await _save_custom_categories(request, current_ids, "guess_what_categories")
+
+@app.delete("/api/guess-what/custom-categories")
+async def delete_custom_guess_what_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Delete custom Guess What categories"""
+    return await _delete_custom_categories(current_ids, "guess_what_categories")
+
+@app.post("/api/guess-what/generate-people")
+async def generate_guess_what_things(request: GuessWhoGeneratePeopleRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate things for Guess What game"""
+    return await _generate_items(request, current_ids, item_type="thing", item_type_plural="things")
+
+@app.post("/api/guess-what/generate-clues")
+async def generate_guess_what_clues(request: GuessWhoGenerateCluesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate clues for Guess What game"""
+    return await _generate_clues(request, current_ids, item_type="thing")
+
+@app.post("/api/guess-what/generate-guesses")
+async def generate_guess_what_guesses(request: GuessWhoGenerateGuessesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate guesses for Guess What game"""
+    return await _generate_guesses(request, current_ids, item_type="thing", item_type_plural="things")
+
+
+# Helper functions for shared category logic
+async def _get_categories(current_ids, default_categories, field_name):
+    """Shared function to get categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        custom_categories = []
+        try:
+            user_doc = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+                account_id
+            ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id).get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                custom_categories = user_data.get(field_name, [])
+        except Exception as e:
+            logging.warning(f"Could not load custom categories for {aac_user_id}: {e}")
+        
+        if custom_categories and len(custom_categories) > 0:
+            all_categories = custom_categories
+        else:
+            all_categories = default_categories.copy()
+        
+        return JSONResponse(content={
+            "default_categories": default_categories,
+            "custom_categories": custom_categories,
+            "all_categories": all_categories
+        })
+    except Exception as e:
+        logging.error(f"Error getting categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
+
+async def _save_custom_categories(request: Request, current_ids, field_name):
+    """Shared function to save custom categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        body = await request.json()
+        categories = body.get("categories", [])
+        
+        if not isinstance(categories, list):
+            raise HTTPException(status_code=400, detail="Categories must be a list")
+        
+        if len(categories) == 0:
+            raise HTTPException(status_code=400, detail="At least one category is required")
+        
+        for cat in categories:
+            if not isinstance(cat, str) or len(cat.strip()) == 0:
+                raise HTTPException(status_code=400, detail="All categories must be non-empty strings")
+        
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({field_name: categories})
+        
+        logging.info(f"Saved {len(categories)} custom categories to {field_name} for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "categories": categories,
+            "count": len(categories)
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error saving custom categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save categories: {str(e)}")
+
+async def _delete_custom_categories(current_ids, field_name):
+    """Shared function to delete custom categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({field_name: firestore.DELETE_FIELD})
+        
+        logging.info(f"Deleted custom categories from {field_name} for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Custom categories deleted, using defaults"
+        })
+    except Exception as e:
+        logging.error(f"Error deleting custom categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete categories: {str(e)}")
+
+
+# Helper functions for generating game items with game-type-specific prompts
+async def _generate_items(request: GuessWhoGeneratePeopleRequest, current_ids: Dict[str, str], item_type: str, item_type_plural: str):
+    """Generate items (people/places/things) based on game type"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 10)
+        
+        # Build exclusion instruction
+        exclusion_instruction = ""
+        if request.previous_people and len(request.previous_people) > 0:
+            excluded_list = ", ".join(f'"{item}"' for item in request.previous_people)
+            exclusion_instruction = f"\n\nDo NOT include any of these: {excluded_list}. Generate completely different {item_type_plural}."
+        
+        llm_query = f"""You are helping someone using an AAC (Augmentative and Alternative Communication) device play a guessing game.
+
+Generate exactly {llm_options} different {item_type_plural} from the "{request.category}" category.
+
+Requirements:
+1. Make them diverse and well-known
+2. Each {item_type} should be specific and clear (e.g., "Eiffel Tower" not just "tower", "Golden Retriever" not just "dog")
+3. Avoid extremely obscure options
+4. Make them suitable for describing through clues
+5. Names should be clear and recognizable{exclusion_instruction}
+
+Return your response as a JSON array of strings with just the names.
+
+Example format:
+["{item_type.title()} 1", "{item_type.title()} 2", "{item_type.title()} 3"]
+
+Generate {llm_options} unique {item_type_plural} now:"""
+        
+        # Call LLM
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+        
+        # Parse response as JSON
+        items = []
+        try:
+            import json as json_module
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            items = json_module.loads(json_str)
+        except json_module.JSONDecodeError as e:
+            logging.warning(f"Failed to parse LLM response as JSON: {e}. Response: {response}")
+            items = [line.strip().strip('"- ') for line in response.split('\n') if line.strip()]
+        
+        if not items or not isinstance(items, list):
+            items = []
+        
+        return JSONResponse(content={
+            "category": request.category,
+            "people": items[:llm_options]  # Keep "people" key for API compatibility
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating items: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate {item_type_plural}: {str(e)}")
+
+
+async def _generate_clues(request: GuessWhoGenerateCluesRequest, current_ids: Dict[str, str], item_type: str):
+    """Generate clues based on game type"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 5)
+        
+        exclusion_instruction = ""
+        if request.previous_clues and len(request.previous_clues) > 0:
+            excluded_list = ", ".join(f'"{clue}"' for clue in request.previous_clues)
+            exclusion_instruction = f"\n\nDo NOT include any of these clues: {excluded_list}. Generate completely different clues."
+        
+        llm_query = f"""You are helping someone using an AAC device play a guessing game.
+
+The {item_type} to describe is: "{request.selected_person}"
+Category: "{request.category}"
+
+Generate exactly {llm_options} concise, distinctive clues that Player 1 can choose to help Player 2 guess what it is.
+
+Requirements:
+1. Each clue should be 1-2 sentences maximum
+2. Clues should be specific and descriptive
+3. Varied difficulty (some easier, some harder)
+4. Appropriate for someone using AAC
+5. Avoid giving away the answer completely{exclusion_instruction}
+
+Return your response as a JSON array of objects with "text" (full clue) and "summary" (5 words or less).
+
+Example format:
+[
+  {{"text": "This is located in Paris, France", "summary": "In Paris France"}},
+  {{"text": "It's made of iron and very tall", "summary": "Iron very tall"}}
+]
+
+Generate {llm_options} clues now:"""
+        
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+        
+        clues = []
+        try:
+            import json as json_module
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            parsed_data = json_module.loads(json_str)
+            
+            if parsed_data and isinstance(parsed_data, list):
+                clues = []
+                for item in parsed_data:
+                    if isinstance(item, dict):
+                        clues.append(item)
+                    elif isinstance(item, str):
+                        summary = item[:50] if len(item) > 50 else item
+                        summary = ' '.join(summary.split()[:5])
+                        clues.append({"text": item, "summary": summary})
+        except json_module.JSONDecodeError as e:
+            logging.warning(f"Failed to parse LLM response as JSON: {e}")
+            for line in response.split('\n'):
+                line = line.strip().strip('"- ')
+                if line:
+                    summary = ' '.join(line.split()[:5])
+                    clues.append({"text": line, "summary": summary})
+        
+        if not clues or not isinstance(clues, list):
+            clues = []
+        
+        return JSONResponse(content={
+            "category": request.category,
+            "selected_person": request.selected_person,
+            "clues": clues[:llm_options]
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating clues: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate clues: {str(e)}")
+
+
+async def _generate_guesses(request: GuessWhoGenerateGuessesRequest, current_ids: Dict[str, str], item_type: str, item_type_plural: str):
+    """Generate guesses based on game type"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 5)
+        total_guesses_needed = llm_options * 2
+        
+        clues_context = "\n".join([f"- {clue}" for clue in request.clues])
+        
+        previous_guesses_context = ""
+        if request.previous_guesses and len(request.previous_guesses) > 0:
+            guesses_list = "\n".join([f"- {guess}" for guess in request.previous_guesses])
+            previous_guesses_context = f"\n\nPrevious INCORRECT guesses (do NOT include these):\n{guesses_list}"
+        
+        llm_query = f"""You are helping someone using an AAC device play a guessing game. Player 1 needs to guess a {item_type} from the "{request.category}" category that Player 2 is thinking of.
+
+The clues given by Player 2 were:
+{clues_context}{previous_guesses_context}
+
+Generate exactly {total_guesses_needed} diverse guess options - {item_type_plural} from the "{request.category}" category that could match these clues.
+
+IMPORTANT: Consider ALL clues together. A good guess should reasonably match ALL the clues provided.
+
+Requirements:
+1. Each guess must be from the "{request.category}" category
+2. Guesses should be plausible based on ALL the clues
+3. Include a mix of obvious and creative guesses
+4. Randomize the order - do NOT put the most likely guess first
+5. Make them well-known and recognizable
+6. Do NOT include any of the previous incorrect guesses
+
+Return your response as a JSON array of strings, in RANDOM order.
+
+Example format:
+["{item_type.title()} 1", "{item_type.title()} 2", "{item_type.title()} 3"]
+
+Generate {total_guesses_needed} unique guesses now:"""
+        
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+        
+        guesses = []
+        try:
+            import json as json_module
+            import random
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            guesses = json_module.loads(json_str)
+            
+            if isinstance(guesses, list) and len(guesses) > 0:
+                random.shuffle(guesses)
+        except json_module.JSONDecodeError as e:
+            logging.warning(f"Failed to parse LLM response as JSON: {e}")
+            guesses = [line.strip().strip('"- ') for line in response.split('\n') if line.strip()]
+            import random
+            random.shuffle(guesses)
+        
+        if not guesses or not isinstance(guesses, list):
+            guesses = []
+        
+        return JSONResponse(content={
+            "category": request.category,
+            "clues_given": request.clues,
+            "guesses": guesses[:total_guesses_needed]
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating guesses: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate guesses: {str(e)}")
 
 
 if __name__ == "__main__":

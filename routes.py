@@ -33,6 +33,7 @@ STATIC_PAGES = [
     "avatar_admin.html",
     "jokes.html",
     "games.html",
+    "guess_who.html",
     "mood.html",
     "symbol_admin.html",
     "accent_migration.html"
