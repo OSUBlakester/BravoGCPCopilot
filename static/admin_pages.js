@@ -35,6 +35,7 @@ const SPECIAL_PAGES = [
     { name: 'favorites', displayName: 'Favorites Page' },
     { name: 'mood', displayName: 'Mood Selection Page' },
     { name: 'games', displayName: 'Games Page' },
+    { name: 'jokes', displayName: 'Jokes Page' },
     // Add more special pages here as needed
 ];
 

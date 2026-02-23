@@ -65,46 +65,61 @@
             padding: 1rem;
         }
 
-        /* --- Game Menu Styles --- */
-        .game-menu {
+        /* --- Grid Container Styles (from gridpage) --- */
+        #gridContainer {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
+            gap: 24px;
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
+            --button-font-size: 16px;
         }
 
-        .game-card {
-            background: white;
-            border-radius: 1rem;
-            padding: 2rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            text-align: center;
+        #gridContainer button {
+            position: relative;
+            padding: 12px;
+            font-size: var(--button-font-size);
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s ease;
-            border: 3px solid transparent;
+            background-color: #ffffff;
+            color: #1e293b;
+            border: 1px solid rgba(255,255,255,0.5);
+            border-radius: 24px;
+            box-shadow: 
+                0 10px 15px -3px rgba(0, 0, 0, 0.08),
+                0 4px 6px -2px rgba(0, 0, 0, 0.04),
+                inset 0 0 0 1px rgba(255,255,255,0.5);
+            text-align: center;
+            min-height: 100px;
+            aspect-ratio: 1 / 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            word-wrap: break-word;
+            hyphens: auto;
+            line-height: 1.2;
+            overflow: hidden;
         }
 
-        .game-card:hover {
-            border-color: #FB4F14;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+        @supports not (aspect-ratio: 1 / 1) {
+            #gridContainer button {
+                height: 120px;
+            }
         }
 
-        .game-card i {
-            font-size: 3rem;
-            color: #FB4F14;
-            margin-bottom: 1rem;
+        #gridContainer button:hover {
+            transform: translateY(-6px) scale(1.02);
+            box-shadow: 
+                0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            z-index: 10;
         }
 
-        .game-card h3 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            color: #002244;
-        }
-
-        .game-card p {
-            color: #666;
-            line-height: 1.5;
+        #gridContainer button:active {
+            transform: scale(0.95);
+            box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
         }
 
         /* --- Game Grid Styles --- */
@@ -232,28 +247,6 @@
 
         /* --- Action Buttons now use game-button styling --- */
 
-        /* --- Back Button --- */
-        .back-button {
-            position: fixed;
-            bottom: 2rem;
-            left: 2rem;
-            background: #002244;
-            color: white;
-            border: none;
-            border-radius: 50px;
-            padding: 1rem 1.5rem;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-        }
-
-        .back-button:hover {
-            background: #1e3a8a;
-            transform: translateY(-2px);
-        }
-
         /* --- Listening Indicator --- */
         .listening-indicator {
             background: #22c55e;
@@ -339,19 +332,8 @@
     <div id="mainContent" class="game-container">
         
         <!-- Game Menu (Initial View) -->
-        <div id="gameMenu" class="game-menu">
-            <div class="game-card" onclick="startTwentyQuestions()">
-                <i class="fas fa-question-circle"></i>
-                <h3>20 Questions</h3>
-                <p>Play the classic guessing game! One player thinks of something and the other tries to guess it by asking yes or no questions.</p>
-            </div>
-            
-            <!-- Future games can be added here -->
-            <div class="game-card" style="opacity: 0.5; cursor: not-allowed;">
-                <i class="fas fa-puzzle-piece"></i>
-                <h3>More Games</h3>
-                <p>Additional games coming soon! Stay tuned for more fun activities.</p>
-            </div>
+        <div id="gridContainer">
+            <!-- Buttons will be dynamically generated here -->
         </div>
 
         <!-- 20 Questions Game View -->
@@ -446,11 +428,6 @@
             </div>
         </div>
     </div>
-
-    <!-- Back Button -->
-    <button class="back-button" onclick="goBack()">
-        <i class="fas fa-arrow-left"></i> Back
-    </button>
 
     <!-- Include JavaScript -->
     <script src="/static/splash-screen.js"></script>
@@ -570,6 +547,9 @@
                 // Initialize speech recognition
                 initializeSpeechRecognition();
                 
+                // Generate game menu buttons
+                await generateGameMenuButtons();
+                
                 // Hide splash screen
                 hideSplashScreen();
                 
@@ -577,6 +557,254 @@
                 console.error('Error initializing games page:', error);
                 showError('Failed to initialize games. Please refresh the page.');
                 hideSplashScreen();
+            }
+        }
+
+        // Generate game menu buttons using gridpage pattern
+        async function generateGameMenuButtons() {
+            const container = document.getElementById('gridContainer');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            updateGridLayout();
+            
+            const gameButtons = [
+                { text: 'Home', onClick: () => window.location.href = '/gridpage.html' },
+                { text: '20 Questions', onClick: () => startTwentyQuestions() },
+                { text: 'Guess Who', onClick: () => startGuessGame('who') },
+                { text: 'Guess Where', onClick: () => startGuessGame('where') },
+                { text: 'Guess What', onClick: () => startGuessGame('what') }
+            ];
+            
+            for (let idx = 0; idx < gameButtons.length; idx++) {
+                const buttonData = gameButtons[idx];
+                const currentRow = Math.floor(idx / gridColumns);
+                const currentCol = idx % gridColumns;
+                
+                const button = document.createElement('button');
+                
+                // Try to get symbol image
+                let symbolImageUrl = await getSymbolImageForText(buttonData.text);
+                
+                if (symbolImageUrl) {
+                    // Create container with image and text footer
+                    const buttonContent = document.createElement('div');
+                    buttonContent.style.position = 'relative';
+                    buttonContent.style.width = '100%';
+                    buttonContent.style.height = '100%';
+                    buttonContent.style.display = 'flex';
+                    buttonContent.style.flexDirection = 'column';
+                    
+                    const imageContainer = document.createElement('div');
+                    imageContainer.style.flex = '1';
+                    imageContainer.style.position = 'relative';
+                    imageContainer.style.overflow = 'hidden';
+                    imageContainer.style.width = '100%';
+                    
+                    const imageElement = document.createElement('img');
+                    imageElement.src = symbolImageUrl;
+                    imageElement.alt = buttonData.text;
+                    imageElement.style.width = '100%';
+                    imageElement.style.height = '100%';
+                    imageElement.style.objectFit = 'contain';
+                    imageElement.style.position = 'absolute';
+                    imageElement.style.top = '0';
+                    imageElement.style.left = '0';
+                    
+                    imageElement.onerror = () => {
+                        imageElement.style.display = 'none';
+                    };
+                    
+                    const textFooter = document.createElement('div');
+                    textFooter.style.height = '28px';
+                    textFooter.style.width = '100%';
+                    textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                    textFooter.style.color = 'white';
+                    textFooter.style.display = 'flex';
+                    textFooter.style.alignItems = 'center';
+                    textFooter.style.justifyContent = 'center';
+                    textFooter.style.padding = '2px 4px';
+                    textFooter.style.margin = '0';
+                    textFooter.style.borderRadius = '0';
+                    textFooter.style.position = 'absolute';
+                    textFooter.style.bottom = '0';
+                    textFooter.style.left = '0';
+                    textFooter.style.right = '0';
+                    
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = buttonData.text;
+                    textSpan.style.fontSize = '0.7em';
+                    textSpan.style.fontWeight = 'bold';
+                    textSpan.style.textAlign = 'center';
+                    textSpan.style.lineHeight = '1.1';
+                    
+                    imageContainer.appendChild(imageElement);
+                    textFooter.appendChild(textSpan);
+                    buttonContent.appendChild(imageContainer);
+                    buttonContent.appendChild(textFooter);
+                    button.appendChild(buttonContent);
+                } else {
+                    // Text-only button
+                    button.textContent = buttonData.text;
+                }
+                
+                button.dataset.row = currentRow;
+                button.dataset.col = currentCol;
+                button.classList.add('grid-button');
+                button.style.gridRowStart = currentRow + 1;
+                button.style.gridColumnStart = currentCol + 1;
+                
+                if (!symbolImageUrl) {
+                    button.style.padding = '0';
+                    button.style.margin = '0';
+                    button.style.border = 'none';
+                    button.style.position = 'relative';
+                    button.style.overflow = 'hidden';
+                }
+                
+                button.addEventListener('click', buttonData.onClick);
+                
+                container.appendChild(button);
+            }
+            
+            // Start scanning after a brief delay (same as gridpage pattern)
+            setTimeout(() => {
+                if (!ScanningOff) {
+                    console.log('▶️ Starting scanning on games menu');
+                    startScanning('gridContainer');
+                } else {
+                    console.log('🔇 Scanning is disabled (ScanningOff=true)');
+                }
+            }, defaultDelay);
+        }
+        
+        // Update grid layout (from gridpage)
+        let gridColumns = 10; // Default matching gridpage
+        let enablePictograms = false; // Default - will be loaded from settings (matches gridpage default)
+        let ScanningOff = false; // Default
+        let defaultDelay = 100; // Delay before starting scanning
+        
+        function updateGridLayout() {
+            const gridContainer = document.getElementById('gridContainer');
+            if (!gridContainer) return;
+            
+            gridContainer.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+            
+            const baseFontSize = 20;
+            const minFontSize = 10;
+            const maxFontSize = 28;
+            const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
+            
+            gridContainer.style.setProperty('--button-font-size', `${fontSize}px`);
+        }
+        
+        // Image search function (from gridpage with caching)
+        async function getSymbolImageForText(text, keywords = null) {
+            console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
+            if (!text || text.trim() === '') {
+                console.log(`❌ Empty text provided to getSymbolImageForText`);
+                return null;
+            }
+            
+            // Check if pictograms/images are enabled
+            if (!enablePictograms) {
+                console.log(`❌ Pictograms disabled, skipping image load for "${text}"`);
+                return null;
+            }
+            
+            // Persistent in-memory and sessionStorage cache
+            if (!window.symbolImageCache) {
+                window.symbolImageCache = new Map();
+                
+                // Load cache from sessionStorage
+                try {
+                    const cachedData = sessionStorage.getItem('symbolImageCache');
+                    if (cachedData) {
+                        const parsed = JSON.parse(cachedData);
+                        Object.entries(parsed).forEach(([key, value]) => {
+                            if (value.timestamp > Date.now() - 3600000) {
+                                window.symbolImageCache.set(key, value);
+                            }
+                        });
+                        console.log(`✅ Restored ${window.symbolImageCache.size} cached symbol images`);
+                    }
+                } catch (e) {
+                    console.warn('Failed to restore symbol image cache:', e);
+                }
+            }
+            
+            const cacheKey = `grid_${text.trim().toLowerCase()}`;
+            if (window.symbolImageCache.has(cacheKey)) {
+                const cached = window.symbolImageCache.get(cacheKey);
+                if (cached.timestamp > Date.now() - 3600000) {
+                    console.log(`[IMAGE] Cache hit for "${text}": ${cached.imageUrl ? 'found' : 'null'}`);
+                    return cached.imageUrl;
+                }
+            }
+            
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => {
+                    console.warn(`⏰ Timeout reached for symbol search: "${text}"`);
+                    controller.abort();
+                }, 10000);
+                
+                let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`;
+                if (keywords && keywords.length > 0) {
+                    symbolsUrl += `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
+                }
+                
+                const response = await authenticatedFetch(symbolsUrl, {
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    console.warn(`Symbol search failed for "${text}": ${response.status}`);
+                    return null;
+                }
+                
+                const data = await response.json();
+                
+                if (data && data.symbols && Array.isArray(data.symbols) && data.symbols.length > 0) {
+                    const symbolUrl = data.symbols[0].url;
+                    // Cache the result
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: symbolUrl,
+                        timestamp: Date.now()
+                    });
+                    // Persist to sessionStorage
+                    try {
+                        const cacheObj = Object.fromEntries(window.symbolImageCache);
+                        sessionStorage.setItem('symbolImageCache', JSON.stringify(cacheObj));
+                    } catch (e) {
+                        console.warn('Failed to persist symbol cache:', e);
+                    }
+                    console.log(`✅ Found Firestore image for "${text}": ${symbolUrl}`);
+                    return symbolUrl;
+                } else {
+                    // Cache null result
+                    window.symbolImageCache.set(cacheKey, {
+                        imageUrl: null,
+                        timestamp: Date.now()
+                    });
+                    try {
+                        const cacheObj = Object.fromEntries(window.symbolImageCache);
+                        sessionStorage.setItem('symbolImageCache', JSON.stringify(cacheObj));
+                    } catch (e) {
+                        console.warn('Failed to persist symbol cache:', e);
+                    }
+                    console.log(`❌ No Firestore image found for "${text}"`);
+                    return null;
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    console.warn(`🚫 Request aborted for symbol "${text}" - likely due to timeout`);
+                } else {
+                    console.error(`Error fetching symbol for "${text}":`, error);
+                }
+                return null;
             }
         }
 
@@ -596,12 +824,31 @@
                     } else {
                         gameState.scanDelay = 3500; // Default
                     }
+                    
+                    // Load Grid Columns (same as gridpage)
+                    if (settings && typeof settings.gridColumns === 'number' && !isNaN(settings.gridColumns)) {
+                        gridColumns = Math.max(2, Math.min(18, parseInt(settings.gridColumns)));
+                        console.log(`Grid Columns loaded: ${gridColumns}`);
+                    } else {
+                        gridColumns = 10; // Default value
+                    }
+                    
+                    // Load pictograms setting
+                    enablePictograms = settings.enablePictograms === true;
+                    console.log('enablePictograms loaded:', enablePictograms);
+                    
+                    // Load scanning settings
+                    ScanningOff = settings.ScanningOff === true;
+                    console.log('ScanningOff loaded:', ScanningOff);
                 }
             } catch (error) {
                 console.error('Error loading user settings:', error);
-                // Use defaults
+                // Use defaults (match gridpage defaults)
                 gameState.wakeWord = 'hey bravo';
                 gameState.scanDelay = 3500;
+                gridColumns = 10;
+                enablePictograms = false; // Default to false like gridpage
+                ScanningOff = false;
             }
         }
 
@@ -810,8 +1057,8 @@
             console.log(`SCANNING: Container hidden?`, container.classList.contains('hidden'));
             
             scanningSystem.currentContainer = container;
-            // Look for game-button classes (action buttons now use game-button class)
-            scanningSystem.buttons = Array.from(container.querySelectorAll('.game-button'));
+            // Look for grid buttons in the main menu or game-button in gameplay screens
+            scanningSystem.buttons = Array.from(container.querySelectorAll('button:not([style*="display: none"])'));
             scanningSystem.currentIndex = 0;
             scanningSystem.isScanning = true;
             
@@ -1040,7 +1287,7 @@
             };
             
             // Hide menu and show game
-            document.getElementById('gameMenu').classList.add('hidden');
+            document.getElementById('gridContainer').classList.add('hidden');
             document.getElementById('twentyQuestionsGame').classList.remove('hidden');
             
             // Show role selection
@@ -1959,7 +2206,10 @@
             
             // Hide game view and show menu
             document.getElementById('twentyQuestionsGame').classList.add('hidden');
-            document.getElementById('gameMenu').classList.remove('hidden');
+            document.getElementById('gridContainer').classList.remove('hidden');
+            
+            // Re-initialize scanning for the menu
+            startScanning('gridContainer');
             
             // Reset all game sections
             document.getElementById('roleSelection').classList.add('hidden');
@@ -1993,14 +2243,14 @@
             }, 5000);
         }
 
-        // Go back to previous page
-        function goBack() {
-            // Check if there's a referrer or previous page in history
-            if (document.referrer && document.referrer.includes(window.location.hostname)) {
-                window.history.back();
-            } else {
-                window.location.href = 'gridpage.html';
-            }
+        // Start Guess games - redirect to guess_games.html with type parameter
+        function startGuessGame(type) {
+            window.location.href = `/static/guess_games.html?type=${type}`;
+        }
+        
+        // Backward compatibility - redirect old Guess Who link
+        function startGuessWho() {
+            startGuessGame('who');
         }
 
         // Hide splash screen
@@ -2014,6 +2264,23 @@
             if (window.splashScreen && window.splashScreen.hide) {
                 window.splashScreen.hide();
             }
+        }
+
+        // Add CSS for scanning highlight (if not already present)
+        if (!document.getElementById('scanning-styles')) {
+            const styleSheet = document.createElement("style");
+            styleSheet.id = 'scanning-styles';
+            styleSheet.textContent = `
+                .scanning { /* Highlight style for individual buttons */
+                    box-shadow: 0 0 10px 4px #FB4F14 !important; /* Orange glow, !important to override base button shadow */
+                    outline: none !important; /* Prevent default browser focus outline, !important for specificity */
+                }
+                .active { /* Optional style for click feedback */
+                     transform: scale(0.95);
+                     opacity: 0.8;
+                }
+            `;
+            document.head.appendChild(styleSheet);
         }
     </script>
 </body>
