@@ -157,3 +157,8 @@ fix_pages_data.py
 
 # Custom schemas (may contain test data)
 custom_images_schema.json
+
+# Testing documentation and scripts
+GUESS_WHO_*.md
+check_guess_who_setup.sh
+copy_jokes_to_test.py

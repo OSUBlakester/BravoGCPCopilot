@@ -680,7 +680,7 @@
         
         // Update grid layout (from gridpage)
         let gridColumns = 10; // Default matching gridpage
-        let enablePictograms = true; // Default - will be loaded from settings
+        let enablePictograms = false; // Default - will be loaded from settings (matches gridpage default)
         let ScanningOff = false; // Default
         let defaultDelay = 100; // Delay before starting scanning
         
@@ -843,11 +843,11 @@
                 }
             } catch (error) {
                 console.error('Error loading user settings:', error);
-                // Use defaults
+                // Use defaults (match gridpage defaults)
                 gameState.wakeWord = 'hey bravo';
                 gameState.scanDelay = 3500;
                 gridColumns = 10;
-                enablePictograms = true;
+                enablePictograms = false; // Default to false like gridpage
                 ScanningOff = false;
             }
         }
