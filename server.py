@@ -18100,7 +18100,42 @@ async def generate_guess_what_guesses(request: GuessWhoGenerateGuessesRequest, c
     return await _generate_guesses(request, current_ids, item_type="thing", item_type_plural="things")
 
 
-# --- Hangman Game Endpoint ---
+# --- Hangman Game Endpoints ---
+
+DEFAULT_HANGMAN_CATEGORIES = [
+    "Animals",
+    "Food",
+    "Sports",
+    "Movies",
+    "TV Shows",
+    "Colors",
+    "Countries",
+    "Fruits",
+    "Body Parts",
+    "Clothing",
+    "School Subjects",
+    "Musical Instruments",
+    "Vehicles",
+    "Holidays",
+    "Weather"
+]
+
+@app.post("/api/hangman/categories")
+async def get_hangman_categories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get Hangman categories"""
+    return await _get_categories(current_ids, DEFAULT_HANGMAN_CATEGORIES, "hangman_categories")
+
+@app.post("/api/hangman/custom-categories")
+async def save_custom_hangman_categories(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save custom Hangman categories"""
+    return await _save_custom_categories(request, current_ids, "hangman_categories")
+
+@app.delete("/api/hangman/custom-categories")
+async def delete_custom_hangman_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Delete custom Hangman categories (reset to defaults)"""
+    return await _delete_custom_categories(current_ids, "hangman_categories")
 
 class HangmanGenerateWordsRequest(BaseModel):
     category: str = Field(..., description="Category name (e.g., 'Animals', 'Sports', 'Movies')")
