@@ -18100,6 +18100,94 @@ async def generate_guess_what_guesses(request: GuessWhoGenerateGuessesRequest, c
     return await _generate_guesses(request, current_ids, item_type="thing", item_type_plural="things")
 
 
+# --- Hangman Game Endpoint ---
+
+class HangmanGenerateWordsRequest(BaseModel):
+    category: str = Field(..., description="Category name (e.g., 'Animals', 'Sports', 'Movies')")
+    previous_words: Optional[List[str]] = Field(default_factory=list, description="Previously used words to exclude")
+
+@app.post("/api/hangman/generate-words")
+async def generate_hangman_words(request: HangmanGenerateWordsRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate word options for Hangman game"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 10)
+
+        exclusion_instruction = ""
+        if request.previous_words and len(request.previous_words) > 0:
+            excluded_list = ", ".join(f'"{w}"' for w in request.previous_words)
+            exclusion_instruction = f"\n\nDo NOT include any of these previously used words: {excluded_list}. Generate completely different words."
+
+        llm_query = f"""You are helping someone play Hangman. Generate exactly {llm_options} words from the "{request.category}" category that are good for a Hangman game.
+
+Requirements:
+1. Each word should be a single word or a short well-known phrase (1-3 words max)
+2. Words should be well-known and recognizable
+3. Prefer words between 4 and 10 letters for single words
+4. Make them diverse within the category
+5. Avoid very obscure or difficult-to-spell words
+6. Words should be fun and engaging for a guessing game{exclusion_instruction}
+
+Return your response as a JSON array of strings.
+
+Example format for "Animals" category:
+["elephant", "dolphin", "penguin", "giraffe", "octopus"]
+
+Generate {llm_options} Hangman words for the "{request.category}" category now:"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+
+        words = []
+        try:
+            json_text = response_text.strip()
+            if json_text.startswith('```json'):
+                lines = json_text.split('\n')
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if line.strip() == '```json':
+                        in_json = True
+                        continue
+                    elif line.strip() == '```' and in_json:
+                        break
+                    elif in_json:
+                        json_lines.append(line)
+                json_text = '\n'.join(json_lines)
+
+            parsed = json.loads(json_text)
+            if isinstance(parsed, list):
+                words = [w.strip() for w in parsed if isinstance(w, str) and w.strip()]
+            elif isinstance(parsed, dict) and 'words' in parsed:
+                words = [w.strip() for w in parsed['words'] if isinstance(w, str) and w.strip()]
+        except (json.JSONDecodeError, TypeError):
+            for line in response_text.strip().split('\n'):
+                line = line.strip().strip('-•*"\'').strip()
+                line = re.sub(r'^\d+\.?\s*', '', line).strip()
+                if line and len(line) < 40:
+                    words.append(line)
+
+        if not words:
+            fallback_words = {
+                "Animals": ["elephant", "dolphin", "penguin", "giraffe", "octopus"],
+                "Sports": ["basketball", "tennis", "soccer", "swimming", "baseball"],
+                "Food": ["pizza", "hamburger", "spaghetti", "chocolate", "sandwich"],
+                "Movies": ["frozen", "batman", "titanic", "avengers", "shrek"],
+            }
+            words = fallback_words.get(request.category, ["puzzle", "challenge", "mystery", "adventure", "treasure"])
+
+        return JSONResponse(content={
+            "words": words[:llm_options],
+            "category": request.category
+        })
+
+    except Exception as e:
+        logging.error(f"Error generating hangman words: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
 # Helper functions for shared category logic
 async def _get_categories(current_ids, default_categories, field_name):
     """Shared function to get categories"""

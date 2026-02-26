@@ -573,7 +573,8 @@
                 { text: '20 Questions', onClick: () => startTwentyQuestions() },
                 { text: 'Guess Who', onClick: () => startGuessGame('who') },
                 { text: 'Guess Where', onClick: () => startGuessGame('where') },
-                { text: 'Guess What', onClick: () => startGuessGame('what') }
+                { text: 'Guess What', onClick: () => startGuessGame('what') },
+                { text: 'Hangman', onClick: () => window.location.href = '/static/hangman.html' }
             ];
             
             for (let idx = 0; idx < gameButtons.length; idx++) {
