@@ -42,6 +42,7 @@ let gridColumns = 6;
 
 // Image matching
 let enablePictograms = true;
+let useTapInterface = false;
 
 // Audio announce queue
 let announcementQueue = [];
@@ -113,6 +114,12 @@ async function loadSettings() {
             gridColumns = Math.max(2, Math.min(12, parseInt(settings.gridColumns)));
         }
         ScanningOff = settings.ScanningOff === true;
+        useTapInterface = settings.useTapInterface === true;
+        
+        // Force pictograms on for tap interface users
+        if (useTapInterface) {
+            enablePictograms = true;
+        }
     } catch (error) {
         console.error('Error loading settings:', error);
     }
@@ -1092,7 +1099,7 @@ function goBackToPreviousStep() {
         updatePageContent(previousScreen, null, { skipHistory: true });
         return;
     }
-    window.location.href = '/games.html';
+    window.location.href = useTapInterface ? '/static/games.html' : '/games.html';
 }
 
 function createGoBackButton() {
