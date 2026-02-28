@@ -129,7 +129,7 @@ async function showCategoryScreen() {
 
     try {
         gameState.isLoading = true;
-        const response = await authenticatedFetch('/api/guess-what/categories', {
+        const response = await authenticatedFetch('/api/hangman/categories', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
@@ -1396,4 +1396,207 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.addEventListener('touchstart', tryResumeAudioContext, { once: true });
     document.body.addEventListener('keydown', tryResumeAudioContext, { once: true });
     initializeGame();
+    setupCustomCategoriesUI();
 });
+
+// ===== CUSTOM CATEGORIES MANAGEMENT =====
+
+function setupCustomCategoriesUI() {
+    const lockButton = document.getElementById('lock-icon');
+    const pinModal = document.getElementById('pin-modal');
+    const pinInput = document.getElementById('pin-input');
+    const pinSubmitButton = document.getElementById('pin-submit');
+    const pinCancelButton = document.getElementById('pin-cancel');
+    const pinError = document.getElementById('pin-error');
+
+    const customCategoriesModal = document.getElementById('custom-categories-modal');
+    const closeCategoriesModal = document.getElementById('close-categories-modal');
+    const cancelCategoriesButton = document.getElementById('cancel-categories-button');
+    const saveCategoriesButton = document.getElementById('save-categories-button');
+    const resetToDefaultsButton = document.getElementById('reset-to-defaults-button');
+    const categoriesInput = document.getElementById('categories-input');
+    const categoriesPreview = document.getElementById('categories-preview');
+    const categoryCount = document.getElementById('category-count');
+
+    // PIN Modal Functions
+    function showPinModal() {
+        if (pinModal) {
+            pinModal.classList.remove('hidden');
+            if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+            if (pinError) pinError.classList.add('hidden');
+        }
+    }
+
+    function hidePinModal() {
+        if (pinModal) pinModal.classList.add('hidden');
+        if (pinInput) pinInput.value = '';
+        if (pinError) pinError.classList.add('hidden');
+    }
+
+    async function validatePin(pin) {
+        try {
+            const response = await authenticatedFetch('/api/account/toolbar-pin', { method: 'GET' });
+            if (response.ok) {
+                const data = await response.json();
+                return data.pin === pin;
+            }
+        } catch (error) {
+            console.error('Error validating PIN:', error);
+        }
+        return false;
+    }
+
+    function showCustomCategoriesModal() {
+        hidePinModal();
+        if (customCategoriesModal) {
+            customCategoriesModal.classList.remove('hidden');
+            loadCurrentCategories();
+        }
+    }
+
+    function hideCustomCategoriesModal() {
+        if (customCategoriesModal) customCategoriesModal.classList.add('hidden');
+    }
+
+    async function loadCurrentCategories() {
+        try {
+            const response = await authenticatedFetch('/api/hangman/categories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const categories = (data.custom_categories && data.custom_categories.length > 0)
+                    ? data.custom_categories
+                    : data.default_categories;
+                categoriesInput.value = categories.join('\n');
+                updatePreview();
+            }
+        } catch (error) {
+            console.error('Error loading categories:', error);
+        }
+    }
+
+    function parseCategories(text) {
+        const lines = text.split('\n');
+        const categories = [];
+        lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed.length > 0) categories.push(trimmed);
+        });
+        const unique = [];
+        const seen = new Set();
+        categories.forEach(cat => {
+            const lower = cat.toLowerCase();
+            if (!seen.has(lower)) { seen.add(lower); unique.push(cat); }
+        });
+        return unique;
+    }
+
+    function updatePreview() {
+        const text = categoriesInput.value;
+        const categories = parseCategories(text);
+        if (categoryCount) categoryCount.textContent = categories.length;
+        if (categoriesPreview) {
+            if (categories.length === 0) {
+                categoriesPreview.innerHTML = '<p class="text-gray-400 text-sm italic">No categories entered yet...</p>';
+            } else {
+                categoriesPreview.innerHTML = categories.map((cat, index) =>
+                    `<span class="inline-block bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm mr-2 mb-2">${index + 1}. ${escapeHtml(cat)}</span>`
+                ).join('');
+            }
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    async function saveCustomCategories() {
+        const text = categoriesInput.value;
+        const categories = parseCategories(text);
+        if (categories.length === 0) { alert('Please enter at least one category.'); return; }
+        try {
+            const response = await authenticatedFetch('/api/hangman/custom-categories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ categories })
+            });
+            if (response.ok) {
+                alert(`Successfully saved ${categories.length} custom categories!`);
+                hideCustomCategoriesModal();
+                if (gameState.phase === 'category') await showCategoryScreen();
+            } else {
+                alert('Failed to save categories. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error saving categories:', error);
+            alert('Failed to save categories. Please try again.');
+        }
+    }
+
+    async function resetToDefaults() {
+        if (!confirm('Are you sure you want to reset to default categories? This will remove all custom categories.')) return;
+        try {
+            const response = await authenticatedFetch('/api/hangman/custom-categories', { method: 'DELETE' });
+            if (response.ok) {
+                alert('Successfully reset to default categories!');
+                hideCustomCategoriesModal();
+                if (gameState.phase === 'category') await showCategoryScreen();
+            } else {
+                alert('Failed to reset categories. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error resetting categories:', error);
+            alert('Failed to reset categories. Please try again.');
+        }
+    }
+
+    // Event Listeners
+    if (lockButton) lockButton.addEventListener('click', showPinModal);
+
+    if (pinSubmitButton) {
+        pinSubmitButton.addEventListener('click', async () => {
+            const pin = pinInput.value;
+            if (pin.length >= 3 && pin.length <= 10) {
+                const isValid = await validatePin(pin);
+                if (isValid) {
+                    showCustomCategoriesModal();
+                } else {
+                    if (pinError) { pinError.textContent = 'Invalid PIN. Please try again.'; pinError.classList.remove('hidden'); }
+                    if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+                }
+            } else {
+                if (pinError) { pinError.textContent = 'PIN must be 3-10 characters.'; pinError.classList.remove('hidden'); }
+            }
+        });
+    }
+
+    if (pinCancelButton) pinCancelButton.addEventListener('click', hidePinModal);
+
+    if (pinInput) {
+        pinInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') pinSubmitButton.click();
+        });
+    }
+
+    if (closeCategoriesModal) closeCategoriesModal.addEventListener('click', hideCustomCategoriesModal);
+    if (cancelCategoriesButton) cancelCategoriesButton.addEventListener('click', hideCustomCategoriesModal);
+    if (saveCategoriesButton) saveCategoriesButton.addEventListener('click', saveCustomCategories);
+    if (resetToDefaultsButton) resetToDefaultsButton.addEventListener('click', resetToDefaults);
+    if (categoriesInput) categoriesInput.addEventListener('input', updatePreview);
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (customCategoriesModal && !customCategoriesModal.classList.contains('hidden')) {
+                hideCustomCategoriesModal();
+            } else if (pinModal && !pinModal.classList.contains('hidden')) {
+                hidePinModal();
+            }
+        }
+    });
+}
