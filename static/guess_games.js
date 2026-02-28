@@ -82,6 +82,7 @@ let gridColumns = 6;
 
 // Image matching state
 let enablePictograms = true; // Can be toggled via settings
+let useTapInterface = false; // Whether user is using tap interface
 
 // Audio announce queue (minimal version of gridpage)
 let announcementQueue = [];
@@ -154,6 +155,12 @@ async function loadGuessWhoSettings() {
         }
 
         ScanningOff = settings.ScanningOff === true;
+        useTapInterface = settings.useTapInterface === true;
+        
+        // Force pictograms on for tap interface users
+        if (useTapInterface) {
+            enablePictograms = true;
+        }
     } catch (error) {
         console.error('Error loading Guess Who settings:', error);
     }
@@ -546,13 +553,15 @@ async function handleWakeWordForClue() {
     hideListeningIndicator();
     stopWakeWordRecognition();
     
-    // Announce and start listening immediately (during announcement)
-    announceText('Listening for your clue now.', false);
+    // Wait for announcement to finish before starting recognition
+    // (otherwise the mic picks up the TTS audio and recognition ends prematurely)
     showListeningIndicator('Listening for: your clue');
+    await announceText('Listening for your clue now.', false);
     startClueCapture();
 }
 
-function startClueCapture() {
+function startClueCapture(retryCount = 0) {
+    const MAX_RETRIES = 3;
     waitingForGuess = true; // Reuse the guess capture flag for clue capture
     
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -588,21 +597,34 @@ function startClueCapture() {
         }
     };
 
-    clueRecognitionInstance.onerror = () => {
-        console.error('[MODE B CLUE] Recognition error');
-        waitingForGuess = false;
-        try { clueRecognitionInstance.stop(); } catch (e) {}
+    clueRecognitionInstance.onerror = (event) => {
+        console.error('[MODE B CLUE] Recognition error:', event.error);
+        // Don't reset waitingForGuess here — let onend handle retry
     };
 
     clueRecognitionInstance.onend = () => {
-        waitingForGuess = false;
+        if (!hasProcessedResult && waitingForGuess) {
+            // Recognition ended without capturing a clue — retry
+            if (retryCount < MAX_RETRIES) {
+                console.log(`[MODE B CLUE] Recognition ended without result, retrying (${retryCount + 1}/${MAX_RETRIES})`);
+                setTimeout(() => startClueCapture(retryCount + 1), 300);
+            } else {
+                console.log('[MODE B CLUE] Max retries reached, giving up');
+                waitingForGuess = false;
+                hideListeningIndicator();
+                announceText('I didn\'t catch your clue. Please try again.', false);
+            }
+        } else {
+            waitingForGuess = false;
+        }
     };
 
     try { 
         clueRecognitionInstance.start();
-        console.log('[MODE B CLUE] Started listening for clue');
+        console.log(`[MODE B CLUE] Started listening for clue (attempt ${retryCount + 1})`);
     } catch (e) {
         console.error('[MODE B CLUE] Error starting recognition:', e);
+        waitingForGuess = false;
     }
 }
 
@@ -1499,7 +1521,7 @@ function goBackToPreviousStep() {
         return;
     }
 
-    window.location.href = '/games.html';
+    window.location.href = useTapInterface ? '/static/games.html' : '/games.html';
 }
 
 async function displayGridButtons(buttons, containerElement = null) {

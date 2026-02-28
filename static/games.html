@@ -569,7 +569,7 @@
             updateGridLayout();
             
             const gameButtons = [
-                { text: 'Home', onClick: () => window.location.href = '/gridpage.html' },
+                { text: 'Home', onClick: () => window.location.href = useTapInterface ? '/static/tap_interface.html' : '/gridpage.html' },
                 { text: '20 Questions', onClick: () => startTwentyQuestions() },
                 { text: 'Guess Who', onClick: () => startGuessGame('who') },
                 { text: 'Guess Where', onClick: () => startGuessGame('where') },
@@ -683,6 +683,7 @@
         let gridColumns = 10; // Default matching gridpage
         let enablePictograms = false; // Default - will be loaded from settings (matches gridpage default)
         let ScanningOff = false; // Default
+        let useTapInterface = false; // Whether user is using tap interface
         let defaultDelay = 100; // Delay before starting scanning
         
         function updateGridLayout() {
@@ -697,6 +698,47 @@
             const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
             
             gridContainer.style.setProperty('--button-font-size', `${fontSize}px`);
+        }
+        
+        // Add pictogram images to game-button divs in a container (for tap mode)
+        async function enhanceButtonsWithImages(containerId) {
+            if (!enablePictograms) return;
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const buttons = container.querySelectorAll('.game-button');
+            const promises = Array.from(buttons).map(async (button) => {
+                // Skip if already enhanced with an image
+                if (button.querySelector('.game-btn-img')) return;
+                
+                // Get search text: use data attribute or clean text content
+                let searchText = button.dataset.scanLabel || '';
+                if (!searchText) {
+                    searchText = button.textContent.trim();
+                }
+                // Skip very long text (full questions don't match images well)
+                if (!searchText || searchText.length > 60) return;
+                
+                try {
+                    const imageUrl = await getSymbolImageForText(searchText);
+                    if (imageUrl) {
+                        const img = document.createElement('img');
+                        img.src = imageUrl;
+                        img.alt = '';
+                        img.className = 'game-btn-img';
+                        img.style.cssText = 'width:48px;height:48px;object-fit:contain;margin-right:12px;flex-shrink:0;border-radius:8px;';
+                        img.onerror = () => { img.style.display = 'none'; };
+                        button.insertBefore(img, button.firstChild);
+                        button.style.display = 'flex';
+                        button.style.alignItems = 'center';
+                        button.style.justifyContent = 'center';
+                    }
+                } catch (e) {
+                    console.warn('Failed to load image for game button:', searchText);
+                }
+            });
+            
+            await Promise.all(promises);
         }
         
         // Image search function (from gridpage with caching)
@@ -841,6 +883,16 @@
                     // Load scanning settings
                     ScanningOff = settings.ScanningOff === true;
                     console.log('ScanningOff loaded:', ScanningOff);
+                    
+                    // Load tap interface preference
+                    useTapInterface = settings.useTapInterface === true;
+                    console.log('useTapInterface loaded:', useTapInterface);
+                    
+                    // Force pictograms on for tap interface users
+                    if (useTapInterface) {
+                        enablePictograms = true;
+                        console.log('Tap mode: forcing enablePictograms=true');
+                    }
                 }
             } catch (error) {
                 console.error('Error loading user settings:', error);
@@ -1042,6 +1094,12 @@
 
         // Scanning System Functions
         function startScanning(containerId) {
+            // Skip scanning entirely when ScanningOff is true (tap mode users)
+            if (ScanningOff) {
+                console.log(`SCANNING: Skipped for ${containerId} (ScanningOff=true)`);
+                return;
+            }
+            
             console.log(`SCANNING: Starting scan for container: ${containerId}`);
             
             // Stop any existing scanning first
@@ -1300,6 +1358,7 @@
             // Start scanning for role selection (no listening - user taps/uses switch)
             setTimeout(() => {
                 startScanning('roleSelection');
+                enhanceButtonsWithImages('roleSelection');
             }, 2000);
         }
 
@@ -1336,6 +1395,7 @@
                 // Delay before showing category selection so announcement plays
                 setTimeout(() => {
                     document.getElementById('categorySelection').classList.remove('hidden');
+                    enhanceButtonsWithImages('categorySelection');
                     
                     // Start scanning for category selection (no listening - user taps/uses switch)
                     setTimeout(() => {
@@ -1573,6 +1633,9 @@
             setTimeout(() => {
                 startScanning('optionsSelection');
             }, 500);
+            
+            // Add pictograms to option buttons for tap mode
+            enhanceButtonsWithImages('optionsSelection');
         }
 
         // Handle option click
@@ -1889,6 +1952,9 @@
             setTimeout(() => {
                 startScanning('responseOptions');
             }, 500);
+            
+            // Add pictograms to response buttons for tap mode
+            enhanceButtonsWithImages('responseOptions');
         }
 
         // Handle selection of a response option
@@ -2009,6 +2075,9 @@
             setTimeout(() => {
                 startScanning('actionButtons');
             }, 500);
+            
+            // Add pictograms to action buttons for tap mode
+            enhanceButtonsWithImages('actionButtons');
         }
 
         // Ask another question
@@ -2178,6 +2247,7 @@
             // Start scanning for role selection (no listening - user taps/uses switch)
             setTimeout(() => {
                 startScanning('roleSelection');
+                enhanceButtonsWithImages('roleSelection');
             }, 2000);
         }
 

@@ -3598,6 +3598,11 @@
                 openSpellingModal();
                 return;
             }
+            if (category.special_function === 'games') {
+                console.log('Navigating to Games');
+                window.location.href = '/static/games.html';
+                return;
+            }
             
             // Update active state
             document.querySelectorAll('.category-button').forEach(btn => {

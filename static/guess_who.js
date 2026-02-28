@@ -37,6 +37,7 @@ let gridColumns = 6;
 
 // Image matching state
 let enablePictograms = true; // Can be toggled via settings
+let useTapInterface = false; // Whether user is using tap interface
 
 // Audio announce queue (minimal version of gridpage)
 let announcementQueue = [];
@@ -96,6 +97,12 @@ async function loadGuessWhoSettings() {
         }
 
         ScanningOff = settings.ScanningOff === true;
+        useTapInterface = settings.useTapInterface === true;
+        
+        // Force pictograms on for tap interface users
+        if (useTapInterface) {
+            enablePictograms = true;
+        }
     } catch (error) {
         console.error('Error loading Guess Who settings:', error);
     }
@@ -1369,7 +1376,7 @@ function endGame() {
         {
             text: 'Home',
             summary: 'Home',
-            onClick: () => window.location.href = '/gridpage.html'
+            onClick: () => window.location.href = useTapInterface ? '/static/tap_interface.html' : '/gridpage.html'
         }
     ];
     
@@ -1387,7 +1394,7 @@ function createHomeButton() {
         text: 'Home',
         summary: 'Home',
         onClick: () => {
-            window.location.href = '/gridpage.html';
+            window.location.href = useTapInterface ? '/static/tap_interface.html' : '/gridpage.html';
         }
     };
 }
