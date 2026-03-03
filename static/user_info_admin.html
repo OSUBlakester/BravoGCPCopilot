@@ -909,8 +909,10 @@
                     
                     // Set up authenticated fetch function
                     window.authenticatedFetch = function(url, options = {}) {
+                        const isFormData = options.body instanceof FormData;
                         const headers = {
-                            'Content-Type': 'application/json',
+                            // Don't set Content-Type for FormData — browser sets multipart boundary automatically
+                            ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
                             ...options.headers
                         };
                         
