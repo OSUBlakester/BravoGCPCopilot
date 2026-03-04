@@ -403,7 +403,11 @@ async function updatePageTitleWithProfile() {
 }
 
 // --- Core Fetch Wrapper (Same as gridpage.js) ---
-async function authenticatedFetch(url, options = {}) {
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
+    // Re-read token from sessionStorage (may have been refreshed by token-refresh.js)
+    firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
+    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+
     if (!firebaseIdToken || !currentAacUserId) {
         throw new Error('User not authenticated');
     }
@@ -421,10 +425,22 @@ async function authenticatedFetch(url, options = {}) {
     options.headers = headers;
 
     const response = await fetch(url, options);
-    if (response.status === 401 || response.status === 403) {
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Auth failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed, retrying...');
+                return authenticatedFetch(url, options, true);
+            }
+        }
         console.error('Authentication failed. Redirecting to auth page.');
         window.location.href = '/static/auth.html';
         throw new Error('Authentication failed');
+    }
+    if (response.status === 401 || response.status === 403) {
+        window.location.href = '/static/auth.html';
+        throw new Error('Authentication failed after token refresh');
     }
     return response;
 }

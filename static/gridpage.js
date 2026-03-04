@@ -513,8 +513,8 @@ function base64ToArrayBuffer(base64) {
 
 // --- Core Fetch Wrapper (NEW) ---
 // This function will wrap all your fetch calls to automatically add auth headers
-async function authenticatedFetch(url, options = {}) {
-    // Always refresh tokens from session storage (in case they were updated)
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
+    // Always refresh tokens from session storage (in case they were updated by token-refresh.js)
     firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
     currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
     
@@ -548,10 +548,24 @@ async function authenticatedFetch(url, options = {}) {
     // Make the request
     const response = await fetch(url, options);
     
-    // Handle authentication failures
-    if (response.status === 401 || response.status === 403) {
+    // Handle authentication failures — try silent token refresh before giving up
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Authentication failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        
+        // Try to refresh the token silently via Firebase
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed successfully, retrying request...');
+                // Retry the request with the fresh token (clone options to avoid header mutation issues)
+                const retryOptions = { ...options, headers: { ...options.headers } };
+                return authenticatedFetch(url, retryOptions, true);
+            }
+        }
+        
+        // Token refresh failed — fall back to redirect
         const errorText = await response.text();
-        console.warn(`Authentication failed (${response.status}) for ${url}:`, errorText);
+        console.warn(`Token refresh failed for ${url}:`, errorText);
         localStorage.setItem('debug_auth_expired', `Auth failed at ${new Date().toISOString()}: ${response.status} - ${errorText}`);
         
         // For chat history, fail gracefully without redirecting
@@ -565,6 +579,22 @@ async function authenticatedFetch(url, options = {}) {
         window.location.href = 'auth.html';
         throw new Error("Session expired or invalid.");
     }
+    
+    // Handle auth failure on retry (refresh already attempted)
+    if (response.status === 401 || response.status === 403) {
+        const errorText = await response.text();
+        localStorage.setItem('debug_auth_expired', `Auth failed after refresh at ${new Date().toISOString()}: ${response.status} - ${errorText}`);
+        
+        if (url.includes('/record_chat_history')) {
+            throw new Error(`Authentication expired while recording chat history: ${response.status} - ${errorText}`);
+        }
+        
+        sessionStorage.clear();
+        alert('Your session has expired. Please log in again.');
+        window.location.href = 'auth.html';
+        throw new Error("Session expired or invalid.");
+    }
+    
     return response;
 }
 

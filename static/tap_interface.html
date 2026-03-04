@@ -5,7 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tap Interface - Bravo AAC</title>
     
-    <!-- Authentication handled via session storage (set by auth.html) -->
+    <!-- Firebase SDK for silent token refresh -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script src="/static/token-refresh.js"></script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="/static/mood-selection.css">
@@ -2709,7 +2713,11 @@
         }
 
         // Authenticated fetch function (same pattern as gridpage)
-        async function authenticatedFetch(url, options = {}) {
+        async function authenticatedFetch(url, options = {}, _isRetry = false) {
+            // Re-read token from sessionStorage (may have been refreshed by token-refresh.js)
+            firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
+            currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
+            
             if (!firebaseIdToken || !currentAacUserId) {
                 console.error("Authentication: Firebase ID Token or AAC User ID not found. Redirecting to login.");
                 sessionStorage.clear();
@@ -2729,10 +2737,28 @@
             
             options.headers = headers;
 
-            // Add a check for 401/403 responses to trigger re-authentication
+            // Add a check for 401/403 responses — try silent token refresh before giving up
             const response = await fetch(url, options);
+            if ((response.status === 401 || response.status === 403) && !_isRetry) {
+                console.warn(`Authentication failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+                
+                if (typeof window.refreshFirebaseToken === 'function') {
+                    const newToken = await window.refreshFirebaseToken();
+                    if (newToken) {
+                        console.log('[AUTH] Token refreshed successfully, retrying request...');
+                        const retryOptions = { ...options, headers: { ...options.headers } };
+                        return authenticatedFetch(url, retryOptions, true);
+                    }
+                }
+                
+                // Token refresh failed
+                console.warn(`Token refresh failed for ${url}. Redirecting to login.`);
+                sessionStorage.clear();
+                window.location.href = 'auth.html';
+                throw new Error("Session expired or invalid.");
+            }
             if (response.status === 401 || response.status === 403) {
-                console.warn(`Authentication failed (${response.status}) for ${url}. Redirecting to login.`);
+                console.warn(`Authentication failed after token refresh for ${url}. Redirecting to login.`);
                 sessionStorage.clear();
                 window.location.href = 'auth.html';
                 throw new Error("Session expired or invalid.");
