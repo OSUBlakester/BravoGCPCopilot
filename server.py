@@ -405,12 +405,12 @@ async def verify_firebase_token_only(
         decoded_token = await asyncio.to_thread(auth.verify_id_token, token.credentials)
         # Return Firebase UID and email from the token
         return {"account_id": decoded_token['uid'], "email": decoded_token.get('email')}
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received during token-only verification.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received during token-only verification.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received during token-only verification.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except Exception as e:
         logging.error(f"Error during token-only verification: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Authentication error during token verification: {e}")
@@ -544,12 +544,12 @@ async def get_current_account_and_user_ids(
             "email": account_data.get("email", "")  # Add email for admin verification
         }
 
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except HTTPException as e:
         # Re-raise explicit HTTPExceptions
         raise e
@@ -621,12 +621,12 @@ async def get_target_account_id(
             "is_therapist": is_therapist
         }
 
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -9067,12 +9067,12 @@ async def verify_firebase_token_only(
         decoded_token = await asyncio.to_thread(auth.verify_id_token, token.credentials)
         # Return Firebase UID and email from the token
         return {"account_id": decoded_token['uid'], "email": decoded_token.get('email')}
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received during token-only verification.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received during token-only verification.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received during token-only verification.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except Exception as e:
         logging.error(f"Error during token-only verification: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Authentication error during token verification: {e}")

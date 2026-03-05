@@ -19,13 +19,17 @@
 
     const TOKEN_KEY = 'firebaseIdToken';
     const REFRESH_INTERVAL_MS = 45 * 60 * 1000; // 45 minutes
+    const AUTH_STATE_TIMEOUT_MS = 10 * 1000; // 10 second timeout for auth state resolution
     let refreshTimer = null;
     let isInitialized = false;
     let initPromise = null;
+    let authStateResolved = false; // Track whether onAuthStateChanged has fired
 
     /**
      * Initialize Firebase and set up token auto-refresh.
      * Safe to call multiple times — will only initialize once.
+     * IMPORTANT: This now waits for Firebase to restore auth state from IndexedDB
+     * before resolving, so that currentUser is available for token refresh.
      */
     async function initTokenRefresh() {
         if (initPromise) return initPromise;
@@ -48,26 +52,48 @@
                 console.log('[TokenRefresh] Firebase initialized for project:', config.projectId);
             }
 
-            // Listen for auth state changes
-            firebase.auth().onAuthStateChanged(async (user) => {
-                if (user) {
-                    try {
-                        const token = await user.getIdToken();
-                        sessionStorage.setItem(TOKEN_KEY, token);
-                        console.log('[TokenRefresh] Token updated via onAuthStateChanged');
-                    } catch (e) {
-                        console.warn('[TokenRefresh] Failed to get token in onAuthStateChanged:', e);
+            // Wait for Firebase to restore auth state from IndexedDB.
+            // This is critical: firebase.auth().currentUser is null until 
+            // onAuthStateChanged fires for the first time. Without this wait,
+            // any immediate call to refreshFirebaseToken() would fail because
+            // currentUser hasn't been populated yet.
+            await new Promise((resolve) => {
+                const timeout = setTimeout(() => {
+                    console.warn('[TokenRefresh] Auth state resolution timed out after', AUTH_STATE_TIMEOUT_MS / 1000, 'seconds');
+                    authStateResolved = true;
+                    resolve();
+                }, AUTH_STATE_TIMEOUT_MS);
+
+                firebase.auth().onAuthStateChanged(async (user) => {
+                    if (!authStateResolved) {
+                        // First callback — auth state is now resolved
+                        clearTimeout(timeout);
+                        authStateResolved = true;
                     }
-                } else {
-                    console.log('[TokenRefresh] No user signed in');
-                }
+
+                    if (user) {
+                        try {
+                            const token = await user.getIdToken();
+                            sessionStorage.setItem(TOKEN_KEY, token);
+                            console.log('[TokenRefresh] Token updated via onAuthStateChanged');
+                        } catch (e) {
+                            console.warn('[TokenRefresh] Failed to get token in onAuthStateChanged:', e);
+                        }
+                    } else {
+                        console.log('[TokenRefresh] No user signed in');
+                    }
+
+                    // Resolve the init promise after the first auth state callback
+                    // (token is already updated in sessionStorage if user exists)
+                    resolve();
+                });
             });
 
             // Set up proactive refresh timer
             _startRefreshTimer();
 
             isInitialized = true;
-            console.log('[TokenRefresh] Initialized with', REFRESH_INTERVAL_MS / 60000, 'min refresh interval');
+            console.log('[TokenRefresh] Initialized — auth state resolved, user:', !!firebase.auth().currentUser);
         } catch (e) {
             console.error('[TokenRefresh] Initialization error:', e);
             // Don't block the app — the existing sessionStorage token may still be valid
@@ -78,15 +104,18 @@
      * Force-refresh the Firebase ID token and update sessionStorage.
      * Returns the new token, or null if refresh failed.
      * Use this on 401 responses before retrying the request.
+     * 
+     * Waits for Firebase auth state to be resolved first (fixes race condition
+     * where currentUser is null because IndexedDB hasn't been read yet).
      */
     async function refreshFirebaseToken() {
         try {
-            // Ensure Firebase is initialized
+            // Ensure Firebase is initialized AND auth state is resolved
             await initTokenRefresh();
 
             const user = firebase.auth().currentUser;
             if (!user) {
-                console.warn('[TokenRefresh] No current user — cannot refresh token');
+                console.warn('[TokenRefresh] No current user after auth state resolved — cannot refresh token');
                 return null;
             }
 
