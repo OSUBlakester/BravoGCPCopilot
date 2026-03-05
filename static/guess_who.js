@@ -1775,7 +1775,7 @@ function tryResumeAudioContext() {
 }
 
 // Fetch helper (similar to gridpage)
-async function authenticatedFetch(url, options = {}) {
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
     const firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
     const currentAacUserId = sessionStorage.getItem('currentAacUserId');
     
@@ -1794,6 +1794,20 @@ async function authenticatedFetch(url, options = {}) {
         ...options,
         headers
     });
+    
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Auth failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed, retrying...');
+                return authenticatedFetch(url, options, true);
+            }
+        }
+        sessionStorage.clear();
+        window.location.href = 'auth.html';
+        throw new Error('Authentication failed');
+    }
     
     if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);

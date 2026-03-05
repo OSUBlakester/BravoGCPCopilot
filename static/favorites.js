@@ -489,7 +489,11 @@ async function handleSummarySelection(summary) {
 
 // Authenticated fetch function
 // Authenticated fetch function (matching gridpage.js pattern)
-async function authenticatedFetch(url, options = {}) {
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
+    // Re-read token from sessionStorage (may have been refreshed by token-refresh.js)
+    firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
+    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+
     if (!firebaseIdToken || !currentAacUserId) {
         throw new Error('No authentication token or user ID');
     }
@@ -507,10 +511,28 @@ async function authenticatedFetch(url, options = {}) {
         headers['X-Admin-Target-Account'] = adminTargetAccountId;
     }
     
-    return fetch(url, {
+    const response = await fetch(url, {
         ...options,
         headers
     });
+
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Auth failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed, retrying...');
+                return authenticatedFetch(url, options, true);
+            }
+        }
+        window.location.href = 'auth.html';
+        throw new Error('Authentication failed');
+    }
+    if (response.status === 401 || response.status === 403) {
+        window.location.href = 'auth.html';
+        throw new Error('Authentication failed after token refresh');
+    }
+    return response;
 }
 
 // Speech and announcement functions
