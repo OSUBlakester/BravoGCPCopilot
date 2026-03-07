@@ -37,8 +37,8 @@
 
         #app-container {
             width: 100%;
-            max-width: 1200px;
-            height: calc(100vh - 40px);
+            max-width: 1800px;
+            height: min(calc((100vh - 40px) * 1.25), 100vh);
             background-color: #ffffff;
             border-radius: 24px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
@@ -78,9 +78,32 @@
             display: flex;
             flex-direction: column;
             height: 100%;
+            width: min(1700px, calc(100% - 12px));
+            margin: 0 auto;
             padding: 10px;
             gap: 10px;
             overflow: hidden;
+            align-items: stretch;
+        }
+
+        .tap-content-wrapper {
+            width: 100%;
+            margin: 0;
+            align-self: stretch;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .tap-content-wrapper > .speech-history-container,
+        .tap-content-wrapper > .main-grid {
+            width: 100%;
+            max-width: 100%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         /* Removed top-bar styles as we removed the top bar */
@@ -102,10 +125,13 @@
 
         /* Speech History Section */
         .speech-history-container {
-            margin: 10px;
+            margin: 0;
             display: flex;
             flex-direction: column;
             gap: 5px;
+            width: 100%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         .speech-history-container label {
@@ -123,14 +149,15 @@
 
         .build-space-textarea {
             flex: 1;
-            padding: 8px;
+            padding: 6px 8px;
             border: 1px solid #ddd;
             border-radius: 6px;
-            font-size: 0.8em;
+            font-size: 0.75em;
             resize: none;
             background-color: #f9f9f9;
             transition: border-color 0.3s ease;
-            min-height: 36px;
+            min-height: 34px;
+            height: 34px;
         }
 
         .build-space-textarea:focus {
@@ -141,15 +168,15 @@
 
         .control-buttons {
             display: flex;
-            gap: 8px;
+            gap: 4px;
             align-items: stretch;
         }
 
         .control-btn {
             flex: 1;
-            min-width: 81px;
+            min-width: 40px;
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 12px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s ease;
             display: flex;
@@ -159,7 +186,7 @@
             padding: 0;
             position: relative;
             overflow: hidden;
-            height: 70px;
+            height: 34px;
             box-shadow: 
                 0 4px 8px -2px rgba(50, 50, 93, 0.15), 
                 0 2px 5px -2px rgba(0, 0, 0, 0.2);
@@ -182,22 +209,12 @@
             align-items: center;
             justify-content: center;
             width: 100%;
-            font-size: 1.8em;
+            font-size: 1em;
             color: white;
         }
 
         .control-btn-label {
-            width: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            backdrop-filter: blur(4px);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 4px;
-            font-size: 8px;
-            font-weight: 600;
-            min-height: 24px;
+            display: none;
         }
 
         .speak-btn {
@@ -206,6 +223,14 @@
 
         .speak-btn:hover {
             background: linear-gradient(145deg, #059669, #047857);
+        }
+
+        .wizard-speak-btn {
+            background: linear-gradient(145deg, #8B5CF6, #7C3AED);
+        }
+
+        .wizard-speak-btn:hover {
+            background: linear-gradient(145deg, #7C3AED, #6D28D9);
         }
 
         .backspace-btn {
@@ -309,36 +334,47 @@
         .main-grid {
             flex: 1;
             display: grid;
-            grid-template-columns: 1.5fr 9fr; /* Increased Categories column by 20% */
-            gap: 10px;
+            grid-template-columns: 1.35fr 8.65fr;
+            gap: 8px;
             min-height: 0;
             height: 100%;
+            width: 100%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         .categories-column {
             display: flex;
             flex-direction: column;
-            gap: 15px; /* Increased gap for better spacing */
+            gap: 8px;
             grid-row: 1 / -1;
             overflow-y: auto;
             overflow-x: hidden;
             max-height: 100%;
-            padding: 15px; /* Increased padding */
-            padding-bottom: 100px; /* Increased buffer for scrolling */
+            padding: 8px;
+            padding-bottom: 60px;
             background-color: #cbd5e1; /* Darker gray background to separate from others */
             border-radius: 12px; /* Rounded corners */
         }
 
+        .categories-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            width: 100%;
+        }
+
         .category-button {
             flex: 0 0 auto; /* Fixed size, don't grow/shrink */
-            height: 110px; /* Match Phrases and Words buttons */
+            height: 78px;
             width: 100%;
             
             background: linear-gradient(145deg, #ffffff, #f0f0f0); /* Light button face */
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 16px; /* Match others */
+            border-radius: 12px; /* Reduced ~25% */
             
-            font-size: 1.1em;
+            font-size: 0.83em;
             font-weight: 600;
             color: #333;
             cursor: pointer;
@@ -358,7 +394,13 @@
             padding: 0; /* Remove padding to allow image to fill */
             position: relative;
             overflow: hidden;
-            margin-bottom: 5px; /* Explicit margin to ensure separation */
+            margin-bottom: 0;
+        }
+
+        .categories-content .category-button {
+            width: 75%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         .category-button:hover {
@@ -388,11 +430,11 @@
             gap: 0px;
             flex: 1;
             overflow-y: auto;
-            padding-right: 5px;
+            align-items: stretch;
+            padding: 0 8px 80px 8px;
             scrollbar-width: thin;
             scrollbar-color: #ccc #f0f0f0;
             height: 100%;
-            padding-bottom: 150px; /* Increased buffer for scrolling */
         }
 
         .llm-static-options {
@@ -419,7 +461,7 @@
         /* Section Headers */
         .section-header {
             background: rgba(255, 255, 255, 0.9);
-            padding: 6px 12px;
+            padding: 4px 9px;
             border-radius: 8px;
             margin: 0;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -427,7 +469,7 @@
 
         .section-header h3 {
             margin: 0;
-            font-size: 0.88em;
+            font-size: 0.66em;
             color: #333;
             font-weight: 600;
             display: inline-flex;
@@ -436,7 +478,7 @@
         }
 
         .section-header i {
-            margin-right: 6.4px;
+            margin-right: 4.8px;
             color: #667eea;
         }
 
@@ -445,10 +487,10 @@
             width: 100%;
             background: linear-gradient(145deg, #ffffff, #f0f0f0);
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 12px;
-            padding: 10px 12px;
+            border-radius: 9px;
+            padding: 8px 9px;
             margin: 0;
-            font-size: 0.9em;
+            font-size: 0.68em;
             font-weight: 600;
             color: #333;
             cursor: pointer;
@@ -481,7 +523,7 @@
         }
 
         .categories-header-btn i {
-            margin-right: 6px;
+            margin-right: 4px;
             color: #667eea;
         }
 
@@ -610,10 +652,15 @@
             flex-direction: column;
             margin: 0;
             padding: 0;
+            width: 100%;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         .phrases-section {
             flex: 0 0 auto; /* Don't grow, just take needed space */
+            margin-top: 8px;
             margin-bottom: 0;
             transition: all 0.3s ease; /* Smooth transition when resizing */
         }
@@ -627,23 +674,25 @@
         .llm-static-options {
             display: grid;
             /* Grid columns and rows will be set dynamically via JS */
-            grid-auto-rows: 110px; /* Fixed height to match Freestyle section */
-            gap: 16px; /* Match gap of Freestyle section */
+            grid-auto-rows: 102px;
+            gap: 12px;
             width: 100%;
             margin: 0;
-            padding: 12px; /* Match padding of Freestyle section */
+            padding: 9px;
+            justify-content: center;
             /* Removed min-height to prevent empty rows */
         }
 
         .freestyle-options {
             display: grid;
             /* Grid columns will be set dynamically via JS */
-            grid-auto-rows: 110px; /* Fixed height */
-            gap: 16px; /* Increased gap to prevent touching */
+            grid-auto-rows: 102px;
+            gap: 12px;
             width: 100%;
             height: 100%;
             margin: 0;
-            padding: 12px; /* Increased padding */
+            padding: 9px;
+            justify-content: center;
             overflow-y: auto;
         }
 
@@ -749,9 +798,14 @@
 
         /* Options Grid Container - Full Height */
         .options-grid-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            flex: 1;
             height: 100%;
             overflow-y: auto;
-            padding: 10px;
+            align-items: stretch;
+            padding: 0 8px 80px 8px;
             background-color: #e5e7eb; /* Darker gray background for better contrast */
             border-radius: 12px; /* Rounded corners for the container */
             scrollbar-width: thin;
@@ -836,8 +890,8 @@
             }
             
             .category-button {
-                min-width: 120px;
-                padding: 10px;
+                min-width: 90px;
+                padding: 8px;
             }
             
             .options-grid-container {
@@ -1337,31 +1391,38 @@
 
     <!-- Main Application -->
     <div class="container" id="mainApp">
+        <div class="tap-content-wrapper">
         <!-- Speech History Section -->
         <div class="speech-history-container">
             <label for="build-space">Speech History:</label>
             <div class="speech-history-row">
                 <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
                 <div class="control-buttons">
-                    <button id="speak-build-btn" class="control-btn speak-btn">
+                    <button id="speak-build-btn" class="control-btn speak-btn" title="Speak exactly as written" aria-label="Speak exactly as written">
                         <div class="control-btn-icon">
                             <i class="fas fa-volume-up"></i>
                         </div>
                         <div class="control-btn-label">Speak</div>
                     </button>
-                    <button id="backspace-build-btn" class="control-btn backspace-btn">
+                    <button id="speak-build-autoclean-btn" class="control-btn wizard-speak-btn" title="Auto Clean and speak" aria-label="Auto Clean and speak">
+                        <div class="control-btn-icon">
+                            <i class="fas fa-hat-wizard"></i>
+                        </div>
+                        <div class="control-btn-label">Auto Clean Speak</div>
+                    </button>
+                    <button id="backspace-build-btn" class="control-btn backspace-btn" title="Backspace" aria-label="Backspace">
                         <div class="control-btn-icon">
                             <i class="fas fa-backspace"></i>
                         </div>
                         <div class="control-btn-label">Backspace</div>
                     </button>
-                    <button id="clear-text-btn" class="control-btn clear-text-btn">
+                    <button id="clear-text-btn" class="control-btn clear-text-btn" title="Clear text" aria-label="Clear text">
                         <div class="control-btn-icon">
                             <i class="fas fa-eraser"></i>
                         </div>
                         <div class="control-btn-label">Clear Text</div>
                     </button>
-                    <button id="reset-btn" class="control-btn reset-btn">
+                    <button id="reset-btn" class="control-btn reset-btn" title="Reset" aria-label="Reset">
                         <div class="control-btn-icon">
                             <i class="fas fa-redo"></i>
                         </div>
@@ -1419,6 +1480,7 @@
                 </div>
             </div>
         </div>
+        </div>
         
         <!-- Status Message -->
         <div id="statusMessage" class="status-message">Ready</div>
@@ -1461,7 +1523,8 @@
 
         // User Settings (loaded from server)
         let SummaryOff = false; // Default summary state
-        let enablePictograms = true; // Always enabled for Tap Interface
+        let enablePictograms = true; // Controlled by disableTapPictograms for Tap Interface
+        let disableTapPictograms = false; // When true, Tap Interface is text-only (no images, no sight-word formatting)
         let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
         let currentSpeechRate = 180; // Default words-per-minute
 
@@ -1490,6 +1553,7 @@
         const freestyleOptions = document.getElementById('freestyleOptions');
         const buildSpace = document.getElementById('build-space');
         const speakBuildBtn = document.getElementById('speak-build-btn');
+        const speakBuildAutoCleanBtn = document.getElementById('speak-build-autoclean-btn');
         const backspaceBuildBtn = document.getElementById('backspace-build-btn');
         const clearTextBtn = document.getElementById('clear-text-btn');
         const resetBtn = document.getElementById('reset-btn');
@@ -1516,6 +1580,14 @@
 
         function getReadyMessage() {
             return `Ready - Say "${getWakeWordDisplay()}" to ask a question or make a comment`;
+        }
+
+        function isTapTextOnlyMode() {
+            return disableTapPictograms === true;
+        }
+
+        function isTapSightWord(text) {
+            return !isTapTextOnlyMode() && typeof window.isSightWord === 'function' && window.isSightWord(text);
         }
 
         // Extract main keyword from a phrase for image matching
@@ -1618,9 +1690,14 @@
             if (!text || text.trim() === '') {
                 return null;
             }
+
+            // Hard gate: no images anywhere in Tap Interface when text-only mode is enabled
+            if (!enablePictograms || isTapTextOnlyMode()) {
+                return null;
+            }
             
             // Check if this text is a sight word - if so, force text-only display (no images)
-            if (window.isSightWord && window.isSightWord(text)) {
+            if (isTapSightWord(text)) {
                 console.log(`🔤 Tap interface sight word detected: "${text}" - using text-only display`);
                 return null;
             }
@@ -2447,12 +2524,10 @@
                 console.log('SummaryOff setting (FORCED FALSE for Tap):', SummaryOff);
                 
                 // Load Pictogram setting
-                // enablePictograms = settings.enablePictograms === true;
-                // console.log('enablePictograms setting:', enablePictograms, 'Raw value:', settings.enablePictograms);
-                
-                // Force enable for Tap Interface
-                console.log('🔧 DEBUG: Forcing enablePictograms to true for Tap Interface');
-                enablePictograms = true;
+                disableTapPictograms = settings.disableTapPictograms === true;
+                enablePictograms = !disableTapPictograms;
+                console.log('disableTapPictograms setting:', disableTapPictograms);
+                console.log('Tap Interface pictogram mode:', enablePictograms ? 'enabled' : 'disabled (text-only mode)');
                 
                 // Load TTS settings
                 if (settings && typeof settings.speech_rate === 'number' && !isNaN(settings.speech_rate)) {
@@ -2533,7 +2608,6 @@
             const freestyleOptions = document.getElementById('freestyleOptions');
             
             if (llmStaticOptions && freestyleOptions) {
-                // Use full gridColumns for both phrases and words sections (same sizing)
                 const phraseColumns = gridColumns;
                 const wordColumns = gridColumns;
                 
@@ -2798,8 +2872,14 @@
             // Build space controls
             speakBuildBtn.addEventListener('click', () => {
                 enableSpeechSynthesis(); // Enable on first user gesture
-                speakBuildSpace();
+                speakBuildSpace(false);
             });
+            if (speakBuildAutoCleanBtn) {
+                speakBuildAutoCleanBtn.addEventListener('click', () => {
+                    enableSpeechSynthesis(); // Enable on first user gesture
+                    speakBuildSpace(true);
+                });
+            }
             backspaceBuildBtn.addEventListener('click', backspaceBuildSpace);
             clearTextBtn.addEventListener('click', clearTextOnly);
             resetBtn.addEventListener('click', clearBuildSpace);
@@ -3241,6 +3321,10 @@
         }
 
         function applyImageToButton(btn, imageUrl, text) {
+            if (isTapTextOnlyMode() || !enablePictograms) {
+                return;
+            }
+
             // Create image + text layout
             btn.innerHTML = '';
             const buttonContent = document.createElement('div');
@@ -3319,7 +3403,7 @@
                 categoryBtn.className = 'category-button';
                 
                 // Check if this is a sight word - if so, apply special styling and skip images
-                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                const isSightWord = isTapSightWord(button.label);
                 
                 // Only apply custom background if specified in config, otherwise let CSS handle it
                 if (button.background_color && button.background_color !== '#FFFFFF') {
@@ -3471,7 +3555,7 @@
                 const modalBtn = document.createElement('button');
                 modalBtn.className = 'categories-modal-button';
                 
-                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                const isSightWord = isTapSightWord(button.label);
                 
                 if (button.background_color && button.background_color !== '#FFFFFF') {
                     modalBtn.style.backgroundColor = button.background_color;
@@ -4278,7 +4362,7 @@
                     }
                     
                     // Check if displayText is a sight word - if so, skip image loading
-                    const isSightWord = window.isSightWord && window.isSightWord(displayText);
+                    const isSightWord = isTapSightWord(displayText);
                     
                     // Add Firestore image support (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
@@ -5174,7 +5258,7 @@
                     const text = option.text || option;
                     
                     // Check if this is a sight word - if so, skip image loading
-                    const isSightWord = window.isSightWord && window.isSightWord(text);
+                    const isSightWord = isTapSightWord(text);
                     
                     // Add Firestore image support for words (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
@@ -5549,44 +5633,45 @@
             // The build space textarea shows the current text
         }
 
-        async function speakBuildSpace() {
+        async function cleanupTextForSpeech(text) {
+            try {
+                const response = await authenticatedFetch('/api/freestyle/cleanup-text', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text_to_cleanup: text
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const cleanedText = data.cleaned_text || text;
+                    console.log("Original text:", text);
+                    console.log("Cleaned text:", cleanedText);
+                    return cleanedText;
+                }
+
+                console.error('Failed to cleanup text:', response.statusText);
+                return text;
+            } catch (error) {
+                console.error('Error during text cleanup:', error);
+                return text;
+            }
+        }
+
+        async function speakBuildSpace(forceAutoClean = false) {
             let text = buildSpace.value.trim();
             if (text) {
-                console.log('Auto Clean enabled?', autoClean);
-                
-                // If Auto Clean is enabled, clean up the text first
-                if (autoClean) {
-                    console.log('Auto Clean enabled - cleaning text before speaking');
-                    try {
-                        const response = await authenticatedFetch('/api/freestyle/cleanup-text', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                text_to_cleanup: text
-                            })
-                        });
-                        
-                        if (response.ok) {
-                            const data = await response.json();
-                            const cleanedText = data.cleaned_text || text;
-                            console.log("Original text:", text);
-                            console.log("Cleaned text:", cleanedText);
-                            
-                            // Update the build space with cleaned text
-                            text = cleanedText;
-                            buildSpace.value = cleanedText;
-                        } else {
-                            console.error('Failed to cleanup text:', response.statusText);
-                        }
-                    } catch (error) {
-                        console.error('Error during text cleanup:', error);
-                        // Continue with original text if cleanup fails
-                    }
+                console.log('Speak mode:', forceAutoClean ? 'AUTO_CLEAN_FORCED' : 'RAW');
+
+                if (forceAutoClean) {
+                    text = await cleanupTextForSpeech(text);
+                    buildSpace.value = text;
                 }
                 
-                // Use backend TTS with the (possibly cleaned) text
+                // Use backend TTS with raw or cleaned text based on selected speak button
                 await announce(text, "system", true);
             }
         }

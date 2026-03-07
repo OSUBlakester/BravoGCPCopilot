@@ -1592,6 +1592,7 @@ DEFAULT_SETTINGS = {
     "displaySplashTime": 3000,  # Default splash screen duration (3 seconds)
     "enableMoodSelection": True,  # Default mood selection enabled
     "enablePictograms": False,  # Default AAC pictograms disabled
+    "disableTapPictograms": False,  # Default Tap Interface pictograms enabled
     "enableSightWords": True,  # Default sight word logic enabled
     "sightWordGradeLevel": "pre_k",  # Default sight word grade level
     "useTapInterface": False,  # Default to gridpage interface
@@ -6412,6 +6413,7 @@ class SettingsModel(BaseModel):
     displaySplashTime: Optional[int] = Field(None, description="Duration in milliseconds to display splash screen.", ge=500, le=10000)
     enableMoodSelection: Optional[bool] = Field(None, description="Enable/disable mood selection at session start.")
     enablePictograms: Optional[bool] = Field(None, description="Enable/disable AAC pictogram display on buttons.")
+    disableTapPictograms: Optional[bool] = Field(None, description="When true, Tap Interface shows text-only buttons (no pictograms/images and no sight word formatting).")
     enableSightWords: Optional[bool] = Field(None, description="Enable/disable sight word logic for text-only display")
     sightWordGradeLevel: Optional[str] = Field(None, description="Dolch sight word grade level for text-only buttons (pre_k, kindergarten, first_grade, second_grade, third_grade, third_grade_with_nouns)")
     useTapInterface: Optional[bool] = Field(None, description="Use tap interface as main interface instead of gridpage")
@@ -9499,6 +9501,11 @@ async def get_freestyle_word_options(
                 contextual_info += f" | Coming from LLM-generated page '{request.source_page}' with context: {request.context}"
             else:
                 contextual_info += f" | Coming from page '{request.source_page}' with topic: {request.context}"
+        elif request.source_page and request.source_page.lower() not in ('home', 'unknownpage', ''):
+            # Static page with no LLM context — use page name as topic hint
+            contextual_info += f" | Coming from page '{request.source_page}'"
+            if request.originating_button_text:
+                contextual_info += f" (via button: {request.originating_button_text})"
         elif request.originating_button_text:
             contextual_info += f" | Coming from button: {request.originating_button_text}"
         
@@ -9541,31 +9548,80 @@ CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 
 Context (use only for word relevance): {contextual_info}"""
         else:
-            # If no build space text, provide core AAC words for starting communication
+            # If no build space text, provide words for starting communication
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
-            
-            # Focus on core AAC vocabulary regardless of source context
-            base_aac_words = [
-                "I", "want", "need", "like", "go", "see", "eat", "drink", "play", "help",
-                "more", "stop", "done", "good", "bad", "yes", "no", "please", "thank", "you",
-                "me", "my", "we", "they", "this", "that", "here", "there", "now", "later"
-            ]
-            
-            # Create context-aware but AAC-focused prompt
-            if request.context and request.is_llm_generated:
-                # User came from an LLM-generated page - provide AAC words that could relate to that topic
-                context_hint = f"The user came from a page about '{request.context}', so include some words that might relate to this topic alongside core AAC words."
-            else:
-                context_hint = "Focus on core AAC communication words that can start any conversation."
             
             # Add mood context
             mood_instruction = ""
             if request.current_mood and request.current_mood != 'none':
                 mood_instruction = f"\n\nIMPORTANT: The user is currently feeling {request.current_mood}. Include words that would be relevant for someone in this emotional state. For example, if angry: frustrated, upset, mad, annoyed; if happy: excited, joyful, pleased, great; if sad: down, hurt, disappointed, blue."
             
-            prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
+            # Determine if we have meaningful source page context
+            has_llm_context = request.context and request.is_llm_generated
+            has_source_page = request.source_page and request.source_page.lower() not in ('home', 'unknownpage', '')
+            has_originating_button = request.originating_button_text and request.originating_button_text.strip()
+            
+            if has_llm_context:
+                # USER CAME FROM AN LLM-GENERATED PAGE — generate topic-relevant words
+                # The context contains the LLM query that built the source page (e.g., "Do Something", "Tell me about animals")
+                # This should work like category-words: most words relate to the topic
+                topic_description = request.context
+                button_hint = f" (the user pressed the '{request.originating_button_text}' button to get there)" if has_originating_button else ""
+                source_hint = f" The page was called '{request.source_page}'." if has_source_page else ""
+                
+                logging.info(f"Freestyle context-aware generation: LLM context='{topic_description}', source_page='{request.source_page}', originating_button='{request.originating_button_text}'")
+                
+                prompt = f"""The user is on a freestyle communication page. They navigated here from a page that was generated by the query: "{topic_description}"{button_hint}.{source_hint}
 
-{context_hint}{mood_instruction}
+Generate exactly {freestyle_options} {variation_text} words or short phrases that are relevant to this topic and useful for AAC communication about it.{mood_instruction}
+
+Requirements:
+- Generate words that relate to the topic "{topic_description}" so the user can communicate about it
+- Include a MIX of: topic-specific nouns, relevant verbs/actions, descriptive words, and a few essential AAC words (I, want, like, need)
+- About 60-70% of words should be directly related to the topic
+- About 30-40% should be core AAC words useful for building sentences about the topic (pronouns, common verbs, question words)
+- Words should be useful for STARTING phrases about this topic
+- Keep words simple and appropriate for AAC communication
+- For each word, provide a related keyword for image searching
+- Format: "word|keyword" (e.g., "play|games", "outside|outdoors", "fun|happy")
+- The keyword should help find relevant images that represent the word
+- If the word itself is the best keyword, use the same word (e.g., "car|car")
+- Make each word distinct and commonly used
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line
+
+User context: {contextual_info}"""
+            
+            elif has_source_page:
+                # USER CAME FROM A STATIC (non-LLM) PAGE — use page name as topic hint
+                page_name = request.source_page.replace('_', ' ').replace('-', ' ')
+                button_hint = f" (via the '{request.originating_button_text}' button)" if has_originating_button else ""
+                
+                logging.info(f"Freestyle page-context generation: source_page='{request.source_page}', originating_button='{request.originating_button_text}'")
+                
+                prompt = f"""The user is on a freestyle communication page. They navigated here from a page called "{page_name}"{button_hint}.
+
+Generate exactly {freestyle_options} {variation_text} words that help the user communicate about topics related to "{page_name}".{mood_instruction}
+
+Requirements:
+- Generate words that relate to the "{page_name}" topic so the user can communicate about it
+- Include a MIX of: topic-relevant words and core AAC sentence starters (I, want, like, need, go)
+- About 50% topic-relevant words, 50% core AAC words
+- Words should be useful for STARTING phrases related to this page topic
+- Keep words simple and appropriate for AAC communication
+- For each word, provide a related keyword for image searching
+- Format: "word|keyword" (e.g., "I|person", "want|desire", "go|arrow", "happy|smile")
+- The keyword should help find relevant images that represent the word
+- If the word itself is the best keyword, use the same word (e.g., "car|car")
+- Make each word distinct and commonly used in AAC
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line
+
+User context: {contextual_info}"""
+            
+            else:
+                # NO CONTEXT — generic AAC words (home page or unknown source)
+                prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
+
+Focus on core AAC communication words that can start any conversation.{mood_instruction}
 
 Requirements:
 - ONLY provide single words (no phrases or sentences)
@@ -9578,6 +9634,7 @@ Requirements:
 - Each option should be useful for starting or building communication
 - Include both basic needs words and descriptive words
 - Make each word distinct and commonly used in AAC
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line
 
 Context for word selection: {contextual_info}"""
         
