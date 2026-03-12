@@ -11,44 +11,69 @@
     <link rel="stylesheet" href="/static/freestyle.css">
     <link rel="stylesheet" href="/static/splash-screen.css">
     <style>
-        /* --- Basic Body Style --- */
+        /* --- Basic Body Style (matching gridpage.html) --- */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
-            padding: 0;
-            background-color: #f4f7f6;
+            padding: 20px;
+            background: #e2e8f0;
+            min-height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* --- App Container (matching gridpage.html) --- */
+        #app-container {
+            width: 100%;
+            max-width: 1200px;
+            background-color: #f8fafc;
+            border-radius: 40px;
+            box-shadow:
+                0 25px 50px -12px rgba(0, 0, 0, 0.25),
+                0 0 0 1px rgba(0,0,0,0.05);
+            overflow: hidden;
+            min-height: calc(100vh - 40px);
+            position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         /* --- Admin Toolbar Styles --- */
         .admin-toolbar {
-            background-color: #ffffff;
-            padding: 0.25rem 0.5rem;
+            background-color: transparent;
+            padding: 0.5rem 1rem;
             display: flex;
             justify-content: flex-end;
             align-items: center;
-            gap: 0.4rem;
+            gap: 0.5rem;
             flex-wrap: wrap;
         }
 
-        /* --- Page Banner Styles --- */
+        /* --- Page Banner Styles (matching gridpage.html) --- */
         .page-banner {
             background-color: #002244;
             color: #FB4F14;
-            padding: 0.75em 1.5em;
+            padding: 0.5rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 50;
         }
         .page-banner h1 {
             margin: 0;
-            font-size: 1.75em;
-            font-weight: 500;
+            font-size: 1.25rem;
+            font-weight: 600;
             text-align: left;
+            color: #FB4F14;
         }
     </style>
 </head>
 <body>
+    <div id="app-container">
     <div class="page-banner">
         <h1 id="dynamic-page-title">Free Style Communication</h1>
         <div class="admin-toolbar">
@@ -126,10 +151,12 @@
             </div>
             
             <div class="spelling-content">
-                <!-- Current Word Display -->
+                <!-- Current Word Display + Action Buttons (horizontal layout) -->
                 <div class="current-word-section">
-                    <label for="current-word">Current Word:</label>
-                    <input type="text" id="current-word" class="current-word-input" readonly>
+                    <div class="current-word-left">
+                        <label for="current-word">Current Word:</label>
+                        <input type="text" id="current-word" class="current-word-input" readonly>
+                    </div>
                     <div class="word-controls">
                         <button id="add-word-btn" class="word-control-btn add-btn">
                             <i class="fas fa-plus"></i> Add Word
@@ -217,5 +244,6 @@
     <script src="/static/splash-screen.js"></script>
     <script src="/static/sight-word-service.js"></script>
     <script src="/static/freestyle.js"></script>
+    </div> <!-- end app-container -->
 </body>
 </html>

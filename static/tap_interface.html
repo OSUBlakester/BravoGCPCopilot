@@ -219,6 +219,7 @@
 
         .speak-btn {
             background: linear-gradient(145deg, #10B981, #059669);
+            border: 2px solid rgba(255, 255, 255, 0.8);
         }
 
         .speak-btn:hover {
@@ -227,10 +228,49 @@
 
         .wizard-speak-btn {
             background: linear-gradient(145deg, #8B5CF6, #7C3AED);
+            border: 2px solid rgba(255, 255, 255, 0.8);
         }
 
         .wizard-speak-btn:hover {
             background: linear-gradient(145deg, #7C3AED, #6D28D9);
+        }
+
+        .preview-btn {
+            background: linear-gradient(145deg, #0ea5e9, #0284c7);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .preview-btn:hover {
+            background: linear-gradient(145deg, #0284c7, #0369a1);
+        }
+
+        .preview-btn.preview-toggle-active {
+            background: linear-gradient(145deg, #f59e0b, #d97706);
+            border-color: rgba(255, 255, 255, 0.95);
+            box-shadow:
+                0 0 0 2px rgba(245, 158, 11, 0.35),
+                0 6px 14px -2px rgba(217, 119, 6, 0.45),
+                inset 0 1px 0 rgba(255, 255, 255, 0.95);
+        }
+
+        /* Make first two action buttons 50% wider than standard control buttons */
+        #speak-build-btn,
+        #speak-build-autoclean-btn {
+            flex: 1.5 1 0;
+            min-width: 60px;
+        }
+
+        .option-button.preview-selected {
+            transform: translateY(-2px);
+            border: 3px solid #0ea5e9;
+            box-shadow:
+                0 0 0 3px rgba(14, 165, 233, 0.25),
+                0 12px 20px -5px rgba(14, 165, 233, 0.35),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        .option-button.preview-selected:hover {
+            background: linear-gradient(145deg, #f0f9ff, #e0f2fe);
         }
 
         .backspace-btn {
@@ -1406,7 +1446,7 @@
                     </button>
                     <button id="speak-build-autoclean-btn" class="control-btn wizard-speak-btn" title="Auto Clean and speak" aria-label="Auto Clean and speak">
                         <div class="control-btn-icon">
-                            <i class="fas fa-hat-wizard"></i>
+                            <i class="fas fa-wand-magic-sparkles"></i>
                         </div>
                         <div class="control-btn-label">Auto Clean Speak</div>
                     </button>
@@ -1427,6 +1467,12 @@
                             <i class="fas fa-redo"></i>
                         </div>
                         <div class="control-btn-label">Reset</div>
+                    </button>
+                    <button id="preview-toggle-btn" class="control-btn preview-btn" title="Preview options before selecting" aria-label="Preview options before selecting" aria-pressed="false">
+                        <div class="control-btn-icon">
+                            <i class="fas fa-ear-listen"></i>
+                        </div>
+                        <div class="control-btn-label">Preview</div>
                     </button>
                 </div>
             </div>
@@ -1489,6 +1535,9 @@
 
     <!-- Sight Word Service -->
     <script src="/static/sight-word-service.js"></script>
+    
+    <!-- Tap Interface Follow-up Conversation Logic -->
+    <script src="/static/tap-follow-up-logic.js"></script>
 
     <script>
         // Authentication variables (same pattern as gridpage)
@@ -1510,6 +1559,13 @@
         let currentPhraseOptions = []; // Track current phrase options for exclusion
         let currentWordOptions = []; // Track current word options for exclusion
 
+        // Follow-up conversation tracking (like gridpage)
+        let tapFollowUpConversation = {
+            originalQuestion: null,
+            originalCategory: null,
+            selectedPhrases: []
+        };
+
         // Wake Word Variables (from gridpage)
         let wakeWordInterjection = "hey";
         let wakeWordName = "friend";  // Default should match gridpage
@@ -1527,6 +1583,12 @@
         let disableTapPictograms = false; // When true, Tap Interface is text-only (no images, no sight-word formatting)
         let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
         let currentSpeechRate = 180; // Default words-per-minute
+        let applicationVolume = 8; // Default application volume (0-10 scale)
+        const SYSTEM_PREVIEW_VOICE_NAME = 'en-US-Neural2-A';
+        const PREVIEW_OPTION_SELECTED_CLASS = 'preview-selected';
+        let previewModeEnabled = false;
+        let previewPendingButton = null;
+        let previewPendingKey = null;
 
         // Note: Using Firestore image lookup instead of emoji pictograms
 
@@ -1554,6 +1616,7 @@
         const buildSpace = document.getElementById('build-space');
         const speakBuildBtn = document.getElementById('speak-build-btn');
         const speakBuildAutoCleanBtn = document.getElementById('speak-build-autoclean-btn');
+        const previewToggleBtn = document.getElementById('preview-toggle-btn');
         const backspaceBuildBtn = document.getElementById('backspace-build-btn');
         const clearTextBtn = document.getElementById('clear-text-btn');
         const resetBtn = document.getElementById('reset-btn');
@@ -1570,6 +1633,63 @@
             if (statusMessageElement) {
                 statusMessageElement.textContent = message;
             }
+        }
+
+        function clearPreviewSelection() {
+            if (previewPendingButton && previewPendingButton.isConnected) {
+                previewPendingButton.classList.remove(PREVIEW_OPTION_SELECTED_CLASS);
+            }
+            previewPendingButton = null;
+            previewPendingKey = null;
+        }
+
+        function syncPreviewToggleVisualState() {
+            if (!previewToggleBtn) return;
+            previewToggleBtn.classList.toggle('preview-toggle-active', previewModeEnabled);
+            previewToggleBtn.setAttribute('aria-pressed', previewModeEnabled ? 'true' : 'false');
+            previewToggleBtn.title = previewModeEnabled
+                ? 'Preview is ON - first tap previews, second tap selects'
+                : 'Preview is OFF';
+        }
+
+        function setPreviewMode(enabled) {
+            previewModeEnabled = !!enabled;
+            if (!previewModeEnabled) {
+                clearPreviewSelection();
+            }
+            syncPreviewToggleVisualState();
+        }
+
+        async function handlePreviewInteraction(buttonElement, speechText, optionType = 'option') {
+            if (!previewModeEnabled) {
+                return { proceed: true, alreadyAnnounced: false };
+            }
+
+            const previewKey = `${optionType}:${speechText}`;
+            const isConfirmingSameButton = previewPendingButton === buttonElement && previewPendingKey === previewKey;
+
+            if (isConfirmingSameButton) {
+                clearPreviewSelection();
+                await announce(speechText, 'system', false, {
+                    voiceNameOverride: currentTtsVoiceName || SYSTEM_PREVIEW_VOICE_NAME,
+                    speechRateOverride: currentSpeechRate,
+                    volumeMultiplier: 1.0
+                });
+                return { proceed: true, alreadyAnnounced: true };
+            }
+
+            clearPreviewSelection();
+            previewPendingButton = buttonElement;
+            previewPendingKey = previewKey;
+            buttonElement.classList.add(PREVIEW_OPTION_SELECTED_CLASS);
+
+            await announce(speechText, 'system', false, {
+                voiceNameOverride: SYSTEM_PREVIEW_VOICE_NAME,
+                speechRateOverride: currentSpeechRate,
+                volumeMultiplier: 0.5
+            });
+
+            return { proceed: false, alreadyAnnounced: true };
         }
 
         function getWakeWordDisplay() {
@@ -2539,6 +2659,11 @@
                     currentTtsVoiceName = settings.selected_tts_voice_name;
                     console.log(`TTS Voice Name loaded: "${currentTtsVoiceName}"`);
                 }
+
+                if (settings && typeof settings.applicationVolume === 'number' && !isNaN(settings.applicationVolume)) {
+                    applicationVolume = Math.max(0, Math.min(10, Number(settings.applicationVolume)));
+                    console.log(`Application volume loaded: ${applicationVolume}/10`);
+                }
                 
                 // Load Wake Word parts
                 if (settings && typeof settings.wakeWordInterjection === 'string' && settings.wakeWordInterjection.trim()) {
@@ -2634,13 +2759,9 @@
         
         // Regenerate phrase options using stored context with exclusion
         async function regeneratePhraseOptions() {
-            if (!currentPhrasePrompt) {
-                console.warn('No current phrase prompt stored for regeneration');
-                return;
-            }
-            
             try {
-                console.log('🔄 Regenerating phrase options with prompt:', currentPhrasePrompt);
+                console.log('🔄 Regenerating phrase options');
+                console.log('🔄 Conversation context:', tapFollowUpConversation);
                 console.log('🔄 Excluding current options:', currentPhraseOptions);
                 
                 // Show loading state
@@ -2658,9 +2779,53 @@
                     .filter(text => typeof text === 'string' && text.trim() !== '')
                     .join('; ');
                 
-                // Generate new options with exclusion
-                const options = await generateGridpageLLMOptionsWithExclusion(currentPhrasePrompt, LLMOptions, excludedOptionsText);
-                renderCategoryOptions(options);
+                let options = [];
+                
+                // Check if we have conversation context - use follow-up logic
+                if (tapFollowUpConversation.selectedPhrases.length > 0) {
+                    console.log('🔄 Using follow-up prompt with conversation context');
+                    const followUpPrompt = buildFollowUpPromptForTap(excludedOptionsText);
+                    
+                    const requestBody = {
+                        count: LLMOptions,
+                        prompt: followUpPrompt,
+                        response_format: 'json'
+                    };
+                    
+                    const response = await authenticatedFetch('/llm', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const rawOptions = await response.json();
+                    const normalizedOptions = normalizeTapLlmOptions(rawOptions);
+                    
+                    // Apply all filters
+                    const filteredOptions = Array.isArray(normalizedOptions)
+                        ? normalizedOptions.filter(opt => !isPartnerInterrogativePattern(opt?.option))
+                        : normalizedOptions;
+                    const prioritizedOptions = prioritizeContextualOptionsTap(filteredOptions, getTapConversationContextText(), LLMOptions);
+                    const additiveOptions = enforceAdditiveFollowUpOptionsTap(prioritizedOptions, LLMOptions);
+                    options = prioritizePartnerEngagementQuestionsTap(additiveOptions, LLMOptions, 4);
+                    
+                } else if (currentPhrasePrompt) {
+                    // No conversation context - use original prompt with exclusion
+                    console.log('🔄 Using original prompt with exclusion:', currentPhrasePrompt);
+                    options = await generateGridpageLLMOptionsWithExclusion(currentPhrasePrompt, LLMOptions, excludedOptionsText);
+                } else {
+                    console.error('No prompt available for regeneration');
+                    updateStatusMessage('Error: No context for regeneration');
+                    return;
+                }
+                
+                currentPhraseOptions = options;
+                renderCategoryOptions(options, true); // Defer images
+                setTimeout(() => loadImagesForPhrases(options), 50);
                 
             } catch (error) {
                 console.error('Error regenerating phrase options:', error);
@@ -2872,17 +3037,34 @@
             // Build space controls
             speakBuildBtn.addEventListener('click', () => {
                 enableSpeechSynthesis(); // Enable on first user gesture
+                clearPreviewSelection();
                 speakBuildSpace(false);
             });
             if (speakBuildAutoCleanBtn) {
                 speakBuildAutoCleanBtn.addEventListener('click', () => {
                     enableSpeechSynthesis(); // Enable on first user gesture
+                    clearPreviewSelection();
                     speakBuildSpace(true);
                 });
             }
-            backspaceBuildBtn.addEventListener('click', backspaceBuildSpace);
-            clearTextBtn.addEventListener('click', clearTextOnly);
-            resetBtn.addEventListener('click', clearBuildSpace);
+            if (previewToggleBtn) {
+                previewToggleBtn.addEventListener('click', () => {
+                    enableSpeechSynthesis();
+                    setPreviewMode(!previewModeEnabled);
+                });
+            }
+            backspaceBuildBtn.addEventListener('click', () => {
+                clearPreviewSelection();
+                backspaceBuildSpace();
+            });
+            clearTextBtn.addEventListener('click', () => {
+                clearPreviewSelection();
+                clearTextOnly();
+            });
+            resetBtn.addEventListener('click', () => {
+                clearPreviewSelection();
+                clearBuildSpace();
+            });
             
             // Modal controls
             modalClose.addEventListener('click', closeModal);
@@ -2893,6 +3075,8 @@
             // Add click listeners to enable speech synthesis on any user interaction
             document.addEventListener('click', enableSpeechSynthesis, { once: true });
             document.addEventListener('touchstart', enableSpeechSynthesis, { once: true });
+
+            syncPreviewToggleVisualState();
         }
 
         // Generate word options with exclusion (like freestyle page)
@@ -3027,6 +3211,15 @@
 
         async function loadInitialPhrases() {
             console.log('⏱️ loadInitialPhrases: Starting at:', Date.now());
+            
+            // Reset conversation context when loading initial phrases
+            console.log('💬 Resetting conversation context for initial phrases');
+            tapFollowUpConversation = {
+                originalQuestion: null,
+                originalCategory: null,
+                selectedPhrases: []
+            };
+            
             try {
                 // Generate generic conversation starters and common phrases
                 const genericPrompt = "Generate general conversation starters and common communication phrases for everyday social interactions";
@@ -3132,6 +3325,11 @@
             // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
             if (phraseTexts.length > 0) {
                 try {
+                    // Ensure cache is initialized
+                    if (!window.symbolImageCache) {
+                        window.symbolImageCache = new Map();
+                    }
+                    
                     console.log(`📦 Batch searching local library for ${phraseTexts.length} phrases...`);
                     const startTime = performance.now();
                     const batchResults = await batchSearchLocalImageLibrary(phraseTexts);
@@ -3212,6 +3410,11 @@
             // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
             if (wordTexts.length > 0) {
                 try {
+                    // Ensure cache is initialized
+                    if (!window.symbolImageCache) {
+                        window.symbolImageCache = new Map();
+                    }
+                    
                     console.log(`📦 Batch searching local library for ${wordTexts.length} words...`);
                     const startTime = performance.now();
                     const batchResults = await batchSearchLocalImageLibrary(wordTexts);
@@ -3713,6 +3916,14 @@
                 window.location.href = '/static/games.html';
                 return;
             }
+            
+            // Reset conversation context when changing categories
+            console.log('💬 Resetting conversation context for new category');
+            tapFollowUpConversation = {
+                originalQuestion: currentQuestion || null,
+                originalCategory: category.label,
+                selectedPhrases: []
+            };
             
             // Update active state
             document.querySelectorAll('.category-button').forEach(btn => {
@@ -4225,6 +4436,7 @@
             console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0, 'Defer Images:', deferImages);
             console.log('renderCategoryOptions called with:', options);
             console.log('llmStaticOptions element:', llmStaticOptions);
+            clearPreviewSelection();
             
             if (!llmStaticOptions) {
                 console.error('llmStaticOptions element not found!');
@@ -4442,6 +4654,11 @@
                     
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
+                        const previewDecision = await handlePreviewInteraction(btn, speechText, 'phrase');
+                        if (!previewDecision.proceed) {
+                            return;
+                        }
+
                         // Reset status message after first button click following a question
                         if (activeQuestionAsked) {
                             activeQuestionAsked = false;
@@ -4450,7 +4667,104 @@
                         
                         addToSpeech(speechText);
                         // Announce the speech text when phrase is selected
-                        await announce(speechText, "system", true);
+                        if (!previewDecision.alreadyAnnounced) {
+                            await announce(speechText, "system", true);
+                        }
+                        
+                        // ========== FOLLOW-UP CONVERSATION LOGIC ==========
+                        console.log('💬 Tap phrase selected, generating follow-up options:', speechText);
+                        
+                        // Initialize conversation context if needed
+                        if (tapFollowUpConversation.selectedPhrases.length === 0) {
+                            if (currentQuestion) {
+                                tapFollowUpConversation.originalQuestion = currentQuestion;
+                            }
+                            if (currentCategory && currentCategory.label) {
+                                tapFollowUpConversation.originalCategory = currentCategory.label;
+                            }
+                        }
+                        
+                        // Add selected phrase to conversation history
+                        tapFollowUpConversation.selectedPhrases.push(speechText);
+                        console.log('💬 Conversation history:', tapFollowUpConversation);
+                        
+                        // Build exclusion text from current options
+                        const excludedOptionsText = currentPhraseOptions
+                            .map(opt => (typeof opt === 'object' && opt.option) ? opt.option : opt)
+                            .filter(text => typeof text === 'string' && text.trim() !== '')
+                            .join('; ');
+                        
+                        // Generate follow-up prompt with conversation context
+                        const followUpPrompt = buildFollowUpPromptForTap(excludedOptionsText);
+                        
+                        try {
+                            console.log('📤 Sending follow-up request to LLM...');
+                            
+                            // Generate follow-up options using LLM
+                            const requestBody = {
+                                count: LLMOptions,
+                                prompt: followUpPrompt,
+                                response_format: 'json'
+                            };
+                            
+                            const response = await authenticatedFetch('/llm', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(requestBody)
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            
+                            const followUpOptionsRaw = await response.json();
+                            const followUpOptions = normalizeTapLlmOptions(followUpOptionsRaw);
+                            console.log(`📥 Received ${Array.isArray(followUpOptionsRaw) ? followUpOptionsRaw.length : 0} follow-up options from LLM (raw)`);
+                            console.log(`📥 TAP normalized follow-up options: ${followUpOptions.length}`);
+                            
+                            // FILTER 1: Remove partner-interrogative patterns
+                            const filteredForUserPerspective = Array.isArray(followUpOptions)
+                                ? followUpOptions.filter(optionObj => {
+                                    const optionText = typeof optionObj === 'object' ? optionObj.option : optionObj;
+                                    const isInterrogative = isPartnerInterrogativePattern(optionText);
+                                    if (isInterrogative) {
+                                        console.warn('🚫 TAP: Filtered out partner-interrogative pattern:', optionText);
+                                    }
+                                    return !isInterrogative;
+                                })
+                                : followUpOptions;
+                            
+                            console.log(`✅ TAP: After interrogative filter: ${Array.isArray(filteredForUserPerspective) ? filteredForUserPerspective.length : 0} options remain`);
+                            
+                            // FILTER 2: Prioritize based on context
+                            const prioritizedOptions = prioritizeContextualOptionsTap(
+                                filteredForUserPerspective,
+                                getTapConversationContextText(),
+                                LLMOptions
+                            );
+                            
+                            // FILTER 3: Enforce additive (remove repetition)
+                            const additiveOptions = enforceAdditiveFollowUpOptionsTap(prioritizedOptions, LLMOptions);
+                            
+                            // FILTER 4: Ensure partner-engagement questions are prioritized
+                            const finalOptions = prioritizePartnerEngagementQuestionsTap(additiveOptions, LLMOptions, 4);
+                            
+                            console.log(`✅ TAP: Final follow-up options: ${finalOptions.length}`);
+                            
+                            // Render the follow-up phrases
+                            if (finalOptions && finalOptions.length > 0) {
+                                currentPhraseOptions = finalOptions;
+                                renderCategoryOptions(finalOptions, true); // Defer images
+                                setTimeout(() => loadImagesForPhrases(finalOptions), 50);
+                            } else {
+                                console.warn('TAP: No follow-up options after filtering');
+                            }
+                            
+                        } catch (error) {
+                            console.error('TAP: Error generating follow-up options:', error);
+                            // On error, keep current options
+                        }
+                        // ========== END FOLLOW-UP CONVERSATION LOGIC ==========
                     });
                 } else {
                     btn.classList.add('empty-state');
@@ -4464,6 +4778,21 @@
             llmStaticOptions.appendChild(fragment);
         }
 
+        // Check if word list contains UI-technical words that shouldn't be initial suggestions
+        function containsUITechnicalWords(words) {
+            const technicalTerms = ['tap', 'button', 'screen', 'click', 'touch', 'swipe', 'hold', 'scroll', 'drag', 'pinch', 'menu'];
+            if (!words || words.length === 0) return true; // Empty list is bad
+            
+            const techWordCount = words.filter(w => 
+                technicalTerms.includes((w.text || '').toLowerCase())
+            ).length;
+            
+            // If more than 20% of suggestions are technical terms, it's a bad set
+            const technicalRatio = techWordCount / words.length;
+            console.log(`📊 Technical word ratio: ${techWordCount}/${words.length} = ${(technicalRatio * 100).toFixed(1)}%`);
+            return technicalRatio > 0.2;
+        }
+
         async function loadFreestyleOptions() {
             console.log('⏱️ loadFreestyleOptions: Starting at:', Date.now());
             try {
@@ -4474,7 +4803,7 @@
                 
                 // Check cache first
                 const cachedWords = getCachedData(CACHE_KEYS.INITIAL_WORDS);
-                if (cachedWords) {
+                if (cachedWords && !containsUITechnicalWords(cachedWords)) {
                     console.log('⏱️ loadFreestyleOptions: Rendering from cache at:', Date.now());
                     renderFreestyleOptions(cachedWords, true); // true = defer images
                     // Load cached images INSTANTLY (200ms delay for DOM)
@@ -4483,31 +4812,38 @@
                         // Then load missing images in background (3 second delay)
                         setTimeout(() => loadImagesForWords(cachedWords, false), 3000); // false = fetch if needed
                     }, 200);
+                    return; // Use cache and don't refresh
                 }
                 
                 // Generate initial freestyle options (general communication words)
                 console.log('⏱️ loadFreestyleOptions: Fetching fresh words at:', Date.now());
-                const options = await generateFreestyleLLMOptions(null, 29);
+                let options = await generateGeneralStarterWords(29); // Use safer function with fallback
                 console.log('⏱️ loadFreestyleOptions: Got', options ? options.length : 0, 'words at:', Date.now());
+                
+                // If for some reason we still got bad words, use the curated fallback
+                if (containsUITechnicalWords(options)) {
+                    console.log('⚠️ Generated words contain too many technical terms, using curated fallback');
+                    options = getFallbackStarterWords();
+                }
                 
                 // Update cache
                 setCachedData(CACHE_KEYS.INITIAL_WORDS, options);
                 
-                // Only re-render if we didn't use cache (to avoid flicker)
-                if (!cachedWords) {
-                    console.log('⏱️ loadFreestyleOptions: Rendering words at:', Date.now());
-                    renderFreestyleOptions(options, true); // true = defer images
-                    // Load cached images INSTANTLY (200ms delay for DOM)
-                    setTimeout(async () => {
-                        await loadImagesForWords(options, true); // true = cache only, instant
-                        // Then load missing images in background (3 second delay)
-                        setTimeout(() => loadImagesForWords(options, false), 3000); // false = fetch if needed
-                    }, 200);
-                    console.log('⏱️ loadFreestyleOptions: Rendering complete at:', Date.now());
-                }
+                console.log('⏱️ loadFreestyleOptions: Rendering words at:', Date.now());
+                renderFreestyleOptions(options, true); // true = defer images
+                // Load cached images INSTANTLY (200ms delay for DOM)
+                setTimeout(async () => {
+                    await loadImagesForWords(options, true); // true = cache only, instant
+                    // Then load missing images in background (3 second delay)
+                    setTimeout(() => loadImagesForWords(options, false), 3000); // false = fetch if needed
+                }, 200);
+                console.log('⏱️ loadFreestyleOptions: Rendering complete at:', Date.now());
             } catch (error) {
                 console.error('🔴 Error loading freestyle options:', error);
-                renderFreestyleOptions([]);
+                // Fallback to curated words on any error
+                const fallbackWords = getFallbackStarterWords();
+                renderFreestyleOptions(fallbackWords, true);
+                setCachedData(CACHE_KEYS.INITIAL_WORDS, fallbackWords);
             }
         }
 
@@ -5156,6 +5492,7 @@
             console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length, 'Defer Images:', deferImages);
             console.log('renderFreestyleOptions called with', options.length, 'options:', options);
             console.log('freestyleOptions element:', freestyleOptions);
+            clearPreviewSelection();
             
             // Store current options for exclusion in Something Else
             currentWordOptions = options.slice(); // Create a copy
@@ -5339,19 +5676,8 @@
                     }
                     
                     btn.addEventListener('click', async () => {
-                        // Reset status message after first button click following a question
-                        if (activeQuestionAsked) {
-                            activeQuestionAsked = false;
-                            updateStatusMessage(getReadyMessage());
-                        }
-                        
-                        // SIMPLIFIED LOGIC: 
-                        // 1. If there's a word prompt, combine it with the selection
-                        // 2. Add the result to Speech History and announce it
-                        // 3. Generate new options based on the updated Speech History
-                        
                         let phraseToAdd, phraseToAnnounce;
-                        
+
                         if (currentWordsPrompt) {
                             // Combine word prompt with selected option
                             phraseToAdd = `${currentWordsPrompt} ${text}`;
@@ -5363,10 +5689,28 @@
                             phraseToAnnounce = text;
                             console.log('🎯 Using selection as-is:', text);
                         }
+
+                        const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
+                        if (!previewDecision.proceed) {
+                            return;
+                        }
+
+                        // Reset status message after first button click following a question
+                        if (activeQuestionAsked) {
+                            activeQuestionAsked = false;
+                            updateStatusMessage(getReadyMessage());
+                        }
+                        
+                        // SIMPLIFIED LOGIC: 
+                        // 1. If there's a word prompt, combine it with the selection
+                        // 2. Add the result to Speech History and announce it
+                        // 3. Generate new options based on the updated Speech History
                         
                         // Add to Speech History and announce
                         addToSpeech(phraseToAdd);
-                        await announce(phraseToAnnounce, "system", true);
+                        if (!previewDecision.alreadyAnnounced) {
+                            await announce(phraseToAnnounce, "system", true);
+                        }
                         
                         // CRITICAL: Generate next options based on the UPDATED Speech History
                         // This ensures continuity in the conversation
@@ -5434,6 +5778,9 @@
                 announcementQueue.push({
                     textToAnnounce,
                     announcementType,
+                    voiceNameOverride: null,
+                    speechRateOverride: null,
+                    volumeMultiplier: 1.0,
                     resolve,
                     reject
                 });
@@ -5449,7 +5796,15 @@
             }
 
             isAnnouncingNow = true;
-            const { textToAnnounce, announcementType, resolve, reject } = announcementQueue.shift();
+            const {
+                textToAnnounce,
+                announcementType,
+                voiceNameOverride,
+                speechRateOverride,
+                volumeMultiplier,
+                resolve,
+                reject
+            } = announcementQueue.shift();
 
             console.log(`🔊 QUEUE: Playing "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
 
@@ -5459,7 +5814,12 @@
                 const response = await authenticatedFetch(`/play-audio`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+                    body: JSON.stringify({
+                        text: textToAnnounce,
+                        routing_target: announcementType,
+                        voice_name_override: voiceNameOverride,
+                        speech_rate_override: speechRateOverride
+                    }),
                 });
 
                 if (!response.ok) {
@@ -5477,7 +5837,7 @@
 
                 console.log(`🔊 Audio data received, sample rate: ${sampleRate}, playing...`);
                 const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, volumeMultiplier);
                 
                 console.log(`🔊 Audio playback completed successfully`);
                 resolve();
@@ -5505,7 +5865,7 @@
             return bytes.buffer;
         }
 
-        async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType) {
+        async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, volumeMultiplier = 1.0) {
             try {
                 console.log(`🔊 Creating audio context for playback...`);
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -5523,10 +5883,15 @@
                 
                 const source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
+                const gainNode = audioContext.createGain();
+                const normalizedApplicationVolume = Math.max(0, Math.min(1, Number(applicationVolume || 8) / 10));
+                const normalizedMultiplier = Math.max(0, Number(volumeMultiplier || 1));
+                gainNode.gain.value = normalizedApplicationVolume * normalizedMultiplier;
                 
                 // Connect to appropriate output (system or personal speaker like gridpage)
                 const destination = audioContext.destination;
-                source.connect(destination);
+                source.connect(gainNode);
+                gainNode.connect(destination);
                 
                 console.log(`🔊 Starting audio playback...`);
                 return new Promise((resolve, reject) => {
@@ -5755,9 +6120,9 @@
         
         // Modified announce function to record chat history for personal messages
         const originalAnnounce = window.announce;
-        window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true) {
+        window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
             if (originalAnnounce) {
-                await originalAnnounce(textToAnnounce, announcementType, recordHistory);
+                await originalAnnounce(textToAnnounce, announcementType, recordHistory, options);
             }
             
             // Record chat history for personal announcements (user selections)
@@ -6150,7 +6515,7 @@
         }
 
         // Proper announcement system (from gridpage)
-        async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
+        async function announce(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
             console.log(`🔊 ANNOUNCE: "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
             
             // Initialize audio context if not already done
@@ -6163,6 +6528,9 @@
                 announcementQueue.push({
                     textToAnnounce,
                     announcementType,
+                    voiceNameOverride: options.voiceNameOverride || null,
+                    speechRateOverride: options.speechRateOverride || null,
+                    volumeMultiplier: typeof options.volumeMultiplier === 'number' ? options.volumeMultiplier : 1.0,
                     resolve,
                     reject
                 });

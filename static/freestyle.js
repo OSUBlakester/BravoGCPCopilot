@@ -380,7 +380,7 @@ async function initializeUserContext() {
     return true;
 }
 
-// Function to update page title with profile name
+// Function to update page title with profile name and source context
 async function updatePageTitleWithProfile() {
     try {
         const response = await authenticatedFetch('/api/account/users');
@@ -392,9 +392,22 @@ async function updatePageTitleWithProfile() {
         if (currentProfile && currentProfile.display_name) {
             const titleElement = document.getElementById('dynamic-page-title');
             if (titleElement) {
-                const baseTitle = 'Free Style Communication';
+                let baseTitle = 'Free Style Communication';
+                
+                // Add source context to title if available
+                const navContext = getNavigationContext();
+                if (navContext.originating_button && navContext.is_llm_generated) {
+                    // LLM-generated page — show the button text as topic
+                    baseTitle = `Free Style - ${navContext.originating_button}`;
+                } else if (navContext.source_page && navContext.source_page.toLowerCase() !== 'home') {
+                    // Static page — show the page name as topic
+                    const pageName = navContext.source_page.replace(/_/g, ' ').replace(/-/g, ' ')
+                        .replace(/\b\w/g, c => c.toUpperCase());
+                    baseTitle = `Free Style - ${pageName}`;
+                }
+                
                 titleElement.textContent = `${baseTitle} - ${currentProfile.display_name}`;
-                console.log(`Updated freestyle page title to include profile: ${currentProfile.display_name}`);
+                console.log(`Updated freestyle page title to include profile: ${currentProfile.display_name}, context: ${baseTitle}`);
             }
         }
     } catch (error) {
@@ -486,24 +499,20 @@ function updateAlphabetGridLayout() {
     const grid = document.getElementById('alphabet-grid');
     if (!grid) return;
     
-    // Update the CSS grid template columns based on gridColumns setting
-    grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+    // Letters are skinnier so we can fit more columns than the main grid
+    // Use ~1.5x the gridColumns since letters only need narrow buttons
+    const letterColumns = Math.max(6, Math.min(13, Math.round(gridColumns * 1.3)));
+    grid.style.gridTemplateColumns = `repeat(${letterColumns}, 1fr)`;
     
-    // Calculate font size based on number of columns
-    // Fewer columns (larger buttons) = larger font size
-    // More columns (smaller buttons) = smaller font size
-    const baseFontSize = 16; // Base font size in pixels for letters
-    const minFontSize = 10;  // Minimum font size
-    const maxFontSize = 20;  // Maximum font size
+    // Calculate font size matching gridpage formula
+    const baseFontSize = 20; // Match gridpage base
+    const minFontSize = 10;
+    const maxFontSize = 28;
     
-    // Calculate font size: inversely proportional to number of columns
-    // Formula: baseFontSize * (baseFactor / gridColumns) where baseFactor is calibrated for good results
-    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
-    
-    // Set the CSS custom property for letter button font size
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / letterColumns)));
     grid.style.setProperty('--letter-font-size', `${fontSize}px`);
     
-    console.log(`Alphabet grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
+    console.log(`Alphabet grid layout updated to ${letterColumns} columns (from gridColumns=${gridColumns}) with ${fontSize}px font size`);
 }
 
 // --- Update Word Options Grid Layout ---
@@ -514,12 +523,12 @@ function updateWordOptionsGridLayout() {
     // Update the CSS grid template columns based on gridColumns setting
     grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
     
-    // Calculate font size for word options
-    const baseFontSize = 16; // Base font size for word options
-    const minFontSize = 12;  // Minimum font size
-    const maxFontSize = 18;  // Maximum font size
+    // Calculate font size for word options (matching gridpage formula)
+    const baseFontSize = 20; // Match gridpage base font size
+    const minFontSize = 10;  // Match gridpage minimum
+    const maxFontSize = 28;  // Match gridpage maximum
     
-    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
     grid.style.setProperty('--word-option-font-size', `${fontSize}px`);
     
     console.log(`Word options grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
@@ -881,16 +890,16 @@ async function renderWordOptionsGrid() {
                 }
             };
             
-            // Text footer (edge to edge, no margins)
+            // Text footer (matching gridpage)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '18px';
+            textFooter.style.height = '28px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '1px 2px';
+            textFooter.style.padding = '2px 4px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
             textFooter.style.position = 'absolute';
@@ -988,6 +997,9 @@ async function loadMoreWordOptions() {
         isLLMProcessing = true;
         showLoadingIndicator(true);
         
+        // Include navigation context so refreshed options stay relevant to the source page topic
+        const navContext = getNavigationContext();
+        
         const response = await authenticatedFetch('/api/freestyle/word-options', {
             method: 'POST',
             headers: {
@@ -995,7 +1007,11 @@ async function loadMoreWordOptions() {
             },
             body: JSON.stringify({
                 build_space_text: currentBuildSpaceText,
-                request_different_options: true // Signal to generate different options
+                request_different_options: true, // Signal to generate different options
+                context: navContext.context,
+                source_page: navContext.source_page,
+                is_llm_generated: navContext.is_llm_generated,
+                originating_button_text: navContext.originating_button
             })
         });
         
@@ -1324,6 +1340,27 @@ function backspaceCurrentWord() {
     }
 }
 
+// --- Choose Word Modal Grid Layout (match gridpage sizing) ---
+function updateModalGridLayout() {
+    // Apply same grid columns and font size as main word-options grid
+    const categoryGrid = document.getElementById('category-grid');
+    const wordOptionsGrid = document.getElementById('category-word-options-grid');
+    
+    const baseFontSize = 20;
+    const minFontSize = 10;
+    const maxFontSize = 28;
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
+    
+    [categoryGrid, wordOptionsGrid].forEach(grid => {
+        if (grid) {
+            grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+            grid.style.setProperty('--word-option-font-size', `${fontSize}px`);
+        }
+    });
+    
+    console.log(`Modal grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
+}
+
 // --- Choose Word Modal Management ---
 function setupChooseWordModal() {
     // Setup event listeners
@@ -1353,6 +1390,9 @@ function openChooseWordModal() {
     
     // Show modal
     document.getElementById('choose-word-modal').classList.remove('hidden');
+    
+    // Apply gridpage-matching layout to modal grids
+    updateModalGridLayout();
     
     // Show category selection
     showCategorySelection();
@@ -1452,11 +1492,11 @@ function generateCategoryButtons() {
     // Clear existing categories
     categoryGrid.innerHTML = '';
     
-    // Create category buttons
+    // Create category buttons (text only, no icons, for better fit)
     categories.forEach((category, index) => {
         const button = document.createElement('button');
         button.className = 'freestyle-modal-btn category-btn';
-        button.innerHTML = `<i class="${category.icon}"></i> ${category.name}`;
+        button.textContent = category.name;
         button.addEventListener('click', () => selectCategory(category.name));
         categoryGrid.appendChild(button);
     });
@@ -1539,6 +1579,9 @@ async function displayCategoryWords() {
     // Clear existing words
     wordOptionsGrid.innerHTML = '';
     
+    // Apply gridpage-matching layout
+    updateModalGridLayout();
+    
     // Add word buttons with images
     for (let i = 0; i < currentCategoryWords.length; i++) {
         const word = currentCategoryWords[i];
@@ -1597,16 +1640,16 @@ async function displayCategoryWords() {
                 }
             };
             
-            // Text footer (edge to edge, no margins)
+            // Text footer (matching gridpage)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '18px';
+            textFooter.style.height = '28px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '1px 2px';
+            textFooter.style.padding = '2px 4px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
             textFooter.style.position = 'absolute';
@@ -1679,8 +1722,14 @@ async function displayCategoryWords() {
 async function generateDifferentWords() {
     console.log('Generating different words for category:', currentChooseWordCategory);
     
+    // Extract display text strings from current words to exclude them
+    const excludeWords = currentCategoryWords.map(w => 
+        (typeof w === 'object' && w.text) ? w.text : String(w)
+    );
+    console.log('Excluding words:', excludeWords);
+    
     // Generate new words excluding current ones
-    await generateCategoryWords(currentChooseWordCategory, currentCategoryWords);
+    await generateCategoryWords(currentChooseWordCategory, excludeWords);
 }
 
 async function selectCategoryWord(word) {
@@ -2011,33 +2060,15 @@ function stopScanning() {
     // Note: No need to cancel speech here as backend TTS handles its own queue
 }
 
-async function speakAndHighlight(button) {
+function speakAndHighlight(button) {
     // Remove scanning class from all buttons
     document.querySelectorAll('.scanning-highlight').forEach(btn => {
         btn.classList.remove('scanning-highlight');
     });
     
-    // Add scanning class to current button
+    // Add scanning class to current button (visual highlight only, no speech)
+    // Speech only occurs when the user actually selects/clicks a button via switch input
     button.classList.add('scanning-highlight');
-    
-    try {
-        let textToSpeak = button.textContent;
-        
-        // Special case: if this is the Speak Display button, use Build Space text instead
-        if (button.id === 'speak-display-btn' && currentBuildSpaceText.trim()) {
-            textToSpeak = currentBuildSpaceText.trim();
-        }
-        
-        // Special case: if this is the Add Word button, use Current Word text instead
-        if (button.id === 'add-word-btn' && currentSpellingWord.trim()) {
-            textToSpeak = currentSpellingWord.trim();
-        }
-        
-        // Use backend TTS instead of browser speech synthesis
-        await announce(textToSpeak, "system", false);
-    } catch (e) {
-        console.error("Speech synthesis error:", e);
-    }
 }
 
 function resumeScanning() {

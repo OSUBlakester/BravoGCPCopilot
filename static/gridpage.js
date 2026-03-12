@@ -9,6 +9,12 @@ let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from setti
 let currentQuestion = null; // Stores the current question context for LLM
 let currentOptions = []; // Stores the current LLM-generated options for Something Else functionality
 let scanningInterval; // Holds the interval ID for scanning
+const GRID_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_grid';
+const FOLLOW_UP_CONVERSATION_KEY = 'llm_followUpConversation';
+let followUpConversation = {
+    originalQuestion: null,
+    selectedResponses: []
+};
 
 // Restore querytype and currentQuestion from localStorage if available
 if (localStorage.getItem('llm_currentQueryType')) {
@@ -26,6 +32,23 @@ if (localStorage.getItem('llm_currentOptions')) {
     } catch (e) {
         console.warn('Failed to parse currentOptions from storage:', e);
         currentOptions = [];
+    }
+}
+if (localStorage.getItem(FOLLOW_UP_CONVERSATION_KEY)) {
+    try {
+        const storedConversation = JSON.parse(localStorage.getItem(FOLLOW_UP_CONVERSATION_KEY));
+        if (storedConversation && typeof storedConversation === 'object') {
+            followUpConversation.originalQuestion = typeof storedConversation.originalQuestion === 'string'
+                ? storedConversation.originalQuestion
+                : null;
+            followUpConversation.selectedResponses = Array.isArray(storedConversation.selectedResponses)
+                ? storedConversation.selectedResponses.filter(item => typeof item === 'string' && item.trim() !== '')
+                : [];
+        }
+        console.log('Restored follow-up conversation:', followUpConversation);
+    } catch (e) {
+        console.warn('Failed to parse follow-up conversation from storage:', e);
+        followUpConversation = { originalQuestion: null, selectedResponses: [] };
     }
 }
 let currentButtonIndex = -1; // Tracks the index for scanning
@@ -55,6 +78,433 @@ const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening'; // CSS class for highli
 let activeOriginatingButtonText = null; // NEW: To store the text of the button that initiated the LLM query
 let activeLLMPromptForContext = null; // Store the prompt that generated current LLM buttons
 
+function persistFollowUpConversation() {
+    localStorage.setItem(FOLLOW_UP_CONVERSATION_KEY, JSON.stringify(followUpConversation));
+}
+
+function resetFollowUpConversation() {
+    followUpConversation = {
+        originalQuestion: null,
+        selectedResponses: []
+    };
+    localStorage.removeItem(FOLLOW_UP_CONVERSATION_KEY);
+}
+
+function initializeFollowUpConversation(questionText) {
+    const normalizedQuestion = typeof questionText === 'string' ? questionText.trim() : '';
+    if (!normalizedQuestion) {
+        resetFollowUpConversation();
+        return;
+    }
+
+    followUpConversation = {
+        originalQuestion: normalizedQuestion,
+        selectedResponses: []
+    };
+    persistFollowUpConversation();
+}
+
+function addFollowUpSelection(selectionText) {
+    const normalizedSelection = typeof selectionText === 'string' ? selectionText.trim() : '';
+    if (!normalizedSelection) return;
+
+    if (!followUpConversation.originalQuestion && currentQuestion) {
+        followUpConversation.originalQuestion = currentQuestion;
+    }
+
+    followUpConversation.selectedResponses.push(normalizedSelection);
+    persistFollowUpConversation();
+}
+
+function getConversationContextText() {
+    const baseQuestion = followUpConversation.originalQuestion || currentQuestion || '';
+    const history = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+
+    if (!baseQuestion) return '';
+
+    const historyText = history.length > 0
+        ? history.map((response, index) => `${index + 1}. ${response}`).join('\n')
+        : 'None yet';
+
+    return `Original question: "${baseQuestion}"\nSelected follow-ups so far:\n${historyText}`;
+}
+
+function classifyCommunicationType(text) {
+    const normalized = text.toLowerCase().trim();
+    
+    // Greeting patterns: hello, hi, hey, goodbye, etc.
+    if (/^\b(hello|hi|hey|goodbye|bye|good morning|good afternoon|good evening|howdy)\b/.test(normalized)) {
+        return 'greeting';
+    }
+    
+    // Question patterns: ends with ? or starts with question words
+    if (/\?$/.test(normalized) || /^\b(what|why|how|when|where|who|which|do|does|did|can|could|will|would|should|is|are|am|have|has|had|will)\b/.test(normalized)) {
+        return 'question';
+    }
+    
+    // Request patterns: want, need, can you, will you, let's
+    if (/\b(want|need|can you|could you|will you|would you|let's|let me|i need|i want|please|can i|could i)\b/.test(normalized)) {
+        return 'request';
+    }
+    
+    // Answer patterns: yes, no, yeah, nope, sure, etc.
+    if (/^\b(yes|no|yeah|yep|nope|sure|definitely|absolutely|maybe|perhaps|probably)\b|\b(yes|no)$/.test(normalized)) {
+        return 'answer';
+    }
+    
+    // Joke/humor patterns: common joke/funny signals
+    if (/\b(haha|lol|lmao|funny|joke|made me laugh|that's hilarious|isn't that funny)\b/.test(normalized)) {
+        return 'joke';
+    }
+    
+    // Affirmation patterns: positive self-assertions
+    if (/\b(i am strong|i can do|i'm amazing|i'm great|i'm capable|i'm confident|proud of)\b/.test(normalized)) {
+        return 'affirmation';
+    }
+    
+    // Default: assertion/opinion (statements of fact, feeling, or opinion)
+    return 'assertion';
+}
+
+function classifyFollowUpGuidance(communicationType) {
+    const guidance = {
+        greeting: {
+            description: 'The user greeted someone. Follow-ups should respond appropriately.',
+            patterns: [
+                'How are you doing?',
+                'Where have you been?',
+                'What have you been up to?',
+                'Good to see you!',
+                'I missed you!',
+                'What have you been doing?'
+            ]
+        },
+        assertion: {
+            description: 'The user made a statement or shared an opinion. Follow-ups should engage the other person at the same level.',
+            patterns: [
+                'What do you think about that?',
+                'Do you agree?',
+                'Have you experienced that too?',
+                'Would you like to do that with me?',
+                'I like that because...',
+                'That reminds me of...'
+            ]
+        },
+        question: {
+            description: 'The user asked a question. Follow-ups should provide alternatives, clarifications, or related questions.',
+            patterns: [
+                'Is it something fun?',
+                'Can we find that out together?',
+                'Let\'s figure it out',
+                'I\'m curious about that too',
+                'Do you know?',
+                'Should we ask someone?'
+            ]
+        },
+        request: {
+            description: 'The user made a request or expressed a want. Follow-ups should expand the idea or get partner input.',
+            patterns: [
+                'Do you want to go with me?',
+                'When can we do that?',
+                'What do you think about that?',
+                'Can we start planning that?',
+                'I hope we can do that soon',
+                'Do you want to do that too?'
+            ]
+        },
+        answer: {
+            description: 'The user gave an answer (yes/no/maybe). Follow-ups should continue the conversation or explain the answer.',
+            patterns: [
+                'I don\'t want to do that',
+                'Maybe we could try this instead',
+                'Here\'s why I think that',
+                'Would you do that?',
+                'What would you do?',
+                'Can we talk about why?'
+            ]
+        },
+        joke: {
+            description: 'The user shared humor. Follow-ups should engage with the joke or build on the playfulness.',
+            patterns: [
+                'Isn\'t that funny?',
+                'Do you like jokes like that?',
+                'Did that make you laugh?',
+                'I love when we laugh together',
+                'Tell me another funny one!',
+                'You\'re so funny!'
+            ]
+        },
+        affirmation: {
+            description: 'The user made a positive self-statement. Follow-ups should reinforce or build on that positivity.',
+            patterns: [
+                'You\'re amazing!',
+                'I\'m proud of you too',
+                'You\'re strong too',
+                'That\'s awesome!',
+                'I believe in you',
+                'We\'re both great!'
+            ]
+        }
+    };
+    return guidance[communicationType] || guidance.assertion;
+}
+
+function getActiveSessionMoodText() {
+    let mood = '';
+
+    if (typeof window.getCurrentMood === 'function') {
+        try {
+            mood = window.getCurrentMood() || '';
+        } catch (error) {
+            console.warn('Unable to read mood from getCurrentMood():', error);
+        }
+    }
+
+    if (!mood) {
+        mood = sessionStorage.getItem('currentSessionMood') || '';
+    }
+
+    const normalizedMood = typeof mood === 'string' ? mood.trim() : '';
+    if (!normalizedMood || normalizedMood.toLowerCase() === 'none') {
+        return '';
+    }
+
+    return `Current user mood for this session: "${normalizedMood}". Keep follow-up options naturally consistent with this mood.`;
+}
+
+function isPartnerInterrogativePattern(text) {
+    // Detects options that sound like the PARTNER questioning/interviewing the user about their own statement
+    // These should NEVER be generated as follow-up options from the user's perspective
+    
+    if (!text || typeof text !== 'string') return false;
+    const normalized = text.toLowerCase().trim();
+    
+    // DEBUG: Log what we're checking
+    console.log(`🔍 Checking option: "${text}"`);
+    
+    // Get latest user response to check context
+    const latestResponse = Array.isArray(followUpConversation.selectedResponses) && followUpConversation.selectedResponses.length > 0
+        ? followUpConversation.selectedResponses[followUpConversation.selectedResponses.length - 1]
+        : '';
+    const latestWasUserAssertion = /^i\b/i.test(latestResponse);
+    
+    console.log(`   Latest response: "${latestResponse}"`);
+    console.log(`   Was user assertion (started with "I"): ${latestWasUserAssertion}`);
+    
+    // BROAD CATCH-ALL: If user just made a statement about themselves (started with "I"),
+    // block ANY option asking them to elaborate on that statement
+    if (latestWasUserAssertion) {
+        // Block "tell me" phrases entirely after user assertion
+        if (/\btell me\b/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: "tell me" phrase after user assertion:', text);
+            return true;
+        }
+        
+        // Block "what's making you" or "what is making you" 
+        if (/what('s| is) making you/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: "what\'s making you" after user assertion:', text);
+            return true;
+        }
+        
+        // Block "what makes you"
+        if (/what makes you/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: "what makes you" after user assertion:', text);
+            return true;
+        }
+        
+        // Block "share more" / "describe" / "explain"
+        if (/^(share more|describe|explain)/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: explain/describe pattern after user assertion:', text);
+            return true;
+        }
+    }
+    
+    // Block therapy/interview patterns regardless of context
+    if (/^(why are you|why do you|how does (that|it|this) make you feel|how are you feel)/i.test(normalized)) {
+        console.warn('🚫 BLOCKED: therapy/interview pattern:', text);
+        return true;
+    }
+    
+    // Block "what kind of ... are you"
+    if (/^what kind of .+ are you/i.test(normalized)) {
+        console.warn('🚫 BLOCKED: "what kind of ... are you" pattern:', text);
+        return true;
+    }
+    
+    // Block "can you tell me"
+    if (/^can you tell me/i.test(normalized)) {
+        console.warn('🚫 BLOCKED: "can you tell me" pattern:', text);
+        return true;
+    }
+    
+    console.log(`   ✅ Option passed filter`);
+    return false;
+}
+
+function buildFollowUpPrompt(excludedOptionsText = '') {
+    const summaryInstruction = SummaryOff
+        ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
+        : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
+
+    const conversationContext = getConversationContextText();
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+    
+    // Classify communication type and get guidance
+    const communicationType = latestSelectedResponse
+        ? classifyCommunicationType(latestSelectedResponse)
+        : 'assertion';
+    const typeGuidance = classifyFollowUpGuidance(communicationType);
+    
+    const moodLine = getActiveSessionMoodText();
+    const exclusionLine = excludedOptionsText && excludedOptionsText.trim()
+        ? `Avoid repeating these existing options: "${excludedOptionsText}".`
+        : '';
+    const latestFocusLine = latestSelectedResponse
+        ? `Latest selected response (PRIMARY FOCUS): "${latestSelectedResponse}".`
+        : '';
+    
+    // Build type-specific pattern examples
+    const typePatternExamples = typeGuidance.patterns
+        .slice(0, 4)
+        .map(pattern => `  • ${pattern}`)
+        .join('\n');
+
+    return `
+AAC COMMUNICATION SYSTEM - GENERATING USER'S NEXT SPEECH OPTIONS
+
+SCENARIO:
+An AAC user is having a conversation. They select pre-written options to speak.
+The user has ALREADY SPOKEN the following words out loud to their communication partner:
+${conversationContext}
+Most recently, the user JUST SAID OUT LOUD: "${latestSelectedResponse}"
+
+YOUR TASK:
+Generate ${LLMOptions} MORE things the SAME user can SAY, ASK, BUILD, or EXPOUND next to continue THEIR speaking turn.
+These are OPTIONS FOR THE USER TO SELECT AND SPEAK (including statements and partner-engagement questions), not responses TO the user.
+
+🚫🚫🚫 CRITICAL ERROR TO AVOID 🚫🚫🚫
+
+The user JUST SAID: "I am over the moon with excitement!"
+
+DO NOT GENERATE: "Tell me more about what makes you feel this way!"
+WHY THIS IS WRONG: The user JUST expressed excitement. They don't ask THEMSELVES to tell them more about their own feeling. That would be the PARTNER asking the user a question.
+
+DO NOT GENERATE: "What's making you so excited?"  
+WHY THIS IS WRONG: The user doesn't ask themselves what's making them excited. That's the PARTNER questioning the user.
+
+DO NOT GENERATE: "Tell me...", "What makes you...", "What's making you...", "Describe...", "Explain..."
+WHY: These are PARTNER phrases asking the user to elaborate. The user doesn't interview themselves.
+
+✅ CORRECT EXAMPLES - Generate options like these:
+
+The user JUST SAID: "I am over the moon with excitement!"
+GENERATE: "This is the best day ever!" ✅ (User expounding on their emotion)
+GENERATE: "Do you want to celebrate with me?" ✅ (User inviting partner)
+GENERATE: "I can't wait to do something fun!" ✅ (User continuing their expression)
+GENERATE: "Are you excited too?" ✅ (User engaging partner)
+GENERATE: "Something amazing just happened!" ✅ (User adding context)
+
+COMMUNICATION TYPE: ${communicationType.toUpperCase()}
+${typeGuidance.description}
+
+PATTERN EXAMPLES FOR ${communicationType.toUpperCase()}:
+${typePatternExamples}
+
+RULES FOR GENERATION:
+1. The user is SPEAKING, not being interviewed
+2. The user is continuing THEIR turn (partner hasn't responded yet)
+3. Generate things the user would SAY or ASK to engage the partner, not questions someone would ASK the user
+4. Options should BUILD/EXPOUND on their point OR invite partner engagement
+5. Keep options short, conversational, and natural
+6. NO "Tell me", "What makes you", "Describe", "Explain" after user assertions
+7. Include at least 4 partner-engagement QUESTIONS that end with "?" and invite the partner to respond
+
+${moodLine}${exclusionLine}
+Return ONLY a JSON list where each item has "option", "summary", and "keywords" keys.
+The "option" key should contain the FULL option text.
+${summaryInstruction}
+The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
+`;
+}
+
+function scoreUserVoicePerspective(optionText) {
+    if (!optionText || typeof optionText !== 'string') return 0;
+    const normalized = optionText.trim().toLowerCase();
+    let score = 0;
+
+    // Positive signals: sounds like the AAC user speaking.
+    if (/^(i\b|i'm\b|i am\b|i want\b|i need\b|i feel\b|let('|’)s\b|can we\b|could we\b|tell me\b|show me\b)/i.test(optionText)) {
+        score += 3;
+    }
+
+    if (/^(do you\b|have you\b|can you\b|would you\b|could you\b|what do you think\b|which do you\b|did you\b)/i.test(optionText)) {
+        score += 4;
+    }
+
+    if (/\bwith me\b/i.test(optionText)) {
+        score += 2;
+    }
+
+    // Reduce rigid planning-style prompts that feel less conversational in follow-ups.
+    if (/^(what should i do\b|which (rides|one|park|option) should i\b)/i.test(optionText)) {
+        score -= 3;
+    }
+
+    // Negative signals: sounds like the system/partner questioning the AAC user's prior response.
+    const addressedToUserPatterns = [
+        /\bwhat\s+is\s+it\s+you\s+find\b/i,
+        /\bwhat\s+is\s+making\s+you\s+feel\b/i,
+        /\bwhat\s+makes\s+you\s+feel\b/i,
+        /\bwhy\s+did\s+you\s+choose\b/i,
+        /\bwhy\s+are\s+you\s+feeling\b/i,
+        /\bwhy\s+do\s+you\s+feel\b/i,
+        /\bhow\s+does\s+that\s+make\s+you\s+feel\b/i,
+        /\bhow\s+are\s+you\s+feeling\s+about\s+(that|this|your)\b/i,
+        /\byour\s+answer\b/i,
+        /\byou\s+selected\b/i,
+        /\byou\s+chose\b/i
+    ];
+
+    for (const pattern of addressedToUserPatterns) {
+        if (pattern.test(normalized)) {
+            score -= 6;
+        }
+    }
+
+    return score;
+}
+
+function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}) {
+    if (ScanningOff) {
+        console.log(`🔇 Scanning is disabled (${source}).`);
+        window.waitingForInitialSwitch = false;
+        return;
+    }
+
+    if (waitForSwitchToScan) {
+        window.waitingForInitialSwitch = true;
+        console.log(`✋ Waiting for switch press before scanning (${source}).`);
+
+        const hasShownPrompt = sessionStorage.getItem(GRID_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+        if (allowPrompt && !hasShownPrompt) {
+            sessionStorage.setItem(GRID_SWITCH_PROMPT_SHOWN_KEY, 'true');
+            announce("Press switch to begin scanning", "personal", false, false);
+        }
+        return;
+    }
+
+    window.waitingForInitialSwitch = false;
+    console.log(`▶️ Starting auditory scanning automatically (${source}).`);
+    startAuditoryScanning();
+}
+
 function addPauseToJokeText(text) {
     if (!text) return '';
     if (text.includes('[PAUSE]')) return text;
@@ -83,6 +533,386 @@ function isJokeQuestion(questionText) {
     if (!questionText) return false;
     const lowered = questionText.toLowerCase();
     return /\b(joke|jokes|funny|pun|dad joke|tell me a joke|make me laugh)\b/.test(lowered);
+}
+
+function tokenizeForContext(text) {
+    if (!text || typeof text !== 'string') return [];
+    const stopWords = new Set([
+        'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'to', 'of', 'for', 'in', 'on', 'at', 'with', 'from',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'it', 'this', 'that', 'i', 'you', 'we', 'they', 'he', 'she',
+        'do', 'does', 'did', 'want', 'wants', 'would', 'could', 'should', 'can', 'will', 'today', 'tonight', 'afternoon'
+    ]);
+
+    return text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(token => token.length > 1 && !stopWords.has(token));
+}
+
+function scoreOptionContextualFit(optionData, contextTerms, latestResponseTerms) {
+    const optionText = typeof optionData.option === 'string' ? optionData.option : '';
+    const summaryText = typeof optionData.summary === 'string' ? optionData.summary : '';
+    const keywordText = Array.isArray(optionData.keywords) ? optionData.keywords.join(' ') : '';
+    const combinedText = `${optionText} ${summaryText} ${keywordText}`;
+    const optionTerms = tokenizeForContext(combinedText);
+    const optionTermSet = new Set(optionTerms);
+
+    let score = 0;
+    for (const term of contextTerms) {
+        if (optionTermSet.has(term)) score += 4;
+    }
+    for (const term of latestResponseTerms) {
+        if (optionTermSet.has(term)) score += 6;
+    }
+
+    const wordCount = optionText.trim().split(/\s+/).filter(Boolean).length;
+    if (wordCount >= 2 && wordCount <= 10) score += 1;
+    if (wordCount > 14) score -= 2;
+
+    if (/^i\s+want\s+to\b/i.test(optionText) || /^let('|’)s\b/i.test(optionText) || /^how about\b/i.test(optionText)) {
+        score += 1;
+    }
+
+    // BOOST: Prioritize partner-engagement questions
+    const partnerEngagementPatterns = [/^do you\b/i, /^would you\b/i, /^can you\b/i, /^could you\b/i, /^have you\b/i, /^what do you think\b/i, /^what do you feel\b/i, /^are you\b/i, /^should we\b/i, /^do you want\b/i, /^will you\b/i, /^do you like\b/i, /^what's your\b/i, /^who wants\b/i];
+    if (partnerEngagementPatterns.some(pattern => pattern.test(optionText))) score += 8;
+
+    // Prefer single selectable phrase over multi-sentence constructions.
+    if ((optionText.match(/[.!?]/g) || []).length > 1) {
+        score -= 2;
+    }
+
+    return score;
+}
+
+function prioritizeContextualOptions(options, contextText, maxCount = LLMOptions) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+
+    const contextTerms = tokenizeForContext(contextText || '');
+    const latestResponse = Array.isArray(followUpConversation.selectedResponses) && followUpConversation.selectedResponses.length > 0
+        ? followUpConversation.selectedResponses[followUpConversation.selectedResponses.length - 1]
+        : '';
+    const latestResponseTerms = tokenizeForContext(latestResponse);
+
+    const scored = options.map((optionData, index) => ({
+        optionData,
+        index,
+        score: scoreOptionContextualFit(optionData, contextTerms, latestResponseTerms)
+    }));
+
+    scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.index - b.index;
+    });
+
+    const selected = scored.slice(0, Math.max(1, maxCount)).map(item => item.optionData);
+    console.log('Context prioritization scores:', scored.map(s => ({ idx: s.index, score: s.score, summary: s.optionData?.summary })));
+    return selected;
+}
+
+function filterOptionsForUserVoicePerspective(options) {
+    if (!Array.isArray(options)) return [];
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    const mirroredToUserPatterns = [
+        /^\s*what\s+is\s+making\s+you\s+feel\b/i,
+        /^\s*what\s+makes\s+you\s+feel\b/i,
+        /^\s*why\s+do\s+you\s+feel\b/i,
+        /^\s*how\s+does\s+that\s+make\s+you\s+feel\b/i,
+        /^\s*why\s+are\s+you\s+so\b/i
+    ];
+
+    const latestLooksFirstPerson = /^\s*(i\b|i\'m\b|i am\b|i feel\b|i want\b|i like\b|i love\b)/i.test(latestSelectedResponse || '');
+
+    return options.filter(item => {
+        const optionText = typeof item?.option === 'string' ? item.option.trim() : '';
+        if (!optionText) return false;
+
+        if (latestLooksFirstPerson && mirroredToUserPatterns.some(pattern => pattern.test(optionText))) {
+            return false;
+        }
+
+        const perspectiveScore = scoreUserVoicePerspective(optionText);
+        // Keep neutral and positive items; remove only strongly "addressed-to-user" phrasing.
+        return perspectiveScore > -5;
+    });
+}
+
+function ensurePartnerPerspectiveMix(options, maxCount = LLMOptions) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    const isAssertion = /^\s*(i\b|i\'m\b|i am\b|i want\b|i like\b|i love\b|i feel\b)/i.test(latestSelectedResponse || '');
+    if (!isAssertion) return options.slice(0, Math.max(1, maxCount));
+
+    const partnerDirected = [];
+    const otherOptions = [];
+
+    for (const item of options) {
+        const text = typeof item?.option === 'string' ? item.option.trim() : '';
+        if (/^(do you\b|have you\b|would you\b|could you\b|can you\b|did you\b|what do you think\b)/i.test(text)) {
+            partnerDirected.push(item);
+        } else {
+            otherOptions.push(item);
+        }
+    }
+
+    const targetPartnerCount = Math.min(3, Math.max(1, Math.floor(Math.max(1, maxCount) / 3)));
+    const prioritized = [
+        ...partnerDirected.slice(0, targetPartnerCount),
+        ...otherOptions,
+        ...partnerDirected.slice(targetPartnerCount)
+    ];
+
+    return prioritized.slice(0, Math.max(1, maxCount));
+}
+
+function isQuestionLikeOption(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (/[?]\s*$/.test(trimmed)) return true;
+    return /^(do|does|did|are|is|can|could|would|will|have|has|should|what|which|when|where|why|how|who)\b/i.test(trimmed);
+}
+
+function buildPartnerQuestionFallbacks(latestSelectedResponse, neededCount) {
+    const communicationType = classifyCommunicationType(latestSelectedResponse || '');
+    const templatesByType = {
+        assertion: [
+            'What do you think about this?',
+            'Do you agree with me?',
+            'Have you felt this way too?',
+            'Can we talk about this?',
+            'What would you do in my place?'
+        ],
+        affirmation: [
+            'Do you feel the same way?',
+            'Would you agree with that?',
+            'What do you think?',
+            'Should we do that together?',
+            'Do you want to join me?'
+        ],
+        request: [
+            'Can you help me with this?',
+            'Would you do this with me?',
+            'Do you think this would work?',
+            'Should we try this now?',
+            'Can we do this together?'
+        ],
+        answer: [
+            'Does that make sense to you?',
+            'What do you think about that?',
+            'Do you want to know more?',
+            'Should I explain more?',
+            'Do you agree with that?'
+        ],
+        joke: [
+            'Do you think that is funny?',
+            'Want to hear another one?',
+            'Did that make you laugh?',
+            'Do you have a joke too?',
+            'Should I tell one more?'
+        ],
+        greeting: [
+            'How are you doing today?',
+            'What are you up to?',
+            'Can we chat for a bit?',
+            'Are you having a good day?',
+            'Do you want to talk?'
+        ],
+        question: [
+            'What do you think about that?',
+            'Do you have an idea?',
+            'Can we figure this out together?',
+            'Would you choose the same?',
+            'Should we decide together?'
+        ]
+    };
+
+    const templates = templatesByType[communicationType] || templatesByType.assertion;
+    const selectedTemplates = templates.slice(0, Math.max(0, neededCount));
+    return selectedTemplates.map((text) => ({
+        option: text,
+        summary: text,
+        keywords: tokenizeForContext(text).slice(0, 5),
+        isLLMGenerated: true,
+        originalPrompt: activeLLMPromptForContext,
+        originatingButtonText: activeOriginatingButtonText
+    }));
+}
+
+function prioritizePartnerEngagementQuestions(options, maxCount = LLMOptions, minQuestionCount = 3) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    const questions = [];
+    const nonQuestions = [];
+
+    for (const item of options) {
+        const text = typeof item?.option === 'string' ? item.option.trim() : '';
+        if (!text) continue;
+        if (isQuestionLikeOption(text)) {
+            questions.push(item);
+        } else {
+            nonQuestions.push(item);
+        }
+    }
+
+    const targetQuestions = Math.min(Math.max(1, minQuestionCount), Math.max(1, maxCount));
+    let supplementalQuestions = [];
+    if (questions.length < targetQuestions) {
+        supplementalQuestions = buildPartnerQuestionFallbacks(latestSelectedResponse, targetQuestions - questions.length);
+    }
+
+    const merged = [...questions, ...supplementalQuestions, ...nonQuestions];
+    const deduped = [];
+    const seen = new Set();
+    for (const item of merged) {
+        const text = typeof item?.option === 'string' ? item.option.trim() : '';
+        const normalized = normalizeForComparison(text);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        deduped.push(item);
+    }
+
+    const result = deduped.slice(0, Math.max(1, maxCount));
+    const resultQuestionCount = result.filter(item => isQuestionLikeOption(item?.option)).length;
+    console.log('❓ Partner question prioritization:', {
+        inputCount: options.length,
+        existingQuestionCount: questions.length,
+        supplementalQuestionCount: supplementalQuestions.length,
+        outputCount: result.length,
+        outputQuestionCount: resultQuestionCount,
+        targetQuestions
+    });
+    return result;
+}
+
+function normalizeForComparison(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+        .toLowerCase()
+        .replace(/["'“”‘’]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function enforceAdditiveFollowUpOptions(options, maxCount = LLMOptions) {
+    if (!Array.isArray(options) || options.length === 0) {
+        console.log('📊 enforceAdditiveFollowUpOptions: Empty/invalid input, returning empty');
+        return [];
+    }
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    console.log('📊 enforceAdditiveFollowUpOptions START:', {
+        inputCount: options.length,
+        latestSelectedResponse: latestSelectedResponse,
+        selectedResponsesCount: selectedResponses.length
+    });
+
+    const latestNormalized = normalizeForComparison(latestSelectedResponse);
+    if (!latestNormalized) {
+        const result = options.slice(0, Math.max(1, maxCount));
+        console.log(`📊 enforceAdditiveFollowUpOptions: No latestNormalized, returning ${result.length} options`);
+        return result;
+    }
+
+    console.log('📊 Latest normalized:', latestNormalized);
+
+    const additive = [];
+    for (let i = 0; i < options.length; i++) {
+        const item = options[i];
+        if (!item || typeof item.option !== 'string') {
+            console.log(`  ❌ Option ${i}: Skipped (invalid item structure)`);
+            continue;
+        }
+
+        const rawOption = item.option.trim();
+        if (!rawOption) {
+            console.log(`  ❌ Option ${i}: Skipped (empty after trim)`);
+            continue;
+        }
+
+        let updatedOption = rawOption;
+        const normalizedOption = normalizeForComparison(rawOption);
+
+        console.log(`  📌 Option ${i}: "${rawOption.substring(0, 50)}..." normalized: "${normalizedOption.substring(0, 50)}..."`);
+
+        // If option is just a restatement of the previous selection, drop it.
+        if (normalizedOption === latestNormalized) {
+            console.log(`    🚫 Exact match with latest - DROPPED`);
+            continue;
+        }
+
+        // If option starts by repeating prior selection, remove that prefix and keep additive tail.
+        if (normalizedOption.startsWith(latestNormalized)) {
+            console.log(`    ⚠️  Option starts with latest response, attempting to strip prefix...`);
+            const escapedLatest = latestSelectedResponse.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const prefixRegex = new RegExp(`^\\s*${escapedLatest}\\s*[!?.:,;\-–—]*\\s*`, 'i');
+            updatedOption = updatedOption.replace(prefixRegex, '').trim();
+
+            // Fallback if punctuation/spacing mismatch prevented direct prefix strip.
+            if (!updatedOption) {
+                console.log(`      Direct regex failed, trying fallback...`);
+                const firstBreak = rawOption.search(/[!?.]\s+/);
+                if (firstBreak >= 0) {
+                    updatedOption = rawOption.slice(firstBreak + 1).trim();
+                    console.log(`      Fallback found break at ${firstBreak}, extracted: "${updatedOption.substring(0, 50)}..."`);
+                }
+            } else {
+                console.log(`      Regex stripped prefix, remaining: "${updatedOption.substring(0, 50)}..."`);
+            }
+        }
+
+        if (!updatedOption) {
+            console.log(`    🚫 No updated option remains - DROPPED`);
+            continue;
+        }
+
+        const updatedNormalized = normalizeForComparison(updatedOption);
+        if (!updatedNormalized || updatedNormalized === latestNormalized) {
+            console.log(`    🚫 Updated normalized is empty or matches latest - DROPPED`);
+            continue;
+        }
+
+        console.log(`    ✅ KEEPING option`);
+        additive.push({
+            ...item,
+            option: updatedOption,
+            summary: item.summary && typeof item.summary === 'string' ? item.summary : updatedOption
+        });
+    }
+
+    const result = additive.slice(0, Math.max(1, maxCount));
+    console.log(`📊 enforceAdditiveFollowUpOptions END: ${result.length} options kept from ${options.length} input`);
+    return result;
 }
 
 async function fetchJokeOptions(limit, questionContext) {
@@ -130,6 +960,7 @@ let currentSpeechRate = 180;                 // Default words-per-minute
 
 // --- AAC Pictogram Support ---
 let enablePictograms = false; // Global setting for pictogram display - Always false for Gridpage
+let disableTapPictograms = false; // When true, Tap Interface shows no pictograms/images and no sight word formatting
 
 // Simple mapping of button text to Unicode emoji or icons
 // This can be extended with more sophisticated matching or external APIs
@@ -383,9 +1214,15 @@ function getWordVariants(word) {
  * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
  */
 async function getSymbolImageForText(text, keywords = null) {
-    console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
+    console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}, disableTapPictograms: ${disableTapPictograms}`);
     if (!text || text.trim() === '') {
         console.log(`❌ Empty text provided to getSymbolImageForText`);
+        return null;
+    }
+    
+    // If Tap Interface pictograms are disabled, return null (no images at all)
+    if (disableTapPictograms) {
+        console.log(`❌ Tap Interface pictograms disabled via setting, skipping image for "${text}"`);
         return null;
     }
     
@@ -659,8 +1496,9 @@ async function loadScanSettings() {
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
+        disableTapPictograms = settings.disableTapPictograms === true;
         console.log('🔍 DEBUG enablePictograms loaded from settings:', settings.enablePictograms, '-> final value:', enablePictograms);
-        console.log('🔍 DEBUG waitForSwitchToScan loaded from settings:', settings.waitForSwitchToScan, '-> final value:', waitForSwitchToScan);
+        console.log('🔍 DEBUG disableTapPictograms loaded from settings:', settings.disableTapPictograms, '-> final value:', disableTapPictograms);
         
         // Update sight word service with new settings
         if (window.updateSightWordSettings) {
@@ -1300,8 +2138,13 @@ async function generateGrid(page, container) {
         
         const button = document.createElement('button');
         
-        // Check if this is a sight word - if so, render as text-only
-        if (window.isSightWord && window.isSightWord(buttonData.text)) {
+        // When disableTapPictograms is on: ALL buttons are plain text-only
+        // No images, no sight word formatting, no assigned images — just text
+        if (disableTapPictograms) {
+            console.log(`[DISABLE TAP PICTOGRAMS] Plain text button for: "${buttonData.text}"`);
+            button.textContent = buttonData.text;
+        // Check if this is a sight word - if so, render as text-only with special formatting
+        } else if (window.isSightWord && window.isSightWord(buttonData.text)) {
             console.log('[SIGHT WORD] Rendering text-only button for:', buttonData.text);
             button.textContent = buttonData.text;
             button.classList.add('sight-word-button');
@@ -1424,26 +2267,10 @@ async function generateGrid(page, container) {
 
     // Delay scanning until after the page is rendered
     setTimeout(() => {
-        // Check if we should wait for switch press before starting (only on first visit to this page)
-        const scanningHasStarted = sessionStorage.getItem('bravoScanningStarted_grid') === 'true';
-        
         console.log('🔍 GRIDPAGE SCANNING INIT DEBUG:');
         console.log('  ScanningOff:', ScanningOff);
         console.log('  waitForSwitchToScan:', waitForSwitchToScan);
-        console.log('  scanningHasStarted:', scanningHasStarted);
-        console.log('  Should wait?', !ScanningOff && waitForSwitchToScan && !scanningHasStarted);
-        
-        if (!ScanningOff && waitForSwitchToScan && !scanningHasStarted) {
-            console.log('✋ Waiting for switch press to begin scanning on gridpage...');
-            window.waitingForInitialSwitch = true;
-            // Play prompt in personal speaker
-            announce("Press switch to begin scanning", "personal", false, false);
-        } else if (!ScanningOff) {
-            console.log('▶️ Starting auditory scanning automatically');
-            startAuditoryScanning();
-        } else {
-            console.log('🔇 Scanning is disabled (ScanningOff=true)');
-        }
+        startOrWaitForScanning({ allowPrompt: true, source: 'generateGrid' });
     }, defaultDelay);
 }
 
@@ -1614,6 +2441,7 @@ async function handleButtonClick(buttonData) {
             }
             activeOriginatingButtonText = buttonLabel;
             activeLLMPromptForContext = llmQuery;
+            initializeFollowUpConversation(llmQuery);
 
             // Note: #LLMOptions replacement now handled on server side
             currentQuestion = llmQuery;
@@ -2180,7 +3008,7 @@ function setupSpeechRecognition() {
                 questionTextarea.placeholder = "Listening for your question..."; // Update placeholder
             }
 
-            const announcement = 'Listening for your question...';
+            const announcement = "I'm listening.";
             console.log("Calling announce for question prompt...");
             try {
                 await announce(announcement, "system", false);
@@ -2266,6 +3094,7 @@ function setupQuestionRecognition() {
             try {
                 announce("Okay, processing: " + finalTranscript.trim() + ". Give me a moment.", "system", false);
                 currentQuestion = finalTranscript.trim().toLowerCase();
+                initializeFollowUpConversation(currentQuestion);
 
                 const summaryInstruction = SummaryOff
                 ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
@@ -2290,18 +3119,21 @@ function setupQuestionRecognition() {
                 const promptForLLM = `
                     Provide up to "${LLMOptions}" short, single-phrase options related to: "${currentQuestion}".
                     Do not include any introductory or concluding text.
+                    Each option should be a short, selectable next-step phrase for AAC use.
+                    Prefer concrete activity choices, clarifying choices, or preference choices.
                     Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-                    The "option" key should contain the FULL option text. If the option contains a question and answer, like a joke, the option contain the question and the answer.
+                    The "option" key should contain the FULL option text.
                     ${summaryInstruction}
                     The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
                     Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
                 `;
                 document.getElementById('loading-indicator').style.display = 'flex';
                 const options = await getLLMResponse(promptForLLM);
-                if (Array.isArray(options) && (options.length === 0 || options.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
-                    querytype = "question"; await generateLlmButtons(options);
+                const prioritizedOptions = prioritizeContextualOptions(options, currentQuestion, LLMOptions);
+                if (Array.isArray(prioritizedOptions) && (prioritizedOptions.length === 0 || prioritizedOptions.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
+                    querytype = "question"; await generateLlmButtons(prioritizedOptions);
                 } else {
-                    console.error("LLM response invalid:", options); announce("Unexpected response.", "system", false);
+                    console.error("LLM response invalid:", prioritizedOptions); announce("Unexpected response.", "system", false);
                     isRestartingKeyword = true; setupSpeechRecognition();
                 }
             } catch (error) {
@@ -3232,6 +4064,7 @@ async function createHomeButton() {
     homeButton.addEventListener('click', () => {
         activeOriginatingButtonText = null;
         activeLLMPromptForContext = null;
+        resetFollowUpConversation();
         localStorage.removeItem('llm_currentQueryType');
         localStorage.removeItem('llm_currentQuestion');
         localStorage.removeItem('llm_currentOptions');
@@ -3266,123 +4099,39 @@ async function generateLlmButtons(options) {
      const askAgainButtonColors = [ 'bg-yellow-500', 'border-yellow-700', 'hover:bg-yellow-600', 'hover:border-yellow-800', 'text-black', 'focus:ring-yellow-400' ];
      const goBackButtonColors = [ 'bg-gray-200', 'border-gray-400', 'hover:bg-gray-300', 'hover:border-gray-500', 'text-black', 'focus:ring-gray-300' ];
 
-    // Generate buttons with async symbol loading (throttled to prevent server overwhelm)
-    const buttonPromises = options.map(async (optionData, idx) => {
-        if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') { 
-            console.warn("Skipping invalid option data:", optionData); 
-            return null; 
+    // Build buttons immediately (text first), then hydrate images asynchronously.
+    const validButtons = [];
+    options.forEach((optionData) => {
+        if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') {
+            console.warn("Skipping invalid option data:", optionData);
+            return;
         }
+
         const button = document.createElement('button');
-        
-        // Add delay between requests to prevent server overwhelm (200ms per button for better spacing)
-        await new Promise(resolve => setTimeout(resolve, idx * 200));
-        
-        // Get optimized search term for better image matching (removes question words like "what", "who", etc.)
-        const optimizedSearchTerm = getOptimizedSearchTerm(optionData.summary, optionData.keywords);
-        console.log(`🔍 Image search optimization: "${optionData.summary}" → "${optimizedSearchTerm}"`);
-        
-        // Try to get symbol image first, fall back to pictogram if needed
-        let symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, optionData.keywords);
-        
-        if (!symbolImageUrl) {
-            console.warn(`🚨 LLM Option: No image found for "${optimizedSearchTerm}" (original: "${optionData.summary}")`);
-        }
-        
-        if (symbolImageUrl) {
-            // Create container with dedicated image area and text footer
-            const buttonContent = document.createElement('div');
-            buttonContent.style.position = 'relative';
-            buttonContent.style.width = '100%';
-            buttonContent.style.height = '100%';
-            buttonContent.style.display = 'flex';
-            buttonContent.style.flexDirection = 'column';
-            
-            // Image container (takes up most of button height)
-            const imageContainer = document.createElement('div');
-            imageContainer.style.flex = '1';
-            imageContainer.style.width = '100%';
-            imageContainer.style.overflow = 'hidden';
-            imageContainer.style.borderRadius = '8px 8px 0 0';
-            imageContainer.style.display = 'flex';
-            imageContainer.style.alignItems = 'center';
-            imageContainer.style.justifyContent = 'center';
-            
-            const imageElement = document.createElement('img');
-            imageElement.src = symbolImageUrl;
-            imageElement.alt = optionData.summary;
-            imageElement.style.width = '100%';
-            imageElement.style.height = '100%';
-            imageElement.style.objectFit = 'cover';
-            imageElement.onerror = () => {
-                console.warn(`Failed to load image for "${optionData.summary}" - using text-only display`);
-                // No emoji fallback - just hide the broken image
-                imageElement.style.display = 'none';
-            };
-            
-            // Text footer (overlays bottom of image)
-            const textFooter = document.createElement('div');
-            textFooter.style.height = '28px'; // Taller to accommodate 2 rows
-            textFooter.style.width = '100%';
-            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-            textFooter.style.color = 'white';
-            textFooter.style.display = 'flex';
-            textFooter.style.alignItems = 'center';
-            textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
-            textFooter.style.margin = '0';
-            textFooter.style.borderRadius = '0';
-            textFooter.style.position = 'absolute';
-            textFooter.style.bottom = '0';
-            textFooter.style.left = '0';
-            textFooter.style.right = '0';
-            
-            const textSpan = document.createElement('span');
-            textSpan.textContent = optionData.summary;
-            textSpan.style.fontSize = '0.7em';
-            textSpan.style.fontWeight = 'bold';
-            textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
-            textSpan.style.wordWrap = 'break-word';
-            textSpan.style.hyphens = 'auto';
-            textSpan.style.overflow = 'hidden';
-            textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
-            textSpan.style.webkitBoxOrient = 'vertical';
-            
-            imageContainer.appendChild(imageElement);
-            textFooter.appendChild(textSpan);
-            buttonContent.appendChild(imageContainer);
-            buttonContent.appendChild(textFooter);
-            button.appendChild(buttonContent);
-        } else {
-            // No image found - use text-only display (no emoji fallback)
-            button.textContent = optionData.summary;
-        }
-        
+        button.textContent = optionData.summary;
         button.dataset.option = optionData.option;
         button.dataset.speechPhrase = optionData.option;
-        // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
-        // The #gridContainer button CSS rules will handle the styling
         button.className = '';
-        
-        // Apply same edge-to-edge styling as regular buttons
-        button.style.padding = '0'; // Remove all padding
-        button.style.margin = '0'; // Remove all margin
-        button.style.border = 'none'; // Remove border
-        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
-        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
+        button.style.padding = '0';
+        button.style.margin = '0';
+        button.style.border = 'none';
+        button.style.position = 'relative';
+        button.style.overflow = 'hidden';
 
-        return { button, optionData };
+        validButtons.push({ button, optionData });
     });
-    
-    // Wait for all buttons to be created
-    const buttonResults = await Promise.all(buttonPromises);
-    const validButtons = buttonResults.filter(result => result !== null);
+
+    console.log(`🧩 generateLlmButtons: Prepared ${validButtons.length} immediate buttons`);
     const fragment = document.createDocumentFragment();
 
     if (querytype === 'jokes') {
         const homeButton = await createHomeButton();
         fragment.appendChild(homeButton);
+    }
+
+    if (querytype !== 'jokes') {
+        const homeButton = await createHomeButton();
+        gridContainer.appendChild(homeButton);
     }
     
     // Add event listeners and append buttons
@@ -3447,22 +4196,60 @@ async function generateLlmButtons(options) {
                 await announce(optionData.option, "system", true); // Use optionData.option directly
                 console.log("✅ Announcement finished for:", button.dataset.option);
 
-                console.log('🔄 About to reload page...');
-                // Clear the question display after announcement
-                // NOTE: Keep activeLLMPromptForContext intact for context-aware navigation (e.g., to freestyle)
-                const questionDisplay = document.getElementById('question-display');
-                if (questionDisplay) { questionDisplay.value = ''; }
-
                 if (querytype === 'jokes') {
                     window.location.href = 'gridpage.html?page=home';
                 } else {
-                    // Reload the page to go back to the initial state
-                    // Consider if this is always the desired behavior
-                    window.location.reload(true);
+                    addFollowUpSelection(optionData.option);
+
+                    const excludedOptionsText = currentOptions
+                        .map(opt => opt.option)
+                        .filter(text => typeof text === 'string' && text.trim() !== '')
+                        .join('; ');
+
+                    const followUpPrompt = buildFollowUpPrompt(excludedOptionsText);
+                    activeLLMPromptForContext = getConversationContextText();
+                    querytype = 'question';
+
+                    document.getElementById('loading-indicator').style.display = 'flex';
+                    const followUpOptions = await getLLMResponse(followUpPrompt);
+                    document.getElementById('loading-indicator').style.display = 'none';
+                    
+                    console.log(`📥 Received ${Array.isArray(followUpOptions) ? followUpOptions.length : 0} options from LLM`);
+                    
+                    // FILTER 1: Remove partner-interrogative patterns
+                    const filteredForUserPerspective = Array.isArray(followUpOptions)
+                        ? followUpOptions.filter(optionObj => {
+                            const optionText = typeof optionObj === 'object' ? optionObj.option : optionObj;
+                            const isInterrogative = isPartnerInterrogativePattern(optionText);
+                            if (isInterrogative) {
+                                console.warn('🚫 Filtered out partner-interrogative pattern:', optionText);
+                            }
+                            return !isInterrogative;
+                        })
+                        : followUpOptions;
+                    
+                    console.log(`✅ After interrogative filter: ${Array.isArray(filteredForUserPerspective) ? filteredForUserPerspective.length : 0} options remain`);
+                    
+                    const prioritizedFollowUpOptions = prioritizeContextualOptions(
+                        filteredForUserPerspective,
+                        getConversationContextText(),
+                        LLMOptions
+                    );
+                    const additiveFollowUpOptions = enforceAdditiveFollowUpOptions(prioritizedFollowUpOptions, LLMOptions);
+                    const partnerQuestionPrioritizedOptions = prioritizePartnerEngagementQuestions(additiveFollowUpOptions, LLMOptions, 4);
+
+                    if (Array.isArray(partnerQuestionPrioritizedOptions) && partnerQuestionPrioritizedOptions.length > 0) {
+                        await generateLlmButtons(partnerQuestionPrioritizedOptions);
+                    } else {
+                        console.warn('No follow-up options returned after selection.');
+                        announce("Sorry, I couldn't find follow-up options right now.", "system", false);
+                        startAuditoryScanning();
+                    }
                 }
 
             } catch (error) {
                  console.error("❌ Error during announcement or reload:", error);
+                 document.getElementById('loading-indicator').style.display = 'none';
                  // Optionally restart scanning here if announce fails
                  startAuditoryScanning();
             } finally {
@@ -3470,6 +4257,90 @@ async function generateLlmButtons(options) {
             }
         }, clickDebounceDelay)); // Apply debounce
         fragment.appendChild(button);
+    });
+
+    // Hydrate images after buttons are already visible to avoid blank states.
+    validButtons.forEach(({ button, optionData }, idx) => {
+        (async () => {
+            try {
+                await new Promise(resolve => setTimeout(resolve, idx * 200));
+                const optimizedSearchTerm = getOptimizedSearchTerm(optionData.summary, optionData.keywords);
+                console.log(`🔍 Image search optimization: "${optionData.summary}" → "${optimizedSearchTerm}"`);
+
+                const symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, optionData.keywords);
+                if (!symbolImageUrl || !button.isConnected) {
+                    if (!symbolImageUrl) {
+                        console.warn(`🚨 LLM Option: No image found for "${optimizedSearchTerm}" (original: "${optionData.summary}")`);
+                    }
+                    return;
+                }
+
+                const buttonContent = document.createElement('div');
+                buttonContent.style.position = 'relative';
+                buttonContent.style.width = '100%';
+                buttonContent.style.height = '100%';
+                buttonContent.style.display = 'flex';
+                buttonContent.style.flexDirection = 'column';
+
+                const imageContainer = document.createElement('div');
+                imageContainer.style.flex = '1';
+                imageContainer.style.width = '100%';
+                imageContainer.style.overflow = 'hidden';
+                imageContainer.style.borderRadius = '8px 8px 0 0';
+                imageContainer.style.display = 'flex';
+                imageContainer.style.alignItems = 'center';
+                imageContainer.style.justifyContent = 'center';
+
+                const imageElement = document.createElement('img');
+                imageElement.src = symbolImageUrl;
+                imageElement.alt = optionData.summary;
+                imageElement.style.width = '100%';
+                imageElement.style.height = '100%';
+                imageElement.style.objectFit = 'cover';
+                imageElement.onerror = () => {
+                    console.warn(`Failed to load image for "${optionData.summary}" - keeping text-only display`);
+                };
+
+                const textFooter = document.createElement('div');
+                textFooter.style.height = '28px';
+                textFooter.style.width = '100%';
+                textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                textFooter.style.color = 'white';
+                textFooter.style.display = 'flex';
+                textFooter.style.alignItems = 'center';
+                textFooter.style.justifyContent = 'center';
+                textFooter.style.padding = '2px 4px';
+                textFooter.style.margin = '0';
+                textFooter.style.borderRadius = '0';
+                textFooter.style.position = 'absolute';
+                textFooter.style.bottom = '0';
+                textFooter.style.left = '0';
+                textFooter.style.right = '0';
+
+                const textSpan = document.createElement('span');
+                textSpan.textContent = optionData.summary;
+                textSpan.style.fontSize = '0.7em';
+                textSpan.style.fontWeight = 'bold';
+                textSpan.style.textAlign = 'center';
+                textSpan.style.lineHeight = '1.1';
+                textSpan.style.wordWrap = 'break-word';
+                textSpan.style.hyphens = 'auto';
+                textSpan.style.overflow = 'hidden';
+                textSpan.style.display = '-webkit-box';
+                textSpan.style.webkitLineClamp = '2';
+                textSpan.style.webkitBoxOrient = 'vertical';
+
+                imageContainer.appendChild(imageElement);
+                textFooter.appendChild(textSpan);
+                buttonContent.appendChild(imageContainer);
+                buttonContent.appendChild(textFooter);
+
+                button.innerHTML = '';
+                button.appendChild(buttonContent);
+            } catch (error) {
+                console.warn(`LLM button image hydration failed for "${optionData.summary}":`, error);
+            }
+        })();
     });
     gridContainer.appendChild(fragment);
 
@@ -3566,37 +4437,46 @@ async function generateLlmButtons(options) {
                         .join("; ");
                     console.log("Excluding options:", excludedOptionsText);
 
-                    const summaryInstruction = SummaryOff
-                        ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
-                        : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
-                        // Set activeLLMPromptForContext to the original concise question before calling getLLMResponse
-                        activeLLMPromptForContext = currentQuestion;
-                        // activeOriginatingButtonText should still be set from the initial question or button click
-                        // that generated the current set of options.
-                    const prompt = `
-                        For the question "${currentQuestion}", provide new options.
-                        IMPORTANTLY, exclude the following options if possible: "${excludedOptionsText}".
-                        Return ONLY a numbered list of the new options. Do not include any introductory or concluding text.
-                        Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-                        ${summaryInstruction}
-                        The "option" key should contain the FULL option text. If the option contains a question and answer, like a joke, the option contain the question and the answer.
-                        The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
-                        Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
-                    `;
+                    activeLLMPromptForContext = getConversationContextText() || currentQuestion;
+                    const prompt = buildFollowUpPrompt(excludedOptionsText);
                     console.log("Sending prompt for 'Something Else' options:", prompt);
 
                     const response = await getLLMResponse(prompt); // Expects an array
+                    
+                    console.log(`📥 Received ${Array.isArray(response) ? response.length : 0} options from LLM (Something Else)`);
+                    
+                    // FILTER 1: Remove partner-interrogative patterns
+                    const filteredResponse = Array.isArray(response)
+                        ? response.filter(optionObj => {
+                            const optionText = typeof optionObj === 'object' ? optionObj.option : optionObj;
+                            const isInterrogative = isPartnerInterrogativePattern(optionText);
+                            if (isInterrogative) {
+                                console.warn('🚫 Filtered out partner-interrogative pattern:', optionText);
+                            }
+                            return !isInterrogative;
+                        })
+                        : response;
+                    
+                    console.log(`✅ After interrogative filter: ${Array.isArray(filteredResponse) ? filteredResponse.length : 0} options remain (Something Else)`);
+                    
+                    const prioritizedResponse = prioritizeContextualOptions(
+                        filteredResponse,
+                        getConversationContextText() || currentQuestion,
+                        LLMOptions
+                    );
+                    const additiveResponse = enforceAdditiveFollowUpOptions(prioritizedResponse, LLMOptions);
+                    const partnerQuestionPrioritizedResponse = prioritizePartnerEngagementQuestions(additiveResponse, LLMOptions, 4);
 
-                    if (Array.isArray(response)) {
-                        if (response.length > 0) {
-                            await generateLlmButtons(response); // This will restart scanning
+                    if (Array.isArray(partnerQuestionPrioritizedResponse)) {
+                        if (partnerQuestionPrioritizedResponse.length > 0) {
+                            await generateLlmButtons(partnerQuestionPrioritizedResponse); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (array response).");
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
                         }
-                    } else if (typeof response === 'string' && response.trim() !== '') { // Fallback for older string response
+                    } else if (typeof prioritizedResponse === 'string' && prioritizedResponse.trim() !== '') { // Fallback for older string response
                         console.warn("Received string response from getLLMResponse for 'Something Else', expected array. Processing as string.");
-                        const newOptions = response.split("\n").map(option => option.replace(/^\s*\d+[\.\)]?\s*|\s*\*+\s*|["']/g, '').trim()).filter(option => option !== "");
+                        const newOptions = prioritizedResponse.split("\n").map(option => option.replace(/^\s*\d+[\.\)]?\s*|\s*\*+\s*|["']/g, '').trim()).filter(option => option !== "");
                         if (newOptions.length > 0) {
                             const newOptionsObjects = newOptions.map(optText => ({ summary: optText, option: optText, keywords: [] }));
                             await generateLlmButtons(newOptionsObjects); // This will restart scanning
@@ -3605,7 +4485,7 @@ async function generateLlmButtons(options) {
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
                         }
                     } else {
-                        console.error("Unexpected or empty response type from getLLMResponse for 'Something Else':", response);
+                        console.error("Unexpected or empty response type from getLLMResponse for 'Something Else':", prioritizedResponse);
                         announce("Sorry, I received an unexpected response for more options.", "system", false);
                     }
                     } catch (error) {
@@ -3741,6 +4621,7 @@ async function generateLlmButtons(options) {
             stopAuditoryScanning();
             activeOriginatingButtonText = null; // Reset, as a new question will be asked
             activeLLMPromptForContext = null;
+            resetFollowUpConversation();
             announce('Okay, please ask your question again after the tone.', "system", false)
                 .then(() => { activeLLMPromptForContext = "User chose to ask question again."; })
                 .then(() => {
@@ -3764,17 +4645,12 @@ async function generateLlmButtons(options) {
         gridContainer.appendChild(askAgainButton);
     }
 
-    if (querytype !== 'jokes') {
-        const homeButton = await createHomeButton();
-        gridContainer.appendChild(homeButton);
-    }
-
 
     // --- Start Auditory Scanning ---
     if (gridContainer.childElementCount > 0) {
          console.log("Starting auditory scanning for generated LLM/special buttons.");
-        // activeLLMPromptForContext is already set by the function that called generateLlmButtons
-         startAuditoryScanning();
+         setupSpeechRecognition();
+            startOrWaitForScanning({ allowPrompt: false, source: 'generateLlmButtons' });
     } else { console.log("No buttons generated, not starting scanning."); }
 }
 
@@ -3792,7 +4668,6 @@ function setupKeyboardListener() {
             if (window.waitingForInitialSwitch) {
                 console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
                 window.waitingForInitialSwitch = false;
-                sessionStorage.setItem('bravoScanningStarted_grid', 'true');
                 startAuditoryScanning();
                 return;
             }
@@ -3855,7 +4730,6 @@ function startGamepadPolling() {
                 if (window.waitingForInitialSwitch) {
                     console.log('Initial switch detected (gamepad) - starting scanning on gridpage');
                     window.waitingForInitialSwitch = false;
-                    sessionStorage.setItem('bravoScanningStarted_grid', 'true');
                     startAuditoryScanning();
                     lastGamepadInputTime = now;
                     lastButtonState = currentButtonState;

@@ -271,13 +271,11 @@ def upload_to_firestore(directory_path, project_id, replace=False):
     directory = Path(directory_path)
     category = directory.parent.name  # e.g., bravo_buddy_006
     
-    # Build command
+    # Build command - bulk_import_bravo_images.py uses --path flag
     cmd = [
         "python3",
         "bulk_import_bravo_images.py",
-        str(directory),
-        category,
-        "--project", project_id
+        "--path", str(directory),
     ]
     
     if replace:
@@ -285,8 +283,13 @@ def upload_to_firestore(directory_path, project_id, replace=False):
     
     print(f"Running: {' '.join(cmd)}\n")
     
+    # Set GCP_PROJECT_ID env var so bulk_import picks up the right project
+    env = os.environ.copy()
+    if project_id:
+        env["GCP_PROJECT_ID"] = project_id
+    
     # Run the upload script
-    result = subprocess.run(cmd, cwd=Path(__file__).parent)
+    result = subprocess.run(cmd, cwd=Path(__file__).parent, env=env)
     
     if result.returncode == 0:
         print("\n✅ Upload completed successfully")

@@ -58,11 +58,41 @@ let currentUserBirthdate = null;
 let currentMood = '';
 let currentProfileImageData = null;
 let initialDataLoaded = false;
+let currentAiOptionOverrides = null;
+
+function getDefaultAiOptionOverrides() {
+    return {
+        exclusions: {
+            eatingByMouth: false,
+            eatingIndependently: false,
+            drinkingByMouth: false,
+            drinkingIndependently: false,
+            walkingIndependently: false,
+            toiletingIndependently: false,
+            readingIndependently: false,
+            foodAllergies: '',
+            environmentalAllergies: ''
+        },
+        inclusions: {
+            profanity: false,
+            adultTopics: false,
+            adultJokes: false,
+            religion: false,
+            politics: false
+        }
+    };
+}
 
 // Global state
 let currentFriendsFamily = { friends_family: [] };
 let editingPersonIndex = null;
 let editingGroupIndex = null;
+
+let aiOverridesModal = null;
+let openAiOverridesModalBtn = null;
+let cancelAiOverridesBtn = null;
+let saveAiOverridesBtn = null;
+let aiOverridesSaveStatus = null;
 
 // Make currentFriendsFamily available globally for interview system
 window.currentFriendsFamily = currentFriendsFamily;
@@ -130,6 +160,13 @@ async function initializePage() {
         currentProfileImage = document.getElementById('currentProfileImage');
         profileImageStatus = document.getElementById('profile-image-status');
 
+        // AI Option Overrides Elements
+        aiOverridesModal = document.getElementById('aiOverridesModal');
+        openAiOverridesModalBtn = document.getElementById('openAiOverridesModalBtn');
+        cancelAiOverridesBtn = document.getElementById('cancelAiOverridesBtn');
+        saveAiOverridesBtn = document.getElementById('saveAiOverridesBtn');
+        aiOverridesSaveStatus = document.getElementById('ai-overrides-save-status');
+
         // Event Listeners - Thread Groups functionality removed
 
         // Basic check for essential elements
@@ -195,6 +232,24 @@ async function initializePage() {
         }
         if (removeProfileImageBtn) {
             removeProfileImageBtn.addEventListener('click', removeProfileImage);
+        }
+
+        if (openAiOverridesModalBtn) {
+            openAiOverridesModalBtn.addEventListener('click', openAiOverridesModal);
+        }
+        if (cancelAiOverridesBtn) {
+            cancelAiOverridesBtn.addEventListener('click', closeAiOverridesModal);
+        }
+        if (saveAiOverridesBtn) {
+            saveAiOverridesBtn.addEventListener('click', saveAiOverridesOnly);
+        }
+
+        if (aiOverridesModal) {
+            aiOverridesModal.addEventListener('click', (e) => {
+                if (e.target === aiOverridesModal) {
+                    closeAiOverridesModal();
+                }
+            });
         }
 
         // Close custom image modal when clicking outside
@@ -431,10 +486,12 @@ async function loadUserInfo() {
         const userInfoData = await userInfoResponse.json();
         currentUserInfo = userInfoData.userInfo || '';
         currentUserName = userInfoData.name || '';
+        currentAiOptionOverrides = userInfoData.aiOptionOverrides || getDefaultAiOptionOverrides();
         userInfoTextarea.value = currentUserInfo;
         if (userName) {
             userName.value = currentUserName;
         }
+        renderAiOverridesToForm();
 
         // Load birthdate
         const birthdayResponse = await window.authenticatedFetch('/api/birthdays', {
@@ -598,7 +655,8 @@ async function saveUserInfoAndBirthday() {
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ 
                 userInfo: userInfo,
-                name: userNameValue
+                name: userNameValue,
+                aiOptionOverrides: collectAiOverridesFromForm()
             })
         });
         if (!userInfoResponse.ok) {
@@ -629,6 +687,116 @@ async function saveUserInfoAndBirthday() {
     } catch (error) {
         console.error("Error saving user info and birthday:", error);
         showStatus(infoSaveStatus, `Error saving: ${error.message}`, true, 5000);
+    }
+}
+
+function renderAiOverridesToForm() {
+    const overrides = currentAiOptionOverrides || getDefaultAiOptionOverrides();
+    const exclusions = overrides.exclusions || {};
+    const inclusions = overrides.inclusions || {};
+
+    const checkboxMap = {
+        ovr_excl_eatingByMouth: exclusions.eatingByMouth,
+        ovr_excl_eatingIndependently: exclusions.eatingIndependently,
+        ovr_excl_drinkingByMouth: exclusions.drinkingByMouth,
+        ovr_excl_drinkingIndependently: exclusions.drinkingIndependently,
+        ovr_excl_walkingIndependently: exclusions.walkingIndependently,
+        ovr_excl_toiletingIndependently: exclusions.toiletingIndependently,
+        ovr_excl_readingIndependently: exclusions.readingIndependently,
+        ovr_inc_profanity: inclusions.profanity,
+        ovr_inc_adultTopics: inclusions.adultTopics,
+        ovr_inc_adultJokes: inclusions.adultJokes,
+        ovr_inc_religion: inclusions.religion,
+        ovr_inc_politics: inclusions.politics
+    };
+
+    Object.entries(checkboxMap).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) element.checked = value === true;
+    });
+
+    const foodAllergiesInput = document.getElementById('ovr_excl_foodAllergies');
+    const environmentalAllergiesInput = document.getElementById('ovr_excl_environmentalAllergies');
+    if (foodAllergiesInput) foodAllergiesInput.value = exclusions.foodAllergies || '';
+    if (environmentalAllergiesInput) environmentalAllergiesInput.value = exclusions.environmentalAllergies || '';
+}
+
+function collectAiOverridesFromForm() {
+    return {
+        exclusions: {
+            eatingByMouth: !!document.getElementById('ovr_excl_eatingByMouth')?.checked,
+            eatingIndependently: !!document.getElementById('ovr_excl_eatingIndependently')?.checked,
+            drinkingByMouth: !!document.getElementById('ovr_excl_drinkingByMouth')?.checked,
+            drinkingIndependently: !!document.getElementById('ovr_excl_drinkingIndependently')?.checked,
+            walkingIndependently: !!document.getElementById('ovr_excl_walkingIndependently')?.checked,
+            toiletingIndependently: !!document.getElementById('ovr_excl_toiletingIndependently')?.checked,
+            readingIndependently: !!document.getElementById('ovr_excl_readingIndependently')?.checked,
+            foodAllergies: (document.getElementById('ovr_excl_foodAllergies')?.value || '').trim(),
+            environmentalAllergies: (document.getElementById('ovr_excl_environmentalAllergies')?.value || '').trim()
+        },
+        inclusions: {
+            profanity: !!document.getElementById('ovr_inc_profanity')?.checked,
+            adultTopics: !!document.getElementById('ovr_inc_adultTopics')?.checked,
+            adultJokes: !!document.getElementById('ovr_inc_adultJokes')?.checked,
+            religion: !!document.getElementById('ovr_inc_religion')?.checked,
+            politics: !!document.getElementById('ovr_inc_politics')?.checked
+        }
+    };
+}
+
+function openAiOverridesModal() {
+    if (!aiOverridesModal) return;
+    if (!currentAiOptionOverrides) {
+        currentAiOptionOverrides = getDefaultAiOptionOverrides();
+    }
+    renderAiOverridesToForm();
+    if (aiOverridesSaveStatus) aiOverridesSaveStatus.textContent = '';
+    aiOverridesModal.classList.remove('hidden');
+}
+
+function closeAiOverridesModal() {
+    if (!aiOverridesModal) return;
+    aiOverridesModal.classList.add('hidden');
+}
+
+async function saveAiOverridesOnly() {
+    const overridesToSave = collectAiOverridesFromForm();
+    currentAiOptionOverrides = overridesToSave;
+
+    if (aiOverridesSaveStatus) {
+        aiOverridesSaveStatus.textContent = 'Saving...';
+        aiOverridesSaveStatus.className = 'text-sm text-blue-600';
+    }
+
+    try {
+        const response = await window.authenticatedFetch('/api/user-info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userInfo: userInfoTextarea?.value || currentUserInfo || '',
+                name: userName?.value || currentUserName || '',
+                aiOptionOverrides: overridesToSave
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Save failed: ${response.status} ${errorText}`);
+        }
+
+        if (aiOverridesSaveStatus) {
+            aiOverridesSaveStatus.textContent = 'Overrides saved.';
+            aiOverridesSaveStatus.className = 'text-sm text-green-600';
+        }
+        setTimeout(() => {
+            closeAiOverridesModal();
+        }, 500);
+    } catch (error) {
+        console.error('Error saving AI overrides:', error);
+        if (aiOverridesSaveStatus) {
+            aiOverridesSaveStatus.textContent = `Error: ${error.message}`;
+            aiOverridesSaveStatus.className = 'text-sm text-red-600';
+        }
     }
 }
 
@@ -1299,7 +1467,8 @@ async function uploadProfileImage() {
     }
     
     if (!userName || !userName.value.trim()) {
-        showStatus(profileImageStatus, "Please enter a user name first", true, 3000);
+        alert('Please enter a user name and click "Save User Name, Info & Birthday" before uploading a profile picture.\n\nThe name must be saved first so the profile picture can be properly tagged.');
+        showStatus(profileImageStatus, "Please save a user name first", true, 5000);
         return;
     }
     
@@ -1316,6 +1485,12 @@ async function uploadProfileImage() {
         
         if (!response.ok) {
             const errorText = await response.text();
+            // Check for the server-side "name not set" error
+            if (response.status === 400 && errorText.includes('name')) {
+                alert('Please set a user name and click "Save User Name, Info & Birthday" before uploading a profile picture.\n\nThe name must be saved to the server first.');
+                showStatus(profileImageStatus, "Please save a user name first", true, 5000);
+                return;
+            }
             throw new Error(`Upload failed: ${response.status} ${errorText}`);
         }
         

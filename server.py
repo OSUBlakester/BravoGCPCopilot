@@ -107,6 +107,7 @@ import json
 import logging
 import time
 import datetime
+import copy
 import holidays
 import calendar # For calculating floating observances
 from datetime import date, timedelta, datetime as dt, timezone # Alias datetime to avoid conflict
@@ -1561,7 +1562,27 @@ DEFAULT_WAKE_WORD_NAME = "Friend" # Default name
 DEFAULT_USER_INFO = {
     "narrative": "Welcome to Bravo! This is your personal communication assistant. As you use the app, this section will contain information about you, your interests, communication preferences, and important personal details that help customize your experience. You can update this information anytime through the user info settings to make your communication more personalized and effective.",
     "currentMood": None,
-    "name": ""
+    "name": "",
+    "aiOptionOverrides": {
+        "exclusions": {
+            "eatingByMouth": False,
+            "eatingIndependently": False,
+            "drinkingByMouth": False,
+            "drinkingIndependently": False,
+            "walkingIndependently": False,
+            "toiletingIndependently": False,
+            "readingIndependently": False,
+            "foodAllergies": "",
+            "environmentalAllergies": ""
+        },
+        "inclusions": {
+            "profanity": False,
+            "adultTopics": False,
+            "adultJokes": False,
+            "religion": False,
+            "politics": False
+        }
+    }
 }
 DEFAULT_USER_CURRENT = {"location": "Unknown", "people": "None", "activity": "Idle", "loaded_at": None, "favorite_name": None, "saved_at": None}
 DEFAULT_COLUMNS = 10 # Default number of columns in the grid
@@ -1621,6 +1642,601 @@ DEFAULT_FRIENDS_FAMILY = []  # List of friends and family entries
 DEFAULT_DIARY: List[Dict] = [] # Diary is a list of entries
 DEFAULT_CHAT_HISTORY: List[Dict] = [] # Chat history is a list of entries
 DEFAULT_BUTTON_ACTIVITY_LOG: List[Dict] = [] # For button clicks
+
+
+def get_default_ai_option_overrides() -> Dict[str, Any]:
+    return copy.deepcopy(DEFAULT_USER_INFO["aiOptionOverrides"])
+
+
+def normalize_ai_option_overrides(raw_overrides: Any) -> Dict[str, Any]:
+    defaults = get_default_ai_option_overrides()
+    if not isinstance(raw_overrides, dict):
+        return defaults
+
+    exclusions = raw_overrides.get("exclusions") if isinstance(raw_overrides.get("exclusions"), dict) else {}
+    inclusions = raw_overrides.get("inclusions") if isinstance(raw_overrides.get("inclusions"), dict) else {}
+
+    exclusion_aliases: Dict[str, List[str]] = {
+        "eatingByMouth": ["eatingByMouth", "noEatingByMouth", "noEatingDrinkingByMouth"],
+        "drinkingByMouth": ["drinkingByMouth", "noDrinkingByMouth", "noEatingDrinkingByMouth"],
+        "eatingIndependently": ["eatingIndependently", "noEatingIndependently", "noEatingDrinkingIndependently"],
+        "drinkingIndependently": ["drinkingIndependently", "noDrinkingIndependently", "noEatingDrinkingIndependently"],
+        "walkingIndependently": ["walkingIndependently", "noWalkingIndependently"],
+        "toiletingIndependently": ["toiletingIndependently", "noToiletingIndependently"],
+        "readingIndependently": ["readingIndependently", "noReadingIndependently"],
+        "foodAllergies": ["foodAllergies", "allergiesFood", "food_allergies"],
+        "environmentalAllergies": ["environmentalAllergies", "allergiesEnvironmental", "environmental_allergies"]
+    }
+
+    inclusion_aliases: Dict[str, List[str]] = {
+        "profanity": ["profanity", "allowProfanity"],
+        "adultTopics": ["adultTopics", "allowAdultTopics"],
+        "adultJokes": ["adultJokes", "allowAdultJokes"],
+        "religion": ["religion", "allowReligion"],
+        "politics": ["politics", "allowPolitics"]
+    }
+
+    def _first_present_value(source: Dict[str, Any], keys: List[str], default_value: Any) -> Any:
+        for alias_key in keys:
+            if alias_key in source:
+                return source.get(alias_key)
+        return default_value
+
+    def _first_present_value_multi(sources: List[Dict[str, Any]], keys: List[str], default_value: Any) -> Any:
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            value = _first_present_value(source, keys, None)
+            if value is not None:
+                return value
+        return default_value
+
+    for key in defaults["exclusions"].keys():
+        aliases = exclusion_aliases.get(key, [key])
+        if key in ["foodAllergies", "environmentalAllergies"]:
+            value = _first_present_value_multi([exclusions, raw_overrides], aliases, defaults["exclusions"][key])
+            defaults["exclusions"][key] = value.strip() if isinstance(value, str) else ""
+        else:
+            value = _first_present_value_multi([exclusions, raw_overrides], aliases, defaults["exclusions"][key])
+            defaults["exclusions"][key] = bool(value)
+
+    for key in defaults["inclusions"].keys():
+        aliases = inclusion_aliases.get(key, [key])
+        value = _first_present_value_multi([inclusions, raw_overrides], aliases, defaults["inclusions"][key])
+        defaults["inclusions"][key] = bool(value)
+
+    return defaults
+
+
+def _extract_allergy_terms(raw_text: str) -> List[str]:
+    if not raw_text or not isinstance(raw_text, str):
+        return []
+    terms = re.split(r'[,\n;]+', raw_text)
+    return [term.strip().lower() for term in terms if term and term.strip()]
+
+
+def build_ai_option_overrides_prompt_block(overrides: Dict[str, Any]) -> str:
+    exclusions = overrides.get("exclusions", {})
+    inclusions = overrides.get("inclusions", {})
+
+    excluded_activity_flags = [
+        ("eatingByMouth", "Eating by mouth is not allowed."),
+        ("eatingIndependently", "Eating independently is not allowed."),
+        ("drinkingByMouth", "Drinking by mouth is not allowed."),
+        ("drinkingIndependently", "Drinking independently is not allowed."),
+        ("walkingIndependently", "Walking independently is not allowed."),
+        ("toiletingIndependently", "Independent toileting actions are not allowed."),
+        ("readingIndependently", "Independent reading actions are not allowed."),
+    ]
+
+    lines = ["=== AI OPTION OVERRIDES (HARD CONSTRAINTS) ==="]
+    for key, sentence in excluded_activity_flags:
+        if exclusions.get(key, False):
+            lines.append(f"- EXCLUDE: {sentence}")
+
+    food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
+    if food_allergy_terms:
+        lines.append(f"- EXCLUDE any food/drink references containing allergies: {', '.join(food_allergy_terms)}")
+
+    env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
+    if env_allergy_terms:
+        lines.append(f"- EXCLUDE environmental triggers containing: {', '.join(env_allergy_terms)}")
+
+    # Inclusion toggles represent explicit allowed topics.
+    if not inclusions.get("profanity", False):
+        lines.append("- EXCLUDE profanity.")
+    if not inclusions.get("adultTopics", False):
+        lines.append("- EXCLUDE adult/sexual topics.")
+    if not inclusions.get("adultJokes", False):
+        lines.append("- EXCLUDE adult jokes.")
+    if not inclusions.get("religion", False):
+        lines.append("- EXCLUDE religion topics.")
+    if not inclusions.get("politics", False):
+        lines.append("- EXCLUDE politics topics.")
+
+    lines.append("If unsure, prefer neutral, accessible, conversational options aligned with user ability constraints.")
+    return "\n".join(lines)
+
+
+def _extract_option_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return ""
+
+    if isinstance(item.get("option"), str):
+        return item.get("option", "")
+
+    for key, value in item.items():
+        if key in ["summary", "keywords"]:
+            continue
+        if isinstance(value, str):
+            return value
+
+    if isinstance(item.get("summary"), str):
+        return item.get("summary", "")
+    return ""
+
+
+def _build_option_search_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return ""
+
+    parts: List[str] = []
+    option_text = _extract_option_text(item)
+    if option_text:
+        parts.append(option_text)
+
+    summary_text = item.get("summary")
+    if isinstance(summary_text, str) and summary_text:
+        parts.append(summary_text)
+
+    keywords = item.get("keywords")
+    if isinstance(keywords, list):
+        parts.extend([str(keyword) for keyword in keywords if isinstance(keyword, (str, int, float))])
+
+    return " ".join(parts)
+
+
+def _contains_any_pattern(text: str, patterns: List[str]) -> bool:
+    if not text:
+        return False
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _prompt_requests_prioritized_profanity(prompt_text: str) -> bool:
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        return False
+    normalized = prompt_text.lower()
+    has_profanity_keyword = bool(re.search(r'\bprofanit(y|ies)\b|\bswear(ing| words?)?\b|\bcuss(ing| words?)?\b', normalized))
+    has_priority_keyword = bool(re.search(r'\bprioriti[sz]e\b|\bprefer\b|\bemphasize\b|\bfocus on\b|\binclude\b', normalized))
+    return has_profanity_keyword and has_priority_keyword
+
+
+def _contains_profanity_text(text: str) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    profanity_patterns = [r'\b(fuck|fucking|shit|damn|bitch|asshole|bastard|hell)\b']
+    return _contains_any_pattern(text.lower(), profanity_patterns)
+
+
+def _detect_requested_sentiment(prompt_text: str) -> Optional[str]:
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        return None
+
+    normalized = prompt_text.lower()
+
+    negative_prompt_patterns = [
+        r'\bdescribe\b[^\n]*\bsomething\s+negative\b',
+        r'\bnegative\b',
+        r'\bbad\b',
+        r'\bangry\b',
+        r'\bupset\b',
+        r'\bfrustrat',
+        r'\bterrible\b',
+        r'\bhorrible\b'
+    ]
+    positive_prompt_patterns = [
+        r'\bdescribe\b[^\n]*\bsomething\s+positive\b',
+        r'\bpositive\b',
+        r'\bgood\b',
+        r'\bhappy\b',
+        r'\bjoy\b',
+        r'\bgrateful\b',
+        r'\bawesome\b',
+        r'\bamazing\b'
+    ]
+
+    asks_negative = _contains_any_pattern(normalized, negative_prompt_patterns)
+    asks_positive = _contains_any_pattern(normalized, positive_prompt_patterns)
+
+    if asks_negative and not asks_positive:
+        return "negative"
+    if asks_positive and not asks_negative:
+        return "positive"
+    return None
+
+
+def _classify_text_sentiment(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return "neutral"
+
+    normalized = text.lower()
+    negative_patterns = [
+        r'\bawful\b', r'\bterrible\b', r'\bhorrible\b', r'\bbad\b', r'\bworst\b',
+        r'\bangry\b', r'\bmad\b', r'\bpissed\b', r'\bfrustrat', r'\bupset\b',
+        r'\bannoy', r'\bstress', r'\boverwhelm', r'\bmiserable\b', r'\bsucks?\b',
+        r'\bdisappoint', r'\bfurious\b', r'\birritat', r'\bdevastat', r'\btragic\b',
+        r'\bdisaster\b', r'\bnightmare\b', r'\bhate\b', r'\bdoom\b', r'\bcrap\b'
+    ]
+    positive_patterns = [
+        r'\bamazing\b', r'\bawesome\b', r'\bgreat\b', r'\bfantastic\b', r'\bwonderful\b',
+        r'\bhappy\b', r'\bjoy\b', r'\bthrilled\b', r'\becstatic\b', r'\bstoked\b',
+        r'\bdelight', r'\bover the moon\b', r'\bon cloud nine\b', r'\bbest\b', r'\bbrilliant\b',
+        r'\bincredible\b', r'\bphenomenal\b', r'\bspectacular\b', r'\bsensational\b', r'\bepic\b',
+        r'\boverjoy', r'\bmiracle\b', r'\bunbelievably good\b', r'\brad\b', r'\bholy cow\b'
+    ]
+
+    has_negative = _contains_any_pattern(normalized, negative_patterns)
+    has_positive = _contains_any_pattern(normalized, positive_patterns)
+
+    if has_negative and not has_positive:
+        return "negative"
+    if has_positive and not has_negative:
+        return "positive"
+    return "neutral"
+
+
+def _default_positive_profanity_options() -> List[Dict[str, Any]]:
+    return [
+        {
+            "option": "This is fucking amazing!",
+            "summary": "Fucking amazing",
+            "keywords": ["fucking", "amazing", "excited", "positive"]
+        },
+        {
+            "option": "I am so damn excited right now!",
+            "summary": "Damn excited",
+            "keywords": ["damn", "excited", "thrilled", "positive"]
+        }
+    ]
+
+
+def _default_negative_profanity_options() -> List[Dict[str, Any]]:
+    return [
+        {
+            "option": "This is fucking awful!",
+            "summary": "Fucking awful",
+            "keywords": ["fucking", "awful", "negative", "upset"]
+        },
+        {
+            "option": "This is so damn frustrating!",
+            "summary": "Damn frustrating",
+            "keywords": ["damn", "frustrating", "angry", "negative"]
+        }
+    ]
+
+
+def _dynamic_profanity_fallback_options(sentiment: Optional[str], requested_count: int = 3) -> List[Dict[str, Any]]:
+    import random
+
+    negative_pool: List[Dict[str, Any]] = [
+        {"option": "This is fucking awful!", "summary": "Fucking awful", "keywords": ["fucking", "awful", "negative", "upset"]},
+        {"option": "This is so damn frustrating!", "summary": "Damn frustrating", "keywords": ["damn", "frustrating", "angry", "negative"]},
+        {"option": "Holy shit, this is a disaster.", "summary": "Holy shit disaster", "keywords": ["holy shit", "disaster", "negative", "angry"]},
+        {"option": "What the hell, this is terrible.", "summary": "What the hell terrible", "keywords": ["hell", "terrible", "negative", "upset"]},
+        {"option": "This outcome is fucking ridiculous.", "summary": "Fucking ridiculous outcome", "keywords": ["fucking", "ridiculous", "negative", "frustrated"]},
+        {"option": "Damn, this really sucks.", "summary": "Damn this sucks", "keywords": ["damn", "sucks", "negative", "annoyed"]},
+        {"option": "I am pissed off about this.", "summary": "Pissed off", "keywords": ["pissed", "angry", "negative", "frustrated"]},
+        {"option": "This is a shit situation.", "summary": "Shit situation", "keywords": ["shit", "situation", "negative", "stress"]}
+    ]
+
+    positive_pool: List[Dict[str, Any]] = [
+        {"option": "This is fucking amazing!", "summary": "Fucking amazing", "keywords": ["fucking", "amazing", "excited", "positive"]},
+        {"option": "I am so damn excited right now!", "summary": "Damn excited", "keywords": ["damn", "excited", "thrilled", "positive"]},
+        {"option": "Holy shit, this is incredible!", "summary": "Holy shit incredible", "keywords": ["holy shit", "incredible", "positive", "joy"]},
+        {"option": "What the hell, this is awesome!", "summary": "What the hell awesome", "keywords": ["hell", "awesome", "positive", "excited"]},
+        {"option": "This is so damn good!", "summary": "So damn good", "keywords": ["damn", "good", "positive", "happy"]},
+        {"option": "I am fucking thrilled about this!", "summary": "Fucking thrilled", "keywords": ["fucking", "thrilled", "positive", "excited"]}
+    ]
+
+    selected_pool = negative_pool if sentiment == "negative" else positive_pool
+    if sentiment is None:
+        selected_pool = negative_pool + positive_pool
+
+    if not selected_pool:
+        return []
+
+    count = max(1, min(requested_count, len(selected_pool)))
+    rng = random.SystemRandom()
+    return rng.sample(selected_pool, count)
+
+
+def _default_negative_options() -> List[Dict[str, Any]]:
+    return [
+        {"option": "This is really upsetting.", "summary": "Really upsetting", "keywords": ["upsetting", "negative", "sad", "frustrated"]},
+        {"option": "I feel overwhelmed and stressed.", "summary": "Overwhelmed and stressed", "keywords": ["overwhelmed", "stressed", "negative", "anxious"]},
+        {"option": "This is disappointing.", "summary": "Disappointing", "keywords": ["disappointing", "negative", "letdown", "sad"]},
+        {"option": "I am really frustrated right now.", "summary": "Really frustrated", "keywords": ["frustrated", "negative", "angry", "annoyed"]},
+        {"option": "This feels terrible.", "summary": "Feels terrible", "keywords": ["terrible", "negative", "bad", "upset"]},
+        {"option": "I am upset about this.", "summary": "Upset about this", "keywords": ["upset", "negative", "sad", "angry"]},
+        {"option": "This is a mess.", "summary": "This is a mess", "keywords": ["mess", "negative", "chaotic", "bad"]},
+        {"option": "I hate this outcome.", "summary": "Hate this outcome", "keywords": ["hate", "negative", "angry", "frustrated"]},
+        {"option": "This is going badly.", "summary": "Going badly", "keywords": ["badly", "negative", "problem", "stress"]},
+        {"option": "I feel defeated right now.", "summary": "Feel defeated", "keywords": ["defeated", "negative", "discouraged", "sad"]},
+        {"option": "This is exhausting.", "summary": "This is exhausting", "keywords": ["exhausting", "negative", "drained", "tired"]},
+        {"option": "I am angry about this situation.", "summary": "Angry about this", "keywords": ["angry", "negative", "mad", "frustrated"]},
+        {"option": "This is unacceptable.", "summary": "This is unacceptable", "keywords": ["unacceptable", "negative", "serious", "upset"]},
+        {"option": "I feel stuck and frustrated.", "summary": "Stuck and frustrated", "keywords": ["stuck", "frustrated", "negative", "annoyed"]},
+        {"option": "This is honestly horrible.", "summary": "Honestly horrible", "keywords": ["horrible", "negative", "awful", "upset"]}
+    ]
+
+
+def _default_positive_options() -> List[Dict[str, Any]]:
+    return [
+        {"option": "This is amazing!", "summary": "This is amazing", "keywords": ["amazing", "positive", "excited", "happy"]},
+        {"option": "I feel so happy right now!", "summary": "So happy", "keywords": ["happy", "positive", "joy", "excited"]},
+        {"option": "This is wonderful news!", "summary": "Wonderful news", "keywords": ["wonderful", "positive", "great", "joy"]},
+        {"option": "I am thrilled about this!", "summary": "Thrilled about this", "keywords": ["thrilled", "positive", "excited", "delighted"]},
+        {"option": "Everything feels perfect.", "summary": "Feels perfect", "keywords": ["perfect", "positive", "great", "satisfied"]},
+        {"option": "This is fantastic!", "summary": "This is fantastic", "keywords": ["fantastic", "positive", "excited", "awesome"]},
+        {"option": "I am overjoyed!", "summary": "I am overjoyed", "keywords": ["overjoyed", "positive", "joy", "delight"]},
+        {"option": "This is excellent news!", "summary": "Excellent news", "keywords": ["excellent", "positive", "great", "happy"]},
+        {"option": "I feel grateful and happy.", "summary": "Grateful and happy", "keywords": ["grateful", "happy", "positive", "joy"]},
+        {"option": "This is so exciting!", "summary": "So exciting", "keywords": ["exciting", "positive", "thrilled", "happy"]}
+    ]
+
+
+def _extend_with_fallbacks(options: List[Any], fallback_items: List[Dict[str, Any]], max_options: int) -> List[Any]:
+    if len(options) >= max_options:
+        return options[:max(1, max_options)]
+
+    existing_texts = set()
+    for item in options:
+        existing_texts.add(_extract_option_text(item).strip().lower())
+
+    for candidate in fallback_items:
+        candidate_text = _extract_option_text(candidate).strip().lower()
+        if candidate_text and candidate_text not in existing_texts:
+            options.append(candidate)
+            existing_texts.add(candidate_text)
+        if len(options) >= max_options:
+            break
+
+    return options[:max(1, max_options)]
+
+
+def apply_prompt_sentiment_alignment(
+    options: List[Any],
+    user_prompt: str,
+    max_options: int = DEFAULT_LLM_OPTIONS
+) -> List[Any]:
+    if not isinstance(options, list):
+        return options
+
+    requested_sentiment = _detect_requested_sentiment(user_prompt)
+    if requested_sentiment not in ["negative", "positive"]:
+        return options[:max(1, max_options)]
+
+    exact_match: List[Any] = []
+    neutral: List[Any] = []
+    opposite: List[Any] = []
+
+    for item in options:
+        text = _build_option_search_text(item)
+        sentiment = _classify_text_sentiment(text)
+        if sentiment == requested_sentiment:
+            exact_match.append(item)
+        elif sentiment == "neutral":
+            neutral.append(item)
+        else:
+            opposite.append(item)
+
+    aligned = exact_match + neutral
+    if requested_sentiment == "negative":
+        aligned = _extend_with_fallbacks(aligned, _default_negative_options(), max_options)
+    elif requested_sentiment == "positive":
+        aligned = _extend_with_fallbacks(aligned, _default_positive_options(), max_options)
+
+    logging.info(
+        "Prompt sentiment alignment. requested=%s counts={match:%s, neutral:%s, opposite_filtered:%s, returned:%s}",
+        requested_sentiment,
+        len(exact_match),
+        len(neutral),
+        len(opposite),
+        len(aligned)
+    )
+
+    return aligned[:max(1, max_options)]
+
+
+def apply_inclusion_preference_bias(
+    options: List[Any],
+    overrides: Dict[str, Any],
+    user_prompt: str,
+    max_options: int = DEFAULT_LLM_OPTIONS
+) -> List[Any]:
+    if not isinstance(options, list) or not options:
+        return options
+
+    inclusions = overrides.get("inclusions", {}) if isinstance(overrides, dict) else {}
+    allow_profanity = bool(inclusions.get("profanity", False))
+    prompt_requests_profanity = _prompt_requests_prioritized_profanity(user_prompt)
+    effective_allow_profanity = allow_profanity or prompt_requests_profanity
+
+    if not effective_allow_profanity:
+        if prompt_requests_profanity:
+            logging.info("Inclusion bias skipped profanity prioritization because overrides.inclusions.profanity is false.")
+        return options[:max(1, max_options)]
+
+    if not prompt_requests_profanity:
+        return options[:max(1, max_options)]
+
+    if not allow_profanity and prompt_requests_profanity:
+        logging.info("Inclusion bias using explicit prompt request for profanity prioritization even though overrides.inclusions.profanity is false.")
+
+    requested_sentiment = _detect_requested_sentiment(user_prompt)
+
+    profane_sentiment_match: List[Any] = []
+    profane_neutral: List[Any] = []
+    profane_other: List[Any] = []
+    non_profane_sentiment_match: List[Any] = []
+    non_profane_neutral: List[Any] = []
+    non_profane_other: List[Any] = []
+
+    for item in options:
+        search_text = _build_option_search_text(item)
+        has_profanity = _contains_profanity_text(search_text)
+        option_sentiment = _classify_text_sentiment(search_text)
+        sentiment_matches = requested_sentiment is None or option_sentiment == requested_sentiment
+
+        if has_profanity and sentiment_matches:
+            profane_sentiment_match.append(item)
+        elif has_profanity and option_sentiment == "neutral":
+            profane_neutral.append(item)
+        elif has_profanity:
+            profane_other.append(item)
+        elif sentiment_matches:
+            non_profane_sentiment_match.append(item)
+        elif option_sentiment == "neutral":
+            non_profane_neutral.append(item)
+        else:
+            non_profane_other.append(item)
+
+    if not profane_sentiment_match:
+        dynamic_count = 3 if max_options >= 6 else 2
+        profane_sentiment_match.extend(_dynamic_profanity_fallback_options(requested_sentiment, dynamic_count))
+
+    combined = profane_sentiment_match + profane_neutral + non_profane_sentiment_match + non_profane_neutral
+
+    if requested_sentiment is None:
+        combined = combined + profane_other + non_profane_other
+
+    if requested_sentiment == "negative":
+        combined = _extend_with_fallbacks(combined, _default_negative_options(), max_options)
+    elif requested_sentiment == "positive":
+        combined = _extend_with_fallbacks(combined, _default_positive_options(), max_options)
+
+    logging.info(
+        "Inclusion bias applied. requested_sentiment=%s, counts={profane_match:%s, profane_neutral:%s, profane_other:%s, non_profane_match:%s, non_profane_neutral:%s, non_profane_other:%s}",
+        requested_sentiment,
+        len(profane_sentiment_match),
+        len(profane_neutral),
+        len(profane_other),
+        len(non_profane_sentiment_match),
+        len(non_profane_neutral),
+        len(non_profane_other)
+    )
+
+    return combined[:max(1, max_options)]
+
+
+def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -> Optional[str]:
+    if not option_text:
+        return None
+
+    normalized_text = option_text.lower()
+    exclusions = overrides.get("exclusions", {})
+    inclusions = overrides.get("inclusions", {})
+
+    # Broad oral-intake restrictions
+    broad_eating_patterns = [
+        r'\beat\b', r'\beating\b', r'\bmeal\b', r'\blunch\b', r'\bdinner\b', r'\bbreakfast\b', r'\bsnack\b',
+        r'\bfood\b', r'\bbite\b', r'\bchew\b', r'\bswallow\b', r'\bget (a|some)?\s*snack\b', r'\bgrab (a|some)?\s*snack\b'
+    ]
+    broad_drinking_patterns = [
+        r'\bdrink\b', r'\bdrinking\b', r'\bsip\b', r'\bgulp\b', r'\bwater\b', r'\bjuice\b', r'\bcoffee\b', r'\btea\b', r'\bsoda\b',
+        r'\bget (a|some)?\s*drink\b', r'\bgrab (a|some)?\s*drink\b', r'\bpour (a|my|your)?\s*drink\b'
+    ]
+
+    if exclusions.get("eatingByMouth", False) and _contains_any_pattern(normalized_text, broad_eating_patterns):
+        return "excluded_activity:eatingByMouth"
+    if exclusions.get("drinkingByMouth", False) and _contains_any_pattern(normalized_text, broad_drinking_patterns):
+        return "excluded_activity:drinkingByMouth"
+
+    # Independent restrictions should block explicitly self-directed consumption actions.
+    independent_eating_patterns = [
+        r'\beat by myself\b', r'\beat by yourself\b', r'\bindependently\s+eat\b', r'\bfeed myself\b', r'\bfeed yourself\b',
+        r'\bmake (my|your) (food|meal)\b', r'\bget (a|some)?\s*snack\b', r'\bgrab (a|some)?\s*snack\b', r'\bget food\b'
+    ]
+    independent_drinking_patterns = [
+        r'\bdrink by myself\b', r'\bdrink by yourself\b', r'\bget (myself|yourself)?\s*(a|some)?\s*drink\b',
+        r'\bpour (my|your)?\s*drink\b', r'\bgrab (a|some)?\s*drink\b'
+    ]
+
+    if exclusions.get("eatingIndependently", False) and _contains_any_pattern(normalized_text, independent_eating_patterns):
+        return "excluded_activity:eatingIndependently"
+    if exclusions.get("drinkingIndependently", False) and _contains_any_pattern(normalized_text, independent_drinking_patterns):
+        return "excluded_activity:drinkingIndependently"
+
+    exclusion_patterns = {
+        "walkingIndependently": [r'\bwalk\b', r'\bwalking\b', r'\bgo for a walk\b', r'\bstroll\b', r'\bhike\b'],
+        "toiletingIndependently": [r'\btoilet\b', r'\bbathroom\b', r'\brestroom\b', r'\bpotty\b', r'\bpee\b', r'\bpoop\b'],
+        "readingIndependently": [r'\bread\b', r'\breading\b', r'\bread a book\b', r'\bbook\b']
+    }
+
+    for key, patterns in exclusion_patterns.items():
+        if exclusions.get(key, False) and _contains_any_pattern(normalized_text, patterns):
+            return f"excluded_activity:{key}"
+
+    food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
+    for term in food_allergy_terms:
+        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+            return f"food_allergy:{term}"
+
+    env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
+    for term in env_allergy_terms:
+        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+            return f"environmental_allergy:{term}"
+
+    topic_patterns = {
+        "profanity": [r'\b(fuck|shit|damn|bitch|asshole|bastard)\b'],
+        "adultTopics": [r'\b(sex|sexual|porn|nude|naked|erotic|orgasm)\b'],
+        "adultJokes": [r'\b(dirty joke|adult joke|nsfw joke|sexual joke)\b'],
+        "religion": [r'\b(god|jesus|christian|church|bible|allah|islam|hindu|buddh)\b'],
+        "politics": [r'\b(politic|election|president|senate|congress|democrat|republican|vote)\b']
+    }
+
+    for inclusion_key, patterns in topic_patterns.items():
+        if not inclusions.get(inclusion_key, False) and _contains_any_pattern(normalized_text, patterns):
+            return f"blocked_topic:{inclusion_key}"
+
+    return None
+
+
+def enforce_ai_option_overrides(options: List[Any], overrides: Dict[str, Any], max_options: int = DEFAULT_LLM_OPTIONS) -> List[Any]:
+    if not isinstance(options, list):
+        return options
+
+    filtered: List[Any] = []
+    removed_reasons: Dict[str, int] = {}
+
+    logging.info(f"AI override enforcement active. Exclusions={overrides.get('exclusions', {})}, Inclusions={overrides.get('inclusions', {})}")
+
+    for item in options:
+        option_text = _build_option_search_text(item)
+        reason = _violates_ai_option_overrides(option_text, overrides)
+        if reason:
+            removed_reasons[reason] = removed_reasons.get(reason, 0) + 1
+            continue
+        filtered.append(item)
+
+    if removed_reasons:
+        logging.info(f"AI override filter removed options: {removed_reasons}")
+    else:
+        logging.info("AI override filter removed 0 options.")
+
+    if len(filtered) == 0:
+        fallback_options = [
+            {"option": "Tell me more about that.", "summary": "Tell me more", "keywords": ["talk", "more", "help"]},
+            {"option": "What do you think about that?", "summary": "What do you think", "keywords": ["question", "think", "talk"]},
+            {"option": "Can we talk about another idea?", "summary": "Another idea", "keywords": ["talk", "idea", "another"]}
+        ]
+        return fallback_options[:max(1, min(max_options, len(fallback_options)))]
+
+    return filtered[:max(1, max_options)]
 
 # AI-extracted narrative from chat history
 DEFAULT_CHAT_DERIVED_NARRATIVE = {
@@ -1809,6 +2425,8 @@ Analyze the provided context to create helpful, personalized suggestions."""
         if context_data["user_info"]:
             user_narrative = context_data['user_info'].get('narrative', 'Not available')
             context_parts.append(f"=== PRIMARY USER PROFILE (MOST IMPORTANT) ===\n{user_narrative}\n\n⚠️  REMEMBER: This user profile should be the foundation for ALL responses. Personal details, family, interests, and characteristics mentioned here are the most important context.\n")
+            overrides = normalize_ai_option_overrides(context_data["user_info"].get("aiOptionOverrides", {}))
+            context_parts.append(build_ai_option_overrides_prompt_block(overrides) + "\n")
         
         # Additional supporting context (stable data only)
         if context_data["friends_family"]:
@@ -3431,6 +4049,14 @@ async def get_llm_response_endpoint(
 
     # Get user's settings to determine LLM provider and options
     user_settings = await load_settings_from_file(account_id, aac_user_id)
+    user_info_doc = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy()
+    )
+    ai_option_overrides = normalize_ai_option_overrides(user_info_doc.get("aiOptionOverrides", {}))
+    logging.info(f"Loaded AI option overrides for /llm {account_id}/{aac_user_id}: {ai_option_overrides}")
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
     vocabulary_level = user_settings.get("vocabularyLevel", "functional")
@@ -3513,7 +4139,8 @@ IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND p
 - Do not forget commas between array elements
 
 Return ONLY valid JSON - no other text before or after the JSON array."""
-    final_user_query = f"{user_prompt_content}\n\n{json_format_instructions}"
+    ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+    final_user_query = f"{user_prompt_content}\n\n{ai_override_prompt_block}\n\n{json_format_instructions}"
 
     llm_response_json_str = ""
 
@@ -3801,7 +4428,19 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             logging.error(f"Logic Error: After processing, extracted LLM options were not a list: {type(extracted_options_list)} - Content: {llm_response_json_str}")
             raise HTTPException(status_code=500, detail="Internal server error: Failed to extract LLM options as a list.")
 
-        return JSONResponse(content=extracted_options_list)
+        enforced_options = enforce_ai_option_overrides(extracted_options_list, ai_option_overrides, llm_options_value)
+        sentiment_aligned_options = apply_prompt_sentiment_alignment(
+            enforced_options,
+            user_prompt_content,
+            llm_options_value
+        )
+        biased_options = apply_inclusion_preference_bias(
+            sentiment_aligned_options,
+            ai_option_overrides,
+            user_prompt_content,
+            llm_options_value
+        )
+        return JSONResponse(content=biased_options)
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -5511,6 +6150,8 @@ async def get_current_events(request: Request, current_ids: Annotated[Dict[str, 
 class PlayAudioRequest(BaseModel):
     text: str
     routing_target: Optional[RoutingTarget] = "default"
+    voice_name_override: Optional[str] = None
+    speech_rate_override: Optional[int] = Field(None, gt=49, lt=401)
 
 
 
@@ -5526,8 +6167,8 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
         user_settings = await load_settings_from_file(account_id, aac_user_id) # Load settings
 
         # Use settings, falling back to global defaults if setting is missing
-        voice_to_use = user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
-        rate_to_use = user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
+        voice_to_use = request.voice_name_override or user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
+        rate_to_use = request.speech_rate_override or user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
 
         logging.info(f"Synthesizing speech for account {account_id} user {aac_user_id} with text: '{request.text[:50]}...' for routing target: {request.routing_target}")
 
@@ -7888,7 +8529,8 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         "userInfo": user_info_content_dict.get("narrative", ""),
         "currentMood": user_info_content_dict.get("currentMood"),
         "name": user_info_content_dict.get("name", ""),
-        "profileImageUrl": user_info_content_dict.get("profileImageUrl")
+        "profileImageUrl": user_info_content_dict.get("profileImageUrl"),
+        "aiOptionOverrides": normalize_ai_option_overrides(user_info_content_dict.get("aiOptionOverrides", {}))
     }
     
     # Debug: log what name we are returning
@@ -7970,6 +8612,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     avatar_config = request.get("avatarConfig")  # Add support for avatar configuration
     user_name = request.get("name", "")  # Add support for user name
     profile_image_url = request.get("profileImageUrl")  # Add support for profile image URL
+    ai_option_overrides = request.get("aiOptionOverrides")
     
     # Debug: log what name we received and extracted
     logging.warning(f"🔍 BACKEND SAVE DEBUG - Name received in request: '{request.get('name', 'NOT_FOUND')}', extracted name: '{user_name}'")
@@ -7980,6 +8623,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     logging.warning(f"👤 Avatar config: {avatar_config}")
     logging.warning(f"👤 User name: {user_name}")
     logging.warning(f"🖼️ Profile image URL: {profile_image_url}")
+    logging.warning(f"🛡️ AI option overrides provided: {ai_option_overrides is not None}")
     
     # Log the raw request for debugging
     logging.warning(f"🔍 Raw request data: {request}")
@@ -8003,6 +8647,8 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         existing_data["avatarConfig"] = avatar_config
     if profile_image_url:
         existing_data["profileImageUrl"] = profile_image_url
+    if ai_option_overrides is not None:
+        existing_data["aiOptionOverrides"] = normalize_ai_option_overrides(ai_option_overrides)
     
     existing_data["updated_at"] = dt.now().isoformat()
     
@@ -8033,7 +8679,12 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         except Exception as cache_error:
             logging.error(f"❌ Failed to invalidate cache for {account_id}/{aac_user_id}: {cache_error}", exc_info=True)
         
-        response_data = {"narrative": user_info, "currentMood": current_mood, "name": user_name}
+        response_data = {
+            "narrative": user_info,
+            "currentMood": current_mood,
+            "name": user_name,
+            "aiOptionOverrides": normalize_ai_option_overrides(existing_data.get("aiOptionOverrides", {}))
+        }
         if avatar_config:
             response_data["avatarConfig"] = avatar_config
         
@@ -17325,30 +17976,37 @@ async def upload_mti_file(
             ]
             extractor_path = next((p for p in extractor_candidates if os.path.exists(p)), None)
 
-            if not extractor_path:
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "Failed to parse MTI file: extractor not found. "
-                        f"Checked: {', '.join(extractor_candidates)}"
-                    )
+            parsed_data = None
+
+            if extractor_path:
+                # Match dev behavior: when extractor exists, use it directly and fail if it errors.
+                # Silent fallback can change page naming/navigation semantics.
+                module_name = "extract_mti_to_json_runtime"
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+
+                spec = importlib.util.spec_from_file_location(module_name, extractor_path)
+                if spec is None or spec.loader is None:
+                    raise HTTPException(status_code=500, detail="Failed to load MTI extractor")
+
+                extractor = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(extractor)
+
+                parsed_data = extractor.extract_mti_file(tmp_path)
+                if not parsed_data:
+                    raise HTTPException(status_code=500, detail="Failed to parse MTI file: extractor returned no data")
+            else:
+                # Compatibility fallback only when extractor file is truly absent.
+                logging.warning(
+                    "MTI extractor script not found. Checked: %s. Falling back to AccentMTIParser.",
+                    ", ".join(extractor_candidates)
                 )
+                from accent_mti_parser import AccentMTIParser
 
-            # Always load a fresh copy to ensure the latest parsing logic is used
-            module_name = "extract_mti_to_json_runtime"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-
-            spec = importlib.util.spec_from_file_location(module_name, extractor_path)
-            if spec is None or spec.loader is None:
-                raise HTTPException(status_code=500, detail="Failed to load MTI extractor")
-
-            extractor = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(extractor)
-
-            parsed_data = extractor.extract_mti_file(tmp_path)
-            if not parsed_data:
-                raise HTTPException(status_code=500, detail="Failed to parse MTI file: extractor returned no data")
+                parser = AccentMTIParser()
+                parsed_data = parser.parse_file(tmp_path)
+                if not parsed_data:
+                    raise HTTPException(status_code=500, detail="Failed to parse MTI file: parser returned no data")
 
             # Sanitize button text in parsed data
             for page_id, page_data in parsed_data.get("pages", {}).items():

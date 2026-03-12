@@ -53,6 +53,7 @@ const interfaceAuditoryInput = document.getElementById('interfaceAuditory');
 const interfaceTapInput = document.getElementById('interfaceTap');
 const SummaryOffInput = document.getElementById('SummaryOff');
 const enablePictogramsInput = document.getElementById('enablePictograms');
+const disableTapPictogramsInput = document.getElementById('disableTapPictograms');
 const enableSightWordsInput = document.getElementById('enableSightWords');
 const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const autoCleanInput = document.getElementById('autoClean');
@@ -230,6 +231,7 @@ async function loadSettings() {
         if (enableMoodSelectionInput) { enableMoodSelectionInput.checked = currentSettings.enableMoodSelection || false; }
         // if (useTapInterfaceInput) { useTapInterfaceInput.checked = currentSettings.useTapInterface || false; } // Removed from UI
         if (enablePictogramsInput) { enablePictogramsInput.checked = currentSettings.enablePictograms !== false; }
+        if (disableTapPictogramsInput) { disableTapPictogramsInput.checked = currentSettings.disableTapPictograms || false; }
         if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; }
         if (waitForSwitchToScanInput) { waitForSwitchToScanInput.checked = currentSettings.waitForSwitchToScan || false; }
         if (enableSightWordsInput) { enableSightWordsInput.checked = currentSettings.enableSightWords !== false; }
@@ -306,6 +308,7 @@ async function saveSettings() {
     const newEnableMoodSelection = enableMoodSelectionInput.checked;
     // const newUseTapInterface = useTapInterfaceInput.checked; // Removed from UI
     const newEnablePictograms = enablePictogramsInput ? enablePictogramsInput.checked : true;
+    const newDisableTapPictograms = disableTapPictogramsInput ? disableTapPictogramsInput.checked : false;
     const newScanningOff = ScanningOffInput ? ScanningOffInput.checked : false;
     const newWaitForSwitchToScan = waitForSwitchToScanInput ? waitForSwitchToScanInput.checked : false;
     const newEnableSightWords = enableSightWordsInput.checked;
@@ -403,6 +406,7 @@ async function saveSettings() {
         enableMoodSelection: newEnableMoodSelection,
         useTapInterface: newUseTapInterface,
         enablePictograms: newEnablePictograms,
+        disableTapPictograms: newDisableTapPictograms,
         enableSightWords: newEnableSightWords,
         sightWordGradeLevel: newSightWordGradeLevel,
         selected_tts_voice_name: newSelectedTtsVoice,
