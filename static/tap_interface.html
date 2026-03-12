@@ -37,8 +37,8 @@
 
         #app-container {
             width: 100%;
-            max-width: 1200px;
-            height: calc(100vh - 40px);
+            max-width: 1800px;
+            height: min(calc((100vh - 40px) * 1.25), 100vh);
             background-color: #ffffff;
             border-radius: 24px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
@@ -78,9 +78,32 @@
             display: flex;
             flex-direction: column;
             height: 100%;
+            width: min(1700px, calc(100% - 12px));
+            margin: 0 auto;
             padding: 10px;
             gap: 10px;
             overflow: hidden;
+            align-items: stretch;
+        }
+
+        .tap-content-wrapper {
+            width: 100%;
+            margin: 0;
+            align-self: stretch;
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .tap-content-wrapper > .speech-history-container,
+        .tap-content-wrapper > .main-grid {
+            width: 100%;
+            max-width: 100%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         /* Removed top-bar styles as we removed the top bar */
@@ -102,10 +125,13 @@
 
         /* Speech History Section */
         .speech-history-container {
-            margin: 10px;
+            margin: 0;
             display: flex;
             flex-direction: column;
             gap: 5px;
+            width: 100%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         .speech-history-container label {
@@ -123,14 +149,15 @@
 
         .build-space-textarea {
             flex: 1;
-            padding: 8px;
+            padding: 6px 8px;
             border: 1px solid #ddd;
             border-radius: 6px;
-            font-size: 0.8em;
+            font-size: 0.75em;
             resize: none;
             background-color: #f9f9f9;
             transition: border-color 0.3s ease;
-            min-height: 36px;
+            min-height: 34px;
+            height: 34px;
         }
 
         .build-space-textarea:focus {
@@ -141,15 +168,15 @@
 
         .control-buttons {
             display: flex;
-            gap: 8px;
+            gap: 4px;
             align-items: stretch;
         }
 
         .control-btn {
             flex: 1;
-            min-width: 81px;
+            min-width: 40px;
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 12px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.2s ease;
             display: flex;
@@ -159,7 +186,7 @@
             padding: 0;
             position: relative;
             overflow: hidden;
-            height: 70px;
+            height: 34px;
             box-shadow: 
                 0 4px 8px -2px rgba(50, 50, 93, 0.15), 
                 0 2px 5px -2px rgba(0, 0, 0, 0.2);
@@ -182,30 +209,68 @@
             align-items: center;
             justify-content: center;
             width: 100%;
-            font-size: 1.8em;
+            font-size: 1em;
             color: white;
         }
 
         .control-btn-label {
-            width: 100%;
-            background-color: rgba(0, 0, 0, 0.85);
-            backdrop-filter: blur(4px);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 4px;
-            font-size: 8px;
-            font-weight: 600;
-            min-height: 24px;
+            display: none;
         }
 
         .speak-btn {
             background: linear-gradient(145deg, #10B981, #059669);
+            border: 2px solid rgba(255, 255, 255, 0.8);
         }
 
         .speak-btn:hover {
             background: linear-gradient(145deg, #059669, #047857);
+        }
+
+        .wizard-speak-btn {
+            background: linear-gradient(145deg, #8B5CF6, #7C3AED);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .wizard-speak-btn:hover {
+            background: linear-gradient(145deg, #7C3AED, #6D28D9);
+        }
+
+        .preview-btn {
+            background: linear-gradient(145deg, #0ea5e9, #0284c7);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .preview-btn:hover {
+            background: linear-gradient(145deg, #0284c7, #0369a1);
+        }
+
+        .preview-btn.preview-toggle-active {
+            background: linear-gradient(145deg, #f59e0b, #d97706);
+            border-color: rgba(255, 255, 255, 0.95);
+            box-shadow:
+                0 0 0 2px rgba(245, 158, 11, 0.35),
+                0 6px 14px -2px rgba(217, 119, 6, 0.45),
+                inset 0 1px 0 rgba(255, 255, 255, 0.95);
+        }
+
+        /* Make first two action buttons 50% wider than standard control buttons */
+        #speak-build-btn,
+        #speak-build-autoclean-btn {
+            flex: 1.5 1 0;
+            min-width: 60px;
+        }
+
+        .option-button.preview-selected {
+            transform: translateY(-2px);
+            border: 3px solid #0ea5e9;
+            box-shadow:
+                0 0 0 3px rgba(14, 165, 233, 0.25),
+                0 12px 20px -5px rgba(14, 165, 233, 0.35),
+                inset 0 1px 0 rgba(255, 255, 255, 1);
+        }
+
+        .option-button.preview-selected:hover {
+            background: linear-gradient(145deg, #f0f9ff, #e0f2fe);
         }
 
         .backspace-btn {
@@ -309,36 +374,47 @@
         .main-grid {
             flex: 1;
             display: grid;
-            grid-template-columns: 1.5fr 9fr; /* Increased Categories column by 20% */
-            gap: 10px;
+            grid-template-columns: 1.35fr 8.65fr;
+            gap: 8px;
             min-height: 0;
             height: 100%;
+            width: 100%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         .categories-column {
             display: flex;
             flex-direction: column;
-            gap: 15px; /* Increased gap for better spacing */
+            gap: 8px;
             grid-row: 1 / -1;
             overflow-y: auto;
             overflow-x: hidden;
             max-height: 100%;
-            padding: 15px; /* Increased padding */
-            padding-bottom: 100px; /* Increased buffer for scrolling */
+            padding: 8px;
+            padding-bottom: 60px;
             background-color: #cbd5e1; /* Darker gray background to separate from others */
             border-radius: 12px; /* Rounded corners */
         }
 
+        .categories-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            width: 100%;
+        }
+
         .category-button {
             flex: 0 0 auto; /* Fixed size, don't grow/shrink */
-            height: 110px; /* Match Phrases and Words buttons */
+            height: 78px;
             width: 100%;
             
             background: linear-gradient(145deg, #ffffff, #f0f0f0); /* Light button face */
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 16px; /* Match others */
+            border-radius: 12px; /* Reduced ~25% */
             
-            font-size: 1.1em;
+            font-size: 0.83em;
             font-weight: 600;
             color: #333;
             cursor: pointer;
@@ -358,7 +434,13 @@
             padding: 0; /* Remove padding to allow image to fill */
             position: relative;
             overflow: hidden;
-            margin-bottom: 5px; /* Explicit margin to ensure separation */
+            margin-bottom: 0;
+        }
+
+        .categories-content .category-button {
+            width: 75%;
+            margin-left: 0;
+            margin-right: 0;
         }
 
         .category-button:hover {
@@ -388,11 +470,11 @@
             gap: 0px;
             flex: 1;
             overflow-y: auto;
-            padding-right: 5px;
+            align-items: stretch;
+            padding: 0 8px 80px 8px;
             scrollbar-width: thin;
             scrollbar-color: #ccc #f0f0f0;
             height: 100%;
-            padding-bottom: 150px; /* Increased buffer for scrolling */
         }
 
         .llm-static-options {
@@ -419,7 +501,7 @@
         /* Section Headers */
         .section-header {
             background: rgba(255, 255, 255, 0.9);
-            padding: 6px 12px;
+            padding: 4px 9px;
             border-radius: 8px;
             margin: 0;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -427,7 +509,7 @@
 
         .section-header h3 {
             margin: 0;
-            font-size: 0.88em;
+            font-size: 0.66em;
             color: #333;
             font-weight: 600;
             display: inline-flex;
@@ -436,7 +518,7 @@
         }
 
         .section-header i {
-            margin-right: 6.4px;
+            margin-right: 4.8px;
             color: #667eea;
         }
 
@@ -445,10 +527,10 @@
             width: 100%;
             background: linear-gradient(145deg, #ffffff, #f0f0f0);
             border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 12px;
-            padding: 10px 12px;
+            border-radius: 9px;
+            padding: 8px 9px;
             margin: 0;
-            font-size: 0.9em;
+            font-size: 0.68em;
             font-weight: 600;
             color: #333;
             cursor: pointer;
@@ -481,7 +563,7 @@
         }
 
         .categories-header-btn i {
-            margin-right: 6px;
+            margin-right: 4px;
             color: #667eea;
         }
 
@@ -610,10 +692,15 @@
             flex-direction: column;
             margin: 0;
             padding: 0;
+            width: 100%;
+            max-width: 100%;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         .phrases-section {
             flex: 0 0 auto; /* Don't grow, just take needed space */
+            margin-top: 8px;
             margin-bottom: 0;
             transition: all 0.3s ease; /* Smooth transition when resizing */
         }
@@ -627,23 +714,25 @@
         .llm-static-options {
             display: grid;
             /* Grid columns and rows will be set dynamically via JS */
-            grid-auto-rows: 110px; /* Fixed height to match Freestyle section */
-            gap: 16px; /* Match gap of Freestyle section */
+            grid-auto-rows: 102px;
+            gap: 12px;
             width: 100%;
             margin: 0;
-            padding: 12px; /* Match padding of Freestyle section */
+            padding: 9px;
+            justify-content: center;
             /* Removed min-height to prevent empty rows */
         }
 
         .freestyle-options {
             display: grid;
             /* Grid columns will be set dynamically via JS */
-            grid-auto-rows: 110px; /* Fixed height */
-            gap: 16px; /* Increased gap to prevent touching */
+            grid-auto-rows: 102px;
+            gap: 12px;
             width: 100%;
             height: 100%;
             margin: 0;
-            padding: 12px; /* Increased padding */
+            padding: 9px;
+            justify-content: center;
             overflow-y: auto;
         }
 
@@ -749,9 +838,14 @@
 
         /* Options Grid Container - Full Height */
         .options-grid-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            flex: 1;
             height: 100%;
             overflow-y: auto;
-            padding: 10px;
+            align-items: stretch;
+            padding: 0 8px 80px 8px;
             background-color: #e5e7eb; /* Darker gray background for better contrast */
             border-radius: 12px; /* Rounded corners for the container */
             scrollbar-width: thin;
@@ -836,8 +930,8 @@
             }
             
             .category-button {
-                min-width: 120px;
-                padding: 10px;
+                min-width: 90px;
+                padding: 8px;
             }
             
             .options-grid-container {
@@ -1337,35 +1431,48 @@
 
     <!-- Main Application -->
     <div class="container" id="mainApp">
+        <div class="tap-content-wrapper">
         <!-- Speech History Section -->
         <div class="speech-history-container">
             <label for="build-space">Speech History:</label>
             <div class="speech-history-row">
                 <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
                 <div class="control-buttons">
-                    <button id="speak-build-btn" class="control-btn speak-btn">
+                    <button id="speak-build-btn" class="control-btn speak-btn" title="Speak exactly as written" aria-label="Speak exactly as written">
                         <div class="control-btn-icon">
                             <i class="fas fa-volume-up"></i>
                         </div>
                         <div class="control-btn-label">Speak</div>
                     </button>
-                    <button id="backspace-build-btn" class="control-btn backspace-btn">
+                    <button id="speak-build-autoclean-btn" class="control-btn wizard-speak-btn" title="Auto Clean and speak" aria-label="Auto Clean and speak">
+                        <div class="control-btn-icon">
+                            <i class="fas fa-wand-magic-sparkles"></i>
+                        </div>
+                        <div class="control-btn-label">Auto Clean Speak</div>
+                    </button>
+                    <button id="backspace-build-btn" class="control-btn backspace-btn" title="Backspace" aria-label="Backspace">
                         <div class="control-btn-icon">
                             <i class="fas fa-backspace"></i>
                         </div>
                         <div class="control-btn-label">Backspace</div>
                     </button>
-                    <button id="clear-text-btn" class="control-btn clear-text-btn">
+                    <button id="clear-text-btn" class="control-btn clear-text-btn" title="Clear text" aria-label="Clear text">
                         <div class="control-btn-icon">
                             <i class="fas fa-eraser"></i>
                         </div>
                         <div class="control-btn-label">Clear Text</div>
                     </button>
-                    <button id="reset-btn" class="control-btn reset-btn">
+                    <button id="reset-btn" class="control-btn reset-btn" title="Reset" aria-label="Reset">
                         <div class="control-btn-icon">
                             <i class="fas fa-redo"></i>
                         </div>
                         <div class="control-btn-label">Reset</div>
+                    </button>
+                    <button id="preview-toggle-btn" class="control-btn preview-btn" title="Preview options before selecting" aria-label="Preview options before selecting" aria-pressed="false">
+                        <div class="control-btn-icon">
+                            <i class="fas fa-ear-listen"></i>
+                        </div>
+                        <div class="control-btn-label">Preview</div>
                     </button>
                 </div>
             </div>
@@ -1419,6 +1526,7 @@
                 </div>
             </div>
         </div>
+        </div>
         
         <!-- Status Message -->
         <div id="statusMessage" class="status-message">Ready</div>
@@ -1427,6 +1535,9 @@
 
     <!-- Sight Word Service -->
     <script src="/static/sight-word-service.js"></script>
+    
+    <!-- Tap Interface Follow-up Conversation Logic -->
+    <script src="/static/tap-follow-up-logic.js"></script>
 
     <script>
         // Authentication variables (same pattern as gridpage)
@@ -1448,6 +1559,13 @@
         let currentPhraseOptions = []; // Track current phrase options for exclusion
         let currentWordOptions = []; // Track current word options for exclusion
 
+        // Follow-up conversation tracking (like gridpage)
+        let tapFollowUpConversation = {
+            originalQuestion: null,
+            originalCategory: null,
+            selectedPhrases: []
+        };
+
         // Wake Word Variables (from gridpage)
         let wakeWordInterjection = "hey";
         let wakeWordName = "friend";  // Default should match gridpage
@@ -1461,9 +1579,16 @@
 
         // User Settings (loaded from server)
         let SummaryOff = false; // Default summary state
-        let enablePictograms = true; // Always enabled for Tap Interface
+        let enablePictograms = true; // Controlled by disableTapPictograms for Tap Interface
+        let disableTapPictograms = false; // When true, Tap Interface is text-only (no images, no sight-word formatting)
         let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
         let currentSpeechRate = 180; // Default words-per-minute
+        let applicationVolume = 8; // Default application volume (0-10 scale)
+        const SYSTEM_PREVIEW_VOICE_NAME = 'en-US-Neural2-A';
+        const PREVIEW_OPTION_SELECTED_CLASS = 'preview-selected';
+        let previewModeEnabled = false;
+        let previewPendingButton = null;
+        let previewPendingKey = null;
 
         // Note: Using Firestore image lookup instead of emoji pictograms
 
@@ -1490,6 +1615,8 @@
         const freestyleOptions = document.getElementById('freestyleOptions');
         const buildSpace = document.getElementById('build-space');
         const speakBuildBtn = document.getElementById('speak-build-btn');
+        const speakBuildAutoCleanBtn = document.getElementById('speak-build-autoclean-btn');
+        const previewToggleBtn = document.getElementById('preview-toggle-btn');
         const backspaceBuildBtn = document.getElementById('backspace-build-btn');
         const clearTextBtn = document.getElementById('clear-text-btn');
         const resetBtn = document.getElementById('reset-btn');
@@ -1508,6 +1635,63 @@
             }
         }
 
+        function clearPreviewSelection() {
+            if (previewPendingButton && previewPendingButton.isConnected) {
+                previewPendingButton.classList.remove(PREVIEW_OPTION_SELECTED_CLASS);
+            }
+            previewPendingButton = null;
+            previewPendingKey = null;
+        }
+
+        function syncPreviewToggleVisualState() {
+            if (!previewToggleBtn) return;
+            previewToggleBtn.classList.toggle('preview-toggle-active', previewModeEnabled);
+            previewToggleBtn.setAttribute('aria-pressed', previewModeEnabled ? 'true' : 'false');
+            previewToggleBtn.title = previewModeEnabled
+                ? 'Preview is ON - first tap previews, second tap selects'
+                : 'Preview is OFF';
+        }
+
+        function setPreviewMode(enabled) {
+            previewModeEnabled = !!enabled;
+            if (!previewModeEnabled) {
+                clearPreviewSelection();
+            }
+            syncPreviewToggleVisualState();
+        }
+
+        async function handlePreviewInteraction(buttonElement, speechText, optionType = 'option') {
+            if (!previewModeEnabled) {
+                return { proceed: true, alreadyAnnounced: false };
+            }
+
+            const previewKey = `${optionType}:${speechText}`;
+            const isConfirmingSameButton = previewPendingButton === buttonElement && previewPendingKey === previewKey;
+
+            if (isConfirmingSameButton) {
+                clearPreviewSelection();
+                await announce(speechText, 'system', false, {
+                    voiceNameOverride: currentTtsVoiceName || SYSTEM_PREVIEW_VOICE_NAME,
+                    speechRateOverride: currentSpeechRate,
+                    volumeMultiplier: 1.0
+                });
+                return { proceed: true, alreadyAnnounced: true };
+            }
+
+            clearPreviewSelection();
+            previewPendingButton = buttonElement;
+            previewPendingKey = previewKey;
+            buttonElement.classList.add(PREVIEW_OPTION_SELECTED_CLASS);
+
+            await announce(speechText, 'system', false, {
+                voiceNameOverride: SYSTEM_PREVIEW_VOICE_NAME,
+                speechRateOverride: currentSpeechRate,
+                volumeMultiplier: 0.5
+            });
+
+            return { proceed: false, alreadyAnnounced: true };
+        }
+
         function getWakeWordDisplay() {
             const interjection = (wakeWordInterjection || "hey").charAt(0).toUpperCase() + (wakeWordInterjection || "hey").slice(1);
             const name = (wakeWordName || "friend").charAt(0).toUpperCase() + (wakeWordName || "friend").slice(1);
@@ -1516,6 +1700,14 @@
 
         function getReadyMessage() {
             return `Ready - Say "${getWakeWordDisplay()}" to ask a question or make a comment`;
+        }
+
+        function isTapTextOnlyMode() {
+            return disableTapPictograms === true;
+        }
+
+        function isTapSightWord(text) {
+            return !isTapTextOnlyMode() && typeof window.isSightWord === 'function' && window.isSightWord(text);
         }
 
         // Extract main keyword from a phrase for image matching
@@ -1618,9 +1810,14 @@
             if (!text || text.trim() === '') {
                 return null;
             }
+
+            // Hard gate: no images anywhere in Tap Interface when text-only mode is enabled
+            if (!enablePictograms || isTapTextOnlyMode()) {
+                return null;
+            }
             
             // Check if this text is a sight word - if so, force text-only display (no images)
-            if (window.isSightWord && window.isSightWord(text)) {
+            if (isTapSightWord(text)) {
                 console.log(`🔤 Tap interface sight word detected: "${text}" - using text-only display`);
                 return null;
             }
@@ -2447,12 +2644,10 @@
                 console.log('SummaryOff setting (FORCED FALSE for Tap):', SummaryOff);
                 
                 // Load Pictogram setting
-                // enablePictograms = settings.enablePictograms === true;
-                // console.log('enablePictograms setting:', enablePictograms, 'Raw value:', settings.enablePictograms);
-                
-                // Force enable for Tap Interface
-                console.log('🔧 DEBUG: Forcing enablePictograms to true for Tap Interface');
-                enablePictograms = true;
+                disableTapPictograms = settings.disableTapPictograms === true;
+                enablePictograms = !disableTapPictograms;
+                console.log('disableTapPictograms setting:', disableTapPictograms);
+                console.log('Tap Interface pictogram mode:', enablePictograms ? 'enabled' : 'disabled (text-only mode)');
                 
                 // Load TTS settings
                 if (settings && typeof settings.speech_rate === 'number' && !isNaN(settings.speech_rate)) {
@@ -2463,6 +2658,11 @@
                 if (settings && typeof settings.selected_tts_voice_name === 'string' && settings.selected_tts_voice_name.trim()) {
                     currentTtsVoiceName = settings.selected_tts_voice_name;
                     console.log(`TTS Voice Name loaded: "${currentTtsVoiceName}"`);
+                }
+
+                if (settings && typeof settings.applicationVolume === 'number' && !isNaN(settings.applicationVolume)) {
+                    applicationVolume = Math.max(0, Math.min(10, Number(settings.applicationVolume)));
+                    console.log(`Application volume loaded: ${applicationVolume}/10`);
                 }
                 
                 // Load Wake Word parts
@@ -2533,7 +2733,6 @@
             const freestyleOptions = document.getElementById('freestyleOptions');
             
             if (llmStaticOptions && freestyleOptions) {
-                // Use full gridColumns for both phrases and words sections (same sizing)
                 const phraseColumns = gridColumns;
                 const wordColumns = gridColumns;
                 
@@ -2560,13 +2759,9 @@
         
         // Regenerate phrase options using stored context with exclusion
         async function regeneratePhraseOptions() {
-            if (!currentPhrasePrompt) {
-                console.warn('No current phrase prompt stored for regeneration');
-                return;
-            }
-            
             try {
-                console.log('🔄 Regenerating phrase options with prompt:', currentPhrasePrompt);
+                console.log('🔄 Regenerating phrase options');
+                console.log('🔄 Conversation context:', tapFollowUpConversation);
                 console.log('🔄 Excluding current options:', currentPhraseOptions);
                 
                 // Show loading state
@@ -2584,9 +2779,53 @@
                     .filter(text => typeof text === 'string' && text.trim() !== '')
                     .join('; ');
                 
-                // Generate new options with exclusion
-                const options = await generateGridpageLLMOptionsWithExclusion(currentPhrasePrompt, LLMOptions, excludedOptionsText);
-                renderCategoryOptions(options);
+                let options = [];
+                
+                // Check if we have conversation context - use follow-up logic
+                if (tapFollowUpConversation.selectedPhrases.length > 0) {
+                    console.log('🔄 Using follow-up prompt with conversation context');
+                    const followUpPrompt = buildFollowUpPromptForTap(excludedOptionsText);
+                    
+                    const requestBody = {
+                        count: LLMOptions,
+                        prompt: followUpPrompt,
+                        response_format: 'json'
+                    };
+                    
+                    const response = await authenticatedFetch('/llm', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const rawOptions = await response.json();
+                    const normalizedOptions = normalizeTapLlmOptions(rawOptions);
+                    
+                    // Apply all filters
+                    const filteredOptions = Array.isArray(normalizedOptions)
+                        ? normalizedOptions.filter(opt => !isPartnerInterrogativePattern(opt?.option))
+                        : normalizedOptions;
+                    const prioritizedOptions = prioritizeContextualOptionsTap(filteredOptions, getTapConversationContextText(), LLMOptions);
+                    const additiveOptions = enforceAdditiveFollowUpOptionsTap(prioritizedOptions, LLMOptions);
+                    options = prioritizePartnerEngagementQuestionsTap(additiveOptions, LLMOptions, 4);
+                    
+                } else if (currentPhrasePrompt) {
+                    // No conversation context - use original prompt with exclusion
+                    console.log('🔄 Using original prompt with exclusion:', currentPhrasePrompt);
+                    options = await generateGridpageLLMOptionsWithExclusion(currentPhrasePrompt, LLMOptions, excludedOptionsText);
+                } else {
+                    console.error('No prompt available for regeneration');
+                    updateStatusMessage('Error: No context for regeneration');
+                    return;
+                }
+                
+                currentPhraseOptions = options;
+                renderCategoryOptions(options, true); // Defer images
+                setTimeout(() => loadImagesForPhrases(options), 50);
                 
             } catch (error) {
                 console.error('Error regenerating phrase options:', error);
@@ -2798,11 +3037,34 @@
             // Build space controls
             speakBuildBtn.addEventListener('click', () => {
                 enableSpeechSynthesis(); // Enable on first user gesture
-                speakBuildSpace();
+                clearPreviewSelection();
+                speakBuildSpace(false);
             });
-            backspaceBuildBtn.addEventListener('click', backspaceBuildSpace);
-            clearTextBtn.addEventListener('click', clearTextOnly);
-            resetBtn.addEventListener('click', clearBuildSpace);
+            if (speakBuildAutoCleanBtn) {
+                speakBuildAutoCleanBtn.addEventListener('click', () => {
+                    enableSpeechSynthesis(); // Enable on first user gesture
+                    clearPreviewSelection();
+                    speakBuildSpace(true);
+                });
+            }
+            if (previewToggleBtn) {
+                previewToggleBtn.addEventListener('click', () => {
+                    enableSpeechSynthesis();
+                    setPreviewMode(!previewModeEnabled);
+                });
+            }
+            backspaceBuildBtn.addEventListener('click', () => {
+                clearPreviewSelection();
+                backspaceBuildSpace();
+            });
+            clearTextBtn.addEventListener('click', () => {
+                clearPreviewSelection();
+                clearTextOnly();
+            });
+            resetBtn.addEventListener('click', () => {
+                clearPreviewSelection();
+                clearBuildSpace();
+            });
             
             // Modal controls
             modalClose.addEventListener('click', closeModal);
@@ -2813,6 +3075,8 @@
             // Add click listeners to enable speech synthesis on any user interaction
             document.addEventListener('click', enableSpeechSynthesis, { once: true });
             document.addEventListener('touchstart', enableSpeechSynthesis, { once: true });
+
+            syncPreviewToggleVisualState();
         }
 
         // Generate word options with exclusion (like freestyle page)
@@ -2947,6 +3211,15 @@
 
         async function loadInitialPhrases() {
             console.log('⏱️ loadInitialPhrases: Starting at:', Date.now());
+            
+            // Reset conversation context when loading initial phrases
+            console.log('💬 Resetting conversation context for initial phrases');
+            tapFollowUpConversation = {
+                originalQuestion: null,
+                originalCategory: null,
+                selectedPhrases: []
+            };
+            
             try {
                 // Generate generic conversation starters and common phrases
                 const genericPrompt = "Generate general conversation starters and common communication phrases for everyday social interactions";
@@ -3052,6 +3325,11 @@
             // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
             if (phraseTexts.length > 0) {
                 try {
+                    // Ensure cache is initialized
+                    if (!window.symbolImageCache) {
+                        window.symbolImageCache = new Map();
+                    }
+                    
                     console.log(`📦 Batch searching local library for ${phraseTexts.length} phrases...`);
                     const startTime = performance.now();
                     const batchResults = await batchSearchLocalImageLibrary(phraseTexts);
@@ -3132,6 +3410,11 @@
             // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
             if (wordTexts.length > 0) {
                 try {
+                    // Ensure cache is initialized
+                    if (!window.symbolImageCache) {
+                        window.symbolImageCache = new Map();
+                    }
+                    
                     console.log(`📦 Batch searching local library for ${wordTexts.length} words...`);
                     const startTime = performance.now();
                     const batchResults = await batchSearchLocalImageLibrary(wordTexts);
@@ -3241,6 +3524,10 @@
         }
 
         function applyImageToButton(btn, imageUrl, text) {
+            if (isTapTextOnlyMode() || !enablePictograms) {
+                return;
+            }
+
             // Create image + text layout
             btn.innerHTML = '';
             const buttonContent = document.createElement('div');
@@ -3319,7 +3606,7 @@
                 categoryBtn.className = 'category-button';
                 
                 // Check if this is a sight word - if so, apply special styling and skip images
-                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                const isSightWord = isTapSightWord(button.label);
                 
                 // Only apply custom background if specified in config, otherwise let CSS handle it
                 if (button.background_color && button.background_color !== '#FFFFFF') {
@@ -3471,7 +3758,7 @@
                 const modalBtn = document.createElement('button');
                 modalBtn.className = 'categories-modal-button';
                 
-                const isSightWord = window.isSightWord && window.isSightWord(button.label);
+                const isSightWord = isTapSightWord(button.label);
                 
                 if (button.background_color && button.background_color !== '#FFFFFF') {
                     modalBtn.style.backgroundColor = button.background_color;
@@ -3629,6 +3916,14 @@
                 window.location.href = '/static/games.html';
                 return;
             }
+            
+            // Reset conversation context when changing categories
+            console.log('💬 Resetting conversation context for new category');
+            tapFollowUpConversation = {
+                originalQuestion: currentQuestion || null,
+                originalCategory: category.label,
+                selectedPhrases: []
+            };
             
             // Update active state
             document.querySelectorAll('.category-button').forEach(btn => {
@@ -4141,6 +4436,7 @@
             console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0, 'Defer Images:', deferImages);
             console.log('renderCategoryOptions called with:', options);
             console.log('llmStaticOptions element:', llmStaticOptions);
+            clearPreviewSelection();
             
             if (!llmStaticOptions) {
                 console.error('llmStaticOptions element not found!');
@@ -4278,7 +4574,7 @@
                     }
                     
                     // Check if displayText is a sight word - if so, skip image loading
-                    const isSightWord = window.isSightWord && window.isSightWord(displayText);
+                    const isSightWord = isTapSightWord(displayText);
                     
                     // Add Firestore image support (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
@@ -4358,6 +4654,11 @@
                     
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
+                        const previewDecision = await handlePreviewInteraction(btn, speechText, 'phrase');
+                        if (!previewDecision.proceed) {
+                            return;
+                        }
+
                         // Reset status message after first button click following a question
                         if (activeQuestionAsked) {
                             activeQuestionAsked = false;
@@ -4366,7 +4667,104 @@
                         
                         addToSpeech(speechText);
                         // Announce the speech text when phrase is selected
-                        await announce(speechText, "system", true);
+                        if (!previewDecision.alreadyAnnounced) {
+                            await announce(speechText, "system", true);
+                        }
+                        
+                        // ========== FOLLOW-UP CONVERSATION LOGIC ==========
+                        console.log('💬 Tap phrase selected, generating follow-up options:', speechText);
+                        
+                        // Initialize conversation context if needed
+                        if (tapFollowUpConversation.selectedPhrases.length === 0) {
+                            if (currentQuestion) {
+                                tapFollowUpConversation.originalQuestion = currentQuestion;
+                            }
+                            if (currentCategory && currentCategory.label) {
+                                tapFollowUpConversation.originalCategory = currentCategory.label;
+                            }
+                        }
+                        
+                        // Add selected phrase to conversation history
+                        tapFollowUpConversation.selectedPhrases.push(speechText);
+                        console.log('💬 Conversation history:', tapFollowUpConversation);
+                        
+                        // Build exclusion text from current options
+                        const excludedOptionsText = currentPhraseOptions
+                            .map(opt => (typeof opt === 'object' && opt.option) ? opt.option : opt)
+                            .filter(text => typeof text === 'string' && text.trim() !== '')
+                            .join('; ');
+                        
+                        // Generate follow-up prompt with conversation context
+                        const followUpPrompt = buildFollowUpPromptForTap(excludedOptionsText);
+                        
+                        try {
+                            console.log('📤 Sending follow-up request to LLM...');
+                            
+                            // Generate follow-up options using LLM
+                            const requestBody = {
+                                count: LLMOptions,
+                                prompt: followUpPrompt,
+                                response_format: 'json'
+                            };
+                            
+                            const response = await authenticatedFetch('/llm', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(requestBody)
+                            });
+                            
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            
+                            const followUpOptionsRaw = await response.json();
+                            const followUpOptions = normalizeTapLlmOptions(followUpOptionsRaw);
+                            console.log(`📥 Received ${Array.isArray(followUpOptionsRaw) ? followUpOptionsRaw.length : 0} follow-up options from LLM (raw)`);
+                            console.log(`📥 TAP normalized follow-up options: ${followUpOptions.length}`);
+                            
+                            // FILTER 1: Remove partner-interrogative patterns
+                            const filteredForUserPerspective = Array.isArray(followUpOptions)
+                                ? followUpOptions.filter(optionObj => {
+                                    const optionText = typeof optionObj === 'object' ? optionObj.option : optionObj;
+                                    const isInterrogative = isPartnerInterrogativePattern(optionText);
+                                    if (isInterrogative) {
+                                        console.warn('🚫 TAP: Filtered out partner-interrogative pattern:', optionText);
+                                    }
+                                    return !isInterrogative;
+                                })
+                                : followUpOptions;
+                            
+                            console.log(`✅ TAP: After interrogative filter: ${Array.isArray(filteredForUserPerspective) ? filteredForUserPerspective.length : 0} options remain`);
+                            
+                            // FILTER 2: Prioritize based on context
+                            const prioritizedOptions = prioritizeContextualOptionsTap(
+                                filteredForUserPerspective,
+                                getTapConversationContextText(),
+                                LLMOptions
+                            );
+                            
+                            // FILTER 3: Enforce additive (remove repetition)
+                            const additiveOptions = enforceAdditiveFollowUpOptionsTap(prioritizedOptions, LLMOptions);
+                            
+                            // FILTER 4: Ensure partner-engagement questions are prioritized
+                            const finalOptions = prioritizePartnerEngagementQuestionsTap(additiveOptions, LLMOptions, 4);
+                            
+                            console.log(`✅ TAP: Final follow-up options: ${finalOptions.length}`);
+                            
+                            // Render the follow-up phrases
+                            if (finalOptions && finalOptions.length > 0) {
+                                currentPhraseOptions = finalOptions;
+                                renderCategoryOptions(finalOptions, true); // Defer images
+                                setTimeout(() => loadImagesForPhrases(finalOptions), 50);
+                            } else {
+                                console.warn('TAP: No follow-up options after filtering');
+                            }
+                            
+                        } catch (error) {
+                            console.error('TAP: Error generating follow-up options:', error);
+                            // On error, keep current options
+                        }
+                        // ========== END FOLLOW-UP CONVERSATION LOGIC ==========
                     });
                 } else {
                     btn.classList.add('empty-state');
@@ -4380,6 +4778,21 @@
             llmStaticOptions.appendChild(fragment);
         }
 
+        // Check if word list contains UI-technical words that shouldn't be initial suggestions
+        function containsUITechnicalWords(words) {
+            const technicalTerms = ['tap', 'button', 'screen', 'click', 'touch', 'swipe', 'hold', 'scroll', 'drag', 'pinch', 'menu'];
+            if (!words || words.length === 0) return true; // Empty list is bad
+            
+            const techWordCount = words.filter(w => 
+                technicalTerms.includes((w.text || '').toLowerCase())
+            ).length;
+            
+            // If more than 20% of suggestions are technical terms, it's a bad set
+            const technicalRatio = techWordCount / words.length;
+            console.log(`📊 Technical word ratio: ${techWordCount}/${words.length} = ${(technicalRatio * 100).toFixed(1)}%`);
+            return technicalRatio > 0.2;
+        }
+
         async function loadFreestyleOptions() {
             console.log('⏱️ loadFreestyleOptions: Starting at:', Date.now());
             try {
@@ -4390,7 +4803,7 @@
                 
                 // Check cache first
                 const cachedWords = getCachedData(CACHE_KEYS.INITIAL_WORDS);
-                if (cachedWords) {
+                if (cachedWords && !containsUITechnicalWords(cachedWords)) {
                     console.log('⏱️ loadFreestyleOptions: Rendering from cache at:', Date.now());
                     renderFreestyleOptions(cachedWords, true); // true = defer images
                     // Load cached images INSTANTLY (200ms delay for DOM)
@@ -4399,31 +4812,38 @@
                         // Then load missing images in background (3 second delay)
                         setTimeout(() => loadImagesForWords(cachedWords, false), 3000); // false = fetch if needed
                     }, 200);
+                    return; // Use cache and don't refresh
                 }
                 
                 // Generate initial freestyle options (general communication words)
                 console.log('⏱️ loadFreestyleOptions: Fetching fresh words at:', Date.now());
-                const options = await generateFreestyleLLMOptions(null, 29);
+                let options = await generateGeneralStarterWords(29); // Use safer function with fallback
                 console.log('⏱️ loadFreestyleOptions: Got', options ? options.length : 0, 'words at:', Date.now());
+                
+                // If for some reason we still got bad words, use the curated fallback
+                if (containsUITechnicalWords(options)) {
+                    console.log('⚠️ Generated words contain too many technical terms, using curated fallback');
+                    options = getFallbackStarterWords();
+                }
                 
                 // Update cache
                 setCachedData(CACHE_KEYS.INITIAL_WORDS, options);
                 
-                // Only re-render if we didn't use cache (to avoid flicker)
-                if (!cachedWords) {
-                    console.log('⏱️ loadFreestyleOptions: Rendering words at:', Date.now());
-                    renderFreestyleOptions(options, true); // true = defer images
-                    // Load cached images INSTANTLY (200ms delay for DOM)
-                    setTimeout(async () => {
-                        await loadImagesForWords(options, true); // true = cache only, instant
-                        // Then load missing images in background (3 second delay)
-                        setTimeout(() => loadImagesForWords(options, false), 3000); // false = fetch if needed
-                    }, 200);
-                    console.log('⏱️ loadFreestyleOptions: Rendering complete at:', Date.now());
-                }
+                console.log('⏱️ loadFreestyleOptions: Rendering words at:', Date.now());
+                renderFreestyleOptions(options, true); // true = defer images
+                // Load cached images INSTANTLY (200ms delay for DOM)
+                setTimeout(async () => {
+                    await loadImagesForWords(options, true); // true = cache only, instant
+                    // Then load missing images in background (3 second delay)
+                    setTimeout(() => loadImagesForWords(options, false), 3000); // false = fetch if needed
+                }, 200);
+                console.log('⏱️ loadFreestyleOptions: Rendering complete at:', Date.now());
             } catch (error) {
                 console.error('🔴 Error loading freestyle options:', error);
-                renderFreestyleOptions([]);
+                // Fallback to curated words on any error
+                const fallbackWords = getFallbackStarterWords();
+                renderFreestyleOptions(fallbackWords, true);
+                setCachedData(CACHE_KEYS.INITIAL_WORDS, fallbackWords);
             }
         }
 
@@ -5072,6 +5492,7 @@
             console.log('🚨 RENDER FREESTYLE OPTIONS CALLED - OPTIONS COUNT:', options.length, 'Defer Images:', deferImages);
             console.log('renderFreestyleOptions called with', options.length, 'options:', options);
             console.log('freestyleOptions element:', freestyleOptions);
+            clearPreviewSelection();
             
             // Store current options for exclusion in Something Else
             currentWordOptions = options.slice(); // Create a copy
@@ -5174,7 +5595,7 @@
                     const text = option.text || option;
                     
                     // Check if this is a sight word - if so, skip image loading
-                    const isSightWord = window.isSightWord && window.isSightWord(text);
+                    const isSightWord = isTapSightWord(text);
                     
                     // Add Firestore image support for words (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
@@ -5255,19 +5676,8 @@
                     }
                     
                     btn.addEventListener('click', async () => {
-                        // Reset status message after first button click following a question
-                        if (activeQuestionAsked) {
-                            activeQuestionAsked = false;
-                            updateStatusMessage(getReadyMessage());
-                        }
-                        
-                        // SIMPLIFIED LOGIC: 
-                        // 1. If there's a word prompt, combine it with the selection
-                        // 2. Add the result to Speech History and announce it
-                        // 3. Generate new options based on the updated Speech History
-                        
                         let phraseToAdd, phraseToAnnounce;
-                        
+
                         if (currentWordsPrompt) {
                             // Combine word prompt with selected option
                             phraseToAdd = `${currentWordsPrompt} ${text}`;
@@ -5279,10 +5689,28 @@
                             phraseToAnnounce = text;
                             console.log('🎯 Using selection as-is:', text);
                         }
+
+                        const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
+                        if (!previewDecision.proceed) {
+                            return;
+                        }
+
+                        // Reset status message after first button click following a question
+                        if (activeQuestionAsked) {
+                            activeQuestionAsked = false;
+                            updateStatusMessage(getReadyMessage());
+                        }
+                        
+                        // SIMPLIFIED LOGIC: 
+                        // 1. If there's a word prompt, combine it with the selection
+                        // 2. Add the result to Speech History and announce it
+                        // 3. Generate new options based on the updated Speech History
                         
                         // Add to Speech History and announce
                         addToSpeech(phraseToAdd);
-                        await announce(phraseToAnnounce, "system", true);
+                        if (!previewDecision.alreadyAnnounced) {
+                            await announce(phraseToAnnounce, "system", true);
+                        }
                         
                         // CRITICAL: Generate next options based on the UPDATED Speech History
                         // This ensures continuity in the conversation
@@ -5350,6 +5778,9 @@
                 announcementQueue.push({
                     textToAnnounce,
                     announcementType,
+                    voiceNameOverride: null,
+                    speechRateOverride: null,
+                    volumeMultiplier: 1.0,
                     resolve,
                     reject
                 });
@@ -5365,7 +5796,15 @@
             }
 
             isAnnouncingNow = true;
-            const { textToAnnounce, announcementType, resolve, reject } = announcementQueue.shift();
+            const {
+                textToAnnounce,
+                announcementType,
+                voiceNameOverride,
+                speechRateOverride,
+                volumeMultiplier,
+                resolve,
+                reject
+            } = announcementQueue.shift();
 
             console.log(`🔊 QUEUE: Playing "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
 
@@ -5375,7 +5814,12 @@
                 const response = await authenticatedFetch(`/play-audio`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+                    body: JSON.stringify({
+                        text: textToAnnounce,
+                        routing_target: announcementType,
+                        voice_name_override: voiceNameOverride,
+                        speech_rate_override: speechRateOverride
+                    }),
                 });
 
                 if (!response.ok) {
@@ -5393,7 +5837,7 @@
 
                 console.log(`🔊 Audio data received, sample rate: ${sampleRate}, playing...`);
                 const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, volumeMultiplier);
                 
                 console.log(`🔊 Audio playback completed successfully`);
                 resolve();
@@ -5421,7 +5865,7 @@
             return bytes.buffer;
         }
 
-        async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType) {
+        async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, volumeMultiplier = 1.0) {
             try {
                 console.log(`🔊 Creating audio context for playback...`);
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -5439,10 +5883,15 @@
                 
                 const source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
+                const gainNode = audioContext.createGain();
+                const normalizedApplicationVolume = Math.max(0, Math.min(1, Number(applicationVolume || 8) / 10));
+                const normalizedMultiplier = Math.max(0, Number(volumeMultiplier || 1));
+                gainNode.gain.value = normalizedApplicationVolume * normalizedMultiplier;
                 
                 // Connect to appropriate output (system or personal speaker like gridpage)
                 const destination = audioContext.destination;
-                source.connect(destination);
+                source.connect(gainNode);
+                gainNode.connect(destination);
                 
                 console.log(`🔊 Starting audio playback...`);
                 return new Promise((resolve, reject) => {
@@ -5549,44 +5998,45 @@
             // The build space textarea shows the current text
         }
 
-        async function speakBuildSpace() {
+        async function cleanupTextForSpeech(text) {
+            try {
+                const response = await authenticatedFetch('/api/freestyle/cleanup-text', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text_to_cleanup: text
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const cleanedText = data.cleaned_text || text;
+                    console.log("Original text:", text);
+                    console.log("Cleaned text:", cleanedText);
+                    return cleanedText;
+                }
+
+                console.error('Failed to cleanup text:', response.statusText);
+                return text;
+            } catch (error) {
+                console.error('Error during text cleanup:', error);
+                return text;
+            }
+        }
+
+        async function speakBuildSpace(forceAutoClean = false) {
             let text = buildSpace.value.trim();
             if (text) {
-                console.log('Auto Clean enabled?', autoClean);
-                
-                // If Auto Clean is enabled, clean up the text first
-                if (autoClean) {
-                    console.log('Auto Clean enabled - cleaning text before speaking');
-                    try {
-                        const response = await authenticatedFetch('/api/freestyle/cleanup-text', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                text_to_cleanup: text
-                            })
-                        });
-                        
-                        if (response.ok) {
-                            const data = await response.json();
-                            const cleanedText = data.cleaned_text || text;
-                            console.log("Original text:", text);
-                            console.log("Cleaned text:", cleanedText);
-                            
-                            // Update the build space with cleaned text
-                            text = cleanedText;
-                            buildSpace.value = cleanedText;
-                        } else {
-                            console.error('Failed to cleanup text:', response.statusText);
-                        }
-                    } catch (error) {
-                        console.error('Error during text cleanup:', error);
-                        // Continue with original text if cleanup fails
-                    }
+                console.log('Speak mode:', forceAutoClean ? 'AUTO_CLEAN_FORCED' : 'RAW');
+
+                if (forceAutoClean) {
+                    text = await cleanupTextForSpeech(text);
+                    buildSpace.value = text;
                 }
                 
-                // Use backend TTS with the (possibly cleaned) text
+                // Use backend TTS with raw or cleaned text based on selected speak button
                 await announce(text, "system", true);
             }
         }
@@ -5670,9 +6120,9 @@
         
         // Modified announce function to record chat history for personal messages
         const originalAnnounce = window.announce;
-        window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true) {
+        window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
             if (originalAnnounce) {
-                await originalAnnounce(textToAnnounce, announcementType, recordHistory);
+                await originalAnnounce(textToAnnounce, announcementType, recordHistory, options);
             }
             
             // Record chat history for personal announcements (user selections)
@@ -6065,7 +6515,7 @@
         }
 
         // Proper announcement system (from gridpage)
-        async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
+        async function announce(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
             console.log(`🔊 ANNOUNCE: "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
             
             // Initialize audio context if not already done
@@ -6078,6 +6528,9 @@
                 announcementQueue.push({
                     textToAnnounce,
                     announcementType,
+                    voiceNameOverride: options.voiceNameOverride || null,
+                    speechRateOverride: options.speechRateOverride || null,
+                    volumeMultiplier: typeof options.volumeMultiplier === 'number' ? options.volumeMultiplier : 1.0,
                     resolve,
                     reject
                 });

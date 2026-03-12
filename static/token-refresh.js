@@ -4,9 +4,11 @@
  * Keeps Firebase ID tokens fresh for pages that rely on sessionStorage tokens.
  * Firebase ID tokens expire after 1 hour. This module:
  * 1. Initializes the Firebase Auth SDK (if not already initialized)
- * 2. Listens for auth state changes and auto-updates the token in sessionStorage
- * 3. Sets up a proactive refresh timer (every 45 minutes)
+ * 2. Listens for auth state AND token changes, auto-updates sessionStorage
+ * 3. Sets up a proactive refresh timer (every 10 minutes)
  * 4. Exposes refreshFirebaseToken() for on-demand refresh (e.g., on 401)
+ * 5. Falls back to silent re-authentication using saved credentials if
+ *    the Firebase SDK loses the user session (e.g., IndexedDB cleared)
  * 
  * Usage: Include Firebase SDK scripts BEFORE this script:
  *   <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
@@ -18,18 +20,17 @@
     'use strict';
 
     const TOKEN_KEY = 'firebaseIdToken';
-    const REFRESH_INTERVAL_MS = 45 * 60 * 1000; // 45 minutes
+    const REFRESH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes (well within 1-hour token lifetime)
     const AUTH_STATE_TIMEOUT_MS = 10 * 1000; // 10 second timeout for auth state resolution
     let refreshTimer = null;
     let isInitialized = false;
     let initPromise = null;
-    let authStateResolved = false; // Track whether onAuthStateChanged has fired
+    let authStateResolved = false;
+    let silentReauthAttempted = false; // Prevent infinite re-auth loops
 
     /**
      * Initialize Firebase and set up token auto-refresh.
      * Safe to call multiple times — will only initialize once.
-     * IMPORTANT: This now waits for Firebase to restore auth state from IndexedDB
-     * before resolving, so that currentUser is available for token refresh.
      */
     async function initTokenRefresh() {
         if (initPromise) return initPromise;
@@ -52,11 +53,14 @@
                 console.log('[TokenRefresh] Firebase initialized for project:', config.projectId);
             }
 
+            // Explicitly set LOCAL persistence (IndexedDB) to ensure session survives page reloads
+            try {
+                await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+            } catch (e) {
+                console.warn('[TokenRefresh] Could not set persistence:', e);
+            }
+
             // Wait for Firebase to restore auth state from IndexedDB.
-            // This is critical: firebase.auth().currentUser is null until 
-            // onAuthStateChanged fires for the first time. Without this wait,
-            // any immediate call to refreshFirebaseToken() would fail because
-            // currentUser hasn't been populated yet.
             await new Promise((resolve) => {
                 const timeout = setTimeout(() => {
                     console.warn('[TokenRefresh] Auth state resolution timed out after', AUTH_STATE_TIMEOUT_MS / 1000, 'seconds');
@@ -66,7 +70,6 @@
 
                 firebase.auth().onAuthStateChanged(async (user) => {
                     if (!authStateResolved) {
-                        // First callback — auth state is now resolved
                         clearTimeout(timeout);
                         authStateResolved = true;
                     }
@@ -75,55 +78,116 @@
                         try {
                             const token = await user.getIdToken();
                             sessionStorage.setItem(TOKEN_KEY, token);
-                            console.log('[TokenRefresh] Token updated via onAuthStateChanged');
+                            console.log('[TokenRefresh] Token updated via onAuthStateChanged, uid:', user.uid);
                         } catch (e) {
                             console.warn('[TokenRefresh] Failed to get token in onAuthStateChanged:', e);
                         }
                     } else {
-                        console.log('[TokenRefresh] No user signed in');
+                        console.warn('[TokenRefresh] AUTH STATE CHANGED TO NULL — user signed out or session lost');
                     }
 
-                    // Resolve the init promise after the first auth state callback
-                    // (token is already updated in sessionStorage if user exists)
                     resolve();
                 });
+            });
+
+            // Also listen for token changes (fires on auto-refresh, not just sign-in/out)
+            firebase.auth().onIdTokenChanged(async (user) => {
+                if (user) {
+                    try {
+                        const token = await user.getIdToken();
+                        sessionStorage.setItem(TOKEN_KEY, token);
+                        console.log('[TokenRefresh] Token updated via onIdTokenChanged');
+                    } catch (e) {
+                        console.warn('[TokenRefresh] Failed to get token in onIdTokenChanged:', e);
+                    }
+                }
             });
 
             // Set up proactive refresh timer
             _startRefreshTimer();
 
             isInitialized = true;
-            console.log('[TokenRefresh] Initialized — auth state resolved, user:', !!firebase.auth().currentUser);
+            console.log('[TokenRefresh] Initialized — user:', !!firebase.auth().currentUser,
+                        ', savedCreds:', !!(localStorage.getItem('bravoSavedEmail') && localStorage.getItem('bravoSavedPassword')));
         } catch (e) {
             console.error('[TokenRefresh] Initialization error:', e);
-            // Don't block the app — the existing sessionStorage token may still be valid
+        }
+    }
+
+    /**
+     * Attempt silent re-authentication using saved credentials from localStorage.
+     * This is the fallback when firebase.auth().currentUser is null (session lost).
+     * Returns the new token, or null if re-auth failed.
+     */
+    async function _attemptSilentReauth() {
+        if (silentReauthAttempted) {
+            console.warn('[TokenRefresh] Silent re-auth already attempted this session, skipping');
+            return null;
+        }
+        silentReauthAttempted = true;
+
+        const savedEmail = localStorage.getItem('bravoSavedEmail');
+        const savedPassword = localStorage.getItem('bravoSavedPassword');
+
+        if (!savedEmail || !savedPassword) {
+            console.warn('[TokenRefresh] No saved credentials available for silent re-auth');
+            return null;
+        }
+
+        try {
+            console.log('[TokenRefresh] Attempting silent re-authentication with saved credentials...');
+            const userCredential = await firebase.auth().signInWithEmailAndPassword(savedEmail, savedPassword);
+            const newToken = await userCredential.user.getIdToken();
+            sessionStorage.setItem(TOKEN_KEY, newToken);
+            console.log('[TokenRefresh] Silent re-authentication successful!');
+            silentReauthAttempted = false; // Reset flag on success so future attempts work
+            return newToken;
+        } catch (e) {
+            console.error('[TokenRefresh] Silent re-authentication failed:', e.code, e.message);
+            return null;
         }
     }
 
     /**
      * Force-refresh the Firebase ID token and update sessionStorage.
      * Returns the new token, or null if refresh failed.
-     * Use this on 401 responses before retrying the request.
      * 
-     * Waits for Firebase auth state to be resolved first (fixes race condition
-     * where currentUser is null because IndexedDB hasn't been read yet).
+     * Strategy:
+     * 1. Try getIdToken(true) if currentUser exists
+     * 2. If no currentUser, fall back to silent re-auth with saved credentials
+     * 3. If all fails, return null (caller handles redirect to login)
      */
     async function refreshFirebaseToken() {
         try {
             // Ensure Firebase is initialized AND auth state is resolved
             await initTokenRefresh();
 
-            const user = firebase.auth().currentUser;
-            if (!user) {
-                console.warn('[TokenRefresh] No current user after auth state resolved — cannot refresh token');
-                return null;
+            let user = firebase.auth().currentUser;
+
+            // Strategy 1: Use existing Firebase session
+            if (user) {
+                try {
+                    const newToken = await user.getIdToken(true);
+                    sessionStorage.setItem(TOKEN_KEY, newToken);
+                    console.log('[TokenRefresh] Token force-refreshed successfully via getIdToken');
+                    return newToken;
+                } catch (e) {
+                    console.warn('[TokenRefresh] getIdToken(true) failed:', e.code || e.message);
+                    // Fall through to re-auth
+                }
+            } else {
+                console.warn('[TokenRefresh] No current user — Firebase session lost');
             }
 
-            // Force refresh (true = bypass cache)
-            const newToken = await user.getIdToken(true);
-            sessionStorage.setItem(TOKEN_KEY, newToken);
-            console.log('[TokenRefresh] Token force-refreshed successfully');
-            return newToken;
+            // Strategy 2: Silent re-authentication with saved credentials
+            console.log('[TokenRefresh] Attempting silent re-auth fallback...');
+            const reauthToken = await _attemptSilentReauth();
+            if (reauthToken) {
+                return reauthToken;
+            }
+
+            console.error('[TokenRefresh] All refresh strategies exhausted');
+            return null;
         } catch (e) {
             console.error('[TokenRefresh] Force refresh failed:', e);
             return null;
@@ -134,7 +198,8 @@
         if (refreshTimer) clearInterval(refreshTimer);
         
         refreshTimer = setInterval(async () => {
-            console.log('[TokenRefresh] Proactive refresh triggered');
+            const user = firebase.auth().currentUser;
+            console.log('[TokenRefresh] Proactive refresh triggered — currentUser:', !!user);
             await refreshFirebaseToken();
         }, REFRESH_INTERVAL_MS);
     }

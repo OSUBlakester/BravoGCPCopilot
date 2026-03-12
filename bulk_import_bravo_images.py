@@ -1,4 +1,4 @@
-College_Logos#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Bulk import script for BravoImages to Firestore database with AI-generated tags.
 
@@ -101,6 +101,21 @@ class BravoImageImporter:
         
         logger.info(f"🔍 Scanning {base_path} for images...")
         
+        # Folders to always skip
+        SKIP_FOLDERS = {'originals_backup', 'logs', '.DS_Store'}
+        
+        # First, check for PNG images directly in base_path (flat directory of images)
+        direct_images = [f for f in base_path.glob("*.png") if 'originals_backup' not in str(f)]
+        if direct_images:
+            # Determine concept from parent folder name
+            concept = base_path.parent.name  # e.g., "batch_missing_images"
+            logger.info(f"📄 Found {len(direct_images)} images directly in {base_path.name}")
+            for image_file in direct_images:
+                subconcept = image_file.stem  # filename without extension
+                images.append((str(image_file), concept, subconcept))
+            logger.info(f"🎯 Found {len(images)} images to process")
+            return images
+        
         # Scan all batch folders
         for batch_folder in base_path.glob("batch_*_output"):
             if not batch_folder.is_dir():
@@ -134,7 +149,7 @@ class BravoImageImporter:
             
             # Then scan concept folders within each batch (original logic)
             for concept_folder in batch_folder.iterdir():
-                if not concept_folder.is_dir() or concept_folder.name in ['logs', 'failed_concepts.json', 'generation_progress.json']:
+                if not concept_folder.is_dir() or concept_folder.name in SKIP_FOLDERS or concept_folder.name in ['failed_concepts.json', 'generation_progress.json']:
                     continue
                 
                 concept = concept_folder.name
@@ -161,7 +176,7 @@ class BravoImageImporter:
         
         # Handle non-batch folders (like Bravo_Bear_001)
         for folder in base_path.iterdir():
-            if not folder.is_dir() or folder.name.startswith('batch_') or folder.name.startswith('.'):
+            if not folder.is_dir() or folder.name.startswith('batch_') or folder.name.startswith('.') or folder.name in SKIP_FOLDERS:
                 continue
                 
             logger.info(f"📁 Processing non-batch folder: {folder.name}")
@@ -171,6 +186,9 @@ class BravoImageImporter:
             if categories_folder.exists() and categories_folder.is_dir():
                 logger.info(f"  📄 Found Categories folder in {folder.name}")
                 for image_file in categories_folder.glob("*.png"):
+                    # Skip images inside originals_backup
+                    if 'originals_backup' in str(image_file):
+                        continue
                     concept = folder.name
                     subconcept = image_file.stem  # Use filename without extension as subconcept
                     images.append((str(image_file), concept, subconcept))
@@ -341,10 +359,15 @@ class BravoImageImporter:
                     .get
                 )
                 
-                if existing:
+                if existing and not getattr(self, 'replace_existing', False):
                     logger.info(f"⏭️ Skipping {concept}/{subconcept} - already exists")
                     results["skipped"] += 1
                     continue
+                elif existing and getattr(self, 'replace_existing', False):
+                    # Delete existing entries so new one replaces them
+                    for doc in existing:
+                        logger.info(f"🔄 Replacing existing {concept}/{subconcept} (doc: {doc.id})")
+                        await asyncio.to_thread(doc.reference.delete)
                 
                 # Upload image to storage
                 logger.info(f"📤 Uploading {concept}/{subconcept}")
@@ -373,14 +396,16 @@ class BravoImageImporter:
         
         return results
     
-    async def run_import(self, base_path: str, test_mode: bool = False, batch_size: int = 10):
+    async def run_import(self, base_path: str, test_mode: bool = False, batch_size: int = 10, replace: bool = False):
         """Run the bulk import process"""
         self.batch_size = batch_size
+        self.replace_existing = replace
         
         logger.info("🚀 Starting BravoImages bulk import")
         logger.info(f"📁 Source path: {base_path}")
         logger.info(f"📦 Batch size: {batch_size}")
         logger.info(f"🧪 Test mode: {test_mode}")
+        logger.info(f"🔄 Replace existing: {replace}")
         
         # Find all images
         all_images = self.find_all_images(base_path)
@@ -436,12 +461,14 @@ async def main():
     parser.add_argument('--path', type=str, 
                        default='/Users/blakethomas/Documents/BravoGCPCopilot/BravoImages',
                        help='Path to BravoImages folder')
+    parser.add_argument('--replace', action='store_true',
+                       help='Replace existing images instead of skipping')
     
     args = parser.parse_args()
     
     try:
         importer = BravoImageImporter()
-        await importer.run_import(args.path, args.test, args.batch_size)
+        await importer.run_import(args.path, args.test, args.batch_size, args.replace)
         
     except KeyboardInterrupt:
         logger.info("🛑 Import interrupted by user")
