@@ -354,7 +354,7 @@ template_user_data_paths = {
         "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use ONLY diary events dated today or earlier and EXCLUDE any future-dated events. Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements about planned activities and events. CRITICAL: Use correct verb tenses based on timing - future tense ONLY for events that haven't happened yet (e.g., 'I'm going to...', 'I have plans to...', 'I will...') and past tense for events that already happened (e.g., 'I went to...', 'I did...', 'I attended...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby about their activities.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "customAudioFile": None, "hidden": False}
@@ -2438,20 +2438,65 @@ Analyze the provided context to create helpful, personalized suggestions."""
         
         # Add current date for diary context
         from datetime import datetime
-        current_date_str = datetime.now().strftime('%Y-%m-%d')
+        today_date = datetime.now().date()
+        current_date_str = today_date.strftime('%Y-%m-%d')
         context_parts.append(f"--- TODAY'S DATE (CRITICAL FOR DIARY CONTEXT) ---\n{current_date_str}\n⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events. Generate responses accordingly.\n")
         
         # Diary entries (stable, long-term data)
         if context_data["diary"]:
+            def parse_diary_date(entry: Dict) -> Optional[datetime.date]:
+                if not isinstance(entry, dict):
+                    return None
+                raw_date = entry.get("date")
+                if not isinstance(raw_date, str) or not raw_date.strip():
+                    return None
+                raw_date = raw_date.strip()
+
+                for fmt in ("%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"):
+                    try:
+                        return datetime.strptime(raw_date, fmt).date()
+                    except ValueError:
+                        continue
+
+                try:
+                    return datetime.fromisoformat(raw_date.replace("Z", "+00:00")).date()
+                except ValueError:
+                    return None
+
+            dated_entries = []
+            undated_entries = []
+            for entry in context_data["diary"]:
+                parsed_date = parse_diary_date(entry)
+                if parsed_date is None:
+                    undated_entries.append(entry)
+                else:
+                    dated_entries.append((entry, parsed_date))
+
+            dated_entries.sort(key=lambda item: item[1], reverse=True)
+
+            completed_entries = [entry for entry, parsed in dated_entries if parsed <= today_date]
+            upcoming_entries = [entry for entry, parsed in dated_entries if parsed > today_date]
+
             diary_context = f"""--- Diary Entries (Background Context) ---
 📅 TODAY'S DATE: {current_date_str}
 ⚠️ CRITICAL INSTRUCTIONS FOR DIARY INTERPRETATION:
 - Entries with dates BEFORE {current_date_str} = PAST events (use past tense: "I did", "I went", "I had")
-- Entries with date {current_date_str} = TODAY'S events (use present tense: "I am", "I'm doing")  
+- Entries with date {current_date_str} = TODAY'S events (use present tense: "I am", "I'm doing")
 - Entries with dates AFTER {current_date_str} = FUTURE events (use future tense: "I will", "I'm going to", "I have planned")
 
-Diary Entries (most recent 15, sorted newest to oldest):
-{json.dumps(context_data['diary'][:15], indent=2)}
+⚠️ DIARY USAGE RULES:
+- For prompts about "recent activities" or "what I did", use ONLY Completed/Today entries.
+- For prompts about "upcoming plans" or "what I will do", use ONLY Upcoming entries.
+- NEVER describe Upcoming entries as if they already happened.
+
+Completed / Today Diary Entries (date <= {current_date_str}, newest first, max 15):
+{json.dumps(completed_entries[:15], indent=2)}
+
+Upcoming Diary Entries (date > {current_date_str}, soonest first, max 15):
+{json.dumps(list(reversed(upcoming_entries[-15:])), indent=2)}
+
+Undated Diary Entries (use cautiously, max 5):
+{json.dumps(undated_entries[:5], indent=2)}
 """
             context_parts.append(diary_context)
         
