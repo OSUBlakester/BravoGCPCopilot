@@ -1629,6 +1629,193 @@ DEFAULT_BIRTHDAYS = {
     "friendsFamily": []    # List of {"name": "...", "monthDay": "MM-DD"}
 }
 
+
+def _safe_parse_month_day(month_day: str) -> Optional[tuple[int, int]]:
+    if not isinstance(month_day, str) or not month_day.strip():
+        return None
+    raw_value = month_day.strip()
+    for fmt in ("%m-%d", "%m/%d"):
+        try:
+            parsed = dt.strptime(raw_value, fmt)
+            return parsed.month, parsed.day
+        except ValueError:
+            continue
+    return None
+
+
+def _next_occurrence_for_month_day(month: int, day: int, today_date: date) -> Optional[date]:
+    for year in (today_date.year, today_date.year + 1):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            continue
+        if candidate >= today_date:
+            return candidate
+    return None
+
+
+def _get_supplemental_holidays(country_code: str, year: int) -> Dict[date, str]:
+    """Return additional culturally relevant holidays not always present in official holiday datasets."""
+    supplemental: Dict[date, str] = {}
+
+    # US federal holiday datasets usually exclude many widely celebrated observances.
+    if country_code == "US":
+        fixed_dates = [
+            (2, 14, "Valentine's Day"),
+            (3, 17, "St. Patrick's Day"),
+            (10, 31, "Halloween"),
+            (12, 31, "New Year's Eve"),
+        ]
+        for month, day, name in fixed_dates:
+            try:
+                supplemental[date(year, month, day)] = name
+            except ValueError:
+                continue
+
+    return supplemental
+
+
+def _build_upcoming_celebrations_context(
+    birthday_data: Optional[Dict[str, Any]],
+    friends_family_data: Optional[Dict[str, Any]],
+    settings_data: Optional[Dict[str, Any]],
+    today_date: date,
+    days_ahead: int = 60,
+    max_items: int = 18,
+) -> str:
+    if not birthday_data:
+        birthday_data = {}
+    if not friends_family_data:
+        friends_family_data = {}
+    if not settings_data:
+        settings_data = {}
+
+    horizon_date = today_date + timedelta(days=days_ahead)
+    events: List[Dict[str, Any]] = []
+
+    user_birthdate = birthday_data.get("userBirthdate")
+    if isinstance(user_birthdate, str) and user_birthdate.strip():
+        try:
+            parsed_birthdate = date.fromisoformat(user_birthdate.strip())
+            next_birthday = _next_occurrence_for_month_day(parsed_birthdate.month, parsed_birthdate.day, today_date)
+            if next_birthday and next_birthday <= horizon_date:
+                events.append({
+                    "date": next_birthday,
+                    "kind": "birthday",
+                    "label": "User birthday",
+                    "days_away": (next_birthday - today_date).days,
+                })
+        except ValueError:
+            pass
+
+    for person in birthday_data.get("friendsFamily", []) or []:
+        if not isinstance(person, dict):
+            continue
+        person_name = str(person.get("name") or "Someone important").strip() or "Someone important"
+        month_day = person.get("monthDay") or person.get("birthday") or person.get("date")
+        parsed_month_day = _safe_parse_month_day(str(month_day) if month_day is not None else "")
+        if not parsed_month_day:
+            continue
+        next_birthday = _next_occurrence_for_month_day(parsed_month_day[0], parsed_month_day[1], today_date)
+        if next_birthday and next_birthday <= horizon_date:
+            events.append({
+                "date": next_birthday,
+                "kind": "birthday",
+                "label": f"{person_name}'s birthday",
+                "days_away": (next_birthday - today_date).days,
+            })
+
+    # Support birthdays stored in info/friends_family (user_info_admin primary source)
+    for person in friends_family_data.get("friends_family", []) or []:
+        if not isinstance(person, dict):
+            continue
+        person_name = str(person.get("name") or "Someone important").strip() or "Someone important"
+        month_day = person.get("birthday") or person.get("monthDay") or person.get("date")
+        parsed_month_day = _safe_parse_month_day(str(month_day) if month_day is not None else "")
+        if not parsed_month_day:
+            continue
+        next_birthday = _next_occurrence_for_month_day(parsed_month_day[0], parsed_month_day[1], today_date)
+        if next_birthday and next_birthday <= horizon_date:
+            events.append({
+                "date": next_birthday,
+                "kind": "birthday",
+                "label": f"{person_name}'s birthday",
+                "days_away": (next_birthday - today_date).days,
+            })
+
+    country_code_raw = str(settings_data.get("CountryCode") or "US").strip().upper()
+    country_code = country_code_raw if re.fullmatch(r"[A-Z]{2}", country_code_raw) else "US"
+    try:
+        holiday_calendar = holidays.country_holidays(country_code, years=[today_date.year, today_date.year + 1])
+    except Exception:
+        holiday_calendar = holidays.country_holidays("US", years=[today_date.year, today_date.year + 1])
+        country_code = "US"
+
+    for holiday_date, holiday_name in holiday_calendar.items():
+        if today_date <= holiday_date <= horizon_date:
+            events.append({
+                "date": holiday_date,
+                "kind": "holiday",
+                "label": str(holiday_name),
+                "days_away": (holiday_date - today_date).days,
+            })
+
+    # Merge supplemental holidays (e.g., St. Patrick's Day in US)
+    supplemental_holidays: Dict[date, str] = {}
+    for y in (today_date.year, today_date.year + 1):
+        supplemental_holidays.update(_get_supplemental_holidays(country_code, y))
+
+    for holiday_date, holiday_name in supplemental_holidays.items():
+        if today_date <= holiday_date <= horizon_date:
+            events.append({
+                "date": holiday_date,
+                "kind": "holiday",
+                "label": str(holiday_name),
+                "days_away": (holiday_date - today_date).days,
+            })
+
+    events.sort(key=lambda item: (item["date"], item["kind"], item["label"]))
+    truncated_events = events[:max_items]
+
+    lines = [
+        "--- Upcoming Celebrations Context (use when relevant) ---",
+        f"Today: {today_date.isoformat()}",
+        f"Country code for holidays: {country_code}",
+        f"Window: next {days_ahead} days",
+    ]
+
+    if not truncated_events:
+        lines.append("No upcoming holidays or birthdays in the next window.")
+        lines.append("If asked about plans, suggest asking others about upcoming events anyway.")
+        return "\n".join(lines)
+
+    lines.append("Upcoming birthdays and holidays (chronological):")
+    for event in truncated_events:
+        day_phrase = "today" if event["days_away"] == 0 else f"in {event['days_away']} day(s)"
+        lines.append(
+            f"- {event['date'].isoformat()} | {event['kind']} | {event['label']} | {day_phrase}"
+        )
+
+    lines.append(
+        "Guidance: For greetings and plans, naturally reference upcoming celebrations when it fits user context and tone."
+    )
+    lines.append(
+        "Guidance: Mention birthdays by name when available and appropriate."
+    )
+
+    priority_events = [
+        event for event in truncated_events
+        if event.get("days_away", 9999) <= 14
+    ]
+    if priority_events:
+        lines.append("Priority events in next 14 days:")
+        for event in priority_events:
+            lines.append(
+                f"- {event['label']} ({event['date'].isoformat()}, in {event['days_away']} day(s))"
+            )
+
+    return "\n".join(lines)
+
 # --- Default Friends & Family Structure ---
 DEFAULT_RELATIONSHIPS = [
     "Parent", "Child", "Sibling", "Grandparent", "Grandchild", "Spouse", "Partner", 
@@ -2586,6 +2773,9 @@ Undated Diary Entries (use cautiously, max 5):
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
+            "settings": load_settings_from_file(account_id, aac_user_id),
+            "birthdays": load_birthdays_from_file(account_id, aac_user_id),
+            "friends_family": load_friends_family_from_file(account_id, aac_user_id),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
         }
         results = await asyncio.gather(*tasks.values())
@@ -2653,6 +2843,33 @@ Undated Diary Entries (use cautiously, max 5):
                 f"Activity: {context_data['user_current'].get('activity', 'Idle')}"
             ])
             delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
+
+        today_date = dt.now().date()
+        celebrations_context = _build_upcoming_celebrations_context(
+            birthday_data=context_data.get("birthdays") or {},
+            friends_family_data=context_data.get("friends_family") or {},
+            settings_data=context_data.get("settings") or {},
+            today_date=today_date,
+            days_ahead=60,
+            max_items=20,
+        )
+
+        query_hint_lower = str(query_hint or "").lower()
+        celebration_keywords = [
+            "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
+            "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
+        ]
+        if any(keyword in query_hint_lower for keyword in celebration_keywords):
+            celebrations_context += (
+                "\n⚠️ HIGH PRIORITY FOR THIS REQUEST: The prompt indicates greetings/plans/celebrations. "
+                "Prefer options that reference relevant upcoming birthdays/holidays naturally and in first person."
+            )
+            celebrations_context += (
+                "\n⚠️ REQUIREMENT: If Priority events in next 14 days are listed above, include at least one generated option "
+                "for each priority event unless that would conflict with safety rules."
+            )
+
+        delta_parts.append("\n🎉 " + celebrations_context + "\n")
         
         # CHAT HISTORY: Now ALL recent messages go in DELTA (not cached)
         # This significantly reduces cache size/cost since messages change frequently
@@ -3694,6 +3911,11 @@ async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
     except Exception as e:
         logging.warning(f"Primary OpenAI model failed: {e}. Trying fallback...")
         try:
+            # Try fallback ChatGPT model
+            return await _generate_openai_content(prompt_text, CHATGPT_FALLBACK_MODEL)
+        except Exception as e2:
+            logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
+            raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
 
 def _is_retryable_gemini_exception(exc: Exception) -> bool:
@@ -3757,12 +3979,6 @@ async def _execute_gemini_call_with_retry(
             )
             await asyncio.sleep(sleep_seconds)
             attempt += 1
-
-            # Try fallback ChatGPT model
-            return await _generate_openai_content(prompt_text, CHATGPT_FALLBACK_MODEL)
-        except Exception as e2:
-            logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
-            raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
 # --- Helper function for Gemini LLM with Context Caching ---
 async def _generate_gemini_content_with_caching(
