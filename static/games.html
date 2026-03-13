@@ -230,6 +230,27 @@
             background-color: #fafafa;
         }
 
+        #storyQaList,
+        #storyPartnerList {
+            max-height: 180px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            border: 1px solid #eee;
+            border-radius: 0.5rem;
+            background-color: #fafafa;
+        }
+
+        .story-helper-item {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+            color: #002244;
+            font-weight: 500;
+        }
+
+        .story-helper-item:last-child {
+            border-bottom: none;
+        }
+
         .qa-item {
             padding: 0.5rem 0;
             border-bottom: 1px solid #eee;
@@ -247,6 +268,32 @@
         .qa-answer {
             color: #FB4F14;
             font-weight: bold;
+        }
+
+        .story-read-title {
+            color: #002244;
+            margin-bottom: 0.75rem;
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        .story-read-text {
+            max-height: 260px;
+            overflow-y: auto;
+            padding: 0.75rem;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            background-color: #fafafa;
+            line-height: 1.6;
+            font-size: 1.05rem;
+            color: #1f2937;
+            white-space: pre-wrap;
+        }
+
+        .story-read-word.active {
+            background-color: #fef3c7;
+            border-radius: 0.25rem;
+            color: #111827;
         }
 
         /* --- Action Buttons now use game-button styling --- */
@@ -326,7 +373,7 @@
 
     <!-- Page Banner -->
     <div class="page-banner">
-        <h1>🎮 Games</h1>
+        <h1 id="pageTitle">🎮 Games</h1>
         <div class="admin-toolbar">
             <!-- Admin toolbar content can be added here -->
         </div>
@@ -431,6 +478,79 @@
                 </div>
             </div>
         </div>
+
+        <!-- Story Builder Game View -->
+        <div id="storyBuilderGame" class="hidden">
+            <div id="storyUserOptions" class="game-grid hidden">
+                <!-- Dynamic answer/title options -->
+            </div>
+
+            <div id="storyTranscript" class="question-history">
+                <h3>Story Q&A</h3>
+                <div id="storyQaList"></div>
+            </div>
+
+            <div id="storyLibrary" class="question-history">
+                <h3>Saved Stories</h3>
+                <div id="storyLibraryList" class="game-grid"></div>
+            </div>
+
+            <div id="storyReadDisplay" class="question-history hidden">
+                <div id="storyReadTitle" class="story-read-title"></div>
+                <div id="storyReadText" class="story-read-text"></div>
+            </div>
+
+            <div id="storyDetail" class="question-history hidden">
+                <h3>Story Detail</h3>
+                <input id="storyTitleInput" class="w-full p-2 border border-gray-300 rounded mb-3" placeholder="Story title" />
+                <textarea id="storyTextInput" class="w-full p-2 border border-gray-300 rounded" rows="8" placeholder="Story text"></textarea>
+                <div id="storyDetailActions" class="game-grid" style="margin-top: 1rem;">
+                    <button class="game-button" onclick="readCurrentStory()"><i class="fas fa-volume-up"></i>Read Story</button>
+                    <button class="game-button" onclick="saveCurrentStoryEdits()"><i class="fas fa-save"></i>Save Edits</button>
+                    <button class="game-button" onclick="deleteCurrentStory()" style="background-color: #dc2626; color: white;"><i class="fas fa-trash"></i>Delete Story</button>
+                    <button class="game-button" onclick="closeStoryDetail()"><i class="fas fa-arrow-left"></i>Back to Builder</button>
+                </div>
+            </div>
+
+            <div id="storyBottomControls" style="margin-top: 0.75rem; display:flex; gap:0.6rem; justify-content:center; flex-wrap:wrap;">
+                <button id="storyPartnerIdeasButton" type="button" onclick="openPartnerIdeasModal()" style="padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid #cbd5e1; background: #ffffff; color: #1f2937; font-weight: 600;">
+                    <i class="fas fa-comments"></i> Partner Ideas
+                </button>
+                <button id="storyDeleteStoriesButton" type="button" onclick="promptStoryDeletePin()" class="hidden" style="padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid #991b1b; background: #dc2626; color: #ffffff; font-weight: 700;">
+                    <i class="fas fa-trash"></i> Delete Stories
+                </button>
+            </div>
+
+            <div id="storyBottomStatus" class="game-status" style="position: sticky; bottom: 0; z-index: 20; margin-top: 1rem;">
+                <div id="storyStatusMessage" class="status-text">Say the wake word to ask the next question or complete the story.</div>
+                <div id="storyHeardTranscript" class="qa-question"></div>
+            </div>
+
+            <div id="storyPartnerModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1rem;">
+                <div style="background: #fff; width: min(900px, 95vw); max-height: 80vh; border-radius: 12px; padding: 1rem; overflow: hidden; display: flex; flex-direction: column;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 0.75rem;">
+                        <h3 style="margin: 0; color: #002244; font-size: 1.2rem;">Partner Question Ideas</h3>
+                        <button class="game-button" style="padding: 0.4rem 0.8rem; font-size: 0.9rem;" onclick="closePartnerIdeasModal()"><i class="fas fa-times"></i>Close</button>
+                    </div>
+                    <div id="storyPartnerList" style="overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.6rem;"></div>
+                </div>
+            </div>
+
+            <div id="storyDeleteModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem;">
+                <div style="background: #fff; width: min(760px, 95vw); max-height: 85vh; border-radius: 12px; padding: 1rem; overflow: hidden; display: flex; flex-direction: column;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 0.75rem;">
+                        <h3 style="margin: 0; color: #002244; font-size: 1.2rem;">Delete Stories</h3>
+                        <button type="button" style="padding: 0.4rem 0.8rem; font-size: 0.9rem; border-radius:8px; border:1px solid #cbd5e1; background:#fff;" onclick="closeStoryDeleteModal()"><i class="fas fa-times"></i> Close</button>
+                    </div>
+                    <p id="storyDeleteModalMessage" style="margin: 0 0 0.6rem 0; color: #334155; font-size: 0.95rem;">Select stories to delete.</p>
+                    <div id="storyDeleteList" style="overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.6rem; flex: 1;"></div>
+                    <div style="display:flex; justify-content:flex-end; gap:0.6rem; margin-top: 0.8rem;">
+                        <button type="button" style="padding: 0.6rem 1rem; border-radius:8px; border:1px solid #cbd5e1; background:#fff;" onclick="closeStoryDeleteModal()">Cancel</button>
+                        <button id="storyConfirmDeleteButton" type="button" style="padding: 0.6rem 1rem; border-radius:8px; border:1px solid #991b1b; background:#dc2626; color:#fff; font-weight:700;" onclick="confirmDeleteSelectedStories()">Delete Selected</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Include JavaScript -->
@@ -460,6 +580,26 @@
             currentPhase: 'menu', // 'menu', 'role', 'category', 'ready', 'playing', 'guessing', 'finished'
             scanDelay: 3500, // Will be loaded from settings
             awaitingAnswerType: null // 'question' or 'guess'
+        };
+
+        let storyState = {
+            transcript: [],
+            pendingQuestion: '',
+            partnerSuggestions: [],
+            currentOptions: [],
+            selectingTitle: false,
+            selectedStoryId: null,
+            stories: [],
+            mode: 'build',
+            view: 'entry',
+            currentStoryTitle: '',
+            currentStoryText: '',
+            readWordRanges: [],
+            readWordWeightTotal: 0,
+            activeReadWordIndex: -1,
+            activeReadUtterance: null,
+            deleteSelectionIds: [],
+            verifiedAdminPin: false
         };
 
         // Speech recognition setup
@@ -546,9 +686,20 @@
 
         // Add keyboard event listener for spacebar (same as gridpage)
         document.addEventListener('keydown', function(event) {
-            if (event.code === 'Space' && scanningSystem.isScanning) {
-                event.preventDefault();
-                selectCurrentScannedButton();
+            if (event.code === 'Space' || event.code === 'Enter') {
+                if (waitingForInitialSwitch && pendingScanContainerId) {
+                    event.preventDefault();
+                    const pendingContainerId = pendingScanContainerId;
+                    waitingForInitialSwitch = false;
+                    pendingScanContainerId = null;
+                    startScanning(pendingContainerId, true);
+                    return;
+                }
+
+                if (scanningSystem.isScanning) {
+                    event.preventDefault();
+                    selectCurrentScannedButton();
+                }
             }
         });
 
@@ -594,7 +745,8 @@
                 { text: 'Guess Who', onClick: () => startGuessGame('who') },
                 { text: 'Guess Where', onClick: () => startGuessGame('where') },
                 { text: 'Guess What', onClick: () => startGuessGame('what') },
-                { text: 'Hangman', onClick: () => window.location.href = '/static/hangman.html' }
+                { text: 'Hangman', onClick: () => window.location.href = '/static/hangman.html' },
+                { text: 'Story Builder', onClick: () => startStoryBuilder() }
             ];
             
             for (let idx = 0; idx < gameButtons.length; idx++) {
@@ -703,8 +855,14 @@
         let gridColumns = 10; // Default matching gridpage
         let enablePictograms = false; // Default - will be loaded from settings (matches gridpage default)
         let ScanningOff = false; // Default
+        let waitForSwitchToScan = false; // Default
         let useTapInterface = false; // Whether user is using tap interface
+        let selectedTtsVoiceName = 'en-US-Neural2-A';
+        let configuredSpeechRateWpm = 170;
         let defaultDelay = 100; // Delay before starting scanning
+        let waitingForInitialSwitch = false;
+        let pendingScanContainerId = null;
+        const GAMES_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_games';
         
         function updateGridLayout() {
             const gridContainer = document.getElementById('gridContainer');
@@ -903,10 +1061,20 @@
                     // Load scanning settings
                     ScanningOff = settings.ScanningOff === true;
                     console.log('ScanningOff loaded:', ScanningOff);
+                    waitForSwitchToScan = settings.waitForSwitchToScan === true;
+                    console.log('waitForSwitchToScan loaded:', waitForSwitchToScan);
                     
                     // Load tap interface preference
                     useTapInterface = settings.useTapInterface === true;
                     console.log('useTapInterface loaded:', useTapInterface);
+
+                    if (settings && typeof settings.selected_tts_voice_name === 'string' && settings.selected_tts_voice_name.trim()) {
+                        selectedTtsVoiceName = settings.selected_tts_voice_name.trim();
+                    }
+
+                    if (settings && typeof settings.speech_rate === 'number' && !isNaN(settings.speech_rate)) {
+                        configuredSpeechRateWpm = Math.max(50, Math.min(400, parseInt(settings.speech_rate, 10)));
+                    }
                     
                     // Force pictograms on for tap interface users
                     if (useTapInterface) {
@@ -922,6 +1090,9 @@
                 gridColumns = 10;
                 enablePictograms = false; // Default to false like gridpage
                 ScanningOff = false;
+                waitForSwitchToScan = false;
+                selectedTtsVoiceName = 'en-US-Neural2-A';
+                configuredSpeechRateWpm = 170;
             }
         }
 
@@ -953,13 +1124,9 @@
                     isRecognitionActive = false;
                     
                     // Auto-restart for certain phases
-                    if (gameState.currentPhase === 'ready' || 
-                        gameState.currentPhase === 'awaiting_wake_word' ||
-                        gameState.currentPhase === 'awaiting_answer') {
+                    if (shouldAutoRestartListeningPhase()) {
                         setTimeout(() => {
-                            if (gameState.currentPhase === 'ready' || 
-                                gameState.currentPhase === 'awaiting_wake_word' ||
-                                gameState.currentPhase === 'awaiting_answer') {
+                            if (shouldAutoRestartListeningPhase()) {
                                 startListening();
                             }
                         }, 1500);
@@ -972,18 +1139,14 @@
                     isRecognitionActive = false;
                     
                     // Auto-restart for certain phases, but wait longer if an announcement is playing
-                    if (gameState.currentPhase === 'ready' || 
-                        gameState.currentPhase === 'awaiting_wake_word' ||
-                        gameState.currentPhase === 'awaiting_answer') {
+                    if (shouldAutoRestartListeningPhase()) {
                         
                         // If an announcement is currently playing, wait longer to avoid interference
                         const delay = isAnnouncingNow ? 4000 : 1000;
                         console.log(`Recognition onend: Restarting in ${delay}ms (announcing: ${isAnnouncingNow})`);
                         
                         setTimeout(() => {
-                            if (gameState.currentPhase === 'ready' || 
-                                gameState.currentPhase === 'awaiting_wake_word' ||
-                                gameState.currentPhase === 'awaiting_answer') {
+                            if (shouldAutoRestartListeningPhase()) {
                                 startListening();
                             }
                         }, delay);
@@ -994,9 +1157,24 @@
             }
         }
 
+        function shouldAutoRestartListeningPhase() {
+            return [
+                'ready',
+                'awaiting_wake_word',
+                'awaiting_answer',
+                'story_awaiting_wake_word',
+                'story_listening_for_question'
+            ].includes(gameState.currentPhase);
+        }
+
         // Handle speech recognition results
         function handleSpeechResult(transcript) {
             hideListening();
+
+            if (currentGame === 'story_builder') {
+                handleStorySpeechResult(transcript);
+                return;
+            }
             
             // Check for wake word during scanning ONLY in voice response phases
             if (scanningSystem.isScanning && 
@@ -1076,7 +1254,14 @@
             console.log(`LISTENING: startListening() called in phase: ${gameState.currentPhase}`);
             
             // Completely prevent listening during action selection and response selection phases
-            if (gameState.currentPhase === 'action_selection' || gameState.currentPhase === 'selecting_response') {
+            if (gameState.currentPhase === 'action_selection' ||
+                gameState.currentPhase === 'selecting_response' ||
+                gameState.currentPhase === 'story_selecting_answer' ||
+                gameState.currentPhase === 'story_confirm_end' ||
+                gameState.currentPhase === 'story_selecting_title' ||
+                gameState.currentPhase === 'story_post_story_actions' ||
+                gameState.currentPhase === 'story_generating' ||
+                gameState.currentPhase === 'story_detail') {
                 console.log(`LISTENING: Blocked during ${gameState.currentPhase} phase`);
                 return;
             }
@@ -1088,10 +1273,7 @@
                     console.error('Error starting speech recognition:', error);
                     // Retry after a short delay
                     setTimeout(() => {
-                        if (!isRecognitionActive && 
-                            (gameState.currentPhase === 'ready' || 
-                             gameState.currentPhase === 'awaiting_wake_word' ||
-                             gameState.currentPhase === 'awaiting_answer')) {
+                        if (!isRecognitionActive && shouldAutoRestartListeningPhase()) {
                             startListening();
                         }
                     }, 1000);
@@ -1113,12 +1295,32 @@
         }
 
         // Scanning System Functions
-        function startScanning(containerId) {
+        function startScanning(containerId, forceStart = false) {
             // Skip scanning entirely when ScanningOff is true (tap mode users)
             if (ScanningOff) {
                 console.log(`SCANNING: Skipped for ${containerId} (ScanningOff=true)`);
+                waitingForInitialSwitch = false;
+                pendingScanContainerId = null;
                 return;
             }
+
+            // Match gridpage behavior: optionally wait for switch press before beginning scan
+            if (waitForSwitchToScan && !forceStart) {
+                waitingForInitialSwitch = true;
+                pendingScanContainerId = containerId;
+                stopScanning();
+                console.log(`SCANNING: Waiting for switch press before scanning (${containerId})`);
+
+                const hasShownPrompt = sessionStorage.getItem(GAMES_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+                if (!hasShownPrompt) {
+                    sessionStorage.setItem(GAMES_SWITCH_PROMPT_SHOWN_KEY, 'true');
+                    announce('Press switch to begin scanning');
+                }
+                return;
+            }
+
+            waitingForInitialSwitch = false;
+            pendingScanContainerId = null;
             
             console.log(`SCANNING: Starting scan for container: ${containerId}`);
             
@@ -1137,7 +1339,13 @@
             
             scanningSystem.currentContainer = container;
             // Look for grid buttons in the main menu or game-button in gameplay screens
-            scanningSystem.buttons = Array.from(container.querySelectorAll('button:not([style*="display: none"])'));
+            scanningSystem.buttons = Array.from(container.querySelectorAll('button, .game-button, .grid-button')).filter((element) => {
+                if (!element || !(element instanceof HTMLElement)) {
+                    return false;
+                }
+                const styles = window.getComputedStyle(element);
+                return styles.display !== 'none' && styles.visibility !== 'hidden' && element.offsetParent !== null;
+            });
             scanningSystem.currentIndex = 0;
             scanningSystem.isScanning = true;
             
@@ -1249,7 +1457,7 @@
         }
 
         // Play audio to device (simplified version of gridpage)
-        async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) {
+        async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType, progressCallback = null) {
             try {
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 const audioBuffer = await audioContext.decodeAudioData(audioDataBuffer);
@@ -1258,9 +1466,40 @@
                 source.connect(audioContext.destination);
                 
                 return new Promise((resolve, reject) => {
-                    source.onended = resolve;
+                    const totalDuration = audioBuffer.duration || 0;
+                    let startedAt = null;
+                    let rafId = null;
+
+                    const tickProgress = () => {
+                        if (startedAt === null || typeof progressCallback !== 'function') {
+                            return;
+                        }
+
+                        const elapsed = Math.max(0, audioContext.currentTime - startedAt);
+                        const ratio = totalDuration > 0 ? Math.min(1, elapsed / totalDuration) : 1;
+                        progressCallback(ratio, elapsed, totalDuration);
+
+                        if (ratio < 1) {
+                            rafId = window.requestAnimationFrame(tickProgress);
+                        }
+                    };
+
+                    source.onended = () => {
+                        if (rafId !== null) {
+                            window.cancelAnimationFrame(rafId);
+                        }
+                        if (typeof progressCallback === 'function') {
+                            progressCallback(1, totalDuration, totalDuration);
+                        }
+                        resolve();
+                    };
                     source.onerror = reject;
                     source.start(0);
+
+                    startedAt = audioContext.currentTime;
+                    if (typeof progressCallback === 'function') {
+                        rafId = window.requestAnimationFrame(tickProgress);
+                    }
                 });
             } catch (error) {
                 console.error('Error playing audio:', error);
@@ -1275,13 +1514,17 @@
             }
 
             isAnnouncingNow = true;
-            const { textToAnnounce, announcementType, resolve, reject } = announcementQueue.shift();
+            const { textToAnnounce, announcementType, voiceNameOverride, speechRateOverride, progressCallback, resolve, reject } = announcementQueue.shift();
 
             console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
             // Show speech bubble if enabled (same as gridpage.js)
             if (typeof showSplashScreen === 'function') {
-                showSplashScreen(textToAnnounce);
+                const splashText = String(textToAnnounce || '')
+                    .replace(/<[^>]*>/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                showSplashScreen(splashText || textToAnnounce);
             }
 
             // Stop speech recognition during announcements to prevent interference
@@ -1298,7 +1541,12 @@
                 const response = await authenticatedFetch(`/play-audio`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+                    body: JSON.stringify({
+                        text: textToAnnounce,
+                        routing_target: announcementType,
+                        voice_name_override: voiceNameOverride || null,
+                        speech_rate_override: Number.isFinite(speechRateOverride) ? speechRateOverride : null
+                    }),
                 });
 
                 if (!response.ok) {
@@ -1315,7 +1563,7 @@
                 }
 
                 const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+                await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, progressCallback);
 
                 resolve(); // Resolve the promise for this announcement
             } catch (error) {
@@ -1329,13 +1577,16 @@
         }
 
         // Announce text using same system as gridpage.js
-        async function announce(textToAnnounce, announcementType = "system") {
+        async function announce(textToAnnounce, announcementType = "system", voiceNameOverride = null, speechRateOverride = null, progressCallback = null) {
             console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
             
             return new Promise((resolve, reject) => {
                 announcementQueue.push({
                     textToAnnounce,
                     announcementType,
+                    voiceNameOverride,
+                    speechRateOverride,
+                    progressCallback,
                     resolve,
                     reject
                 });
@@ -1380,6 +1631,1260 @@
                 startScanning('roleSelection');
                 enhanceButtonsWithImages('roleSelection');
             }, 2000);
+        }
+
+        function resetStoryBuilderState() {
+            storyState = {
+                transcript: [],
+                pendingQuestion: '',
+                partnerSuggestions: [],
+                currentOptions: [],
+                selectingTitle: false,
+                selectedStoryId: null,
+                stories: [],
+                mode: 'build',
+                view: 'entry',
+                currentStoryTitle: '',
+                currentStoryText: '',
+                readWordRanges: [],
+                readWordWeightTotal: 0,
+                activeReadWordIndex: -1,
+                activeReadUtterance: null,
+                deleteSelectionIds: [],
+                verifiedAdminPin: false
+            };
+        }
+
+        function updateStoryBottomControls({ showPartnerIdeas = false, showDeleteStories = false } = {}) {
+            const partnerBtn = document.getElementById('storyPartnerIdeasButton');
+            const deleteBtn = document.getElementById('storyDeleteStoriesButton');
+            if (partnerBtn) {
+                partnerBtn.classList.toggle('hidden', !showPartnerIdeas);
+            }
+            if (deleteBtn) {
+                deleteBtn.classList.toggle('hidden', !showDeleteStories);
+            }
+        }
+
+        function getStoryEntryOptions() {
+            return [
+                { option: 'Go Back', summary: 'Go Back', action: 'story_entry_back' },
+                { option: 'Create a New Story', summary: 'Create New Story', action: 'story_entry_create' },
+                { option: 'Read an Existing Story', summary: 'Read Existing Story', action: 'story_entry_read' }
+            ];
+        }
+
+        function getReadExistingStoryOptions() {
+            const options = [
+                { option: 'Go Back', summary: 'Go Back', action: 'story_read_back' }
+            ];
+
+            storyState.stories.forEach((story) => {
+                options.push({
+                    option: story.title || 'Untitled Story',
+                    summary: story.title || 'Untitled Story',
+                    action: 'story_read_story',
+                    storyId: story.id,
+                    storyTitle: story.title || 'Untitled Story'
+                });
+            });
+
+            if (storyState.stories.length === 0) {
+                options.push({
+                    option: 'No saved stories found',
+                    summary: 'No Saved Stories',
+                    action: 'story_noop'
+                });
+            }
+
+            return options;
+        }
+
+        async function showStoryEntryMenu() {
+            stopListening();
+            closePartnerIdeasModal();
+            closeStoryDeleteModal();
+            storyState.view = 'entry';
+            gameState.currentPhase = 'story_entry_menu';
+
+            document.getElementById('storyTranscript').classList.add('hidden');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.add('hidden');
+
+            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: false });
+            setStoryStatusMessage('Choose an option to begin Story Builder.');
+            displayStoryUserOptions(getStoryEntryOptions());
+        }
+
+        async function startCreateStoryFlow() {
+            stopScanning();
+            stopListening();
+            closePartnerIdeasModal();
+            closeStoryDeleteModal();
+
+            storyState.mode = 'build';
+            storyState.view = 'create';
+            storyState.pendingQuestion = '';
+            storyState.selectedStoryId = null;
+            storyState.currentStoryTitle = '';
+            storyState.currentStoryText = '';
+            storyState.transcript = [];
+
+            document.getElementById('storyUserOptions').classList.add('hidden');
+            document.getElementById('storyTranscript').classList.remove('hidden');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.add('hidden');
+
+            updateStoryTranscriptUI();
+            await refreshPartnerSuggestions();
+            updateStoryBottomControls({ showPartnerIdeas: true, showDeleteStories: false });
+
+            gameState.currentPhase = 'story_awaiting_wake_word';
+            setStoryStatusMessage(`Let's create a story! Say ${gameState.wakeWord} to ask me a question about the story.`);
+            await announce(`Let's create a story! Say ${gameState.wakeWord} to ask me a question about the story.`);
+            if (gameState.currentPhase === 'story_awaiting_wake_word') {
+                startListening();
+            }
+        }
+
+        async function showExistingStoriesMenu() {
+            stopListening();
+            closePartnerIdeasModal();
+            closeStoryDeleteModal();
+
+            storyState.view = 'read';
+            gameState.currentPhase = 'story_read_list';
+
+            await loadStoryLibrary();
+
+            document.getElementById('storyTranscript').classList.add('hidden');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.add('hidden');
+
+            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: true });
+            setStoryStatusMessage('Choose a story to read.');
+            displayStoryUserOptions(getReadExistingStoryOptions());
+        }
+
+        async function readExistingStoryById(storyId, storyTitle = 'Untitled Story') {
+            if (!storyId) {
+                showError('Story not found.');
+                await showExistingStoriesMenu();
+                return;
+            }
+
+            try {
+                gameState.currentPhase = 'story_generating';
+                const response = await authenticatedFetch(`/api/games/story/${storyId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                if (!data.success || !data.story) {
+                    throw new Error(data.error || 'Story not found');
+                }
+
+                const story = data.story;
+                storyState.selectedStoryId = story.id;
+                storyState.currentStoryTitle = story.title || storyTitle || 'Untitled Story';
+                storyState.currentStoryText = story.story_text || '';
+
+                document.getElementById('storyTranscript').classList.add('hidden');
+                document.getElementById('storyLibrary').classList.add('hidden');
+                document.getElementById('storyDetail').classList.add('hidden');
+                document.getElementById('storyReadDisplay').classList.remove('hidden');
+
+                await announce(`Let's read ${storyState.currentStoryTitle}!`);
+                await readStoryWithHighlight(storyState.currentStoryTitle, storyState.currentStoryText || 'This story is empty.');
+            } catch (error) {
+                console.error('Error reading existing story:', error);
+                showError('Unable to read that story.');
+            }
+
+            await showExistingStoriesMenu();
+        }
+
+        async function validateStoryAdminPin(pin) {
+            try {
+                const response = await authenticatedFetch('/api/account/toolbar-pin', { method: 'GET' });
+                if (!response.ok) {
+                    return false;
+                }
+                const data = await response.json();
+                return (data.pin || '') === pin;
+            } catch (error) {
+                console.error('Error validating admin PIN:', error);
+                return false;
+            }
+        }
+
+        async function promptStoryDeletePin() {
+            if (storyState.view !== 'read') {
+                return;
+            }
+
+            if (storyState.verifiedAdminPin) {
+                openStoryDeleteModal();
+                return;
+            }
+
+            const pin = window.prompt('Enter Admin PIN to delete stories:');
+            if (pin === null) {
+                return;
+            }
+
+            const isValid = await validateStoryAdminPin(String(pin).trim());
+            if (!isValid) {
+                showError('Incorrect Admin PIN.');
+                return;
+            }
+
+            storyState.verifiedAdminPin = true;
+            openStoryDeleteModal();
+        }
+
+        function closeStoryDeleteModal() {
+            const modal = document.getElementById('storyDeleteModal');
+            if (modal) {
+                modal.classList.add('hidden');
+            }
+            storyState.deleteSelectionIds = [];
+
+            if (storyState.view === 'read' && gameState.currentPhase === 'story_read_list') {
+                setTimeout(() => startScanning('storyUserOptions'), 250);
+            }
+        }
+
+        function openStoryDeleteModal() {
+            const modal = document.getElementById('storyDeleteModal');
+            const list = document.getElementById('storyDeleteList');
+            const message = document.getElementById('storyDeleteModalMessage');
+            if (!modal || !list || !message) {
+                return;
+            }
+
+            stopScanning();
+            list.innerHTML = '';
+            storyState.deleteSelectionIds = [];
+
+            if (!storyState.stories.length) {
+                const empty = document.createElement('div');
+                empty.className = 'story-helper-item';
+                empty.textContent = 'No stories available to delete.';
+                list.appendChild(empty);
+                message.textContent = 'There are no saved stories to delete.';
+            } else {
+                message.textContent = 'Select one or more stories to delete.';
+                storyState.stories.forEach((story) => {
+                    const row = document.createElement('label');
+                    row.style.display = 'flex';
+                    row.style.alignItems = 'center';
+                    row.style.gap = '0.6rem';
+                    row.style.padding = '0.4rem 0';
+                    row.style.borderBottom = '1px solid #f1f5f9';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = story.id || '';
+                    checkbox.addEventListener('change', () => {
+                        const selected = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map((item) => item.value);
+                        storyState.deleteSelectionIds = selected;
+                    });
+
+                    const label = document.createElement('span');
+                    label.textContent = story.title || 'Untitled Story';
+
+                    row.appendChild(checkbox);
+                    row.appendChild(label);
+                    list.appendChild(row);
+                });
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        async function confirmDeleteSelectedStories() {
+            const selectedIds = Array.isArray(storyState.deleteSelectionIds)
+                ? storyState.deleteSelectionIds.filter(Boolean)
+                : [];
+
+            if (!selectedIds.length) {
+                showError('Select at least one story to delete.');
+                return;
+            }
+
+            const confirmed = window.confirm(`Delete ${selectedIds.length} selected stor${selectedIds.length === 1 ? 'y' : 'ies'}? This cannot be undone.`);
+            if (!confirmed) {
+                return;
+            }
+
+            showLoading();
+            try {
+                for (const storyId of selectedIds) {
+                    const response = await authenticatedFetch(`/api/games/story/${storyId}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                }
+
+                closeStoryDeleteModal();
+                hideLoading();
+                await showExistingStoriesMenu();
+                setStoryStatusMessage('Selected stories deleted. Choose a story to read.');
+            } catch (error) {
+                console.error('Error deleting selected stories:', error);
+                hideLoading();
+                showError('Failed to delete selected stories.');
+            }
+        }
+
+        function setPageTitle(text) {
+            const titleEl = document.getElementById('pageTitle');
+            if (titleEl) {
+                titleEl.textContent = text;
+            }
+        }
+
+        function setStoryStatusMessage(message, heardTranscript = '') {
+            const statusEl = document.getElementById('storyStatusMessage');
+            const transcriptEl = document.getElementById('storyHeardTranscript');
+            if (statusEl) {
+                statusEl.textContent = message || '';
+            }
+            if (transcriptEl) {
+                transcriptEl.textContent = heardTranscript ? `Heard: ${heardTranscript}` : '';
+            }
+        }
+
+        function renderStoryReadText(title, text) {
+            const titleEl = document.getElementById('storyReadTitle');
+            const textEl = document.getElementById('storyReadText');
+            if (!titleEl || !textEl) {
+                return;
+            }
+
+            titleEl.textContent = title || 'Untitled Story';
+            textEl.innerHTML = '';
+            storyState.readWordRanges = [];
+            storyState.readWordWeightTotal = 0;
+            storyState.activeReadWordIndex = -1;
+
+            const sourceText = String(text || '');
+            const tokenRegex = /\S+/g;
+            let cursor = 0;
+            let match;
+
+            while ((match = tokenRegex.exec(sourceText)) !== null) {
+                const tokenStart = match.index;
+                const tokenText = match[0];
+
+                if (tokenStart > cursor) {
+                    textEl.appendChild(document.createTextNode(sourceText.slice(cursor, tokenStart)));
+                }
+
+                const span = document.createElement('span');
+                span.className = 'story-read-word';
+                span.textContent = tokenText;
+                textEl.appendChild(span);
+
+                const gapText = tokenStart > cursor ? sourceText.slice(cursor, tokenStart) : '';
+                let weight = Math.max(1, tokenText.replace(/[^A-Za-z0-9]/g, '').length * 0.42);
+
+                if (/[,:;]$/.test(tokenText)) {
+                    weight += 1.0;
+                }
+                if (/[.!?]["')\]]*$/.test(tokenText)) {
+                    weight += 2.1;
+                }
+                if (/…$/.test(tokenText) || /\.\.\.$/.test(tokenText)) {
+                    weight += 2.8;
+                }
+
+                const lineBreakCount = (gapText.match(/\n/g) || []).length;
+                if (lineBreakCount > 0) {
+                    weight += lineBreakCount * 1.6;
+                }
+
+                storyState.readWordWeightTotal += weight;
+
+                storyState.readWordRanges.push({
+                    start: tokenStart,
+                    end: tokenStart + tokenText.length,
+                    node: span,
+                    cumulativeWeight: storyState.readWordWeightTotal
+                });
+
+                cursor = tokenStart + tokenText.length;
+            }
+
+            if (cursor < sourceText.length) {
+                textEl.appendChild(document.createTextNode(sourceText.slice(cursor)));
+            }
+        }
+
+        function setActiveStoryReadWordByCharIndex(charIndex) {
+            if (!Array.isArray(storyState.readWordRanges) || storyState.readWordRanges.length === 0) {
+                return;
+            }
+
+            let nextIndex = -1;
+            for (let i = 0; i < storyState.readWordRanges.length; i++) {
+                const token = storyState.readWordRanges[i];
+                if (charIndex >= token.start && charIndex < token.end) {
+                    nextIndex = i;
+                    break;
+                }
+            }
+
+            if (nextIndex === -1 || nextIndex === storyState.activeReadWordIndex) {
+                return;
+            }
+
+            if (storyState.activeReadWordIndex >= 0 && storyState.readWordRanges[storyState.activeReadWordIndex]) {
+                storyState.readWordRanges[storyState.activeReadWordIndex].node.classList.remove('active');
+            }
+
+            storyState.activeReadWordIndex = nextIndex;
+            const activeToken = storyState.readWordRanges[nextIndex];
+            activeToken.node.classList.add('active');
+            activeToken.node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+
+        function clearStoryReadHighlight() {
+            if (
+                storyState.activeReadWordIndex >= 0
+                && Array.isArray(storyState.readWordRanges)
+                && storyState.readWordRanges[storyState.activeReadWordIndex]
+            ) {
+                storyState.readWordRanges[storyState.activeReadWordIndex].node.classList.remove('active');
+            }
+            storyState.activeReadWordIndex = -1;
+        }
+
+        function getStoryCharIndexForPlaybackRatio(ratio, fallbackTextLength) {
+            if (!Array.isArray(storyState.readWordRanges) || storyState.readWordRanges.length === 0) {
+                return 0;
+            }
+
+            const safeRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+            const totalWeight = Math.max(0.0001, Number(storyState.readWordWeightTotal) || 0);
+            const targetWeight = safeRatio * totalWeight;
+
+            for (let i = 0; i < storyState.readWordRanges.length; i++) {
+                const token = storyState.readWordRanges[i];
+                if ((token.cumulativeWeight || 0) >= targetWeight) {
+                    return token.start;
+                }
+            }
+
+            const lastToken = storyState.readWordRanges[storyState.readWordRanges.length - 1];
+            return Number.isFinite(lastToken?.start)
+                ? lastToken.start
+                : Math.max(0, (fallbackTextLength || 1) - 1);
+        }
+
+        function escapeStoryTextForSsml(rawText) {
+            return String(rawText || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&apos;');
+        }
+
+        function buildStoryNarrationSsml(rawText) {
+            const content = escapeStoryTextForSsml(rawText)
+                .replace(/\r\n/g, '\n')
+                .replace(/\n{2,}/g, '<break time="650ms"/>')
+                .replace(/\n/g, '<break time="320ms"/>')
+                .replace(/\.\.\./g, '...<break time="480ms"/>')
+                .replace(/([,;:])(\s|$)/g, '$1<break time="180ms"/>$2')
+                .replace(/([!?]+)(\s|$)/g, '$1<break time="520ms"/>$2')
+                .replace(/([.])(\s|$)/g, '$1<break time="430ms"/>$2');
+
+            return `<speak>${content}</speak>`;
+        }
+
+        async function readStoryWithHighlight(title, storyText) {
+            const text = String(storyText || '').trim();
+            renderStoryReadText(title, text || 'This story is empty.');
+
+            if (!text) {
+                await announce('This story is empty.');
+                return;
+            }
+
+            try {
+                const narrationSsml = buildStoryNarrationSsml(text);
+                await announce(
+                    narrationSsml,
+                    'system',
+                    selectedTtsVoiceName || null,
+                    configuredSpeechRateWpm,
+                    (ratio) => {
+                        if (!text.length) {
+                            return;
+                        }
+                        const charIndex = getStoryCharIndexForPlaybackRatio(ratio, text.length);
+                        setActiveStoryReadWordByCharIndex(charIndex);
+                    }
+                );
+            } finally {
+                clearStoryReadHighlight();
+                storyState.activeReadUtterance = null;
+            }
+        }
+
+        function openPartnerIdeasModal() {
+            const modal = document.getElementById('storyPartnerModal');
+            if (modal) {
+                modal.classList.remove('hidden');
+            }
+        }
+
+        function closePartnerIdeasModal() {
+            const modal = document.getElementById('storyPartnerModal');
+            if (modal) {
+                modal.classList.add('hidden');
+            }
+        }
+
+        async function refreshPartnerSuggestions(defaultPrompt = 'What kind of story should we write?') {
+            if (!Array.isArray(storyState.transcript) || storyState.transcript.length === 0) {
+                storyState.partnerSuggestions = [
+                    'What kind of story do you want to write?',
+                    'Who is in the story?',
+                    'Where does the story happen?',
+                    'What happens first?'
+                ];
+                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
+                return;
+            }
+
+            try {
+                const response = await authenticatedFetch('/api/games/story/options', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        partner_question: defaultPrompt,
+                        transcript: storyState.transcript
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                storyState.partnerSuggestions = Array.isArray(data.partner_suggestions) ? data.partner_suggestions : [];
+                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
+            } catch (error) {
+                console.error('Error refreshing partner suggestions:', error);
+                storyState.partnerSuggestions = [
+                    'What kind of story do you want to write?',
+                    'Who is in the story?',
+                    'Where does the story happen?',
+                    'What happens first?'
+                ];
+                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
+            }
+        }
+
+        async function startStoryBuilder() {
+            currentGame = 'story_builder';
+            resetStoryBuilderState();
+            setPageTitle('🎮 Games - Story Builder');
+
+            stopScanning();
+            stopListening();
+
+            document.getElementById('gridContainer').classList.add('hidden');
+            document.getElementById('twentyQuestionsGame').classList.add('hidden');
+            document.getElementById('storyBuilderGame').classList.remove('hidden');
+
+            document.getElementById('storyUserOptions').classList.add('hidden');
+            document.getElementById('storyTranscript').classList.add('hidden');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.add('hidden');
+            closePartnerIdeasModal();
+            closeStoryDeleteModal();
+
+            updateStoryTranscriptUI();
+            setStoryStatusMessage('Choose an option to begin Story Builder.');
+
+            await showStoryEntryMenu();
+        }
+
+        function handleStorySpeechResult(transcript) {
+            if (gameState.currentPhase !== 'story_awaiting_wake_word' && gameState.currentPhase !== 'story_listening_for_question') {
+                return;
+            }
+
+            const rawTranscript = String(transcript || '').trim();
+            const normalizedTranscript = rawTranscript.toLowerCase();
+            const normalizedWakeWord = gameState.wakeWord.toLowerCase();
+            const compactWakeWord = normalizedWakeWord.replace(/\s+/g, '');
+            const compactTranscript = normalizedTranscript.replace(/\s+/g, '');
+            setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`, normalizedTranscript);
+
+            if (gameState.currentPhase === 'story_awaiting_wake_word') {
+                if (compactTranscript.includes(compactWakeWord) || normalizedTranscript.includes(normalizedWakeWord)) {
+                    gameState.currentPhase = 'story_listening_for_question';
+                    setStoryStatusMessage("I'm listening. Say 'The End' to finish the story.", normalizedTranscript);
+                    announce("I'm listening. Say 'The End' to finish the story.").finally(() => {
+                        if (gameState.currentPhase === 'story_listening_for_question') {
+                            startListening();
+                        }
+                    });
+                    return;
+                }
+
+                setTimeout(() => {
+                    if (gameState.currentPhase === 'story_awaiting_wake_word') {
+                        startListening();
+                    }
+                }, 900);
+                return;
+            }
+
+            if (gameState.currentPhase === 'story_listening_for_question') {
+                let partnerQuestion = rawTranscript;
+                const escapedWakeWord = normalizedWakeWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const wakeWordPrefixRegex = new RegExp(`^${escapedWakeWord}[\\s,.:;!?-]*`, 'i');
+                partnerQuestion = rawTranscript.replace(wakeWordPrefixRegex, '').trim();
+                partnerQuestion = partnerQuestion.replace(/^\s+|\s+$/g, '');
+
+                if (!partnerQuestion) {
+                    announce('Please ask a question for Story Builder.');
+                    setTimeout(() => {
+                        if (gameState.currentPhase === 'story_listening_for_question') {
+                            startListening();
+                        }
+                    }, 1500);
+                    return;
+                }
+
+                storyState.pendingQuestion = partnerQuestion;
+                setStoryStatusMessage(`Question captured: ${partnerQuestion}`, partnerQuestion);
+                announce(`I heard '${partnerQuestion}'. Give me a moment to respond.`);
+
+                if (/^the end\??$/i.test(partnerQuestion)) {
+                    gameState.currentPhase = 'story_confirm_end';
+                    setStoryStatusMessage('Story completion requested. Select Yes or No.', partnerQuestion);
+                    displayStoryUserOptions(['Yes', 'No']);
+                    return;
+                }
+
+                requestStoryOptionsForQuestion(partnerQuestion);
+                return;
+            }
+        }
+
+        function getStoryStandardActionOptions() {
+            return [
+                {
+                    option: 'Something else',
+                    summary: 'Something Else',
+                    action: 'story_something_else'
+                },
+                {
+                    option: 'Ask again',
+                    summary: 'Ask Again',
+                    action: 'story_ask_again'
+                },
+                {
+                    option: 'Quit story',
+                    summary: 'Quit Story',
+                    action: 'story_quit'
+                }
+            ];
+        }
+
+        function getStoryExcludableOptionTexts(options) {
+            if (!Array.isArray(options)) {
+                return [];
+            }
+
+            return options
+                .filter((item) => !(item && typeof item === 'object' && item.action))
+                .map((item) => {
+                    if (item && typeof item === 'object') {
+                        return item.option || item.summary || '';
+                    }
+                    return String(item || '');
+                })
+                .map((text) => text.trim())
+                .filter(Boolean);
+        }
+
+        function getStoryPostReadActionOptions() {
+            return [
+                {
+                    option: 'Exit Story Builder',
+                    summary: 'Exit Story Builder',
+                    action: 'story_post_exit'
+                },
+                {
+                    option: 'Read Story Again',
+                    summary: 'Read Story Again',
+                    action: 'story_post_read_again'
+                },
+                {
+                    option: 'Make changes to story',
+                    summary: 'Make Changes to Story',
+                    action: 'story_post_make_changes'
+                }
+            ];
+        }
+
+        function showStoryQaMode() {
+            document.getElementById('storyDetail').classList.add('hidden');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyUserOptions').classList.add('hidden');
+        }
+
+        async function presentPostStoryActions(statusMessage = 'Choose what to do next with your story.') {
+            gameState.currentPhase = 'story_post_story_actions';
+            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: false });
+            setStoryStatusMessage(statusMessage);
+            displayStoryUserOptions(getStoryPostReadActionOptions());
+        }
+
+        async function beginStoryEditMode() {
+            storyState.mode = 'edit';
+            storyState.view = 'create';
+            storyState.pendingQuestion = '';
+            showStoryQaMode();
+            updateStoryBottomControls({ showPartnerIdeas: true, showDeleteStories: false });
+            gameState.currentPhase = 'story_awaiting_wake_word';
+            setStoryStatusMessage(`I want to make some changes. Say ${gameState.wakeWord} to ask me about the changes.`);
+            await announce(`I want to make some changes. Say ${gameState.wakeWord} to ask me about the changes.`);
+            if (gameState.currentPhase === 'story_awaiting_wake_word') {
+                startListening();
+            }
+        }
+
+        async function regenerateStoryWithCurrentTranscript() {
+            if (!storyState.selectedStoryId) {
+                showError('No story selected for changes.');
+                return;
+            }
+
+            gameState.currentPhase = 'story_generating';
+            showLoading();
+
+            try {
+                const selectedTitle = (document.getElementById('storyTitleInput').value || storyState.currentStoryTitle || 'Untitled Story').trim();
+
+                const response = await authenticatedFetch('/api/games/story/finalize', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: selectedTitle,
+                        transcript: storyState.transcript
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                if (!data.success || !data.story) {
+                    throw new Error(data.error || 'Story regeneration failed');
+                }
+
+                const updatedStoryResponse = await authenticatedFetch(`/api/games/story/${storyState.selectedStoryId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        title: selectedTitle,
+                        story_text: data.story.story_text || '',
+                        transcript: storyState.transcript
+                    })
+                });
+
+                if (!updatedStoryResponse.ok) {
+                    throw new Error(`HTTP ${updatedStoryResponse.status}: ${updatedStoryResponse.statusText}`);
+                }
+
+                const updatedData = await updatedStoryResponse.json();
+                hideLoading();
+
+                if (!updatedData.success || !updatedData.story) {
+                    throw new Error(updatedData.error || 'Failed to save regenerated story');
+                }
+
+                storyState.mode = 'build';
+                await loadStoryLibrary();
+                openStoryDetailFromData(updatedData.story);
+                await announce(`Let's listen to our story ${updatedData.story.title || selectedTitle}.`);
+                await announce(updatedData.story.story_text || 'Your story is ready.');
+                await presentPostStoryActions('Story updated. Choose what to do next.');
+            } catch (error) {
+                console.error('Error regenerating edited story:', error);
+                hideLoading();
+                showError('Failed to regenerate story. Please try again.');
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
+                startListening();
+            }
+        }
+
+        async function requestStoryOptionsForQuestion(partnerQuestion, excludedOptions = []) {
+            showLoading();
+            try {
+                const response = await authenticatedFetch('/api/games/story/options', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        partner_question: partnerQuestion,
+                        transcript: storyState.transcript,
+                        exclude_existing_options: excludedOptions
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                hideLoading();
+
+                const userOptions = Array.isArray(data.user_options) ? data.user_options : [];
+                storyState.partnerSuggestions = Array.isArray(data.partner_suggestions) ? data.partner_suggestions : [];
+                storyState.view = 'create';
+                gameState.currentPhase = 'story_selecting_answer';
+
+                document.getElementById('storyTranscript').classList.remove('hidden');
+                document.getElementById('storyLibrary').classList.add('hidden');
+                document.getElementById('storyReadDisplay').classList.add('hidden');
+                document.getElementById('storyDetail').classList.add('hidden');
+                updateStoryBottomControls({ showPartnerIdeas: true, showDeleteStories: false });
+
+                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
+                displayStoryUserOptions(userOptions, { appendStandardActions: true });
+                setStoryStatusMessage('Choose an answer option for the user.', partnerQuestion);
+            } catch (error) {
+                console.error('Error generating Story Builder options:', error);
+                hideLoading();
+                showError('Failed to generate story options. Try again.');
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
+                setTimeout(() => startListening(), 1200);
+            }
+        }
+
+        function displayStoryPartnerSuggestions(suggestions) {
+            const container = document.getElementById('storyPartnerList');
+            container.innerHTML = '';
+
+            if (!Array.isArray(suggestions) || suggestions.length === 0) {
+                return;
+            }
+
+            suggestions.forEach((questionText) => {
+                const item = document.createElement('div');
+                item.className = 'story-helper-item';
+                item.textContent = questionText;
+                container.appendChild(item);
+            });
+        }
+
+        function displayStoryUserOptions(options, config = {}) {
+            const container = document.getElementById('storyUserOptions');
+            container.innerHTML = '';
+
+            const appendStandardActions = Boolean(config.appendStandardActions);
+            const baseOptions = Array.isArray(options) && options.length > 0 ? options : ['Try Again'];
+            const safeOptions = appendStandardActions
+                ? [...baseOptions, ...getStoryStandardActionOptions()]
+                : baseOptions;
+            storyState.currentOptions = safeOptions;
+
+            safeOptions.forEach((item) => {
+                const isObj = typeof item === 'object' && item !== null;
+                // summary is used for scanning label (short); option is the full text spoken on selection
+                const scanLabel = isObj ? (item.summary || item.option || '') : String(item);
+                const fullOptionText = isObj ? (item.option || item.summary || '') : String(item);
+
+                const button = document.createElement('button');
+                button.className = 'game-button';
+                button.textContent = scanLabel;
+                button.dataset.scanLabel = scanLabel;
+                button.onclick = () => selectStoryOption(isObj ? item : fullOptionText);
+                container.appendChild(button);
+            });
+
+            container.classList.remove('hidden');
+            setTimeout(() => startScanning('storyUserOptions'), 400);
+            enhanceButtonsWithImages('storyUserOptions');
+        }
+
+        async function selectStoryOption(selectedOption) {
+            stopScanning();
+            document.getElementById('storyUserOptions').classList.add('hidden');
+
+            const isObj = selectedOption && typeof selectedOption === 'object';
+            const optionText = isObj ? String(selectedOption.option || selectedOption.summary || '').trim() : String(selectedOption || '').trim();
+            const selectedAction = isObj ? selectedOption.action : null;
+
+            if (selectedAction === 'story_entry_back') {
+                goBackToMenu();
+                return;
+            }
+
+            if (selectedAction === 'story_entry_create') {
+                await startCreateStoryFlow();
+                return;
+            }
+
+            if (selectedAction === 'story_entry_read') {
+                await showExistingStoriesMenu();
+                return;
+            }
+
+            if (selectedAction === 'story_read_back') {
+                await showStoryEntryMenu();
+                return;
+            }
+
+            if (selectedAction === 'story_read_story') {
+                await readExistingStoryById(selectedOption.storyId, selectedOption.storyTitle || optionText);
+                return;
+            }
+
+            if (selectedAction === 'story_noop') {
+                await showExistingStoriesMenu();
+                return;
+            }
+
+            if (selectedAction === 'story_something_else') {
+                const excludedOptions = getStoryExcludableOptionTexts(storyState.currentOptions);
+                setStoryStatusMessage('Getting different answer options.', storyState.pendingQuestion);
+                await requestStoryOptionsForQuestion(storyState.pendingQuestion, excludedOptions);
+                return;
+            }
+
+            if (selectedAction === 'story_ask_again') {
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                storyState.pendingQuestion = '';
+                setStoryStatusMessage(`Please use ${gameState.wakeWord} and ask again.`);
+                announce(`Please use ${gameState.wakeWord} and ask again.`).finally(() => {
+                    if (gameState.currentPhase === 'story_awaiting_wake_word') {
+                        startListening();
+                    }
+                });
+                return;
+            }
+
+            if (selectedAction === 'story_quit') {
+                goBackToMenu();
+                return;
+            }
+
+            if (selectedAction === 'story_post_exit') {
+                goBackToMenu();
+                return;
+            }
+
+            if (selectedAction === 'story_post_read_again') {
+                const storyText = document.getElementById('storyTextInput').value || storyState.currentStoryText || '';
+                if (storyText.trim()) {
+                    await announce(storyText);
+                }
+                await presentPostStoryActions('Choose what to do next with your story.');
+                return;
+            }
+
+            if (selectedAction === 'story_post_make_changes') {
+                await beginStoryEditMode();
+                return;
+            }
+
+            if (gameState.currentPhase === 'story_confirm_end') {
+                storyState.transcript.push({ question: 'The End?', answer: optionText });
+                updateStoryTranscriptUI();
+                await refreshPartnerSuggestions('What should we ask next to shape the story?');
+
+                if (String(optionText).toLowerCase() === 'yes') {
+                    if (storyState.mode === 'edit') {
+                        await announce("I'm updating your story now.");
+                        await regenerateStoryWithCurrentTranscript();
+                        return;
+                    }
+                    await announce("I'm picking a title for the story.");
+                    await requestStoryTitleOptions();
+                    return;
+                }
+
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
+                await announce(`Say ${gameState.wakeWord} to ask another question.`);
+                startListening();
+                return;
+            }
+
+            if (gameState.currentPhase === 'story_selecting_title') {
+                await announce(`Let's listen to our story ${optionText}.`);
+                await finalizeStory(optionText);
+                return;
+            }
+
+            if (gameState.currentPhase === 'story_selecting_answer') {
+                await announce(optionText);
+                storyState.transcript.push({
+                    question: storyState.pendingQuestion,
+                    answer: optionText
+                });
+                updateStoryTranscriptUI();
+                await refreshPartnerSuggestions('What should we ask next to build the story?');
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
+                await announce(`Say ${gameState.wakeWord} to ask another question.`);
+                startListening();
+            }
+        }
+
+        async function requestStoryTitleOptions() {
+            gameState.currentPhase = 'story_generating';
+            showLoading();
+
+            try {
+                const response = await authenticatedFetch('/api/games/story/title-options', {
+                    method: 'POST',
+                    body: JSON.stringify({ transcript: storyState.transcript })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                const titleOptions = Array.isArray(data.title_options) ? data.title_options : [];
+                hideLoading();
+                gameState.currentPhase = 'story_selecting_title';
+                setStoryStatusMessage('Choose a title for your story.');
+                displayStoryUserOptions(titleOptions);
+            } catch (error) {
+                console.error('Error generating title options:', error);
+                hideLoading();
+                showError('Failed to generate title options.');
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
+                startListening();
+            }
+        }
+
+        async function finalizeStory(selectedTitle) {
+            gameState.currentPhase = 'story_generating';
+            showLoading();
+
+            try {
+                const response = await authenticatedFetch('/api/games/story/finalize', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: selectedTitle,
+                        transcript: storyState.transcript
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                hideLoading();
+
+                if (!data.success || !data.story) {
+                    throw new Error(data.error || 'Story generation failed');
+                }
+
+                storyState.mode = 'build';
+                await loadStoryLibrary();
+                openStoryDetailFromData(data.story);
+                setStoryStatusMessage('Story saved. Reading now.');
+                await announce(data.story.story_text || 'Your story is ready.');
+                await presentPostStoryActions('Story complete. Choose what to do next.');
+            } catch (error) {
+                console.error('Error finalizing story:', error);
+                hideLoading();
+                showError('Failed to finish story. Please try again.');
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
+                startListening();
+            }
+        }
+
+        function updateStoryTranscriptUI() {
+            const list = document.getElementById('storyQaList');
+            list.innerHTML = '';
+
+            for (let i = storyState.transcript.length - 1; i >= 0; i--) {
+                const qa = storyState.transcript[i];
+                const item = document.createElement('div');
+                item.className = 'qa-item';
+                item.innerHTML = `<div class="qa-question">Q: ${qa.question || ''}</div><div class="qa-answer">A: ${qa.answer || ''}</div>`;
+                list.appendChild(item);
+            }
+        }
+
+        async function loadStoryLibrary() {
+            try {
+                const response = await authenticatedFetch('/api/games/story/list');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                storyState.stories = Array.isArray(data.stories) ? data.stories : [];
+                renderStoryLibrary();
+            } catch (error) {
+                console.error('Error loading story library:', error);
+                showError('Unable to load saved stories.');
+            }
+        }
+
+        function renderStoryLibrary() {
+            const container = document.getElementById('storyLibraryList');
+            container.innerHTML = '';
+
+            if (!storyState.stories.length) {
+                const empty = document.createElement('div');
+                empty.className = 'story-helper-item';
+                empty.textContent = 'No saved stories yet.';
+                container.appendChild(empty);
+                return;
+            }
+
+            storyState.stories.forEach((story) => {
+                const button = document.createElement('button');
+                button.className = 'game-button';
+                button.dataset.scanLabel = story.title || 'Saved Story';
+                button.innerHTML = `<i class="fas fa-book-open"></i>${story.title || 'Untitled Story'}`;
+                button.onclick = () => openStoryDetail(story.id);
+                container.appendChild(button);
+            });
+        }
+
+        async function showStoryLibrary() {
+            await showExistingStoriesMenu();
+        }
+
+        async function openStoryDetail(storyId) {
+            try {
+                const response = await authenticatedFetch(`/api/games/story/${storyId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                if (!data.success || !data.story) {
+                    throw new Error(data.error || 'Story not found');
+                }
+                openStoryDetailFromData(data.story);
+                gameState.currentPhase = 'story_detail';
+            } catch (error) {
+                console.error('Error loading story detail:', error);
+                showError('Unable to load story.');
+            }
+        }
+
+        function openStoryDetailFromData(story) {
+            storyState.selectedStoryId = story.id;
+            storyState.currentStoryTitle = story.title || '';
+            storyState.currentStoryText = story.story_text || '';
+            const incomingTranscript = Array.isArray(story.transcript) ? story.transcript : [];
+            storyState.transcript = incomingTranscript.filter((entry) => entry && typeof entry === 'object');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.remove('hidden');
+            document.getElementById('storyTitleInput').value = story.title || '';
+            document.getElementById('storyTextInput').value = story.story_text || '';
+            updateStoryTranscriptUI();
+            setStoryStatusMessage('Story detail view. Read, edit, or delete.');
+        }
+
+        async function closeStoryDetail() {
+            await showStoryEntryMenu();
+        }
+
+        async function readCurrentStory() {
+            const text = document.getElementById('storyTextInput').value || '';
+            if (!text.trim()) {
+                showError('Story text is empty.');
+                return;
+            }
+            document.getElementById('storyDetail').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.remove('hidden');
+            await readStoryWithHighlight(document.getElementById('storyTitleInput').value || storyState.currentStoryTitle || 'Untitled Story', text);
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.remove('hidden');
+        }
+
+        async function saveCurrentStoryEdits() {
+            if (!storyState.selectedStoryId) {
+                showError('No story selected.');
+                return;
+            }
+
+            try {
+                const title = document.getElementById('storyTitleInput').value || '';
+                const storyText = document.getElementById('storyTextInput').value || '';
+                const response = await authenticatedFetch(`/api/games/story/${storyState.selectedStoryId}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ title: title, story_text: storyText })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                await loadStoryLibrary();
+                setStoryStatusMessage('Story edits saved.');
+            } catch (error) {
+                console.error('Error saving story edits:', error);
+                showError('Failed to save edits.');
+            }
+        }
+
+        async function deleteCurrentStory() {
+            if (!storyState.selectedStoryId) {
+                showError('No story selected.');
+                return;
+            }
+
+            if (!window.confirm('Delete this story?')) {
+                return;
+            }
+
+            try {
+                const response = await authenticatedFetch(`/api/games/story/${storyState.selectedStoryId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                storyState.selectedStoryId = null;
+                document.getElementById('storyDetail').classList.add('hidden');
+                document.getElementById('storyLibrary').classList.remove('hidden');
+                await loadStoryLibrary();
+                setStoryStatusMessage('Story deleted.');
+                gameState.currentPhase = 'story_awaiting_wake_word';
+                startListening();
+            } catch (error) {
+                console.error('Error deleting story:', error);
+                showError('Failed to delete story.');
+            }
+        }
+
+        function exitStoryBuilder() {
+            goBackToMenu();
         }
 
         // Select game role
@@ -2281,6 +3786,8 @@
             // Reset everything
             currentGame = null;
             gameState.currentPhase = 'menu';
+            resetStoryBuilderState();
+            setPageTitle('🎮 Games');
             
             // Stop scanning
             stopScanning();
@@ -2297,6 +3804,7 @@
             
             // Hide game view and show menu
             document.getElementById('twentyQuestionsGame').classList.add('hidden');
+            document.getElementById('storyBuilderGame').classList.add('hidden');
             document.getElementById('gridContainer').classList.remove('hidden');
             
             // Re-initialize scanning for the menu
@@ -2311,6 +3819,15 @@
             document.getElementById('listeningIndicator').classList.add('hidden');
             document.getElementById('loadingState').classList.add('hidden');
             document.getElementById('errorState').classList.add('hidden');
+            document.getElementById('storyUserOptions').classList.add('hidden');
+            document.getElementById('storyTranscript').classList.add('hidden');
+            document.getElementById('storyLibrary').classList.add('hidden');
+            document.getElementById('storyReadDisplay').classList.add('hidden');
+            document.getElementById('storyDetail').classList.add('hidden');
+            closePartnerIdeasModal();
+            closeStoryDeleteModal();
+            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: false });
+            setStoryStatusMessage('');
         }
 
         // Show/hide loading state

@@ -354,7 +354,7 @@ template_user_data_paths = {
         "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use ONLY diary events dated today or earlier and EXCLUDE any future-dated events. Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements about planned activities and events. CRITICAL: Use correct verb tenses based on timing - future tense ONLY for events that haven't happened yet (e.g., 'I'm going to...', 'I have plans to...', 'I will...') and past tense for events that already happened (e.g., 'I went to...', 'I did...', 'I attended...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby about their activities.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "customAudioFile": None, "hidden": False}
@@ -1629,6 +1629,193 @@ DEFAULT_BIRTHDAYS = {
     "friendsFamily": []    # List of {"name": "...", "monthDay": "MM-DD"}
 }
 
+
+def _safe_parse_month_day(month_day: str) -> Optional[tuple[int, int]]:
+    if not isinstance(month_day, str) or not month_day.strip():
+        return None
+    raw_value = month_day.strip()
+    for fmt in ("%m-%d", "%m/%d"):
+        try:
+            parsed = dt.strptime(raw_value, fmt)
+            return parsed.month, parsed.day
+        except ValueError:
+            continue
+    return None
+
+
+def _next_occurrence_for_month_day(month: int, day: int, today_date: date) -> Optional[date]:
+    for year in (today_date.year, today_date.year + 1):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            continue
+        if candidate >= today_date:
+            return candidate
+    return None
+
+
+def _get_supplemental_holidays(country_code: str, year: int) -> Dict[date, str]:
+    """Return additional culturally relevant holidays not always present in official holiday datasets."""
+    supplemental: Dict[date, str] = {}
+
+    # US federal holiday datasets usually exclude many widely celebrated observances.
+    if country_code == "US":
+        fixed_dates = [
+            (2, 14, "Valentine's Day"),
+            (3, 17, "St. Patrick's Day"),
+            (10, 31, "Halloween"),
+            (12, 31, "New Year's Eve"),
+        ]
+        for month, day, name in fixed_dates:
+            try:
+                supplemental[date(year, month, day)] = name
+            except ValueError:
+                continue
+
+    return supplemental
+
+
+def _build_upcoming_celebrations_context(
+    birthday_data: Optional[Dict[str, Any]],
+    friends_family_data: Optional[Dict[str, Any]],
+    settings_data: Optional[Dict[str, Any]],
+    today_date: date,
+    days_ahead: int = 60,
+    max_items: int = 18,
+) -> str:
+    if not birthday_data:
+        birthday_data = {}
+    if not friends_family_data:
+        friends_family_data = {}
+    if not settings_data:
+        settings_data = {}
+
+    horizon_date = today_date + timedelta(days=days_ahead)
+    events: List[Dict[str, Any]] = []
+
+    user_birthdate = birthday_data.get("userBirthdate")
+    if isinstance(user_birthdate, str) and user_birthdate.strip():
+        try:
+            parsed_birthdate = date.fromisoformat(user_birthdate.strip())
+            next_birthday = _next_occurrence_for_month_day(parsed_birthdate.month, parsed_birthdate.day, today_date)
+            if next_birthday and next_birthday <= horizon_date:
+                events.append({
+                    "date": next_birthday,
+                    "kind": "birthday",
+                    "label": "User birthday",
+                    "days_away": (next_birthday - today_date).days,
+                })
+        except ValueError:
+            pass
+
+    for person in birthday_data.get("friendsFamily", []) or []:
+        if not isinstance(person, dict):
+            continue
+        person_name = str(person.get("name") or "Someone important").strip() or "Someone important"
+        month_day = person.get("monthDay") or person.get("birthday") or person.get("date")
+        parsed_month_day = _safe_parse_month_day(str(month_day) if month_day is not None else "")
+        if not parsed_month_day:
+            continue
+        next_birthday = _next_occurrence_for_month_day(parsed_month_day[0], parsed_month_day[1], today_date)
+        if next_birthday and next_birthday <= horizon_date:
+            events.append({
+                "date": next_birthday,
+                "kind": "birthday",
+                "label": f"{person_name}'s birthday",
+                "days_away": (next_birthday - today_date).days,
+            })
+
+    # Support birthdays stored in info/friends_family (user_info_admin primary source)
+    for person in friends_family_data.get("friends_family", []) or []:
+        if not isinstance(person, dict):
+            continue
+        person_name = str(person.get("name") or "Someone important").strip() or "Someone important"
+        month_day = person.get("birthday") or person.get("monthDay") or person.get("date")
+        parsed_month_day = _safe_parse_month_day(str(month_day) if month_day is not None else "")
+        if not parsed_month_day:
+            continue
+        next_birthday = _next_occurrence_for_month_day(parsed_month_day[0], parsed_month_day[1], today_date)
+        if next_birthday and next_birthday <= horizon_date:
+            events.append({
+                "date": next_birthday,
+                "kind": "birthday",
+                "label": f"{person_name}'s birthday",
+                "days_away": (next_birthday - today_date).days,
+            })
+
+    country_code_raw = str(settings_data.get("CountryCode") or "US").strip().upper()
+    country_code = country_code_raw if re.fullmatch(r"[A-Z]{2}", country_code_raw) else "US"
+    try:
+        holiday_calendar = holidays.country_holidays(country_code, years=[today_date.year, today_date.year + 1])
+    except Exception:
+        holiday_calendar = holidays.country_holidays("US", years=[today_date.year, today_date.year + 1])
+        country_code = "US"
+
+    for holiday_date, holiday_name in holiday_calendar.items():
+        if today_date <= holiday_date <= horizon_date:
+            events.append({
+                "date": holiday_date,
+                "kind": "holiday",
+                "label": str(holiday_name),
+                "days_away": (holiday_date - today_date).days,
+            })
+
+    # Merge supplemental holidays (e.g., St. Patrick's Day in US)
+    supplemental_holidays: Dict[date, str] = {}
+    for y in (today_date.year, today_date.year + 1):
+        supplemental_holidays.update(_get_supplemental_holidays(country_code, y))
+
+    for holiday_date, holiday_name in supplemental_holidays.items():
+        if today_date <= holiday_date <= horizon_date:
+            events.append({
+                "date": holiday_date,
+                "kind": "holiday",
+                "label": str(holiday_name),
+                "days_away": (holiday_date - today_date).days,
+            })
+
+    events.sort(key=lambda item: (item["date"], item["kind"], item["label"]))
+    truncated_events = events[:max_items]
+
+    lines = [
+        "--- Upcoming Celebrations Context (use when relevant) ---",
+        f"Today: {today_date.isoformat()}",
+        f"Country code for holidays: {country_code}",
+        f"Window: next {days_ahead} days",
+    ]
+
+    if not truncated_events:
+        lines.append("No upcoming holidays or birthdays in the next window.")
+        lines.append("If asked about plans, suggest asking others about upcoming events anyway.")
+        return "\n".join(lines)
+
+    lines.append("Upcoming birthdays and holidays (chronological):")
+    for event in truncated_events:
+        day_phrase = "today" if event["days_away"] == 0 else f"in {event['days_away']} day(s)"
+        lines.append(
+            f"- {event['date'].isoformat()} | {event['kind']} | {event['label']} | {day_phrase}"
+        )
+
+    lines.append(
+        "Guidance: For greetings and plans, naturally reference upcoming celebrations when it fits user context and tone."
+    )
+    lines.append(
+        "Guidance: Mention birthdays by name when available and appropriate."
+    )
+
+    priority_events = [
+        event for event in truncated_events
+        if event.get("days_away", 9999) <= 14
+    ]
+    if priority_events:
+        lines.append("Priority events in next 14 days:")
+        for event in priority_events:
+            lines.append(
+                f"- {event['label']} ({event['date'].isoformat()}, in {event['days_away']} day(s))"
+            )
+
+    return "\n".join(lines)
+
 # --- Default Friends & Family Structure ---
 DEFAULT_RELATIONSHIPS = [
     "Parent", "Child", "Sibling", "Grandparent", "Grandchild", "Spouse", "Partner", 
@@ -2438,20 +2625,65 @@ Analyze the provided context to create helpful, personalized suggestions."""
         
         # Add current date for diary context
         from datetime import datetime
-        current_date_str = datetime.now().strftime('%Y-%m-%d')
+        today_date = datetime.now().date()
+        current_date_str = today_date.strftime('%Y-%m-%d')
         context_parts.append(f"--- TODAY'S DATE (CRITICAL FOR DIARY CONTEXT) ---\n{current_date_str}\n⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events. Generate responses accordingly.\n")
         
         # Diary entries (stable, long-term data)
         if context_data["diary"]:
+            def parse_diary_date(entry: Dict) -> Optional[datetime.date]:
+                if not isinstance(entry, dict):
+                    return None
+                raw_date = entry.get("date")
+                if not isinstance(raw_date, str) or not raw_date.strip():
+                    return None
+                raw_date = raw_date.strip()
+
+                for fmt in ("%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"):
+                    try:
+                        return datetime.strptime(raw_date, fmt).date()
+                    except ValueError:
+                        continue
+
+                try:
+                    return datetime.fromisoformat(raw_date.replace("Z", "+00:00")).date()
+                except ValueError:
+                    return None
+
+            dated_entries = []
+            undated_entries = []
+            for entry in context_data["diary"]:
+                parsed_date = parse_diary_date(entry)
+                if parsed_date is None:
+                    undated_entries.append(entry)
+                else:
+                    dated_entries.append((entry, parsed_date))
+
+            dated_entries.sort(key=lambda item: item[1], reverse=True)
+
+            completed_entries = [entry for entry, parsed in dated_entries if parsed <= today_date]
+            upcoming_entries = [entry for entry, parsed in dated_entries if parsed > today_date]
+
             diary_context = f"""--- Diary Entries (Background Context) ---
 📅 TODAY'S DATE: {current_date_str}
 ⚠️ CRITICAL INSTRUCTIONS FOR DIARY INTERPRETATION:
 - Entries with dates BEFORE {current_date_str} = PAST events (use past tense: "I did", "I went", "I had")
-- Entries with date {current_date_str} = TODAY'S events (use present tense: "I am", "I'm doing")  
+- Entries with date {current_date_str} = TODAY'S events (use present tense: "I am", "I'm doing")
 - Entries with dates AFTER {current_date_str} = FUTURE events (use future tense: "I will", "I'm going to", "I have planned")
 
-Diary Entries (most recent 15, sorted newest to oldest):
-{json.dumps(context_data['diary'][:15], indent=2)}
+⚠️ DIARY USAGE RULES:
+- For prompts about "recent activities" or "what I did", use ONLY Completed/Today entries.
+- For prompts about "upcoming plans" or "what I will do", use ONLY Upcoming entries.
+- NEVER describe Upcoming entries as if they already happened.
+
+Completed / Today Diary Entries (date <= {current_date_str}, newest first, max 15):
+{json.dumps(completed_entries[:15], indent=2)}
+
+Upcoming Diary Entries (date > {current_date_str}, soonest first, max 15):
+{json.dumps(list(reversed(upcoming_entries[-15:])), indent=2)}
+
+Undated Diary Entries (use cautiously, max 5):
+{json.dumps(undated_entries[:5], indent=2)}
 """
             context_parts.append(diary_context)
         
@@ -2541,6 +2773,9 @@ Diary Entries (most recent 15, sorted newest to oldest):
         tasks = {
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
+            "settings": load_settings_from_file(account_id, aac_user_id),
+            "birthdays": load_birthdays_from_file(account_id, aac_user_id),
+            "friends_family": load_friends_family_from_file(account_id, aac_user_id),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
         }
         results = await asyncio.gather(*tasks.values())
@@ -2608,6 +2843,33 @@ Diary Entries (most recent 15, sorted newest to oldest):
                 f"Activity: {context_data['user_current'].get('activity', 'Idle')}"
             ])
             delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
+
+        today_date = dt.now().date()
+        celebrations_context = _build_upcoming_celebrations_context(
+            birthday_data=context_data.get("birthdays") or {},
+            friends_family_data=context_data.get("friends_family") or {},
+            settings_data=context_data.get("settings") or {},
+            today_date=today_date,
+            days_ahead=60,
+            max_items=20,
+        )
+
+        query_hint_lower = str(query_hint or "").lower()
+        celebration_keywords = [
+            "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
+            "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
+        ]
+        if any(keyword in query_hint_lower for keyword in celebration_keywords):
+            celebrations_context += (
+                "\n⚠️ HIGH PRIORITY FOR THIS REQUEST: The prompt indicates greetings/plans/celebrations. "
+                "Prefer options that reference relevant upcoming birthdays/holidays naturally and in first person."
+            )
+            celebrations_context += (
+                "\n⚠️ REQUIREMENT: If Priority events in next 14 days are listed above, include at least one generated option "
+                "for each priority event unless that would conflict with safety rules."
+            )
+
+        delta_parts.append("\n🎉 " + celebrations_context + "\n")
         
         # CHAT HISTORY: Now ALL recent messages go in DELTA (not cached)
         # This significantly reduces cache size/cost since messages change frequently
@@ -3655,6 +3917,69 @@ async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
             logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
             raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
+
+def _is_retryable_gemini_exception(exc: Exception) -> bool:
+    retryable_types = (
+        google.api_core.exceptions.TooManyRequests,
+        google.api_core.exceptions.ResourceExhausted,
+        google.api_core.exceptions.ServiceUnavailable,
+        google.api_core.exceptions.InternalServerError,
+        google.api_core.exceptions.DeadlineExceeded,
+    )
+
+    if isinstance(exc, retryable_types):
+        return True
+
+    message = str(exc).lower()
+    retryable_markers = [
+        "429",
+        "too many requests",
+        "resource exhausted",
+        "rate limit",
+        "quota exceeded",
+        "service unavailable",
+        "internal server error",
+        "deadline exceeded",
+    ]
+    return any(marker in message for marker in retryable_markers)
+
+
+async def _execute_gemini_call_with_retry(
+    call_factory,
+    operation_label: str,
+    account_id: str = "unknown",
+    aac_user_id: str = "unknown",
+    max_attempts: int = 6,
+    base_delay_seconds: float = 0.5,
+    max_delay_seconds: float = 20.0,
+):
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            return await asyncio.to_thread(call_factory)
+        except Exception as exc:
+            is_retryable = _is_retryable_gemini_exception(exc)
+            is_last_attempt = attempt >= max_attempts
+
+            if (not is_retryable) or is_last_attempt:
+                if is_retryable and is_last_attempt:
+                    logging.error(
+                        f"Gemini call failed after {attempt}/{max_attempts} attempts "
+                        f"for {operation_label} ({account_id}/{aac_user_id}): {exc}",
+                        exc_info=True,
+                    )
+                raise
+
+            exponential_ceiling = min(max_delay_seconds, base_delay_seconds * (2 ** (attempt - 1)))
+            sleep_seconds = random.uniform(0, exponential_ceiling)
+            logging.warning(
+                f"Retryable Gemini error on {operation_label} ({account_id}/{aac_user_id}) "
+                f"attempt {attempt}/{max_attempts}: {type(exc).__name__}: {exc}. "
+                f"Sleeping {sleep_seconds:.2f}s before retry."
+            )
+            await asyncio.sleep(sleep_seconds)
+            attempt += 1
+
 # --- Helper function for Gemini LLM with Context Caching ---
 async def _generate_gemini_content_with_caching(
     account_id: str, 
@@ -3697,12 +4022,22 @@ async def _generate_gemini_content_with_caching(
                 logging.info(f"TOKEN SAVINGS: User query preview: {user_query_only[:200]}...")
                 
                 # Send only the user query - context is cached in the session
-                response = await asyncio.to_thread(chat_session.send_message, user_query_only)
+                response = await _execute_gemini_call_with_retry(
+                    lambda: chat_session.send_message(user_query_only),
+                    operation_label="gemini_chat_session_send_message",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
             else:
                 # Fallback: send full prompt if no user_query_only provided
                 logging.info(f"No user_query_only provided, sending full prompt to chat session for {account_id}/{aac_user_id}")
                 logging.info(f"Full prompt preview: {prompt_text[:200]}...")
-                response = await asyncio.to_thread(chat_session.send_message, prompt_text)
+                response = await _execute_gemini_call_with_retry(
+                    lambda: chat_session.send_message(prompt_text),
+                    operation_label="gemini_chat_session_send_message",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
             
             # Update message count
             user_key = cache_manager._get_user_key(account_id, aac_user_id)
@@ -3739,10 +4074,14 @@ async def _generate_gemini_content_with_caching(
                     generation_config_with_cache = generation_config or {}
                     
                     # Try using the cached content name directly in the request
-                    response = await asyncio.to_thread(
-                        model.generate_content, 
-                        user_query_only, 
-                        generation_config=generation_config_with_cache
+                    response = await _execute_gemini_call_with_retry(
+                        lambda: model.generate_content(
+                            user_query_only,
+                            generation_config=generation_config_with_cache
+                        ),
+                        operation_label="gemini_cached_content_generate",
+                        account_id=account_id,
+                        aac_user_id=aac_user_id,
                     )
                     return response.text.strip()
                     
@@ -3790,7 +4129,12 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
         logging.info(f"⚙️ Generation config (fallback): {generation_config}")
         
-        response = await asyncio.to_thread(primary_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+        response = await _execute_gemini_call_with_retry(
+            lambda: primary_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
+            operation_label=f"gemini_primary_generate:{primary_llm_model_instance.model_name}",
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+        )
         
         # Log response details for debugging
         logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
@@ -3823,7 +4167,12 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         if fallback_llm_model_instance:
             try:
                 logging.info(f"Attempting LLM generation with fallback model: {fallback_llm_model_instance.model_name}")
-                response_fallback = await asyncio.to_thread(fallback_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+                response_fallback = await _execute_gemini_call_with_retry(
+                    lambda: fallback_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
+                    operation_label=f"gemini_fallback_generate:{fallback_llm_model_instance.model_name}",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
                 fallback_response_text = (await get_text_from_response(response_fallback)).strip()
                 
                 # Log detailed token usage for fallback requests
@@ -4189,8 +4538,11 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 # Use cached base context + pass delta as standard input
                 model = genai.GenerativeModel.from_cached_content(cached_content_ref)
-                response = await asyncio.to_thread(
-                    model.generate_content, combined_prompt, generation_config=generation_config
+                response = await _execute_gemini_call_with_retry(
+                    lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                    operation_label="gemini_cached_base_plus_delta_generate",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
                 )
                 
                 # Log response details for debugging
@@ -4238,8 +4590,11 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     logging.info(f"⚙️ Generation config: {generation_config}")
                     
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
-                    response = await asyncio.to_thread(
-                        model.generate_content, combined_prompt, generation_config=generation_config
+                    response = await _execute_gemini_call_with_retry(
+                        lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                        operation_label="gemini_new_cached_base_plus_delta_generate",
+                        account_id=account_id,
+                        aac_user_id=aac_user_id,
                     )
                     
                     # Log response details for debugging
@@ -10686,6 +11041,27 @@ class GameAnswerRequest(BaseModel):
     player_question: str = Field(..., description="The yes/no question asked by the player")
 
 
+class StoryBuilderOptionsRequest(BaseModel):
+    partner_question: str = Field(..., description="Partner's spoken question for story building")
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript so far")
+    exclude_existing_options: Optional[List[str]] = Field(default_factory=list, description="Previously shown Story Builder options to exclude from regeneration")
+
+
+class StoryBuilderTitleRequest(BaseModel):
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript")
+
+
+class StoryBuilderFinalizeRequest(BaseModel):
+    title: str = Field(..., description="Selected story title")
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript")
+
+
+class StoryBuilderUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Updated story title")
+    story_text: Optional[str] = Field(default=None, description="Updated story text")
+    transcript: Optional[List[Dict[str, str]]] = Field(default=None, description="Updated story transcript")
+
+
 # --- Guess Who Game Models ---
 class GuessWhoCategoriesRequest(BaseModel):
     pass  # No parameters needed, retrieves default + user custom categories
@@ -11641,6 +12017,504 @@ Respond ONLY with "correct" or "incorrect". No other words."""
     if normalized.startswith("i"):
         return "incorrect"
     return "incorrect"
+
+
+def _strip_markdown_code_fences(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 2:
+            lines = lines[1:]
+            while lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+    return cleaned
+
+
+def _dedupe_keep_order(values: List[str]) -> List[str]:
+    seen = set()
+    deduped: List[str] = []
+    for value in values:
+        item = re.sub(r"\s+", " ", (value or "").strip())
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _parse_llm_string_list(response_text: str) -> List[str]:
+    parsed_values: List[str] = []
+    candidate_text = _strip_markdown_code_fences(response_text)
+
+    try:
+        parsed_json = json.loads(candidate_text)
+        if isinstance(parsed_json, list):
+            for item in parsed_json:
+                if isinstance(item, str):
+                    parsed_values.append(item)
+                elif isinstance(item, dict):
+                    for key in ["text", "title", "option", "question", "label"]:
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parsed_values.append(value)
+                            break
+        elif isinstance(parsed_json, dict):
+            for key in ["options", "titles", "questions", "items", "user_options", "partner_suggestions"]:
+                candidate_list = parsed_json.get(key)
+                if isinstance(candidate_list, list):
+                    for item in candidate_list:
+                        if isinstance(item, str):
+                            parsed_values.append(item)
+                        elif isinstance(item, dict):
+                            for nested_key in ["text", "title", "option", "question", "label"]:
+                                value = item.get(nested_key)
+                                if isinstance(value, str) and value.strip():
+                                    parsed_values.append(value)
+                                    break
+    except Exception:
+        pass
+
+    if not parsed_values:
+        for line in candidate_text.split("\n"):
+            cleaned_line = re.sub(r"^\s*(?:[-•]|\d+[\.)])\s*", "", line).strip()
+            if cleaned_line:
+                parsed_values.append(cleaned_line.strip('"\''))
+
+    return _dedupe_keep_order(parsed_values)
+
+
+async def _load_story_builder_generation_context(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    user_info_doc = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy()
+    )
+
+    llm_options = max(2, min(int(settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)), 20))
+    vocabulary_level = settings.get("vocabularyLevel", "functional")
+    vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
+    ai_option_overrides = normalize_ai_option_overrides(user_info_doc.get("aiOptionOverrides", {}))
+    ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+
+    return {
+        "llm_options": llm_options,
+        "vocabulary_level": vocabulary_level,
+        "vocab_instruction": vocab_instruction,
+        "ai_option_overrides": ai_option_overrides,
+        "ai_override_prompt_block": ai_override_prompt_block,
+    }
+
+
+def _story_builder_collection_ref(account_id: str, aac_user_id: str):
+    return firestore_db.collection(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/stories"
+    )
+
+
+def _build_story_transcript_context(transcript: Optional[List[Dict[str, str]]]) -> str:
+    if not transcript:
+        return "No prior story Q&A yet."
+
+    transcript_lines = []
+    for entry in transcript[-40:]:
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question", "")).strip()
+        answer = str(entry.get("answer", "")).strip()
+        if not question and not answer:
+            continue
+        transcript_lines.append(f"Q: {question}\nA: {answer}")
+
+    if not transcript_lines:
+        return "No prior story Q&A yet."
+
+    return "\n\n".join(transcript_lines)
+
+
+@app.post("/api/games/story/options")
+async def generate_story_builder_options(
+    request: StoryBuilderOptionsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        llm_options = context["llm_options"]
+        partner_suggestion_count = max(3, min(6, llm_options))
+
+        transcript_context = _build_story_transcript_context(request.transcript)
+        partner_question = re.sub(r"\s+", " ", request.partner_question.strip())
+        excluded_option_texts = _dedupe_keep_order([
+            re.sub(r"\s+", " ", str(item).strip())
+            for item in (request.exclude_existing_options or [])
+            if isinstance(item, (str, int, float)) and str(item).strip()
+        ])
+        excluded_options_block = ""
+        if excluded_option_texts:
+            excluded_options_block = "\nPreviously shown options to exclude:\n" + "\n".join(
+                [f'- "{item}"' for item in excluded_option_texts]
+            )
+
+        llm_query = f"""You are generating AAC-friendly Story Builder options.
+
+Current partner question:
+"{partner_question}"
+
+Story Q&A transcript so far:
+{transcript_context}
+
+{excluded_options_block}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+TASKS:
+1) Generate exactly {llm_options} answer option objects for the AAC user to select.
+2) Generate exactly {partner_suggestion_count} recommended follow-up questions for the partner.
+
+STRICT FORMAT & STYLE:
+- Each user option must have two fields:
+  - "option": Full conversational response the user is expressing (e.g. "I feel like going on a grand adventure"). This is spoken aloud when the user selects it.
+  - "summary": 1-3 word label used on the scanning button (e.g. "Adventure"). Must be the key descriptive word(s) from the option.
+- If excluded options are provided, do not repeat them and do not return close paraphrases of them.
+- Partner suggestions are helper prompts only (questions the partner can ask next).
+- Avoid repeating transcript content verbatim.
+- Keep options safe and age-appropriate.
+
+Return ONLY valid JSON with this exact structure:
+{{
+  "user_options": [
+    {{"option": "I feel like going on a grand adventure", "summary": "Adventure"}},
+    {{"option": "...", "summary": "..."}}
+  ],
+  "partner_suggestions": ["...", "..."]
+}}"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        cleaned_text = _strip_markdown_code_fences(response_text)
+
+        user_options: List[Dict[str, str]] = []
+        partner_suggestions: List[str] = []
+
+        def _normalize_story_option(item: Any) -> Optional[Dict[str, str]]:
+            """Normalize a raw LLM item into {option, summary} dict."""
+            if isinstance(item, dict) and item.get("option"):
+                option_text = str(item["option"]).strip()
+                summary_text = str(item.get("summary", option_text)).strip()
+                return {"option": option_text, "summary": summary_text or option_text}
+            elif isinstance(item, (str, int, float)):
+                text = str(item).strip()
+                if text:
+                    return {"option": text, "summary": text}
+            return None
+
+        try:
+            parsed = json.loads(cleaned_text)
+            if isinstance(parsed, dict):
+                raw_user_options = parsed.get("user_options", [])
+                raw_partner_suggestions = parsed.get("partner_suggestions", [])
+                if isinstance(raw_user_options, list):
+                    user_options = [n for item in raw_user_options if (n := _normalize_story_option(item)) is not None]
+                if isinstance(raw_partner_suggestions, list):
+                    partner_suggestions = _dedupe_keep_order([str(item) for item in raw_partner_suggestions if isinstance(item, (str, int, float))])
+        except Exception:
+            parsed_list = _parse_llm_string_list(cleaned_text)
+            user_options = [{"option": t, "summary": t} for t in parsed_list[:llm_options] if t.strip()]
+
+        if not user_options:
+            fallback_strings = _parse_llm_string_list(cleaned_text)[:llm_options]
+            user_options = [{"option": t, "summary": t} for t in fallback_strings if t.strip()]
+
+        if not partner_suggestions:
+            partner_suggestion_prompt = f"""Generate exactly {partner_suggestion_count} concise partner follow-up questions for story building.
+Current partner question: "{partner_question}"
+Transcript:\n{transcript_context}
+Return a simple JSON array of strings."""
+            partner_response = await _generate_gemini_content_with_fallback(partner_suggestion_prompt, None, account_id, aac_user_id)
+            partner_suggestions = _parse_llm_string_list(partner_response)[:partner_suggestion_count]
+
+        if user_options:
+            enforced = enforce_ai_option_overrides(user_options, context["ai_option_overrides"], llm_options)
+            excluded_lookup = {item.lower() for item in excluded_option_texts}
+            seen_options: set = set()
+            deduped: List[Dict[str, str]] = []
+            for item in enforced:
+                normalized = _normalize_story_option(item)
+                if not normalized:
+                    continue
+
+                option_key = normalized["option"].lower()
+                summary_key = normalized["summary"].lower()
+                if option_key in excluded_lookup or summary_key in excluded_lookup:
+                    continue
+                if option_key not in seen_options:
+                    seen_options.add(option_key)
+                    deduped.append(normalized)
+            user_options = deduped
+
+        if not user_options:
+            user_options = [
+                {"option": "I want to go on an adventure", "summary": "Adventure"},
+                {"option": "I want a funny comedy story", "summary": "Comedy"},
+                {"option": "I want to solve a mystery", "summary": "Mystery"},
+                {"option": "I want a story about friendship", "summary": "Friendship"},
+            ][:llm_options]
+
+        if not partner_suggestions:
+            partner_suggestions = [
+                "Who is in the story?",
+                "Where does it happen?",
+                "What problem starts the story?",
+                "How should it end?"
+            ][:partner_suggestion_count]
+
+        return JSONResponse(content={
+            "success": True,
+            "partner_question": partner_question,
+            "user_options": user_options[:llm_options],  # [{"option": "...", "summary": "..."}]
+            "partner_suggestions": partner_suggestions[:partner_suggestion_count]
+        })
+    except Exception as e:
+        logging.error(f"Error generating Story Builder options: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/title-options")
+async def generate_story_builder_title_options(
+    request: StoryBuilderTitleRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        llm_options = context["llm_options"]
+        transcript_context = _build_story_transcript_context(request.transcript)
+
+        llm_query = f"""Generate exactly {llm_options} story title options based on this Story Builder transcript.
+
+Transcript:
+{transcript_context}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+Rules:
+- Keep each title concise and clear.
+- Titles should be shareable and engaging.
+- Return ONLY a JSON array of strings.
+"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        title_options = _parse_llm_string_list(response_text)
+        title_options = [
+            item if isinstance(item, str) else _extract_option_text(item)
+            for item in enforce_ai_option_overrides(title_options, context["ai_option_overrides"], llm_options)
+        ]
+        title_options = _dedupe_keep_order([item for item in title_options if isinstance(item, str) and item.strip()])
+
+        if not title_options:
+            title_options = ["My Story", "A New Adventure", "Our Big Day", "The Great Journey"]
+
+        return JSONResponse(content={
+            "success": True,
+            "title_options": title_options[:llm_options]
+        })
+    except Exception as e:
+        logging.error(f"Error generating Story Builder titles: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/finalize")
+async def finalize_story_builder_story(
+    request: StoryBuilderFinalizeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        transcript_context = _build_story_transcript_context(request.transcript)
+        safe_title = re.sub(r"\s+", " ", request.title.strip()) or "Untitled Story"
+
+        llm_query = f"""You are writing a complete narrative story from a partner/user Q&A transcript.
+
+Chosen title: "{safe_title}"
+
+Transcript:
+{transcript_context}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+Requirements:
+- Write a coherent narrative that uses the transcript details.
+- Keep the story clear, natural, and easy to read aloud in AAC settings.
+- Use a strong beginning, middle, and ending.
+- Do not include bullet points.
+- Return ONLY the final story text.
+"""
+
+        story_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        story_text = _strip_markdown_code_fences(story_text)
+        story_text = re.sub(r"\s+\n", "\n", story_text).strip()
+
+        if not story_text:
+            story_text = "This is our story. We built it together by asking questions and choosing answers."
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        story_id = str(uuid.uuid4())
+        story_doc = {
+            "id": story_id,
+            "title": safe_title,
+            "story_text": story_text,
+            "transcript": request.transcript or [],
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+
+        collection_ref = _story_builder_collection_ref(account_id, aac_user_id)
+        await asyncio.to_thread(collection_ref.document(story_id).set, sanitize_for_firestore(story_doc))
+
+        return JSONResponse(content={
+            "success": True,
+            "story": story_doc
+        })
+    except Exception as e:
+        logging.error(f"Error finalizing Story Builder story: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/games/story/list")
+async def list_story_builder_stories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        stories = await load_firestore_collection(account_id, aac_user_id, "stories")
+        stories_sorted = sorted(
+            stories,
+            key=lambda item: item.get("updated_at") or item.get("created_at") or "",
+            reverse=True
+        )
+
+        response_stories = []
+        for story in stories_sorted:
+            story_text = str(story.get("story_text", ""))
+            response_stories.append({
+                "id": story.get("id"),
+                "title": story.get("title", "Untitled Story"),
+                "created_at": story.get("created_at"),
+                "updated_at": story.get("updated_at"),
+                "story_preview": story_text[:180],
+                "transcript_count": len(story.get("transcript", []) or [])
+            })
+
+        return JSONResponse(content={"success": True, "stories": response_stories})
+    except Exception as e:
+        logging.error(f"Error listing Story Builder stories: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/games/story/{story_id}")
+async def get_story_builder_story(
+    story_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        story_data["id"] = doc.id
+        return JSONResponse(content={"success": True, "story": story_data})
+    except Exception as e:
+        logging.error(f"Error loading Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/games/story/{story_id}")
+async def update_story_builder_story(
+    story_id: str,
+    request: StoryBuilderUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        update_data: Dict[str, Any] = {"updated_at": dt.now(timezone.utc).isoformat()}
+        if request.title is not None:
+            normalized_title = re.sub(r"\s+", " ", request.title.strip())
+            update_data["title"] = normalized_title or "Untitled Story"
+        if request.story_text is not None:
+            update_data["story_text"] = request.story_text.strip()
+        if request.transcript is not None:
+            update_data["transcript"] = request.transcript
+
+        if len(update_data.keys()) == 1:
+            return JSONResponse(content={"success": False, "error": "No story fields provided"}, status_code=400)
+
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_data), merge=True)
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_story = updated_doc.to_dict() or {}
+        updated_story["id"] = updated_doc.id
+
+        return JSONResponse(content={"success": True, "story": updated_story})
+    except Exception as e:
+        logging.error(f"Error updating Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/games/story/{story_id}")
+async def delete_story_builder_story(
+    story_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        await asyncio.to_thread(doc_ref.delete)
+        return JSONResponse(content={"success": True, "deleted_id": story_id})
+    except Exception as e:
+        logging.error(f"Error deleting Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 # --- Jokes API Endpoints ---
