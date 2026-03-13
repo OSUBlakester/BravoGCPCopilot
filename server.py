@@ -3694,6 +3694,70 @@ async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
     except Exception as e:
         logging.warning(f"Primary OpenAI model failed: {e}. Trying fallback...")
         try:
+
+
+def _is_retryable_gemini_exception(exc: Exception) -> bool:
+    retryable_types = (
+        google.api_core.exceptions.TooManyRequests,
+        google.api_core.exceptions.ResourceExhausted,
+        google.api_core.exceptions.ServiceUnavailable,
+        google.api_core.exceptions.InternalServerError,
+        google.api_core.exceptions.DeadlineExceeded,
+    )
+
+    if isinstance(exc, retryable_types):
+        return True
+
+    message = str(exc).lower()
+    retryable_markers = [
+        "429",
+        "too many requests",
+        "resource exhausted",
+        "rate limit",
+        "quota exceeded",
+        "service unavailable",
+        "internal server error",
+        "deadline exceeded",
+    ]
+    return any(marker in message for marker in retryable_markers)
+
+
+async def _execute_gemini_call_with_retry(
+    call_factory,
+    operation_label: str,
+    account_id: str = "unknown",
+    aac_user_id: str = "unknown",
+    max_attempts: int = 6,
+    base_delay_seconds: float = 0.5,
+    max_delay_seconds: float = 20.0,
+):
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            return await asyncio.to_thread(call_factory)
+        except Exception as exc:
+            is_retryable = _is_retryable_gemini_exception(exc)
+            is_last_attempt = attempt >= max_attempts
+
+            if (not is_retryable) or is_last_attempt:
+                if is_retryable and is_last_attempt:
+                    logging.error(
+                        f"Gemini call failed after {attempt}/{max_attempts} attempts "
+                        f"for {operation_label} ({account_id}/{aac_user_id}): {exc}",
+                        exc_info=True,
+                    )
+                raise
+
+            exponential_ceiling = min(max_delay_seconds, base_delay_seconds * (2 ** (attempt - 1)))
+            sleep_seconds = random.uniform(0, exponential_ceiling)
+            logging.warning(
+                f"Retryable Gemini error on {operation_label} ({account_id}/{aac_user_id}) "
+                f"attempt {attempt}/{max_attempts}: {type(exc).__name__}: {exc}. "
+                f"Sleeping {sleep_seconds:.2f}s before retry."
+            )
+            await asyncio.sleep(sleep_seconds)
+            attempt += 1
+
             # Try fallback ChatGPT model
             return await _generate_openai_content(prompt_text, CHATGPT_FALLBACK_MODEL)
         except Exception as e2:
@@ -3742,12 +3806,22 @@ async def _generate_gemini_content_with_caching(
                 logging.info(f"TOKEN SAVINGS: User query preview: {user_query_only[:200]}...")
                 
                 # Send only the user query - context is cached in the session
-                response = await asyncio.to_thread(chat_session.send_message, user_query_only)
+                response = await _execute_gemini_call_with_retry(
+                    lambda: chat_session.send_message(user_query_only),
+                    operation_label="gemini_chat_session_send_message",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
             else:
                 # Fallback: send full prompt if no user_query_only provided
                 logging.info(f"No user_query_only provided, sending full prompt to chat session for {account_id}/{aac_user_id}")
                 logging.info(f"Full prompt preview: {prompt_text[:200]}...")
-                response = await asyncio.to_thread(chat_session.send_message, prompt_text)
+                response = await _execute_gemini_call_with_retry(
+                    lambda: chat_session.send_message(prompt_text),
+                    operation_label="gemini_chat_session_send_message",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
             
             # Update message count
             user_key = cache_manager._get_user_key(account_id, aac_user_id)
@@ -3784,10 +3858,14 @@ async def _generate_gemini_content_with_caching(
                     generation_config_with_cache = generation_config or {}
                     
                     # Try using the cached content name directly in the request
-                    response = await asyncio.to_thread(
-                        model.generate_content, 
-                        user_query_only, 
-                        generation_config=generation_config_with_cache
+                    response = await _execute_gemini_call_with_retry(
+                        lambda: model.generate_content(
+                            user_query_only,
+                            generation_config=generation_config_with_cache
+                        ),
+                        operation_label="gemini_cached_content_generate",
+                        account_id=account_id,
+                        aac_user_id=aac_user_id,
                     )
                     return response.text.strip()
                     
@@ -3835,7 +3913,12 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
         logging.info(f"⚙️ Generation config (fallback): {generation_config}")
         
-        response = await asyncio.to_thread(primary_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+        response = await _execute_gemini_call_with_retry(
+            lambda: primary_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
+            operation_label=f"gemini_primary_generate:{primary_llm_model_instance.model_name}",
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+        )
         
         # Log response details for debugging
         logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
@@ -3868,7 +3951,12 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         if fallback_llm_model_instance:
             try:
                 logging.info(f"Attempting LLM generation with fallback model: {fallback_llm_model_instance.model_name}")
-                response_fallback = await asyncio.to_thread(fallback_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+                response_fallback = await _execute_gemini_call_with_retry(
+                    lambda: fallback_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
+                    operation_label=f"gemini_fallback_generate:{fallback_llm_model_instance.model_name}",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
                 fallback_response_text = (await get_text_from_response(response_fallback)).strip()
                 
                 # Log detailed token usage for fallback requests
@@ -4234,8 +4322,11 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 # Use cached base context + pass delta as standard input
                 model = genai.GenerativeModel.from_cached_content(cached_content_ref)
-                response = await asyncio.to_thread(
-                    model.generate_content, combined_prompt, generation_config=generation_config
+                response = await _execute_gemini_call_with_retry(
+                    lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                    operation_label="gemini_cached_base_plus_delta_generate",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
                 )
                 
                 # Log response details for debugging
@@ -4283,8 +4374,11 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     logging.info(f"⚙️ Generation config: {generation_config}")
                     
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
-                    response = await asyncio.to_thread(
-                        model.generate_content, combined_prompt, generation_config=generation_config
+                    response = await _execute_gemini_call_with_retry(
+                        lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                        operation_label="gemini_new_cached_base_plus_delta_generate",
+                        account_id=account_id,
+                        aac_user_id=aac_user_id,
                     )
                     
                     # Log response details for debugging
