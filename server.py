@@ -10731,6 +10731,27 @@ class GameAnswerRequest(BaseModel):
     player_question: str = Field(..., description="The yes/no question asked by the player")
 
 
+class StoryBuilderOptionsRequest(BaseModel):
+    partner_question: str = Field(..., description="Partner's spoken question for story building")
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript so far")
+    exclude_existing_options: Optional[List[str]] = Field(default_factory=list, description="Previously shown Story Builder options to exclude from regeneration")
+
+
+class StoryBuilderTitleRequest(BaseModel):
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript")
+
+
+class StoryBuilderFinalizeRequest(BaseModel):
+    title: str = Field(..., description="Selected story title")
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript")
+
+
+class StoryBuilderUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Updated story title")
+    story_text: Optional[str] = Field(default=None, description="Updated story text")
+    transcript: Optional[List[Dict[str, str]]] = Field(default=None, description="Updated story transcript")
+
+
 # --- Guess Who Game Models ---
 class GuessWhoCategoriesRequest(BaseModel):
     pass  # No parameters needed, retrieves default + user custom categories
@@ -11686,6 +11707,504 @@ Respond ONLY with "correct" or "incorrect". No other words."""
     if normalized.startswith("i"):
         return "incorrect"
     return "incorrect"
+
+
+def _strip_markdown_code_fences(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 2:
+            lines = lines[1:]
+            while lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+    return cleaned
+
+
+def _dedupe_keep_order(values: List[str]) -> List[str]:
+    seen = set()
+    deduped: List[str] = []
+    for value in values:
+        item = re.sub(r"\s+", " ", (value or "").strip())
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _parse_llm_string_list(response_text: str) -> List[str]:
+    parsed_values: List[str] = []
+    candidate_text = _strip_markdown_code_fences(response_text)
+
+    try:
+        parsed_json = json.loads(candidate_text)
+        if isinstance(parsed_json, list):
+            for item in parsed_json:
+                if isinstance(item, str):
+                    parsed_values.append(item)
+                elif isinstance(item, dict):
+                    for key in ["text", "title", "option", "question", "label"]:
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parsed_values.append(value)
+                            break
+        elif isinstance(parsed_json, dict):
+            for key in ["options", "titles", "questions", "items", "user_options", "partner_suggestions"]:
+                candidate_list = parsed_json.get(key)
+                if isinstance(candidate_list, list):
+                    for item in candidate_list:
+                        if isinstance(item, str):
+                            parsed_values.append(item)
+                        elif isinstance(item, dict):
+                            for nested_key in ["text", "title", "option", "question", "label"]:
+                                value = item.get(nested_key)
+                                if isinstance(value, str) and value.strip():
+                                    parsed_values.append(value)
+                                    break
+    except Exception:
+        pass
+
+    if not parsed_values:
+        for line in candidate_text.split("\n"):
+            cleaned_line = re.sub(r"^\s*(?:[-•]|\d+[\.)])\s*", "", line).strip()
+            if cleaned_line:
+                parsed_values.append(cleaned_line.strip('"\''))
+
+    return _dedupe_keep_order(parsed_values)
+
+
+async def _load_story_builder_generation_context(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    user_info_doc = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy()
+    )
+
+    llm_options = max(2, min(int(settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)), 20))
+    vocabulary_level = settings.get("vocabularyLevel", "functional")
+    vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
+    ai_option_overrides = normalize_ai_option_overrides(user_info_doc.get("aiOptionOverrides", {}))
+    ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+
+    return {
+        "llm_options": llm_options,
+        "vocabulary_level": vocabulary_level,
+        "vocab_instruction": vocab_instruction,
+        "ai_option_overrides": ai_option_overrides,
+        "ai_override_prompt_block": ai_override_prompt_block,
+    }
+
+
+def _story_builder_collection_ref(account_id: str, aac_user_id: str):
+    return firestore_db.collection(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/stories"
+    )
+
+
+def _build_story_transcript_context(transcript: Optional[List[Dict[str, str]]]) -> str:
+    if not transcript:
+        return "No prior story Q&A yet."
+
+    transcript_lines = []
+    for entry in transcript[-40:]:
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question", "")).strip()
+        answer = str(entry.get("answer", "")).strip()
+        if not question and not answer:
+            continue
+        transcript_lines.append(f"Q: {question}\nA: {answer}")
+
+    if not transcript_lines:
+        return "No prior story Q&A yet."
+
+    return "\n\n".join(transcript_lines)
+
+
+@app.post("/api/games/story/options")
+async def generate_story_builder_options(
+    request: StoryBuilderOptionsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        llm_options = context["llm_options"]
+        partner_suggestion_count = max(3, min(6, llm_options))
+
+        transcript_context = _build_story_transcript_context(request.transcript)
+        partner_question = re.sub(r"\s+", " ", request.partner_question.strip())
+        excluded_option_texts = _dedupe_keep_order([
+            re.sub(r"\s+", " ", str(item).strip())
+            for item in (request.exclude_existing_options or [])
+            if isinstance(item, (str, int, float)) and str(item).strip()
+        ])
+        excluded_options_block = ""
+        if excluded_option_texts:
+            excluded_options_block = "\nPreviously shown options to exclude:\n" + "\n".join(
+                [f'- "{item}"' for item in excluded_option_texts]
+            )
+
+        llm_query = f"""You are generating AAC-friendly Story Builder options.
+
+Current partner question:
+"{partner_question}"
+
+Story Q&A transcript so far:
+{transcript_context}
+
+{excluded_options_block}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+TASKS:
+1) Generate exactly {llm_options} answer option objects for the AAC user to select.
+2) Generate exactly {partner_suggestion_count} recommended follow-up questions for the partner.
+
+STRICT FORMAT & STYLE:
+- Each user option must have two fields:
+  - "option": Full conversational response the user is expressing (e.g. "I feel like going on a grand adventure"). This is spoken aloud when the user selects it.
+  - "summary": 1-3 word label used on the scanning button (e.g. "Adventure"). Must be the key descriptive word(s) from the option.
+- If excluded options are provided, do not repeat them and do not return close paraphrases of them.
+- Partner suggestions are helper prompts only (questions the partner can ask next).
+- Avoid repeating transcript content verbatim.
+- Keep options safe and age-appropriate.
+
+Return ONLY valid JSON with this exact structure:
+{{
+  "user_options": [
+    {{"option": "I feel like going on a grand adventure", "summary": "Adventure"}},
+    {{"option": "...", "summary": "..."}}
+  ],
+  "partner_suggestions": ["...", "..."]
+}}"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        cleaned_text = _strip_markdown_code_fences(response_text)
+
+        user_options: List[Dict[str, str]] = []
+        partner_suggestions: List[str] = []
+
+        def _normalize_story_option(item: Any) -> Optional[Dict[str, str]]:
+            """Normalize a raw LLM item into {option, summary} dict."""
+            if isinstance(item, dict) and item.get("option"):
+                option_text = str(item["option"]).strip()
+                summary_text = str(item.get("summary", option_text)).strip()
+                return {"option": option_text, "summary": summary_text or option_text}
+            elif isinstance(item, (str, int, float)):
+                text = str(item).strip()
+                if text:
+                    return {"option": text, "summary": text}
+            return None
+
+        try:
+            parsed = json.loads(cleaned_text)
+            if isinstance(parsed, dict):
+                raw_user_options = parsed.get("user_options", [])
+                raw_partner_suggestions = parsed.get("partner_suggestions", [])
+                if isinstance(raw_user_options, list):
+                    user_options = [n for item in raw_user_options if (n := _normalize_story_option(item)) is not None]
+                if isinstance(raw_partner_suggestions, list):
+                    partner_suggestions = _dedupe_keep_order([str(item) for item in raw_partner_suggestions if isinstance(item, (str, int, float))])
+        except Exception:
+            parsed_list = _parse_llm_string_list(cleaned_text)
+            user_options = [{"option": t, "summary": t} for t in parsed_list[:llm_options] if t.strip()]
+
+        if not user_options:
+            fallback_strings = _parse_llm_string_list(cleaned_text)[:llm_options]
+            user_options = [{"option": t, "summary": t} for t in fallback_strings if t.strip()]
+
+        if not partner_suggestions:
+            partner_suggestion_prompt = f"""Generate exactly {partner_suggestion_count} concise partner follow-up questions for story building.
+Current partner question: "{partner_question}"
+Transcript:\n{transcript_context}
+Return a simple JSON array of strings."""
+            partner_response = await _generate_gemini_content_with_fallback(partner_suggestion_prompt, None, account_id, aac_user_id)
+            partner_suggestions = _parse_llm_string_list(partner_response)[:partner_suggestion_count]
+
+        if user_options:
+            enforced = enforce_ai_option_overrides(user_options, context["ai_option_overrides"], llm_options)
+            excluded_lookup = {item.lower() for item in excluded_option_texts}
+            seen_options: set = set()
+            deduped: List[Dict[str, str]] = []
+            for item in enforced:
+                normalized = _normalize_story_option(item)
+                if not normalized:
+                    continue
+
+                option_key = normalized["option"].lower()
+                summary_key = normalized["summary"].lower()
+                if option_key in excluded_lookup or summary_key in excluded_lookup:
+                    continue
+                if option_key not in seen_options:
+                    seen_options.add(option_key)
+                    deduped.append(normalized)
+            user_options = deduped
+
+        if not user_options:
+            user_options = [
+                {"option": "I want to go on an adventure", "summary": "Adventure"},
+                {"option": "I want a funny comedy story", "summary": "Comedy"},
+                {"option": "I want to solve a mystery", "summary": "Mystery"},
+                {"option": "I want a story about friendship", "summary": "Friendship"},
+            ][:llm_options]
+
+        if not partner_suggestions:
+            partner_suggestions = [
+                "Who is in the story?",
+                "Where does it happen?",
+                "What problem starts the story?",
+                "How should it end?"
+            ][:partner_suggestion_count]
+
+        return JSONResponse(content={
+            "success": True,
+            "partner_question": partner_question,
+            "user_options": user_options[:llm_options],  # [{"option": "...", "summary": "..."}]
+            "partner_suggestions": partner_suggestions[:partner_suggestion_count]
+        })
+    except Exception as e:
+        logging.error(f"Error generating Story Builder options: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/title-options")
+async def generate_story_builder_title_options(
+    request: StoryBuilderTitleRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        llm_options = context["llm_options"]
+        transcript_context = _build_story_transcript_context(request.transcript)
+
+        llm_query = f"""Generate exactly {llm_options} story title options based on this Story Builder transcript.
+
+Transcript:
+{transcript_context}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+Rules:
+- Keep each title concise and clear.
+- Titles should be shareable and engaging.
+- Return ONLY a JSON array of strings.
+"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        title_options = _parse_llm_string_list(response_text)
+        title_options = [
+            item if isinstance(item, str) else _extract_option_text(item)
+            for item in enforce_ai_option_overrides(title_options, context["ai_option_overrides"], llm_options)
+        ]
+        title_options = _dedupe_keep_order([item for item in title_options if isinstance(item, str) and item.strip()])
+
+        if not title_options:
+            title_options = ["My Story", "A New Adventure", "Our Big Day", "The Great Journey"]
+
+        return JSONResponse(content={
+            "success": True,
+            "title_options": title_options[:llm_options]
+        })
+    except Exception as e:
+        logging.error(f"Error generating Story Builder titles: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/finalize")
+async def finalize_story_builder_story(
+    request: StoryBuilderFinalizeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        transcript_context = _build_story_transcript_context(request.transcript)
+        safe_title = re.sub(r"\s+", " ", request.title.strip()) or "Untitled Story"
+
+        llm_query = f"""You are writing a complete narrative story from a partner/user Q&A transcript.
+
+Chosen title: "{safe_title}"
+
+Transcript:
+{transcript_context}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+Requirements:
+- Write a coherent narrative that uses the transcript details.
+- Keep the story clear, natural, and easy to read aloud in AAC settings.
+- Use a strong beginning, middle, and ending.
+- Do not include bullet points.
+- Return ONLY the final story text.
+"""
+
+        story_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        story_text = _strip_markdown_code_fences(story_text)
+        story_text = re.sub(r"\s+\n", "\n", story_text).strip()
+
+        if not story_text:
+            story_text = "This is our story. We built it together by asking questions and choosing answers."
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        story_id = str(uuid.uuid4())
+        story_doc = {
+            "id": story_id,
+            "title": safe_title,
+            "story_text": story_text,
+            "transcript": request.transcript or [],
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+
+        collection_ref = _story_builder_collection_ref(account_id, aac_user_id)
+        await asyncio.to_thread(collection_ref.document(story_id).set, sanitize_for_firestore(story_doc))
+
+        return JSONResponse(content={
+            "success": True,
+            "story": story_doc
+        })
+    except Exception as e:
+        logging.error(f"Error finalizing Story Builder story: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/games/story/list")
+async def list_story_builder_stories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        stories = await load_firestore_collection(account_id, aac_user_id, "stories")
+        stories_sorted = sorted(
+            stories,
+            key=lambda item: item.get("updated_at") or item.get("created_at") or "",
+            reverse=True
+        )
+
+        response_stories = []
+        for story in stories_sorted:
+            story_text = str(story.get("story_text", ""))
+            response_stories.append({
+                "id": story.get("id"),
+                "title": story.get("title", "Untitled Story"),
+                "created_at": story.get("created_at"),
+                "updated_at": story.get("updated_at"),
+                "story_preview": story_text[:180],
+                "transcript_count": len(story.get("transcript", []) or [])
+            })
+
+        return JSONResponse(content={"success": True, "stories": response_stories})
+    except Exception as e:
+        logging.error(f"Error listing Story Builder stories: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/games/story/{story_id}")
+async def get_story_builder_story(
+    story_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        story_data["id"] = doc.id
+        return JSONResponse(content={"success": True, "story": story_data})
+    except Exception as e:
+        logging.error(f"Error loading Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/games/story/{story_id}")
+async def update_story_builder_story(
+    story_id: str,
+    request: StoryBuilderUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        update_data: Dict[str, Any] = {"updated_at": dt.now(timezone.utc).isoformat()}
+        if request.title is not None:
+            normalized_title = re.sub(r"\s+", " ", request.title.strip())
+            update_data["title"] = normalized_title or "Untitled Story"
+        if request.story_text is not None:
+            update_data["story_text"] = request.story_text.strip()
+        if request.transcript is not None:
+            update_data["transcript"] = request.transcript
+
+        if len(update_data.keys()) == 1:
+            return JSONResponse(content={"success": False, "error": "No story fields provided"}, status_code=400)
+
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_data), merge=True)
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_story = updated_doc.to_dict() or {}
+        updated_story["id"] = updated_doc.id
+
+        return JSONResponse(content={"success": True, "story": updated_story})
+    except Exception as e:
+        logging.error(f"Error updating Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/games/story/{story_id}")
+async def delete_story_builder_story(
+    story_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        await asyncio.to_thread(doc_ref.delete)
+        return JSONResponse(content={"success": True, "deleted_id": story_id})
+    except Exception as e:
+        logging.error(f"Error deleting Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 # --- Jokes API Endpoints ---
