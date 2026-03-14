@@ -641,6 +641,11 @@ function startAlphabetScanning() {
 
     currentButtonIndex = -1;
 
+    if (scanMode === 'step') {
+        advanceAlphabetScanStep();
+        return;
+    }
+
     const scanStep = () => {
         if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
         currentButtonIndex++;
@@ -656,6 +661,23 @@ function startAlphabetScanning() {
 
     scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceAlphabetScanStep() {
+    if (ScanningOff || scanMode !== 'step') return;
+
+    const container = document.getElementById('alphabet-grid');
+    if (!container) return;
+    const buttons = Array.from(container.querySelectorAll('button:not(:disabled)'));
+    if (buttons.length === 0) { currentlyScannedButton = null; return; }
+
+    if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    const nextButton = buttons[currentButtonIndex];
+    if (!nextButton) return;
+    currentlyScannedButton = nextButton;
+    nextButton.classList.add('scanning');
+    speakScanLabel(nextButton);
 }
 
 function stopAlphabetScanning() {
@@ -1726,7 +1748,15 @@ function setupCustomCategoriesUI() {
         if (e.code === 'Tab' && scanMode === 'step') {
             e.preventDefault();
             interruptScanningAnnouncementPlayback();
-            if (currentlyScannedButton) {
+
+            // Route to the correct scanner based on which grid is currently active
+            const alphabetGrid = document.getElementById('alphabet-grid');
+            const alphabetVisible = alphabetGrid && alphabetGrid.offsetParent !== null
+                && alphabetGrid.querySelectorAll('button:not(:disabled)').length > 0;
+
+            if (alphabetVisible) {
+                advanceAlphabetScanStep();
+            } else if (currentlyScannedButton) {
                 advanceHangmanScanningStep();
             } else {
                 startAuditoryScanning();
