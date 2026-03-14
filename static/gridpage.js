@@ -489,6 +489,14 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
         return;
     }
 
+    // If scanning is already active (auto: interval running; step: a button is highlighted),
+    // don't disrupt it. This prevents the generateGrid setTimeout from re-entering the
+    // "waiting for initial switch" state after the user has already started scanning.
+    if (scanningInterval !== null || currentlyScannedButton !== null) {
+        console.log(`⏭️ Scanning already active — ignoring startOrWaitForScanning (${source}).`);
+        return;
+    }
+
     if (waitForSwitchToScan) {
         window.waitingForInitialSwitch = true;
         console.log(`✋ Waiting for switch press before scanning (${source}).`);
