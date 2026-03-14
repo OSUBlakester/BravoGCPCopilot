@@ -587,6 +587,8 @@ function markAlphabetLetter(letter, correct) {
 // Uses browser's built-in speechSynthesis (device default/system voice)
 // instead of the Cloud TTS personal voice.
 function speakScanLabel(text) {
+    interruptScanningAnnouncementPlayback();
+
     pendingScanSpeechToken += 1;
     const speechToken = pendingScanSpeechToken;
 
@@ -594,8 +596,6 @@ function speakScanLabel(text) {
         clearTimeout(pendingScanSpeechTimer);
         pendingScanSpeechTimer = null;
     }
-
-    interruptScanningAnnouncementPlayback();
 
     let textToSpeak = '';
     if (text instanceof HTMLElement) {
