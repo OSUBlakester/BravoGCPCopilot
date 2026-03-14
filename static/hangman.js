@@ -51,6 +51,8 @@ let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
 let activeAnnouncementAudioContext = null;
 let activeAnnouncementAudioSource = null;
+let pendingScanSpeechTimer = null;
+let pendingScanSpeechToken = 0;
 
 // Speech recognition
 let recognition = null;
@@ -585,17 +587,46 @@ function markAlphabetLetter(letter, correct) {
 // Uses browser's built-in speechSynthesis (device default/system voice)
 // instead of the Cloud TTS personal voice.
 function speakScanLabel(text) {
-    if (!text || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel(); // Stop any in-progress scan speech
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    window.speechSynthesis.speak(utterance);
+    pendingScanSpeechToken += 1;
+    const speechToken = pendingScanSpeechToken;
+
+    if (pendingScanSpeechTimer) {
+        clearTimeout(pendingScanSpeechTimer);
+        pendingScanSpeechTimer = null;
+    }
+
+    interruptScanningAnnouncementPlayback();
+
+    let textToSpeak = '';
+    if (text instanceof HTMLElement) {
+        const ariaLabel = (text.getAttribute('aria-label') || '').trim();
+        const dataLetter = (text.getAttribute('data-letter') || '').trim();
+        const contentText = (text.innerText || text.textContent || '').replace(/\s+/g, ' ').trim();
+        textToSpeak = ariaLabel || dataLetter || contentText;
+    } else {
+        textToSpeak = String(text || '').replace(/\s+/g, ' ').trim();
+    }
+
+    if (!textToSpeak) return;
+
+    pendingScanSpeechTimer = setTimeout(() => {
+        pendingScanSpeechTimer = null;
+        if (speechToken !== pendingScanSpeechToken) return;
+        if (text instanceof HTMLElement && currentlyScannedButton !== text) return;
+
+        announce(textToSpeak, 'system', false, false).catch((error) => {
+            console.error('Hangman scan announce error:', error);
+        });
+    }, 350);
 }
 
 function stopScanSpeech() {
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    pendingScanSpeechToken += 1;
+    if (pendingScanSpeechTimer) {
+        clearTimeout(pendingScanSpeechTimer);
+        pendingScanSpeechTimer = null;
+    }
+    interruptScanningAnnouncementPlayback();
 }
 
 // ===== ALPHABET SCANNING (Mode A: I scan alphabet buttons) =====
@@ -620,7 +651,7 @@ function startAlphabetScanning() {
         currentlyScannedButton = nextButton;
         nextButton.classList.add('scanning');
 
-        speakScanLabel(nextButton.textContent || '');
+        speakScanLabel(nextButton);
     };
 
     scanStep();
@@ -1234,7 +1265,7 @@ function startAuditoryScanning() {
         if (!nextButton) return;
         currentlyScannedButton = nextButton;
         nextButton.classList.add('scanning');
-        speakScanLabel(nextButton.textContent || '');
+        speakScanLabel(nextButton);
     };
 
     scanStep();
@@ -1258,7 +1289,7 @@ function advanceHangmanScanningStep() {
     if (!nextButton) return;
     currentlyScannedButton = nextButton;
     nextButton.classList.add('scanning');
-    speakScanLabel(nextButton.textContent || '');
+    speakScanLabel(nextButton);
 }
 
 function stopAuditoryScanning() {
@@ -1374,6 +1405,12 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
 }
 
 function interruptScanningAnnouncementPlayback() {
+    pendingScanSpeechToken += 1;
+    if (pendingScanSpeechTimer) {
+        clearTimeout(pendingScanSpeechTimer);
+        pendingScanSpeechTimer = null;
+    }
+
     announcementQueue = [];
     isAnnouncingNow = false;
 
