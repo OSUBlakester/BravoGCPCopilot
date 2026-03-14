@@ -7,6 +7,8 @@ let isLLMProcessing = false; // Flag to detect if LLM query is running
 const clickDebounceDelay = 300; // Debounce for button clicks
 let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from settings
 let scanningInterval; // Holds the interval ID for scanning
+let scanMode = 'auto'; // auto | step
+let currentScanAdvanceFn = null; // step scanning advance callback for active context
 let currentButtonIndex = -1; // Tracks the index for scanning
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
@@ -465,6 +467,7 @@ async function loadScanSettings() {
         if (response.ok) {
             const settings = await response.json();
             defaultDelay = settings.scanDelay || 3500;
+            scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             scanLoopLimit = settings.scanLoopLimit || 0;
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
@@ -1793,6 +1796,7 @@ function startScanning() {
     
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
+    currentScanAdvanceFn = null;
     
     if (currentScanningContext === "main") {
         startMainScanning();
@@ -1857,7 +1861,10 @@ function startMainScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startSpellingLettersScanning() {
@@ -1916,7 +1923,10 @@ function startSpellingLettersScanning() {
     
     currentButtonIndex = 0;
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startSpellingPredictionsScanning() {
@@ -1954,7 +1964,10 @@ function startSpellingPredictionsScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startChooseWordCategoriesScanning() {
@@ -1997,7 +2010,10 @@ function startChooseWordCategoriesScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startChooseWordOptionsScanning() {
@@ -2040,7 +2056,10 @@ function startChooseWordOptionsScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function stopScanning() {
@@ -2055,6 +2074,7 @@ function stopScanning() {
         currentlyScannedButton.classList.remove('scanning-highlight');
         currentlyScannedButton = null;
     }
+    currentScanAdvanceFn = null;
     
     currentButtonIndex = -1;
     // Note: No need to cancel speech here as backend TTS handles its own queue
@@ -2082,6 +2102,18 @@ function resumeScanning() {
 // --- Input Handling (Same as gridpage.js) ---
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+            if (isPausedFromScanLimit) {
+                resumeScanning();
+            } else if (currentScanAdvanceFn) {
+                currentScanAdvanceFn();
+            } else {
+                startScanning();
+            }
+            return;
+        }
+
         if (event.code === 'Space') {
             event.preventDefault();
             handleSpacebarPress();

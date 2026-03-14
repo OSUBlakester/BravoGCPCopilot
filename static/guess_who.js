@@ -31,6 +31,7 @@ let currentlyScannedButton = null;
 let currentButtonIndex = -1;
 let defaultDelay = 3500;
 let ScanningOff = false;
+let scanMode = 'auto';
 let wakeWordInterjection = 'hey';
 let wakeWordName = 'bravo';
 let gridColumns = 6;
@@ -97,6 +98,7 @@ async function loadGuessWhoSettings() {
         }
 
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         useTapInterface = settings.useTapInterface === true;
         
         // Force pictograms on for tap interface users
@@ -1498,6 +1500,12 @@ function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { return; }
 
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        advanceGuessWhoScanningStep();
+        return;
+    }
+
     const buttons = getVisibleButtons();
     if (buttons.length === 0) { return; }
 
@@ -1536,6 +1544,43 @@ function startAuditoryScanning() {
 
     scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceGuessWhoScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    const nextButton = buttons[currentButtonIndex];
+    if (!nextButton) {
+        return;
+    }
+    currentlyScannedButton = nextButton;
+    nextButton.classList.add('scanning');
+
+    const textToSpeak = nextButton.textContent || '';
+    if (typeof Prompt === 'function') {
+        try {
+            Prompt(textToSpeak, false, false);
+        } catch (e) {
+            console.error('Scanning Prompt error:', e);
+        }
+    } else {
+        announce(textToSpeak, 'system', false, false).catch((e) => {
+            console.error('Scanning announce error:', e);
+        });
+    }
 }
 
 function stopAuditoryScanning() {
@@ -2103,6 +2148,22 @@ function setupCustomCategoriesUI() {
     
     // Close modal on Escape key
     document.addEventListener('keydown', (e) => {
+        if (e.code === 'Tab' && scanMode === 'step') {
+            e.preventDefault();
+            if (currentlyScannedButton) {
+                advanceGuessWhoScanningStep();
+            } else {
+                startAuditoryScanning();
+            }
+            return;
+        }
+
+        if (e.code === 'Space' && currentlyScannedButton) {
+            e.preventDefault();
+            currentlyScannedButton.click();
+            return;
+        }
+
         if (e.key === 'Escape') {
             if (customCategoriesModal && !customCategoriesModal.classList.contains('hidden')) {
                 hideCustomCategoriesModal();

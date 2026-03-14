@@ -36,6 +36,7 @@ let currentlyScannedButton = null;
 let currentButtonIndex = -1;
 let defaultDelay = 3500;
 let ScanningOff = false;
+let scanMode = 'auto';
 let wakeWordInterjection = 'hey';
 let wakeWordName = 'bravo';
 let gridColumns = 6;
@@ -114,6 +115,7 @@ async function loadSettings() {
             gridColumns = Math.max(2, Math.min(12, parseInt(settings.gridColumns)));
         }
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         useTapInterface = settings.useTapInterface === true;
         
         // Force pictograms on for tap interface users
@@ -1211,6 +1213,13 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) return;
+
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        advanceHangmanScanningStep();
+        return;
+    }
+
     const buttons = getVisibleButtons();
     if (buttons.length === 0) return;
     currentButtonIndex = -1;
@@ -1228,6 +1237,26 @@ function startAuditoryScanning() {
 
     scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceHangmanScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    const nextButton = buttons[currentButtonIndex];
+    if (!nextButton) return;
+    currentlyScannedButton = nextButton;
+    nextButton.classList.add('scanning');
+    speakScanLabel(nextButton.textContent || '');
 }
 
 function stopAuditoryScanning() {
@@ -1611,6 +1640,22 @@ function setupCustomCategoriesUI() {
 
     // Close modal on Escape key
     document.addEventListener('keydown', (e) => {
+        if (e.code === 'Tab' && scanMode === 'step') {
+            e.preventDefault();
+            if (currentlyScannedButton) {
+                advanceHangmanScanningStep();
+            } else {
+                startAuditoryScanning();
+            }
+            return;
+        }
+
+        if (e.code === 'Space' && currentlyScannedButton) {
+            e.preventDefault();
+            currentlyScannedButton.click();
+            return;
+        }
+
         if (e.key === 'Escape') {
             if (customCategoriesModal && !customCategoriesModal.classList.contains('hidden')) {
                 hideCustomCategoriesModal();

@@ -18,6 +18,7 @@ let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
 let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to scan limit
 let ScanningOff = false; // Default scanning state
+let scanMode = 'auto'; // auto | step
 let gridColumns = 10; // Default number of grid columns for button sizing
 
 // Speech recognition variables (from gridpage.js)
@@ -197,6 +198,8 @@ async function loadUserSettings() {
             } else {
                 ScanningOff = false;
             }
+
+            scanMode = userSettings && userSettings.scanMode === 'step' ? 'step' : 'auto';
             
             // Load scan loop limit
             if (userSettings && typeof userSettings.scanLoopLimit === 'number' && !isNaN(userSettings.scanLoopLimit)) {
@@ -219,6 +222,7 @@ async function loadUserSettings() {
             gridColumns: 10, 
             scanDelay: 3500, 
             ScanningOff: false, 
+            scanMode: 'auto',
             scanLoopLimit: 0 
         };
     }
@@ -732,6 +736,13 @@ async function announceText(text) {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { console.log("Auditory scanning is off."); return; }
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        scanCycleCount = 0;
+        isPausedFromScanLimit = false;
+        advanceScanningStep();
+        return;
+    }
     console.log("Starting auditory scanning...");
     const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
     if (buttons.length === 0) { console.log("No visible buttons found."); currentlyScannedButton = null; return; }
@@ -785,6 +796,24 @@ function startAuditoryScanning() {
     console.log(`Scan delay set to: ${defaultDelay}ms`);
     scanStep(); // Perform first scan immediately
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+    speakAndHighlight(currentlyScannedButton);
 }
 
 async function speakAndHighlight(button) {
@@ -919,6 +948,18 @@ function setupEventListeners() {
     
     // Keyboard shortcuts for scanning (from gridpage.js)
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+            if (isPausedFromScanLimit) {
+                resumeAuditoryScanning();
+            } else if (currentlyScannedButton) {
+                advanceScanningStep();
+            } else {
+                startAuditoryScanning();
+            }
+            return;
+        }
+
         switch(event.code) {
             case 'Space':
                 event.preventDefault();
@@ -1129,6 +1170,16 @@ function setupQuestionRecognition() {
 // Keyboard listener setup
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step' && !listeningForQuestion) {
+            event.preventDefault();
+            if (currentlyScannedButton) {
+                advanceScanningStep();
+            } else {
+                startAuditoryScanning();
+            }
+            return;
+        }
+
         if (event.code === 'Space' && !listeningForQuestion && currentlyScannedButton) {
             event.preventDefault();
             const buttonToActivate = currentlyScannedButton; // Capture the button reference

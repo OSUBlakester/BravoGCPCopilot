@@ -730,9 +730,11 @@
             initializeGamesPage();
         });
 
-        // Add keyboard event listener for spacebar (same as gridpage)
+        // Add keyboard event listener for scanning controls
         document.addEventListener('keydown', function(event) {
-            if (event.code === 'Space' || event.code === 'Enter') {
+            const isStepAdvance = event.code === 'Tab' && scanMode === 'step';
+            const isSelect = event.code === 'Space' || event.code === 'Enter';
+            if (isStepAdvance || isSelect) {
                 if (waitingForInitialSwitch && pendingScanContainerId) {
                     event.preventDefault();
                     const pendingContainerId = pendingScanContainerId;
@@ -744,7 +746,11 @@
 
                 if (scanningSystem.isScanning) {
                     event.preventDefault();
-                    selectCurrentScannedButton();
+                    if (isStepAdvance) {
+                        scanNextButton();
+                    } else {
+                        selectCurrentScannedButton();
+                    }
                 }
             }
         });
@@ -901,6 +907,7 @@
         let gridColumns = 10; // Default matching gridpage
         let enablePictograms = false; // Default - will be loaded from settings (matches gridpage default)
         let ScanningOff = false; // Default
+        let scanMode = 'auto'; // auto | step
         let waitForSwitchToScan = false; // Default
         let useTapInterface = false; // Whether user is using tap interface
         let selectedTtsVoiceName = 'en-US-Neural2-A';
@@ -1107,6 +1114,8 @@
                     // Load scanning settings
                     ScanningOff = settings.ScanningOff === true;
                     console.log('ScanningOff loaded:', ScanningOff);
+                    scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
+                    console.log('scanMode loaded:', scanMode);
                     waitForSwitchToScan = settings.waitForSwitchToScan === true;
                     console.log('waitForSwitchToScan loaded:', waitForSwitchToScan);
                     
@@ -1136,6 +1145,7 @@
                 gridColumns = 10;
                 enablePictograms = false; // Default to false like gridpage
                 ScanningOff = false;
+                scanMode = 'auto';
                 waitForSwitchToScan = false;
                 selectedTtsVoiceName = 'en-US-Neural2-A';
                 configuredSpeechRateWpm = 170;
@@ -1412,6 +1422,11 @@
 
         function scanNextButton() {
             if (!scanningSystem.isScanning || scanningSystem.buttons.length === 0) return;
+
+            if (scanningSystem.interval) {
+                clearTimeout(scanningSystem.interval);
+                scanningSystem.interval = null;
+            }
             
             console.log(`SCANNING: Index ${scanningSystem.currentIndex}, Delay: ${gameState.scanDelay}ms`);
             
@@ -1446,9 +1461,11 @@
             // Move to next button
             scanningSystem.currentIndex = (scanningSystem.currentIndex + 1) % scanningSystem.buttons.length;
             
-            // Schedule next scan using user's scan delay setting
-            console.log(`SCANNING: Next scan in ${gameState.scanDelay}ms`);
-            scanningSystem.interval = setTimeout(scanNextButton, gameState.scanDelay);
+            // Schedule next scan only in auto mode
+            if (scanMode !== 'step') {
+                console.log(`SCANNING: Next scan in ${gameState.scanDelay}ms`);
+                scanningSystem.interval = setTimeout(scanNextButton, gameState.scanDelay);
+            }
         }
 
         function stopScanning() {

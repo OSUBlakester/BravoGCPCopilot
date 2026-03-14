@@ -588,6 +588,14 @@
                     <input type="number" id="scanLoopLimit" name="scanLoopLimit" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="e.g., 0">
                     <p class="text-xs text-gray-500 mt-1">Number of complete scanning cycles before pausing (0 = unlimited, 1-10 = limit cycles)</p>
                 </div>
+                <div>
+                    <label for="scanMode" class="block text-lg font-medium text-gray-700 mb-2">Scanning Mode:</label>
+                    <select id="scanMode" name="scanMode" class="w-full max-w-xs">
+                        <option value="auto">Auto Scanning (timer)</option>
+                        <option value="step">Step Scanning (Tab = Next, Space = Select)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Use Auto for timer-based scanning, or Step for two-switch scanning.</p>
+                </div>
                 <div class="flex items-center">
                     <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
                     <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>

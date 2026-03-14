@@ -70,6 +70,7 @@ let wakeWordInterjection = "hey"; // Default interjection (lowercase)
 let wakeWordName = "bravo";       // Default name (lowercase)
 let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
+let scanMode = 'auto'; // auto | step
 let waitForSwitchToScan = false; // Default wait for switch state
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
@@ -1493,6 +1494,7 @@ async function loadScanSettings() {
 
         // Load booleans
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
@@ -3726,6 +3728,10 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { console.log("Auditory scanning is off."); return; }
+    if (scanMode === 'step') {
+        startStepColumnScanning();
+        return;
+    }
     console.log("Starting auditory scanning...", `Pattern: ${currentScanPattern}`);
     
     // Check which scanning pattern to use
@@ -3733,6 +3739,43 @@ function startAuditoryScanning() {
         startRowPhaseScanning();
     } else {
         startColumnPhaseScanning();
+    }
+}
+
+function startStepColumnScanning() {
+    console.log("Starting STEP scanning (column mode)...");
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    currentRowScanMode = false;
+    currentButtonIndex = -1;
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
+    advanceStepColumnScan();
+}
+
+function advanceStepColumnScan() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+    if (currentlyScannedButton) {
+        speakAndHighlight(currentlyScannedButton);
     }
 }
 
@@ -4661,6 +4704,26 @@ async function generateLlmButtons(options) {
  */
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (tab) - starting scanning on gridpage');
+                window.waitingForInitialSwitch = false;
+                startAuditoryScanning();
+                return;
+            }
+
+            if (!isLLMProcessing && !listeningForQuestion) {
+                if (!currentlyScannedButton) {
+                    startAuditoryScanning();
+                } else {
+                    advanceStepColumnScan();
+                }
+            }
+            return;
+        }
+
         if (event.code === 'Space') {
             event.preventDefault();
             

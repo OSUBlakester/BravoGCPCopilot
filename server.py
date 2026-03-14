@@ -291,6 +291,7 @@ template_user_data_paths = {
         "LLMOptions": 10,
         "FreestyleOptions": 20,
         "ScanningOff": False,
+        "scanMode": "auto",
         "waitForSwitchToScan": False,
         "SummaryOff": False,
         "selected_tts_voice_name": "en-US-Neural2-A",
@@ -1600,6 +1601,7 @@ DEFAULT_SETTINGS = {
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
     "FreestyleOptions": 20,  # Default Freestyle Options
     "ScanningOff": False, # Default scanning off
+    "scanMode": "auto", # Scanning mode: "auto" timer scanning or "step" switch-driven scanning
     "waitForSwitchToScan": False, # Default wait for switch to start scanning
     "SummaryOff": False, # Default summary off
     "selected_tts_voice_name": DEFAULT_TTS_VOICE, # Default TTS voice
@@ -7396,6 +7398,7 @@ class SettingsModel(BaseModel):
     FreestyleOptions: Optional[int] = Field(20, description="Number of word options returned for freestyle communication (e.g., 1-50)", ge=1, le=50)
     llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
+    scanMode: Optional[str] = Field(None, description="Scanning mode: 'auto' or 'step'")
     waitForSwitchToScan: Optional[bool] = Field(None, description="Enable/disable waiting for switch press before starting scanning on initial page load.") # Added waitForSwitchToScan
     SummaryOff: Optional[bool] = Field(None, description="Enable/disable summary generation.") # Added SummaryOff    
     selected_tts_voice_name: Optional[str] = None
@@ -7454,6 +7457,17 @@ class SettingsModel(BaseModel):
             else:
                 raise ValueError(f"Invalid vocabularyLevel value: {value}. Must be 'emergent', 'functional', 'developing', or 'proficient'")
         return value
+
+    @field_validator('scanMode', mode='before')
+    @classmethod
+    def validate_scan_mode(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ['auto', 'step']:
+                return normalized
+        raise ValueError("Invalid scanMode value. Must be 'auto' or 'step'")
     
 
 class VoiceDetail(BaseModel):
