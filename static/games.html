@@ -735,6 +735,9 @@
             const isStepAdvance = event.code === 'Tab' && scanMode === 'step';
             const isSelect = event.code === 'Space' || event.code === 'Enter';
             if (isStepAdvance || isSelect) {
+                if (isStepAdvance) {
+                    interruptScanningAnnouncementPlayback();
+                }
                 if (waitingForInitialSwitch && pendingScanContainerId) {
                     event.preventDefault();
                     const pendingContainerId = pendingScanContainerId;
@@ -1507,6 +1510,37 @@
         // Announcement queue and processing (same as gridpage.js)
         let announcementQueue = [];
         let isAnnouncingNow = false;
+        let activeAnnouncementAudioContext = null;
+        let activeAnnouncementAudioSource = null;
+
+        function interruptScanningAnnouncementPlayback() {
+            announcementQueue = [];
+            isAnnouncingNow = false;
+
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+            }
+
+            if (activeAnnouncementAudioSource) {
+                try {
+                    activeAnnouncementAudioSource.onended = null;
+                    activeAnnouncementAudioSource.stop(0);
+                } catch (e) {
+                    // no-op
+                }
+                try {
+                    activeAnnouncementAudioSource.disconnect();
+                } catch (e) {
+                    // no-op
+                }
+                activeAnnouncementAudioSource = null;
+            }
+
+            if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+                activeAnnouncementAudioContext.close().catch(() => {});
+            }
+            activeAnnouncementAudioContext = null;
+        }
 
         // Base64 to ArrayBuffer conversion
         function base64ToArrayBuffer(base64) {
@@ -1527,6 +1561,8 @@
                 const source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(audioContext.destination);
+                activeAnnouncementAudioContext = audioContext;
+                activeAnnouncementAudioSource = source;
                 
                 return new Promise((resolve, reject) => {
                     const totalDuration = audioBuffer.duration || 0;
@@ -1550,6 +1586,13 @@
                     source.onended = () => {
                         if (rafId !== null) {
                             window.cancelAnimationFrame(rafId);
+                        }
+                        activeAnnouncementAudioSource = null;
+                        if (activeAnnouncementAudioContext === audioContext) {
+                            activeAnnouncementAudioContext = null;
+                        }
+                        if (audioContext && audioContext.state !== 'closed') {
+                            audioContext.close().catch(() => {});
                         }
                         if (typeof progressCallback === 'function') {
                             progressCallback(1, totalDuration, totalDuration);

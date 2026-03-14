@@ -511,6 +511,8 @@ function goHome() {
 // Announcement queue and processing (same pattern as gridpage)
 let announcementQueue = [];
 let isAnnouncingNow = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
@@ -528,12 +530,52 @@ async function playAudioToDevice(audioDataBuffer) {
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioContext.destination);
+    activeAnnouncementAudioContext = audioContext;
+    activeAnnouncementAudioSource = source;
 
     return new Promise((resolve, reject) => {
-        source.onended = resolve;
+        source.onended = () => {
+            activeAnnouncementAudioSource = null;
+            if (activeAnnouncementAudioContext === audioContext) {
+                activeAnnouncementAudioContext = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close().catch(() => {});
+            }
+            resolve();
+        };
         source.onerror = reject;
         source.start(0);
     });
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {
@@ -668,6 +710,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 document.addEventListener('keydown', (event) => {
     if (event.code === 'Tab' && scanMode === 'step') {
         event.preventDefault();
+        interruptScanningAnnouncementPlayback();
         if (currentlyScannedButton) {
             advanceJokesScanningStep();
         } else {

@@ -942,6 +942,37 @@ async function fetchJokeOptions(limit, questionContext) {
 let announcementQueue = [];       // Queue for sequential announcements
 let isAnnouncingNow = false;      // Flag to prevent concurrent announce playback
 let audioContextResumeAttempted = false; // Flag for AudioContext auto-resume helper
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
+}
 
 // --- NEW: User Management Variables ---
 let currentAacUserId = null; // NEW: To store the currently selected individual AAC user ID
@@ -3448,24 +3479,38 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
         console.log("playAudioToDevice: Audio source started.");
 
         return new Promise((resolve) => {
             source.onended = () => {
                 console.log("playAudioToDevice: Audio playback ended.");
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close(); // Important to release resources
                 resolve();
             };
         }).catch(err => {
             console.error("playAudioToDevice: Error during audio playback promise:", err);
             if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            if (activeAnnouncementAudioContext === audioContext) {
+                activeAnnouncementAudioContext = null;
+                activeAnnouncementAudioSource = null;
+            }
             throw err;
         });
 
     } catch (error) {
         console.error('playAudioToDevice: Fatal Error during setup or playback:', error);
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
         throw error;
     }
 }
@@ -4706,6 +4751,7 @@ function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
         if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
 
             if (window.waitingForInitialSwitch) {
                 console.log('Initial switch detected (tab) - starting scanning on gridpage');

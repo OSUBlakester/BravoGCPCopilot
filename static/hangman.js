@@ -49,6 +49,8 @@ let useTapInterface = false;
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 // Speech recognition
 let recognition = null;
@@ -1348,12 +1350,56 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
-        return new Promise(resolve => { source.onended = () => { audioContext.close(); resolve(); }; });
+        return new Promise(resolve => {
+            source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
+                audioContext.close();
+                resolve();
+            };
+        });
     } catch (error) {
         console.error('Audio playback error:', error);
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 function tryResumeAudioContext() {
@@ -1642,6 +1688,7 @@ function setupCustomCategoriesUI() {
     document.addEventListener('keydown', (e) => {
         if (e.code === 'Tab' && scanMode === 'step') {
             e.preventDefault();
+            interruptScanningAnnouncementPlayback();
             if (currentlyScannedButton) {
                 advanceHangmanScanningStep();
             } else {

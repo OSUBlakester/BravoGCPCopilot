@@ -5,6 +5,8 @@ let currentFavoritesButtons = [];
 let announcementQueue = [];
 let isProcessingQueue = false;
 let speechSynthesis = window.speechSynthesis;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 // Audio context variable for resume functionality
 let audioContextResumeAttempted = false;
@@ -663,10 +665,16 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
 
         return new Promise((resolve) => {
             source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close();
                 resolve();
             };
@@ -675,8 +683,41 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
     } catch (error) {
         console.error('Error during audio playback:', error);
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
         throw error;
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isProcessingQueue = false;
+
+    if (speechSynthesis) {
+        speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function queueAnnouncement(text) {
@@ -950,6 +991,7 @@ function setupEventListeners() {
     document.addEventListener('keydown', (event) => {
         if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
             if (isPausedFromScanLimit) {
                 resumeAuditoryScanning();
             } else if (currentlyScannedButton) {
@@ -1172,6 +1214,7 @@ function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
         if (event.code === 'Tab' && scanMode === 'step' && !listeningForQuestion) {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
             if (currentlyScannedButton) {
                 advanceScanningStep();
             } else {

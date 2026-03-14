@@ -89,6 +89,8 @@ let useTapInterface = false; // Whether user is using tap interface
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 // Speech recognition (wake word + guess)
 let recognition = null;
@@ -1832,10 +1834,16 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
 
         return new Promise((resolve) => {
             source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close();
                 resolve();
             };
@@ -1845,7 +1853,40 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
         if (audioContext && audioContext.state !== 'closed') {
             audioContext.close();
         }
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {
@@ -2254,6 +2295,7 @@ function setupCustomCategoriesUI() {
     document.addEventListener('keydown', (e) => {
         if (e.code === 'Tab' && scanMode === 'step') {
             e.preventDefault();
+            interruptScanningAnnouncementPlayback();
             if (currentlyScannedButton) {
                 advanceGuessGamesScanningStep();
             } else {
