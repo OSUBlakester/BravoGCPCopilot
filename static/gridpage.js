@@ -2687,6 +2687,27 @@ async function handleButtonClick(buttonData) {
                     const params = new URLSearchParams();
                     params.set('guess_who', '1');
                     window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'mood' || specialPage === 'mood-selection') {
+                    if (typeof clearCurrentMood === 'function') {
+                        clearCurrentMood();
+                    } else {
+                        sessionStorage.removeItem('currentSessionMood');
+                    }
+
+                    if (typeof showMoodSelection === 'function') {
+                        showMoodSelection((selectedMood) => {
+                            if (selectedMood) {
+                                console.log('Mood updated from gridpage button:', selectedMood);
+                            } else {
+                                console.log('Mood selection dismissed or unavailable from gridpage button.');
+                            }
+                            startAuditoryScanning();
+                        });
+                    } else {
+                        console.warn('showMoodSelection is unavailable; falling back to mood.html');
+                        window.location.href = 'mood.html';
+                    }
+                    return;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions
                     console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
