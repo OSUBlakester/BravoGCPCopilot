@@ -11067,6 +11067,11 @@ class StoryBuilderIllustrationRequest(BaseModel):
     regenerate: Optional[bool] = Field(default=False, description="Whether to force regeneration if an illustration already exists")
 
 
+class StoryBuilderExportAudioRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Optional story title override for filename")
+    story_text: Optional[str] = Field(default=None, description="Optional story text override (supports unsaved edits)")
+
+
 # --- Guess Who Game Models ---
 class GuessWhoCategoriesRequest(BaseModel):
     pass  # No parameters needed, retrieves default + user custom categories
@@ -12577,6 +12582,69 @@ async def generate_story_builder_illustration(
         )
     except Exception as e:
         logging.error(f"Error generating Story Builder illustration for {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/{story_id}/export-audio")
+async def export_story_builder_audio(
+    story_id: str,
+    request: StoryBuilderExportAudioRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        stored_title = str(story_data.get("title", "Untitled Story")).strip() or "Untitled Story"
+        stored_text = str(story_data.get("story_text", "")).strip()
+
+        requested_title = str(request.title or "").strip()
+        requested_text = str(request.story_text or "").strip()
+        safe_title = re.sub(r"\s+", " ", requested_title or stored_title) or "Untitled Story"
+        story_text = requested_text if requested_text else stored_text
+
+        if not story_text:
+            return JSONResponse(content={"success": False, "error": "Story text is empty"}, status_code=400)
+
+        user_settings = await load_settings_from_file(account_id, aac_user_id)
+        voice_to_use = user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
+        rate_to_use = user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
+
+        audio_bytes, sample_rate = await synthesize_speech_to_bytes(
+            text=story_text,
+            voice_name=voice_to_use,
+            wpm_rate=rate_to_use
+        )
+
+        import io
+        import wave
+
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_bytes)
+
+        safe_filename_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", safe_title).strip("_") or "story"
+        filename = f"{safe_filename_base}_audio.wav"
+
+        return Response(
+            content=wav_buffer.getvalue(),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store"
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error exporting Story Builder audio for {story_id}: {e}", exc_info=True)
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 

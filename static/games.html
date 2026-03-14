@@ -540,6 +540,7 @@
                 <div id="storyReadText" class="story-read-text"></div>
                 <div id="storyReadActions" class="game-grid" style="margin-top: 1rem;">
                     <button class="game-button" onclick="readSelectedStoryAgain()"><i class="fas fa-volume-up"></i>Read Again</button>
+                    <button class="game-button" onclick="exportStoryAudio(false)"><i class="fas fa-file-audio"></i>Export Audio</button>
                     <button id="createIllustrationReadButton" class="game-button" onclick="createStoryIllustration(false)"><i class="fas fa-image"></i>Create Illustration</button>
                     <button id="regenerateIllustrationReadButton" class="game-button" onclick="createStoryIllustration(true)"><i class="fas fa-sync"></i>Regenerate Illustration</button>
                     <button class="game-button" onclick="backToStoryReadList()"><i class="fas fa-arrow-left"></i>Back to Stories</button>
@@ -558,6 +559,7 @@
                 </div>
                 <div id="storyDetailActions" class="game-grid" style="margin-top: 1rem;">
                     <button class="game-button" onclick="readCurrentStory()"><i class="fas fa-volume-up"></i>Read Story</button>
+                    <button class="game-button" onclick="exportStoryAudio(true)"><i class="fas fa-file-audio"></i>Export Audio</button>
                     <button class="game-button" onclick="saveCurrentStoryEdits()"><i class="fas fa-save"></i>Save Edits</button>
                     <button id="createIllustrationButton" class="game-button" onclick="createStoryIllustration(false)"><i class="fas fa-image"></i>Create Illustration</button>
                     <button id="regenerateIllustrationButton" class="game-button" onclick="createStoryIllustration(true)"><i class="fas fa-sync"></i>Regenerate Illustration</button>
@@ -1871,6 +1873,82 @@
                 renderStoryIllustrationViews();
                 const message = String(error?.message || 'Failed to generate illustration. Try again.');
                 showError(message);
+            }
+        }
+
+        function buildStoryAudioExportFilename(titleText) {
+            const cleaned = String(titleText || 'story')
+                .trim()
+                .replace(/\s+/g, '_')
+                .replace(/[^a-zA-Z0-9_-]/g, '_')
+                .replace(/^_+|_+$/g, '');
+            const safeBase = cleaned || 'story';
+            return `${safeBase}_audio.wav`;
+        }
+
+        async function exportStoryAudio(fromDetailView = false) {
+            if (!storyState.selectedStoryId) {
+                showError('No story selected.');
+                return;
+            }
+
+            try {
+                const titleFromInput = document.getElementById('storyTitleInput')?.value || '';
+                const textFromInput = document.getElementById('storyTextInput')?.value || '';
+
+                const selectedTitle = (fromDetailView ? titleFromInput : storyState.currentStoryTitle) || titleFromInput || storyState.currentStoryTitle || 'Untitled Story';
+                const selectedText = (fromDetailView ? textFromInput : storyState.currentStoryText) || textFromInput || storyState.currentStoryText || '';
+
+                if (!String(selectedText).trim()) {
+                    showError('Story text is empty. Add story text before exporting audio.');
+                    return;
+                }
+
+                showLoading();
+                const response = await authenticatedFetch(`/api/games/story/${storyState.selectedStoryId}/export-audio`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: selectedTitle,
+                        story_text: selectedText
+                    })
+                });
+
+                if (!response.ok) {
+                    let backendError = '';
+                    try {
+                        const errorData = await response.json();
+                        backendError = String(errorData?.error || errorData?.detail || '').trim();
+                    } catch (parseError) {
+                        backendError = '';
+                    }
+                    const combinedError = backendError
+                        ? `HTTP ${response.status}: ${backendError}`
+                        : `HTTP ${response.status}: ${response.statusText}`;
+                    throw new Error(combinedError);
+                }
+
+                const audioBlob = await response.blob();
+                const contentDisposition = response.headers.get('Content-Disposition') || '';
+                const quotedFilenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+                const bareFilenameMatch = contentDisposition.match(/filename=([^;]+)/i);
+                const serverFilename = quotedFilenameMatch?.[1] || bareFilenameMatch?.[1]?.trim();
+                const filename = serverFilename || buildStoryAudioExportFilename(selectedTitle);
+
+                const blobUrl = URL.createObjectURL(audioBlob);
+                const downloadLink = document.createElement('a');
+                downloadLink.href = blobUrl;
+                downloadLink.download = filename;
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                downloadLink.remove();
+                URL.revokeObjectURL(blobUrl);
+
+                hideLoading();
+                setStoryStatusMessage(`Story audio exported as ${filename}.`);
+            } catch (error) {
+                console.error('Error exporting story audio:', error);
+                hideLoading();
+                showError(String(error?.message || 'Failed to export story audio.'));
             }
         }
 
