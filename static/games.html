@@ -230,8 +230,7 @@
             background-color: #fafafa;
         }
 
-        #storyQaList,
-        #storyPartnerList {
+        #storyQaList {
             max-height: 180px;
             overflow-y: auto;
             padding: 0.5rem;
@@ -294,6 +293,41 @@
             background-color: #fef3c7;
             border-radius: 0.25rem;
             color: #111827;
+        }
+
+        .story-illustration-container {
+            margin-bottom: 0.85rem;
+        }
+
+        .story-illustration-status {
+            margin-bottom: 0.5rem;
+            color: #334155;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .story-illustration-frame {
+            width: 100%;
+            max-width: 520px;
+            margin: 0 auto;
+            border-radius: 0.75rem;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+        }
+
+        .story-illustration-image {
+            width: 100%;
+            height: auto;
+            display: block;
+            transform-origin: center;
+            animation: storyKenBurns 18s ease-in-out infinite alternate;
+        }
+
+        @keyframes storyKenBurns {
+            0% { transform: scale(1) translate(0, 0); }
+            100% { transform: scale(1.08) translate(-1.5%, -1%); }
         }
 
         /* --- Action Buttons now use game-button styling --- */
@@ -497,25 +531,42 @@
 
             <div id="storyReadDisplay" class="question-history hidden">
                 <div id="storyReadTitle" class="story-read-title"></div>
+                <div id="storyReadIllustrationContainer" class="story-illustration-container hidden">
+                    <div id="storyReadIllustrationStatus" class="story-illustration-status"></div>
+                    <div id="storyReadIllustrationFrame" class="story-illustration-frame hidden">
+                        <img id="storyReadIllustrationImage" class="story-illustration-image" alt="Story illustration" />
+                    </div>
+                </div>
                 <div id="storyReadText" class="story-read-text"></div>
+                <div id="storyReadActions" class="game-grid" style="margin-top: 1rem;">
+                    <button class="game-button" onclick="readSelectedStoryAgain()"><i class="fas fa-volume-up"></i>Read Again</button>
+                    <button id="createIllustrationReadButton" class="game-button" onclick="createStoryIllustration(false)"><i class="fas fa-image"></i>Create Illustration</button>
+                    <button id="regenerateIllustrationReadButton" class="game-button" onclick="createStoryIllustration(true)"><i class="fas fa-sync"></i>Regenerate Illustration</button>
+                    <button class="game-button" onclick="backToStoryReadList()"><i class="fas fa-arrow-left"></i>Back to Stories</button>
+                </div>
             </div>
 
             <div id="storyDetail" class="question-history hidden">
                 <h3>Story Detail</h3>
                 <input id="storyTitleInput" class="w-full p-2 border border-gray-300 rounded mb-3" placeholder="Story title" />
                 <textarea id="storyTextInput" class="w-full p-2 border border-gray-300 rounded" rows="8" placeholder="Story text"></textarea>
+                <div id="storyIllustrationContainer" class="story-illustration-container" style="margin-top: 0.85rem;">
+                    <div id="storyIllustrationStatus" class="story-illustration-status">No illustration yet.</div>
+                    <div id="storyIllustrationFrame" class="story-illustration-frame hidden">
+                        <img id="storyIllustrationImage" class="story-illustration-image" alt="Story illustration preview" />
+                    </div>
+                </div>
                 <div id="storyDetailActions" class="game-grid" style="margin-top: 1rem;">
                     <button class="game-button" onclick="readCurrentStory()"><i class="fas fa-volume-up"></i>Read Story</button>
                     <button class="game-button" onclick="saveCurrentStoryEdits()"><i class="fas fa-save"></i>Save Edits</button>
+                    <button id="createIllustrationButton" class="game-button" onclick="createStoryIllustration(false)"><i class="fas fa-image"></i>Create Illustration</button>
+                    <button id="regenerateIllustrationButton" class="game-button" onclick="createStoryIllustration(true)"><i class="fas fa-sync"></i>Regenerate Illustration</button>
                     <button class="game-button" onclick="deleteCurrentStory()" style="background-color: #dc2626; color: white;"><i class="fas fa-trash"></i>Delete Story</button>
                     <button class="game-button" onclick="closeStoryDetail()"><i class="fas fa-arrow-left"></i>Back to Builder</button>
                 </div>
             </div>
 
             <div id="storyBottomControls" style="margin-top: 0.75rem; display:flex; gap:0.6rem; justify-content:center; flex-wrap:wrap;">
-                <button id="storyPartnerIdeasButton" type="button" onclick="openPartnerIdeasModal()" style="padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid #cbd5e1; background: #ffffff; color: #1f2937; font-weight: 600;">
-                    <i class="fas fa-comments"></i> Partner Ideas
-                </button>
                 <button id="storyDeleteStoriesButton" type="button" onclick="promptStoryDeletePin()" class="hidden" style="padding: 0.7rem 1rem; border-radius: 10px; border: 1px solid #991b1b; background: #dc2626; color: #ffffff; font-weight: 700;">
                     <i class="fas fa-trash"></i> Delete Stories
                 </button>
@@ -524,16 +575,6 @@
             <div id="storyBottomStatus" class="game-status" style="position: sticky; bottom: 0; z-index: 20; margin-top: 1rem;">
                 <div id="storyStatusMessage" class="status-text">Say the wake word to ask the next question or complete the story.</div>
                 <div id="storyHeardTranscript" class="qa-question"></div>
-            </div>
-
-            <div id="storyPartnerModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 50; display: flex; align-items: center; justify-content: center; padding: 1rem;">
-                <div style="background: #fff; width: min(900px, 95vw); max-height: 80vh; border-radius: 12px; padding: 1rem; overflow: hidden; display: flex; flex-direction: column;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 0.75rem;">
-                        <h3 style="margin: 0; color: #002244; font-size: 1.2rem;">Partner Question Ideas</h3>
-                        <button class="game-button" style="padding: 0.4rem 0.8rem; font-size: 0.9rem;" onclick="closePartnerIdeasModal()"><i class="fas fa-times"></i>Close</button>
-                    </div>
-                    <div id="storyPartnerList" style="overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.6rem;"></div>
-                </div>
             </div>
 
             <div id="storyDeleteModal" class="hidden" style="position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 1rem;">
@@ -599,7 +640,10 @@
             activeReadWordIndex: -1,
             activeReadUtterance: null,
             deleteSelectionIds: [],
-            verifiedAdminPin: false
+            verifiedAdminPin: false,
+            illustrationUrl: '',
+            illustrationStatus: 'not_created',
+            illustrationStyle: 'storybook illustration'
         };
 
         // Speech recognition setup
@@ -1651,16 +1695,187 @@
                 activeReadWordIndex: -1,
                 activeReadUtterance: null,
                 deleteSelectionIds: [],
-                verifiedAdminPin: false
+                verifiedAdminPin: false,
+                illustrationUrl: '',
+                illustrationStatus: 'not_created',
+                illustrationStyle: 'storybook illustration'
             };
         }
 
-        function updateStoryBottomControls({ showPartnerIdeas = false, showDeleteStories = false } = {}) {
-            const partnerBtn = document.getElementById('storyPartnerIdeasButton');
-            const deleteBtn = document.getElementById('storyDeleteStoriesButton');
-            if (partnerBtn) {
-                partnerBtn.classList.toggle('hidden', !showPartnerIdeas);
+        function normalizeStoryIllustrationStatus(statusText) {
+            const normalized = String(statusText || 'not_created').trim().toLowerCase();
+            if (normalized === 'ready' || normalized === 'generating' || normalized === 'failed' || normalized === 'not_created') {
+                return normalized;
             }
+            return 'not_created';
+        }
+
+        function getStoryIllustrationStatusMessage(status, hasImage) {
+            if (status === 'generating') {
+                return 'Generating illustration...';
+            }
+            if (status === 'failed') {
+                return hasImage ? 'Illustration loaded, but latest generation failed.' : 'Illustration generation failed. Try again.';
+            }
+            if (status === 'ready' && hasImage) {
+                return 'Illustration ready.';
+            }
+            return 'No illustration yet.';
+        }
+
+        function updateStoryIllustrationButtons(status, hasImage) {
+            const createBtn = document.getElementById('createIllustrationButton');
+            const regenBtn = document.getElementById('regenerateIllustrationButton');
+            const createReadBtn = document.getElementById('createIllustrationReadButton');
+            const regenReadBtn = document.getElementById('regenerateIllustrationReadButton');
+            const isGenerating = status === 'generating';
+
+            if (createBtn) {
+                createBtn.disabled = isGenerating;
+                createBtn.style.opacity = isGenerating ? '0.55' : '1';
+                createBtn.innerHTML = hasImage
+                    ? '<i class="fas fa-image"></i>Create New Illustration'
+                    : '<i class="fas fa-image"></i>Create Illustration';
+            }
+
+            if (regenBtn) {
+                regenBtn.disabled = isGenerating || !hasImage;
+                regenBtn.style.opacity = (isGenerating || !hasImage) ? '0.55' : '1';
+            }
+
+            if (createReadBtn) {
+                createReadBtn.disabled = isGenerating;
+                createReadBtn.style.opacity = isGenerating ? '0.55' : '1';
+                createReadBtn.innerHTML = hasImage
+                    ? '<i class="fas fa-image"></i>Create New Illustration'
+                    : '<i class="fas fa-image"></i>Create Illustration';
+            }
+
+            if (regenReadBtn) {
+                regenReadBtn.disabled = isGenerating || !hasImage;
+                regenReadBtn.style.opacity = (isGenerating || !hasImage) ? '0.55' : '1';
+            }
+        }
+
+        function renderStoryIllustrationViews() {
+            const url = String(storyState.illustrationUrl || '').trim();
+            const hasImage = Boolean(url);
+            const status = normalizeStoryIllustrationStatus(storyState.illustrationStatus);
+            const statusMessage = getStoryIllustrationStatusMessage(status, hasImage);
+
+            const detailStatusEl = document.getElementById('storyIllustrationStatus');
+            const detailFrameEl = document.getElementById('storyIllustrationFrame');
+            const detailImageEl = document.getElementById('storyIllustrationImage');
+            if (detailStatusEl) {
+                detailStatusEl.textContent = statusMessage;
+            }
+            if (detailFrameEl && detailImageEl) {
+                if (hasImage) {
+                    detailImageEl.src = url;
+                    detailFrameEl.classList.remove('hidden');
+                } else {
+                    detailImageEl.removeAttribute('src');
+                    detailFrameEl.classList.add('hidden');
+                }
+            }
+
+            const readContainerEl = document.getElementById('storyReadIllustrationContainer');
+            const readStatusEl = document.getElementById('storyReadIllustrationStatus');
+            const readFrameEl = document.getElementById('storyReadIllustrationFrame');
+            const readImageEl = document.getElementById('storyReadIllustrationImage');
+            if (readContainerEl && readStatusEl && readFrameEl && readImageEl) {
+                if (hasImage || status === 'generating' || status === 'failed') {
+                    readContainerEl.classList.remove('hidden');
+                    readStatusEl.textContent = statusMessage;
+                    if (hasImage) {
+                        readImageEl.src = url;
+                        readFrameEl.classList.remove('hidden');
+                    } else {
+                        readImageEl.removeAttribute('src');
+                        readFrameEl.classList.add('hidden');
+                    }
+                } else {
+                    readContainerEl.classList.add('hidden');
+                    readImageEl.removeAttribute('src');
+                    readFrameEl.classList.add('hidden');
+                }
+            }
+
+            updateStoryIllustrationButtons(status, hasImage);
+        }
+
+        function syncStoryIllustrationFromStory(story) {
+            const safeStory = story && typeof story === 'object' ? story : {};
+            storyState.illustrationUrl = String(safeStory.illustration_url || '').trim();
+            storyState.illustrationStatus = normalizeStoryIllustrationStatus(safeStory.illustration_status);
+            storyState.illustrationStyle = String(safeStory.illustration_style || storyState.illustrationStyle || 'storybook illustration');
+            renderStoryIllustrationViews();
+        }
+
+        async function createStoryIllustration(regenerate = false) {
+            if (!storyState.selectedStoryId) {
+                showError('No story selected.');
+                return;
+            }
+
+            try {
+                const selectedTitle = (document.getElementById('storyTitleInput')?.value || storyState.currentStoryTitle || '').trim();
+                const selectedText = (document.getElementById('storyTextInput')?.value || storyState.currentStoryText || '').trim();
+                if (!selectedText) {
+                    showError('Add story text before creating an illustration.');
+                    return;
+                }
+
+                storyState.currentStoryTitle = selectedTitle || storyState.currentStoryTitle;
+                storyState.currentStoryText = selectedText;
+                storyState.illustrationStatus = 'generating';
+                renderStoryIllustrationViews();
+                showLoading();
+
+                const response = await authenticatedFetch(`/api/games/story/${storyState.selectedStoryId}/illustrate`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        style: storyState.illustrationStyle || 'storybook illustration',
+                        regenerate: Boolean(regenerate)
+                    })
+                });
+
+                if (!response.ok) {
+                    let backendError = '';
+                    try {
+                        const errorData = await response.json();
+                        backendError = String(errorData?.error || errorData?.detail || '').trim();
+                    } catch (parseError) {
+                        backendError = '';
+                    }
+                    const combinedError = backendError
+                        ? `HTTP ${response.status}: ${backendError}`
+                        : `HTTP ${response.status}: ${response.statusText}`;
+                    throw new Error(combinedError);
+                }
+
+                const data = await response.json();
+                hideLoading();
+
+                if (!data.success || !data.story) {
+                    throw new Error(data.error || 'Failed to generate illustration');
+                }
+
+                syncStoryIllustrationFromStory(data.story);
+                await loadStoryLibrary();
+                setStoryStatusMessage(data.reused_existing ? 'Existing illustration loaded.' : 'Illustration ready.');
+            } catch (error) {
+                console.error('Error creating story illustration:', error);
+                hideLoading();
+                storyState.illustrationStatus = 'failed';
+                renderStoryIllustrationViews();
+                const message = String(error?.message || 'Failed to generate illustration. Try again.');
+                showError(message);
+            }
+        }
+
+        function updateStoryBottomControls({ showDeleteStories = false } = {}) {
+            const deleteBtn = document.getElementById('storyDeleteStoriesButton');
             if (deleteBtn) {
                 deleteBtn.classList.toggle('hidden', !showDeleteStories);
             }
@@ -1702,7 +1917,6 @@
 
         async function showStoryEntryMenu() {
             stopListening();
-            closePartnerIdeasModal();
             closeStoryDeleteModal();
             storyState.view = 'entry';
             gameState.currentPhase = 'story_entry_menu';
@@ -1712,7 +1926,7 @@
             document.getElementById('storyReadDisplay').classList.add('hidden');
             document.getElementById('storyDetail').classList.add('hidden');
 
-            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: false });
+            updateStoryBottomControls({ showDeleteStories: false });
             setStoryStatusMessage('Choose an option to begin Story Builder.');
             displayStoryUserOptions(getStoryEntryOptions());
         }
@@ -1720,7 +1934,6 @@
         async function startCreateStoryFlow() {
             stopScanning();
             stopListening();
-            closePartnerIdeasModal();
             closeStoryDeleteModal();
 
             storyState.mode = 'build';
@@ -1738,8 +1951,7 @@
             document.getElementById('storyDetail').classList.add('hidden');
 
             updateStoryTranscriptUI();
-            await refreshPartnerSuggestions();
-            updateStoryBottomControls({ showPartnerIdeas: true, showDeleteStories: false });
+            updateStoryBottomControls({ showDeleteStories: false });
 
             gameState.currentPhase = 'story_awaiting_wake_word';
             setStoryStatusMessage(`Let's create a story! Say ${gameState.wakeWord} to ask me a question about the story.`);
@@ -1751,7 +1963,6 @@
 
         async function showExistingStoriesMenu() {
             stopListening();
-            closePartnerIdeasModal();
             closeStoryDeleteModal();
 
             storyState.view = 'read';
@@ -1764,7 +1975,7 @@
             document.getElementById('storyReadDisplay').classList.add('hidden');
             document.getElementById('storyDetail').classList.add('hidden');
 
-            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: true });
+            updateStoryBottomControls({ showDeleteStories: true });
             setStoryStatusMessage('Choose a story to read.');
             displayStoryUserOptions(getReadExistingStoryOptions());
         }
@@ -1792,20 +2003,34 @@
                 storyState.selectedStoryId = story.id;
                 storyState.currentStoryTitle = story.title || storyTitle || 'Untitled Story';
                 storyState.currentStoryText = story.story_text || '';
+                syncStoryIllustrationFromStory(story);
 
                 document.getElementById('storyTranscript').classList.add('hidden');
                 document.getElementById('storyLibrary').classList.add('hidden');
                 document.getElementById('storyDetail').classList.add('hidden');
                 document.getElementById('storyReadDisplay').classList.remove('hidden');
+                updateStoryBottomControls({ showDeleteStories: false });
 
                 await announce(`Let's read ${storyState.currentStoryTitle}!`);
                 await readStoryWithHighlight(storyState.currentStoryTitle, storyState.currentStoryText || 'This story is empty.');
+                gameState.currentPhase = 'story_reading_story';
+                setStoryStatusMessage('Story loaded. You can read again, create an illustration, or go back to stories.');
             } catch (error) {
                 console.error('Error reading existing story:', error);
                 showError('Unable to read that story.');
+                await showExistingStoriesMenu();
             }
+        }
 
+        async function backToStoryReadList() {
             await showExistingStoriesMenu();
+        }
+
+        async function readSelectedStoryAgain() {
+            const title = storyState.currentStoryTitle || 'Untitled Story';
+            const text = storyState.currentStoryText || '';
+            await readStoryWithHighlight(title, text || 'This story is empty.');
+            setStoryStatusMessage('Story loaded. You can read again, create an illustration, or go back to stories.');
         }
 
         async function validateStoryAdminPin(pin) {
@@ -2142,60 +2367,6 @@
             }
         }
 
-        function openPartnerIdeasModal() {
-            const modal = document.getElementById('storyPartnerModal');
-            if (modal) {
-                modal.classList.remove('hidden');
-            }
-        }
-
-        function closePartnerIdeasModal() {
-            const modal = document.getElementById('storyPartnerModal');
-            if (modal) {
-                modal.classList.add('hidden');
-            }
-        }
-
-        async function refreshPartnerSuggestions(defaultPrompt = 'What kind of story should we write?') {
-            if (!Array.isArray(storyState.transcript) || storyState.transcript.length === 0) {
-                storyState.partnerSuggestions = [
-                    'What kind of story do you want to write?',
-                    'Who is in the story?',
-                    'Where does the story happen?',
-                    'What happens first?'
-                ];
-                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
-                return;
-            }
-
-            try {
-                const response = await authenticatedFetch('/api/games/story/options', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        partner_question: defaultPrompt,
-                        transcript: storyState.transcript
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const data = await response.json();
-                storyState.partnerSuggestions = Array.isArray(data.partner_suggestions) ? data.partner_suggestions : [];
-                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
-            } catch (error) {
-                console.error('Error refreshing partner suggestions:', error);
-                storyState.partnerSuggestions = [
-                    'What kind of story do you want to write?',
-                    'Who is in the story?',
-                    'Where does the story happen?',
-                    'What happens first?'
-                ];
-                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
-            }
-        }
-
         async function startStoryBuilder() {
             currentGame = 'story_builder';
             resetStoryBuilderState();
@@ -2213,7 +2384,6 @@
             document.getElementById('storyLibrary').classList.add('hidden');
             document.getElementById('storyReadDisplay').classList.add('hidden');
             document.getElementById('storyDetail').classList.add('hidden');
-            closePartnerIdeasModal();
             closeStoryDeleteModal();
 
             updateStoryTranscriptUI();
@@ -2353,7 +2523,7 @@
 
         async function presentPostStoryActions(statusMessage = 'Choose what to do next with your story.') {
             gameState.currentPhase = 'story_post_story_actions';
-            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: false });
+            updateStoryBottomControls({ showDeleteStories: false });
             setStoryStatusMessage(statusMessage);
             displayStoryUserOptions(getStoryPostReadActionOptions());
         }
@@ -2363,7 +2533,7 @@
             storyState.view = 'create';
             storyState.pendingQuestion = '';
             showStoryQaMode();
-            updateStoryBottomControls({ showPartnerIdeas: true, showDeleteStories: false });
+            updateStoryBottomControls({ showDeleteStories: false });
             gameState.currentPhase = 'story_awaiting_wake_word';
             setStoryStatusMessage(`I want to make some changes. Say ${gameState.wakeWord} to ask me about the changes.`);
             await announce(`I want to make some changes. Say ${gameState.wakeWord} to ask me about the changes.`);
@@ -2457,7 +2627,6 @@
                 hideLoading();
 
                 const userOptions = Array.isArray(data.user_options) ? data.user_options : [];
-                storyState.partnerSuggestions = Array.isArray(data.partner_suggestions) ? data.partner_suggestions : [];
                 storyState.view = 'create';
                 gameState.currentPhase = 'story_selecting_answer';
 
@@ -2465,9 +2634,8 @@
                 document.getElementById('storyLibrary').classList.add('hidden');
                 document.getElementById('storyReadDisplay').classList.add('hidden');
                 document.getElementById('storyDetail').classList.add('hidden');
-                updateStoryBottomControls({ showPartnerIdeas: true, showDeleteStories: false });
+                updateStoryBottomControls({ showDeleteStories: false });
 
-                displayStoryPartnerSuggestions(storyState.partnerSuggestions);
                 displayStoryUserOptions(userOptions, { appendStandardActions: true });
                 setStoryStatusMessage('Choose an answer option for the user.', partnerQuestion);
             } catch (error) {
@@ -2478,22 +2646,6 @@
                 setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
                 setTimeout(() => startListening(), 1200);
             }
-        }
-
-        function displayStoryPartnerSuggestions(suggestions) {
-            const container = document.getElementById('storyPartnerList');
-            container.innerHTML = '';
-
-            if (!Array.isArray(suggestions) || suggestions.length === 0) {
-                return;
-            }
-
-            suggestions.forEach((questionText) => {
-                const item = document.createElement('div');
-                item.className = 'story-helper-item';
-                item.textContent = questionText;
-                container.appendChild(item);
-            });
         }
 
         function displayStoryUserOptions(options, config = {}) {
@@ -2610,7 +2762,6 @@
             if (gameState.currentPhase === 'story_confirm_end') {
                 storyState.transcript.push({ question: 'The End?', answer: optionText });
                 updateStoryTranscriptUI();
-                await refreshPartnerSuggestions('What should we ask next to shape the story?');
 
                 if (String(optionText).toLowerCase() === 'yes') {
                     if (storyState.mode === 'edit') {
@@ -2643,7 +2794,6 @@
                     answer: optionText
                 });
                 updateStoryTranscriptUI();
-                await refreshPartnerSuggestions('What should we ask next to build the story?');
                 gameState.currentPhase = 'story_awaiting_wake_word';
                 setStoryStatusMessage(`Say ${gameState.wakeWord} to ask the next question or complete the story.`);
                 await announce(`Say ${gameState.wakeWord} to ask another question.`);
@@ -2799,6 +2949,7 @@
             storyState.currentStoryText = story.story_text || '';
             const incomingTranscript = Array.isArray(story.transcript) ? story.transcript : [];
             storyState.transcript = incomingTranscript.filter((entry) => entry && typeof entry === 'object');
+            syncStoryIllustrationFromStory(story);
             document.getElementById('storyLibrary').classList.add('hidden');
             document.getElementById('storyReadDisplay').classList.add('hidden');
             document.getElementById('storyDetail').classList.remove('hidden');
@@ -2818,9 +2969,12 @@
                 showError('Story text is empty.');
                 return;
             }
+            storyState.currentStoryTitle = document.getElementById('storyTitleInput').value || storyState.currentStoryTitle || 'Untitled Story';
+            storyState.currentStoryText = text;
+            renderStoryIllustrationViews();
             document.getElementById('storyDetail').classList.add('hidden');
             document.getElementById('storyReadDisplay').classList.remove('hidden');
-            await readStoryWithHighlight(document.getElementById('storyTitleInput').value || storyState.currentStoryTitle || 'Untitled Story', text);
+            await readStoryWithHighlight(storyState.currentStoryTitle || 'Untitled Story', text);
             document.getElementById('storyReadDisplay').classList.add('hidden');
             document.getElementById('storyDetail').classList.remove('hidden');
         }
@@ -3824,9 +3978,8 @@
             document.getElementById('storyLibrary').classList.add('hidden');
             document.getElementById('storyReadDisplay').classList.add('hidden');
             document.getElementById('storyDetail').classList.add('hidden');
-            closePartnerIdeasModal();
             closeStoryDeleteModal();
-            updateStoryBottomControls({ showPartnerIdeas: false, showDeleteStories: false });
+            updateStoryBottomControls({ showDeleteStories: false });
             setStoryStatusMessage('');
         }
 

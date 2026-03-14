@@ -11062,6 +11062,11 @@ class StoryBuilderUpdateRequest(BaseModel):
     transcript: Optional[List[Dict[str, str]]] = Field(default=None, description="Updated story transcript")
 
 
+class StoryBuilderIllustrationRequest(BaseModel):
+    style: Optional[str] = Field(default="storybook illustration", description="Visual style for generated illustration")
+    regenerate: Optional[bool] = Field(default=False, description="Whether to force regeneration if an illustration already exists")
+
+
 # --- Guess Who Game Models ---
 class GuessWhoCategoriesRequest(BaseModel):
     pass  # No parameters needed, retrieves default + user custom categories
@@ -12387,6 +12392,11 @@ Requirements:
             "title": safe_title,
             "story_text": story_text,
             "transcript": request.transcript or [],
+            "illustration_url": "",
+            "illustration_status": "not_created",
+            "illustration_prompt": "",
+            "illustration_style": "",
+            "illustration_updated_at": None,
             "created_at": now_iso,
             "updated_at": now_iso,
         }
@@ -12427,7 +12437,9 @@ async def list_story_builder_stories(
                 "created_at": story.get("created_at"),
                 "updated_at": story.get("updated_at"),
                 "story_preview": story_text[:180],
-                "transcript_count": len(story.get("transcript", []) or [])
+                "transcript_count": len(story.get("transcript", []) or []),
+                "illustration_url": story.get("illustration_url", ""),
+                "illustration_status": story.get("illustration_status", "not_created")
             })
 
         return JSONResponse(content={"success": True, "stories": response_stories})
@@ -12493,6 +12505,78 @@ async def update_story_builder_story(
         return JSONResponse(content={"success": True, "story": updated_story})
     except Exception as e:
         logging.error(f"Error updating Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/{story_id}/illustrate")
+async def generate_story_builder_illustration(
+    story_id: str,
+    request: StoryBuilderIllustrationRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        safe_title = re.sub(r"\s+", " ", str(story_data.get("title", "Untitled Story")).strip()) or "Untitled Story"
+        story_text = str(story_data.get("story_text", "")).strip()
+        existing_url = str(story_data.get("illustration_url", "")).strip()
+
+        if existing_url and not bool(request.regenerate):
+            story_data["id"] = doc.id
+            return JSONResponse(content={
+                "success": True,
+                "story": story_data,
+                "reused_existing": True
+            })
+
+        if not story_text:
+            return JSONResponse(content={"success": False, "error": "Story text is empty"}, status_code=400)
+
+        safe_style = re.sub(r"\s+", " ", str(request.style or "storybook illustration").strip()) or "storybook illustration"
+        story_excerpt = " ".join(story_text.split())[:550]
+
+        illustration_prompt = (
+            f"{safe_style}, create a single clean cover-style image for a children's story titled '{safe_title}'. "
+            f"Represent the story with simple, clear visual storytelling and expressive characters. "
+            f"No text, words, letters, or logos in the image. "
+            f"Story content summary: {story_excerpt}"
+        )
+
+        image_bytes = await generate_story_illustration_image(illustration_prompt)
+        safe_story_id = re.sub(r"[^\w\-]", "_", story_id)
+        filename = f"story_illustration_{safe_story_id}_{uuid.uuid4().hex[:8]}.png"
+        image_url = await upload_image_to_storage(image_bytes, filename)
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        update_payload = {
+            "illustration_url": image_url,
+            "illustration_status": "ready",
+            "illustration_prompt": illustration_prompt,
+            "illustration_style": safe_style,
+            "illustration_updated_at": now_iso,
+            "updated_at": now_iso,
+        }
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_payload), merge=True)
+
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_story = updated_doc.to_dict() or {}
+        updated_story["id"] = updated_doc.id
+
+        return JSONResponse(content={"success": True, "story": updated_story})
+    except HTTPException as http_error:
+        return JSONResponse(
+            content={"success": False, "error": str(http_error.detail)},
+            status_code=http_error.status_code
+        )
+    except Exception as e:
+        logging.error(f"Error generating Story Builder illustration for {story_id}: {e}", exc_info=True)
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
@@ -13761,27 +13845,36 @@ async def generate_image_with_openai_if_available(prompt: str, max_retries: int 
         # Fall back to placeholder if OpenAI is not available
         return await generate_image_with_gemini_fallback(prompt, max_retries)
 
-async def generate_image_with_vertex_ai_imagen(prompt: str, max_retries: int = 2) -> bytes:
+async def generate_image_with_vertex_ai_imagen(
+    prompt: str,
+    max_retries: int = 2,
+    allow_placeholder_fallback: bool = True
+) -> bytes:
     """Generate image using Vertex AI Imagen model"""
+    model_candidates = [
+        "imagegeneration@006",
+        "imagen-3.0-fast-generate-001",
+        "imagen-3.0-generate-002",
+    ]
+    last_error = "unknown error"
+
     for attempt in range(max_retries + 1):
         try:
             import requests
             import base64
-            import json
-            
+
             # Get access token for Vertex AI
             import google.auth.transport.requests
-            import google.oauth2.service_account
-            
+
             # Use default credentials
             from google.auth import default
             credentials, project_id = default()
-            
+
             # Refresh credentials to get access token
             auth_req = google.auth.transport.requests.Request()
             credentials.refresh(auth_req)
             access_token = credentials.token
-            
+
             # AAC-focused prompt with even stronger simplicity and icon directives
             enhanced_prompt = f'''
 Create an extremely simple image for the AAC symbol representing "{prompt}".
@@ -13793,56 +13886,80 @@ The image should be a clean, minimalistic icon or cartoon that clearly conveys t
 The image will be used on buttons in an AAC app, so it must be easily recognizable at small sizes.
 Use bold lines, simple shapes, and a limited color palette to ensure the image is easily recognizable at small sizes. 
 The background should be plain or transparent to avoid distractions. Focus on the core concept of "{prompt}" and avoid any abstract or artistic interpretations. 
-'''          
-            # Vertex AI Imagen endpoint
-            endpoint = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagegeneration@006:predict"
-            
-            # Request payload with improved parameters
-            payload = {
-                "instances": [
-                    {
-                        "prompt": enhanced_prompt
-                    }
-                ],
-                "parameters": {
-                    "sampleCount": 1,
-                    "aspectRatio": "1:1",
-                    "safetyFilterLevel": "block_none"  # Less restrictive to allow more stylized results
-                    # Note: seed parameter removed because it's not supported when watermark is enabled
-                }
-            }
-            
-            # Headers (fix the authorization bug)
+'''
+
+            # Headers
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json"
             }
-            
-            # Make the request
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                # Extract image data
-                if 'predictions' in result and len(result['predictions']) > 0:
-                    prediction = result['predictions'][0]
-                    
-                    # Try different response formats
-                    if 'bytesBase64Encoded' in prediction:
-                        return base64.b64decode(prediction['bytesBase64Encoded'])
-                    elif 'generated_image' in prediction and 'bytesBase64Encoded' in prediction['generated_image']:
-                        return base64.b64decode(prediction['generated_image']['bytesBase64Encoded'])
-                    elif 'image' in prediction:
-                        return base64.b64decode(prediction['image'])
-                
-            raise Exception(f"Vertex AI request failed: {response.status_code} - {response.text}")
-                
+
+            for model_name in model_candidates:
+                endpoint = (
+                    f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}"
+                    f"/locations/us-central1/publishers/google/models/{model_name}:predict"
+                )
+
+                payload = {
+                    "instances": [
+                        {
+                            "prompt": enhanced_prompt
+                        }
+                    ],
+                    "parameters": {
+                        "sampleCount": 1,
+                        "aspectRatio": "1:1",
+                        "safetyFilterLevel": "block_none"
+                    }
+                }
+
+                response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
+
+                if response.status_code == 200:
+                    result = response.json()
+
+                    if 'predictions' in result and len(result['predictions']) > 0:
+                        prediction = result['predictions'][0]
+
+                        if 'bytesBase64Encoded' in prediction:
+                            return base64.b64decode(prediction['bytesBase64Encoded'])
+                        elif 'generated_image' in prediction and 'bytesBase64Encoded' in prediction['generated_image']:
+                            return base64.b64decode(prediction['generated_image']['bytesBase64Encoded'])
+                        elif 'image' in prediction:
+                            return base64.b64decode(prediction['image'])
+
+                    last_error = f"model {model_name} returned 200 but no image bytes"
+                    continue
+
+                last_error = f"model {model_name} failed: {response.status_code} - {response.text[:600]}"
+
+            raise Exception(last_error)
+
         except Exception as e:
+            last_error = str(e)
             logging.warning(f"Vertex AI Imagen generation attempt {attempt + 1} failed: {e}")
             if attempt == max_retries:
-                # Fall back to placeholder if Vertex AI fails
-                return await generate_image_with_gemini_fallback(prompt, 0)
+                if allow_placeholder_fallback:
+                    # Fall back to placeholder if Vertex AI fails
+                    return await generate_image_with_gemini_fallback(prompt, 0)
+                raise HTTPException(status_code=503, detail=f"Vertex image generation unavailable: {last_error}")
+
+
+async def generate_story_illustration_image(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate Story Builder illustrations using Gemini/Vertex only (no placeholder fallback)."""
+    try:
+        return await generate_image_with_vertex_ai_imagen(
+            prompt,
+            max_retries=max_retries,
+            allow_placeholder_fallback=False
+        )
+    except Exception as vertex_error:
+        vertex_error_message = str(getattr(vertex_error, "detail", "") or str(vertex_error) or "unknown Gemini/Vertex error")
+        logging.warning(f"Story illustration Gemini/Vertex generation failed: {vertex_error}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gemini image generation unavailable right now: {vertex_error_message}"
+        )
 
 # Update the main function to use Vertex AI Imagen directly
 generate_image_with_gemini = generate_image_with_vertex_ai_imagen
