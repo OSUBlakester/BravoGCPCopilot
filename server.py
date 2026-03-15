@@ -118,11 +118,17 @@ from jinja2 import Environment, FileSystemLoader
 import urllib.parse
 import http.client  # Import the http.client module
 import requests  # Import the requests library (though http.client is used)
+import base64
+import secrets
+import hmac
+import hashlib
 from bs4 import BeautifulSoup
 import random
 import aiohttp
 import asyncio
 from urllib.parse import urljoin, urlparse
+from email.utils import parseaddr
+from email.message import EmailMessage
 import uuid
 import io
 import wave
@@ -5155,6 +5161,7 @@ async def lifespan(app: FastAPI):
     # Code to run on startup
     logging.info("Application startup: Initializing shared backend services...")
     initialize_backend_services() # This now only initializes global, shared items
+    _ensure_email_security_configuration()
     # REMOVE THESE:
     # load_settings_from_file() # Settings loaded per user now
     # load_birthdays_from_file() # Birthdays loaded per user now
@@ -10807,6 +10814,798 @@ Return only the improved text, nothing else."""
         logging.error(f"Error cleaning up text for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
         # Return original text if cleanup fails
         return JSONResponse(content={"cleaned_text": request.text_to_cleanup})
+
+
+# ===== BRAVO EMAIL PHASE 2 BEGIN (WEB APP REVIEW BLOCK) =====
+
+EMAIL_PROVIDER_DOC_SUBPATH = "integrations/email"
+EMAIL_PROVIDER_NAME = "gmail"
+EMAIL_OAUTH_STATE_TTL_SECONDS = 900
+EMAIL_CONNECT_SUCCESS_HTML = "<html><body><h2>Email connected</h2><p>You can close this tab and return to Bravo.</p></body></html>"
+EMAIL_CONNECT_CANCELED_HTML = "<html><body><h2>Email connection canceled</h2><p>You can close this tab and return to Bravo.</p></body></html>"
+GMAIL_OAUTH_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/contacts.readonly",
+]
+
+DEFAULT_EMAIL_PROVIDER_STATE = {
+    "provider": EMAIL_PROVIDER_NAME,
+    "connected": False,
+    "connected_at": None,
+    "email_address": None,
+    "token_encrypted": None,
+    "refresh_token_encrypted": None,
+    "token": None,
+    "refresh_token": None,
+    "token_expires_at": None,
+    "scope": [],
+    "last_error": None,
+}
+
+
+class EmailConnectUrlRequest(BaseModel):
+    provider: Literal["gmail"] = Field(default="gmail")
+
+
+class EmailSendRequest(BaseModel):
+    to: List[str] = Field(default_factory=list)
+    cc: List[str] = Field(default_factory=list)
+    bcc: List[str] = Field(default_factory=list)
+    subject: str = ""
+    body: str = ""
+
+    @field_validator("to", "cc", "bcc")
+    @classmethod
+    def _validate_email_list(cls, values: List[str]) -> List[str]:
+        validated: List[str] = []
+        for raw_value in values or []:
+            candidate = str(raw_value or "").strip()
+            if not candidate:
+                continue
+            _, parsed_email = parseaddr(candidate)
+            if not parsed_email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", parsed_email):
+                raise ValueError(f"Invalid email address: {candidate}")
+            validated.append(parsed_email)
+        return validated
+
+
+def _is_truthy_env(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_email_oauth_state_secret() -> str:
+    secret = os.getenv("EMAIL_OAUTH_STATE_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=500,
+            detail="EMAIL_OAUTH_STATE_SECRET is required for signed OAuth state",
+        )
+    return secret
+
+
+def _require_email_token_encryption_key() -> str:
+    key = os.getenv("EMAIL_TOKEN_ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=500,
+            detail="EMAIL_TOKEN_ENCRYPTION_KEY is required for encrypted token storage",
+        )
+    return key
+
+
+def _get_email_token_cipher():
+    key = _require_email_token_encryption_key()
+    try:
+        from cryptography.fernet import Fernet
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="cryptography package is required for email token encryption") from exc
+    try:
+        return Fernet(key.encode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Invalid EMAIL_TOKEN_ENCRYPTION_KEY value") from exc
+
+
+def _encrypt_email_token(raw_value: Optional[str]) -> Optional[str]:
+    if not raw_value:
+        return None
+    cipher = _get_email_token_cipher()
+    return cipher.encrypt(raw_value.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_email_token(encrypted_value: Optional[str]) -> Optional[str]:
+    if not encrypted_value:
+        return None
+    cipher = _get_email_token_cipher()
+    try:
+        decrypted = cipher.decrypt(encrypted_value.encode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to decrypt stored email token") from exc
+    return decrypted.decode("utf-8")
+
+
+def _ensure_email_security_configuration() -> None:
+    enforce_config = _is_truthy_env(os.getenv("EMAIL_FEATURE_ENABLED", "true"))
+    if not enforce_config:
+        return
+
+    oauth_secret = os.getenv("EMAIL_OAUTH_STATE_SECRET", "").strip()
+    if not oauth_secret:
+        raise RuntimeError("EMAIL_OAUTH_STATE_SECRET is required when EMAIL_FEATURE_ENABLED=true")
+
+    token_encryption_key = os.getenv("EMAIL_TOKEN_ENCRYPTION_KEY", "").strip()
+    if not token_encryption_key:
+        raise RuntimeError("EMAIL_TOKEN_ENCRYPTION_KEY is required when EMAIL_FEATURE_ENABLED=true")
+
+    oauth_client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    if not oauth_client_id:
+        raise RuntimeError("GOOGLE_OAUTH_CLIENT_ID is required when EMAIL_FEATURE_ENABLED=true")
+
+    oauth_client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if not oauth_client_secret:
+        raise RuntimeError("GOOGLE_OAUTH_CLIENT_SECRET is required when EMAIL_FEATURE_ENABLED=true")
+
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(token_encryption_key.encode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError("EMAIL_TOKEN_ENCRYPTION_KEY must be a valid Fernet key and cryptography must be installed") from exc
+
+
+def _email_backend_origin() -> str:
+    domain_value = (os.getenv("DOMAIN") or DOMAIN or "").strip()
+    if domain_value.startswith("http://") or domain_value.startswith("https://"):
+        return domain_value.rstrip("/")
+    if domain_value:
+        return f"https://{domain_value}".rstrip("/")
+    return "http://localhost:8000"
+
+
+def _email_oauth_settings() -> Dict[str, str]:
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    redirect_uri = os.getenv("EMAIL_OAUTH_REDIRECT_URI", "").strip()
+    if not redirect_uri:
+        redirect_uri = f"{_email_backend_origin()}/api/email/oauth/callback"
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+    }
+
+
+def _parse_iso_utc(iso_text: Optional[str]) -> Optional[dt]:
+    if not iso_text:
+        return None
+    try:
+        return dt.fromisoformat(iso_text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _iso_utc_after_seconds(seconds: int) -> str:
+    return (dt.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
+def _serialize_email_oauth_state(payload: Dict[str, Any]) -> str:
+    serialized = json.dumps(payload, separators=(",", ":"))
+    encoded = base64.urlsafe_b64encode(serialized.encode("utf-8")).decode("utf-8").rstrip("=")
+    state_secret = _require_email_oauth_state_secret()
+    signature = hmac.new(state_secret.encode("utf-8"), encoded.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _deserialize_email_oauth_state(state_token: str) -> Dict[str, Any]:
+    state_secret = _require_email_oauth_state_secret()
+    encoded_part = state_token
+
+    if "." in state_token:
+        encoded_part, signature = state_token.rsplit(".", 1)
+        expected_signature = hmac.new(
+            state_secret.encode("utf-8"),
+            encoded_part.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise HTTPException(status_code=400, detail="Invalid OAuth state signature")
+    else:
+        raise HTTPException(status_code=400, detail="Missing OAuth state signature")
+
+    padded = encoded_part + "=" * (-len(encoded_part) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8")
+        payload = json.loads(decoded)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state payload") from exc
+
+    issued_at = payload.get("issued_at")
+    if not isinstance(issued_at, (int, float)):
+        raise HTTPException(status_code=400, detail="OAuth state missing issued_at")
+
+    now_epoch = int(time.time())
+    if now_epoch - int(issued_at) > EMAIL_OAUTH_STATE_TTL_SECONDS:
+        raise HTTPException(status_code=400, detail="OAuth state expired")
+
+    if not payload.get("account_id") or not payload.get("aac_user_id"):
+        raise HTTPException(status_code=400, detail="OAuth state missing identity fields")
+
+    return payload
+
+
+async def _load_email_provider_state(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    saved_state = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=EMAIL_PROVIDER_DOC_SUBPATH,
+        default_data=copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE),
+    )
+    if not isinstance(saved_state, dict):
+        saved_state = copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE)
+
+    merged_state = copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE)
+    merged_state.update(saved_state)
+    return merged_state
+
+
+async def _save_email_provider_state(account_id: str, aac_user_id: str, state_data: Dict[str, Any]) -> None:
+    await save_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=EMAIL_PROVIDER_DOC_SUBPATH,
+        data_to_save=state_data,
+    )
+
+
+def _state_access_token(state: Dict[str, Any]) -> Optional[str]:
+    encrypted = state.get("token_encrypted")
+    if encrypted:
+        return _decrypt_email_token(encrypted)
+    legacy = state.get("token")
+    return str(legacy).strip() if legacy else None
+
+
+def _state_refresh_token(state: Dict[str, Any]) -> Optional[str]:
+    encrypted = state.get("refresh_token_encrypted")
+    if encrypted:
+        return _decrypt_email_token(encrypted)
+    legacy = state.get("refresh_token")
+    return str(legacy).strip() if legacy else None
+
+
+def _gmail_token_endpoint_payload(
+    grant_type: str,
+    oauth_settings: Dict[str, str],
+    code: Optional[str] = None,
+    refresh_token: Optional[str] = None,
+) -> Dict[str, str]:
+    payload = {
+        "client_id": oauth_settings["client_id"],
+        "client_secret": oauth_settings["client_secret"],
+        "grant_type": grant_type,
+    }
+    if grant_type == "authorization_code":
+        payload["code"] = code or ""
+        payload["redirect_uri"] = oauth_settings["redirect_uri"]
+    elif grant_type == "refresh_token":
+        payload["refresh_token"] = refresh_token or ""
+    return payload
+
+
+async def _async_http_request_json(
+    method: str,
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+    timeout_seconds: int = 20,
+) -> Dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.request(method, url, headers=headers, params=params, data=data, json=json_body) as response:
+            body_text = await response.text()
+            try:
+                parsed = json.loads(body_text) if body_text else {}
+            except json.JSONDecodeError:
+                parsed = {}
+            return {
+                "status": response.status,
+                "text": body_text,
+                "json": parsed,
+            }
+
+
+async def _gmail_exchange_code_for_tokens(code: str, oauth_settings: Dict[str, str]) -> Dict[str, Any]:
+    token_response = await _async_http_request_json(
+        "POST",
+        "https://oauth2.googleapis.com/token",
+        data=_gmail_token_endpoint_payload(
+            grant_type="authorization_code",
+            oauth_settings=oauth_settings,
+            code=code,
+        ),
+        timeout_seconds=15,
+    )
+    if token_response["status"] != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to exchange auth code: {token_response['text']}",
+        )
+    return token_response["json"]
+
+
+async def _gmail_refresh_access_token(refresh_token: str, oauth_settings: Dict[str, str]) -> Dict[str, Any]:
+    refresh_response = await _async_http_request_json(
+        "POST",
+        "https://oauth2.googleapis.com/token",
+        data=_gmail_token_endpoint_payload(
+            grant_type="refresh_token",
+            oauth_settings=oauth_settings,
+            refresh_token=refresh_token,
+        ),
+        timeout_seconds=15,
+    )
+    if refresh_response["status"] != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to refresh access token: {refresh_response['text']}",
+        )
+    return refresh_response["json"]
+
+
+def _gmail_scope_list(raw_scope: Any) -> List[str]:
+    if isinstance(raw_scope, str):
+        return [scope for scope in raw_scope.split() if scope.strip()]
+    if isinstance(raw_scope, list):
+        return [str(scope) for scope in raw_scope if str(scope).strip()]
+    return []
+
+
+async def _ensure_valid_gmail_access_token(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    state = await _load_email_provider_state(account_id, aac_user_id)
+    current_access_token = _state_access_token(state)
+    if not state.get("connected") or not current_access_token:
+        raise HTTPException(status_code=400, detail="Gmail provider is not connected")
+
+    expires_at = _parse_iso_utc(state.get("token_expires_at"))
+    should_refresh = not expires_at or expires_at <= (dt.now(timezone.utc) + timedelta(seconds=60))
+
+    if should_refresh:
+        refresh_token = _state_refresh_token(state)
+        if not refresh_token:
+            raise HTTPException(status_code=400, detail="Gmail refresh token missing")
+
+        oauth_settings = _email_oauth_settings()
+        if not oauth_settings["client_id"] or not oauth_settings["client_secret"]:
+            raise HTTPException(status_code=500, detail="Missing Google OAuth client configuration")
+
+        refreshed = await _gmail_refresh_access_token(refresh_token, oauth_settings)
+        refreshed_access_token = refreshed.get("access_token")
+        if not refreshed_access_token:
+            raise HTTPException(status_code=400, detail="Refresh response missing access_token")
+
+        state["token_encrypted"] = _encrypt_email_token(refreshed_access_token)
+        state["token"] = None
+        state["token_expires_at"] = _iso_utc_after_seconds(int(refreshed.get("expires_in", 3600)))
+        state["scope"] = _gmail_scope_list(refreshed.get("scope") or state.get("scope"))
+        await _save_email_provider_state(account_id, aac_user_id, state)
+    elif state.get("token") and not state.get("token_encrypted"):
+        state["token_encrypted"] = _encrypt_email_token(state["token"])
+        state["token"] = None
+        await _save_email_provider_state(account_id, aac_user_id, state)
+
+    return state
+
+
+async def _gmail_get_json(
+    account_id: str,
+    aac_user_id: str,
+    endpoint_url: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+    access_token = _state_access_token(state)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = await _async_http_request_json(
+        "GET",
+        endpoint_url,
+        headers=headers,
+        params=params or {},
+        timeout_seconds=20,
+    )
+
+    if response["status"] == 401 and _state_refresh_token(state):
+        state["token_expires_at"] = _iso_utc_after_seconds(-1)
+        await _save_email_provider_state(account_id, aac_user_id, state)
+        refreshed_state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+        refreshed_token = _state_access_token(refreshed_state)
+        headers = {"Authorization": f"Bearer {refreshed_token}"}
+        response = await _async_http_request_json(
+            "GET",
+            endpoint_url,
+            headers=headers,
+            params=params or {},
+            timeout_seconds=20,
+        )
+
+    if response["status"] >= 400:
+        raise HTTPException(status_code=400, detail=f"Google API request failed: {response['text']}")
+
+    return response["json"]
+
+
+async def _gmail_post_json(
+    account_id: str,
+    aac_user_id: str,
+    endpoint_url: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+    access_token = _state_access_token(state)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = await _async_http_request_json(
+        "POST",
+        endpoint_url,
+        headers=headers,
+        json_body=payload,
+        timeout_seconds=20,
+    )
+
+    if response["status"] == 401 and _state_refresh_token(state):
+        state["token_expires_at"] = _iso_utc_after_seconds(-1)
+        await _save_email_provider_state(account_id, aac_user_id, state)
+        refreshed_state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+        refreshed_token = _state_access_token(refreshed_state)
+        headers = {"Authorization": f"Bearer {refreshed_token}"}
+        response = await _async_http_request_json(
+            "POST",
+            endpoint_url,
+            headers=headers,
+            json_body=payload,
+            timeout_seconds=20,
+        )
+
+    if response["status"] >= 400:
+        raise HTTPException(status_code=400, detail=f"Google API request failed: {response['text']}")
+
+    return response["json"]
+
+
+@app.get("/api/email/status")
+async def get_email_status(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    state = await _load_email_provider_state(account_id, aac_user_id)
+    provider_status = {
+        "gmail": {
+            "connected": bool(state.get("connected")),
+            "email_address": state.get("email_address"),
+            "connected_at": state.get("connected_at"),
+            "has_refresh_token": bool(_state_refresh_token(state)),
+            "scope": state.get("scope") or [],
+        }
+    }
+
+    return JSONResponse(content={"provider_status": provider_status})
+
+
+@app.post("/api/email/connect-url")
+async def get_email_connect_url(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    request: Optional[EmailConnectUrlRequest] = Body(default=None),
+):
+    request_payload = request or EmailConnectUrlRequest()
+    if request_payload.provider != EMAIL_PROVIDER_NAME:
+        raise HTTPException(status_code=400, detail="Only Gmail provider is currently supported")
+
+    oauth_settings = _email_oauth_settings()
+    if not oauth_settings["client_id"] or not oauth_settings["client_secret"]:
+        raise HTTPException(status_code=500, detail="Missing Google OAuth client configuration")
+
+    state_payload = {
+        "account_id": current_ids["account_id"],
+        "aac_user_id": current_ids["aac_user_id"],
+        "provider": EMAIL_PROVIDER_NAME,
+        "issued_at": int(time.time()),
+        "nonce": secrets.token_urlsafe(24),
+    }
+    serialized_state = _serialize_email_oauth_state(state_payload)
+
+    auth_query = {
+        "client_id": oauth_settings["client_id"],
+        "redirect_uri": oauth_settings["redirect_uri"],
+        "response_type": "code",
+        "scope": " ".join(GMAIL_OAUTH_SCOPES),
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+        "state": serialized_state,
+    }
+    connect_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(auth_query)}"
+    return JSONResponse(content={"connect_url": connect_url})
+
+
+@app.get("/api/email/oauth/callback")
+async def email_oauth_callback(
+    state: str,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    state_payload = _deserialize_email_oauth_state(state)
+    account_id = state_payload["account_id"]
+    aac_user_id = state_payload["aac_user_id"]
+
+    if error:
+        previous_state = await _load_email_provider_state(account_id, aac_user_id)
+        previous_state["connected"] = False
+        previous_state["last_error"] = error
+        await _save_email_provider_state(account_id, aac_user_id, previous_state)
+        return HTMLResponse(content=EMAIL_CONNECT_CANCELED_HTML, status_code=200)
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    oauth_settings = _email_oauth_settings()
+    if not oauth_settings["client_id"] or not oauth_settings["client_secret"]:
+        raise HTTPException(status_code=500, detail="Missing Google OAuth client configuration")
+
+    token_data = await _gmail_exchange_code_for_tokens(code, oauth_settings)
+    access_token = token_data.get("access_token")
+    refresh_token = token_data.get("refresh_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Google OAuth token exchange returned no access_token")
+
+    profile_response = await _async_http_request_json(
+        "GET",
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout_seconds=20,
+    )
+    if profile_response["status"] != 200:
+        previous_state = await _load_email_provider_state(account_id, aac_user_id)
+        previous_state["connected"] = False
+        previous_state["last_error"] = f"Profile fetch failed: {profile_response['text']}"
+        await _save_email_provider_state(account_id, aac_user_id, previous_state)
+        raise HTTPException(status_code=502, detail="Failed to verify Gmail profile after OAuth")
+
+    profile_json = profile_response["json"]
+    email_address = profile_json.get("emailAddress")
+    if not email_address:
+        previous_state = await _load_email_provider_state(account_id, aac_user_id)
+        previous_state["connected"] = False
+        previous_state["last_error"] = "Profile response missing emailAddress"
+        await _save_email_provider_state(account_id, aac_user_id, previous_state)
+        raise HTTPException(status_code=502, detail="Gmail profile missing email address")
+
+    next_state = await _load_email_provider_state(account_id, aac_user_id)
+    next_state.update(
+        {
+            "provider": EMAIL_PROVIDER_NAME,
+            "connected": True,
+            "connected_at": dt.now(timezone.utc).isoformat(),
+            "email_address": email_address,
+            "token_encrypted": _encrypt_email_token(access_token),
+            "refresh_token_encrypted": _encrypt_email_token(refresh_token or _state_refresh_token(next_state)),
+            "token": None,
+            "refresh_token": None,
+            "token_expires_at": _iso_utc_after_seconds(int(token_data.get("expires_in", 3600))),
+            "scope": _gmail_scope_list(token_data.get("scope")),
+            "last_error": None,
+        }
+    )
+    await _save_email_provider_state(account_id, aac_user_id, next_state)
+
+    return HTMLResponse(content=EMAIL_CONNECT_SUCCESS_HTML, status_code=200)
+
+
+@app.get("/api/email/inbox")
+async def get_email_inbox(
+    max_results: int = 20,
+    page_token: Optional[str] = None,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    clamped_max = max(1, min(max_results, 50))
+
+    message_list = await _gmail_get_json(
+        account_id,
+        aac_user_id,
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        params={
+            "maxResults": clamped_max,
+            "labelIds": "INBOX",
+            **({"pageToken": page_token} if page_token else {}),
+        },
+    )
+
+    messages = []
+    message_ids = [item.get("id") for item in message_list.get("messages", []) if item.get("id")]
+    semaphore = asyncio.Semaphore(8)
+
+    async def _fetch_message_metadata(message_id: str) -> Optional[Dict[str, Any]]:
+        async with semaphore:
+            return await _gmail_get_json(
+                account_id,
+                aac_user_id,
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+                params={
+                    "format": "metadata",
+                    "metadataHeaders": ["From", "Subject", "Date"],
+                },
+            )
+
+    metadata_results = await asyncio.gather(*[_fetch_message_metadata(message_id) for message_id in message_ids])
+    for metadata in metadata_results:
+        if not metadata:
+            continue
+
+        header_map = {}
+        for header in metadata.get("payload", {}).get("headers", []):
+            header_name = str(header.get("name", "")).lower()
+            if header_name:
+                header_map[header_name] = header.get("value", "")
+
+        from_value = header_map.get("from", "")
+        sender_name, sender_email = parseaddr(from_value)
+
+        messages.append(
+            {
+                "id": metadata.get("id"),
+                "thread_id": metadata.get("threadId"),
+                "subject": header_map.get("subject", "(No subject)"),
+                "from": from_value,
+                "sender_name": sender_name or None,
+                "sender_email": sender_email or None,
+                "date": header_map.get("date"),
+                "snippet": metadata.get("snippet", ""),
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "messages": messages,
+            "next_page_token": message_list.get("nextPageToken"),
+        }
+    )
+
+
+@app.get("/api/email/contacts")
+async def get_email_contacts(
+    max_results: int = 50,
+    page_token: Optional[str] = None,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    clamped_max = max(1, min(max_results, 200))
+
+    connections_json = await _gmail_get_json(
+        account_id,
+        aac_user_id,
+        "https://people.googleapis.com/v1/people/me/connections",
+        params={
+            "personFields": "names,emailAddresses",
+            "pageSize": clamped_max,
+            **({"pageToken": page_token} if page_token else {}),
+        },
+    )
+
+    contacts = []
+    seen_emails = set()
+    for person in connections_json.get("connections", []):
+        names = person.get("names") or []
+        display_name = names[0].get("displayName") if names else None
+        for email_obj in person.get("emailAddresses") or []:
+            email_value = str(email_obj.get("value", "")).strip()
+            if not email_value:
+                continue
+            dedupe_key = email_value.lower()
+            if dedupe_key in seen_emails:
+                continue
+            seen_emails.add(dedupe_key)
+            contacts.append(
+                {
+                    "name": display_name,
+                    "email": email_value,
+                }
+            )
+
+    return JSONResponse(
+        content={
+            "contacts": contacts,
+            "next_page_token": connections_json.get("nextPageToken"),
+        }
+    )
+
+
+@app.post("/api/email/send")
+async def send_email_message(
+    request: EmailSendRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    recipients = [address.strip() for address in (request.to + request.cc + request.bcc) if address and address.strip()]
+    if not recipients:
+        raise HTTPException(status_code=400, detail="At least one recipient is required")
+
+    provider_state = await _load_email_provider_state(account_id, aac_user_id)
+    from_address = provider_state.get("email_address")
+    if not from_address:
+        raise HTTPException(status_code=400, detail="Connected Gmail address is missing")
+
+    message = EmailMessage()
+    message["From"] = from_address
+    message["To"] = ", ".join(request.to) if request.to else "undisclosed-recipients:;"
+    if request.cc:
+        message["Cc"] = ", ".join(request.cc)
+    if request.bcc:
+        message["Bcc"] = ", ".join(request.bcc)
+    message["Subject"] = request.subject or ""
+    message.set_content(request.body or "")
+
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+    send_result = await _gmail_post_json(
+        account_id,
+        aac_user_id,
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        payload={"raw": encoded_message},
+    )
+
+    return JSONResponse(
+        content={
+            "status": "sent",
+            "id": send_result.get("id"),
+            "thread_id": send_result.get("threadId"),
+            "label_ids": send_result.get("labelIds", []),
+        }
+    )
+
+
+@app.post("/api/email/disconnect")
+async def disconnect_email_provider(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    state = await _load_email_provider_state(account_id, aac_user_id)
+    refresh_token = _state_refresh_token(state)
+    access_token = _state_access_token(state)
+    token_for_revoke = refresh_token or access_token
+
+    if token_for_revoke:
+        try:
+            await _async_http_request_json(
+                "POST",
+                "https://oauth2.googleapis.com/revoke",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={"token": token_for_revoke},
+                timeout_seconds=15,
+            )
+        except Exception:
+            logging.warning("Failed to revoke Google token during disconnect", exc_info=True)
+
+    await _save_email_provider_state(
+        account_id,
+        aac_user_id,
+        {
+            **copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE),
+            "provider": EMAIL_PROVIDER_NAME,
+            "connected": False,
+            "last_error": None,
+        },
+    )
+
+    return JSONResponse(content={"status": "disconnected", "provider": EMAIL_PROVIDER_NAME})
+
+
+# ===== BRAVO EMAIL PHASE 2 END (WEB APP REVIEW BLOCK) =====
 
 
 # --- Mood Selection Endpoint ---
