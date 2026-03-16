@@ -10826,9 +10826,17 @@ EMAIL_CONNECT_CANCELED_HTML = "<html><body><h2>Email connection canceled</h2><p>
 GMAIL_OAUTH_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/contacts.readonly",
 ]
+
+GMAIL_INBOX_EXCLUDED_CATEGORIES = {
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_UPDATES",
+    "CATEGORY_FORUMS",
+}
 
 DEFAULT_EMAIL_PROVIDER_STATE = {
     "provider": EMAIL_PROVIDER_NAME,
@@ -11163,6 +11171,49 @@ def _gmail_scope_list(raw_scope: Any) -> List[str]:
     return []
 
 
+def _decode_gmail_base64url(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8"))
+        return decoded.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _extract_plaintext_from_gmail_payload(payload: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+
+    mime_type = str(payload.get("mimeType") or "").lower()
+    body_data = (payload.get("body") or {}).get("data")
+    parts = payload.get("parts") or []
+
+    if mime_type.startswith("text/plain") and body_data:
+        return _decode_gmail_base64url(body_data)
+
+    for part in parts:
+        part_text = _extract_plaintext_from_gmail_payload(part)
+        if part_text:
+            return part_text
+
+    if body_data:
+        return _decode_gmail_base64url(body_data)
+
+    return ""
+
+
+def _gmail_header_map(payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    headers = (payload or {}).get("headers", [])
+    header_map: Dict[str, str] = {}
+    for header in headers:
+        header_name = str(header.get("name", "")).lower()
+        if header_name:
+            header_map[header_name] = header.get("value", "")
+    return header_map
+
+
 async def _ensure_valid_gmail_access_token(account_id: str, aac_user_id: str) -> Dict[str, Any]:
     state = await _load_email_provider_state(account_id, aac_user_id)
     current_access_token = _state_access_token(state)
@@ -11418,6 +11469,7 @@ async def get_email_inbox(
         params={
             "maxResults": clamped_max,
             "labelIds": "INBOX",
+            "q": "in:inbox category:primary -category:promotions -category:social -category:updates -category:forums",
             **({"pageToken": page_token} if page_token else {}),
         },
     )
@@ -11443,11 +11495,11 @@ async def get_email_inbox(
         if not metadata:
             continue
 
-        header_map = {}
-        for header in metadata.get("payload", {}).get("headers", []):
-            header_name = str(header.get("name", "")).lower()
-            if header_name:
-                header_map[header_name] = header.get("value", "")
+        message_labels = set(metadata.get("labelIds") or [])
+        if message_labels.intersection(GMAIL_INBOX_EXCLUDED_CATEGORIES):
+            continue
+
+        header_map = _gmail_header_map(metadata.get("payload"))
 
         from_value = header_map.get("from", "")
         sender_name, sender_email = parseaddr(from_value)
@@ -11471,6 +11523,59 @@ async def get_email_inbox(
             "next_page_token": message_list.get("nextPageToken"),
         }
     )
+
+
+@app.get("/api/email/messages/{message_id}")
+async def get_email_message_detail(
+    message_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    message = await _gmail_get_json(
+        account_id,
+        aac_user_id,
+        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+        params={"format": "full"},
+    )
+
+    payload = message.get("payload") or {}
+    header_map = _gmail_header_map(payload)
+    body_text = _extract_plaintext_from_gmail_payload(payload)
+
+    return JSONResponse(
+        content={
+            "message": {
+                "id": message.get("id"),
+                "thread_id": message.get("threadId"),
+                "subject": header_map.get("subject", "(No subject)"),
+                "from": header_map.get("from", ""),
+                "to": header_map.get("to", ""),
+                "date": header_map.get("date"),
+                "snippet": message.get("snippet", ""),
+                "body_text": body_text,
+            }
+        }
+    )
+
+
+@app.post("/api/email/messages/{message_id}/delete")
+async def delete_email_message(
+    message_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    await _gmail_post_json(
+        account_id,
+        aac_user_id,
+        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/trash",
+        payload={},
+    )
+
+    return JSONResponse(content={"status": "deleted", "id": message_id})
 
 
 @app.get("/api/email/contacts")
