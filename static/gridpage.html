@@ -557,6 +557,7 @@
                             <li><strong>Colors</strong> - Category coding (e.g., green for actions, blue for people)</li>
                         </ul>
                         <p class="text-gray-700 mt-3">In Auditory Scanning mode, buttons are highlighted sequentially and spoken aloud until you activate your switch to make a selection.</p>
+                        <p class="text-gray-700 mt-2"><strong>Scanning Mode</strong> controls how scanning advances: <strong>Auto</strong> continuously moves highlight focus based on scan speed, while <strong>Step</strong> advances one item each time the switch is activated.</p>
                     </section>
 
                     <section class="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -779,7 +780,7 @@
                                 </div>
                             </div>
 
-                            <!-- Scanning Speed -->
+                            <!-- Scanning Mode & Speed -->
                             <div class="setup-task-item cursor-pointer" onclick="toggleTaskDetails(this)">
                                 <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                     <div class="flex-shrink-0 mt-1">
@@ -787,7 +788,7 @@
                                     </div>
                                     <div class="ml-3 flex-1">
                                         <div class="flex items-center justify-between">
-                                            <div class="font-semibold text-gray-900">Configure Scanning Speed - User Settings</div>
+                                            <div class="font-semibold text-gray-900">Configure Scanning Mode &amp; Speed - User Settings</div>
                                             <div class="flex items-center space-x-2">
                                                 <button onclick="event.stopPropagation(); startInteractiveGuide('configure-scanning-speed');" class="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition flex items-center">
                                                     <i class="fas fa-route mr-1"></i>Guide Me
@@ -797,15 +798,17 @@
                                         </div>
                                         <div class="task-details hidden mt-2">
                                             <div class="text-sm text-gray-700 mt-2 space-y-2">
-                                                <p><strong>Purpose:</strong> Control how quickly buttons are highlighted and announced during Auditory Scanning, and how many times the system cycles through all options.</p>
+                                                <p><strong>Purpose:</strong> Configure how scanning behaves (Auto vs Step), how quickly buttons are highlighted and announced, and how many times the system cycles through all options.</p>
+                                                <p><strong>Scanning Mode:</strong> <strong>Auto</strong> advances through choices automatically. <strong>Step</strong> moves one choice forward per switch activation.</p>
                                                 <p><strong>Scan Speed:</strong> The delay (in milliseconds) between each button highlight. Slower speeds give more time to react; faster speeds make navigation quicker.</p>
                                                 <p><strong>Loop Limit:</strong> How many complete cycles through all buttons before scanning pauses until switch is used. A value of 0 will have no limit.</p>
                                                 <p class="font-semibold text-gray-900 mt-3">Steps:</p>
                                                 <ol class="list-decimal list-inside ml-2 space-y-1">
                                                     <li>Navigate to <strong>Admin Toolbar → User Settings</strong></li>
                                                     <li>Find the <strong>Scanning</strong> or <strong>Auditory Scanning</strong> section</li>
+                                                    <li>Select the <strong>Scanning Mode</strong> (<strong>Auto</strong> or <strong>Step</strong>)</li>
                                                     <li>Enter the <strong>Scan Speed</strong> in the input field (try 2000-3000 milliseconds to start)</li>
-                                                    <li>Set the <strong>Loop Limit</strong> (typically 2-3 loops)</li>
+                                                    <li>Set the <strong>Loop Limit</strong> (typically 2-3 loops, or 0 for no limit)</li>
                                                     <li>Click <strong>Save Global Settings</strong> at the bottom of the page</li>
                                                 </ol>
                                             </div>
@@ -1723,7 +1726,7 @@
                 ]
             },
             'configure-scanning-speed': {
-                title: 'Configure Scanning Speed',
+                title: 'Configure Scanning Mode & Speed',
                 steps: [
                     {
                         title: 'Unlock Admin Toolbar',
@@ -1765,14 +1768,14 @@
                     {
                         title: 'Find Scanning Settings',
                         icon: 'fa-tachometer-alt',
-                        content: `<p class="text-gray-700 mb-3">Locate the Scanning or Auditory Scanning section.</p>`,
+                        content: `<p class="text-gray-700 mb-3">Locate the Scanning or Auditory Scanning section where Scanning Mode, Scan Speed, and Loop Limit are configured.</p>`,
                         action: function() {},
                         cleanup: function() {}
                     },
                     {
-                        title: 'Adjust Speed & Loop',
+                        title: 'Set Mode, Speed & Loop',
                         icon: 'fa-sliders-h',
-                        content: `<p class="text-gray-700 mb-3">Set the scan speed (2-3 seconds recommended) and loop limit.</p>`,
+                        content: `<p class="text-gray-700 mb-3">Set <strong>Scanning Mode</strong> (Auto or Step), then configure scan speed (2-3 seconds recommended) and loop limit.</p>`,
                         action: function() {},
                         cleanup: function() {}
                     },

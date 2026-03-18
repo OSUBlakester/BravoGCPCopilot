@@ -34,7 +34,7 @@ steps:
       - '--allow-unauthenticated'
       - '--update-env-vars'
       - 'ENVIRONMENT=$_ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID,EMAIL_FEATURE_ENABLED=$_EMAIL_FEATURE_ENABLED'
-      - '--set-secrets'
+      - '--update-secrets'
       - 'GOOGLE_API_KEY=bravo-google-api-key:latest'
       - '--memory'
       - '2Gi'

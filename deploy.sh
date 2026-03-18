@@ -64,7 +64,7 @@ gcloud builds submit . --config=cloudbuild.yaml --substitutions=_SERVICE_NAME=$S
 
 # Deploy to Cloud Run
 echo "🚀 Deploying to Cloud Run..."
-echo "ℹ️ Note: This deployment will preserve existing environment variables"
+echo "ℹ️ Note: This deployment will preserve existing environment variables and secret mappings"
 echo "ℹ️ Updating ENVIRONMENT, GCP_PROJECT_ID, and EMAIL_FEATURE_ENABLED"
 EMAIL_FEATURE_ENABLED="false"
 gcloud run deploy $SERVICE_NAME \
@@ -73,7 +73,7 @@ gcloud run deploy $SERVICE_NAME \
     --region $REGION \
     --allow-unauthenticated \
     --update-env-vars=ENVIRONMENT=$ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID,EMAIL_FEATURE_ENABLED=$EMAIL_FEATURE_ENABLED \
-    --set-secrets=GOOGLE_API_KEY=bravo-google-api-key:latest \
+    --update-secrets=GOOGLE_API_KEY=bravo-google-api-key:latest \
     --memory 2Gi \
     --cpu 1 \
     --max-instances 10 \

@@ -111,6 +111,7 @@ import copy
 import holidays
 import calendar # For calculating floating observances
 from datetime import date, timedelta, datetime as dt, timezone # Alias datetime to avoid conflict
+from zoneinfo import ZoneInfo
 from fastapi.middleware.cors import CORSMiddleware
 import re
 # from sentence_transformers import SentenceTransformer  # DISABLED - not currently used
@@ -2863,6 +2864,33 @@ Undated Diary Entries (use cautiously, max 5):
         )
 
         query_hint_lower = str(query_hint or "").lower()
+        # Live time context (dynamic per request; NOT cached)
+        # This prevents stale/hallucinated times when users ask about current time/date.
+        now_utc = dt.now(timezone.utc)
+        mountain_now = now_utc.astimezone(ZoneInfo("America/Denver"))
+
+        preferred_tz_name = "America/Denver" if (
+            "mountain" in query_hint_lower or
+            "mst" in query_hint_lower or
+            "mdt" in query_hint_lower
+        ) else "UTC"
+
+        try:
+            preferred_now = now_utc.astimezone(ZoneInfo(preferred_tz_name))
+        except Exception:
+            preferred_tz_name = "UTC"
+            preferred_now = now_utc
+
+        delta_parts.append(
+            "\n🕒 LIVE DATE/TIME CONTEXT (AUTHORITATIVE - USE FOR TIME/DATE QUESTIONS):\n"
+            f"- Current UTC: {now_utc.strftime('%Y-%m-%d %I:%M:%S %p UTC')}\n"
+            f"- Current US Mountain (America/Denver): {mountain_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}\n"
+            f"- Preferred timezone for this request: {preferred_tz_name}\n"
+            f"- Current time in preferred timezone: {preferred_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}\n"
+            "⚠️ TIME ACCURACY RULE: If the prompt asks for current time/date, use the exact values above."
+            " Do NOT invent or reuse old times from prior context.\n"
+        )
+
         celebration_keywords = [
             "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
             "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
@@ -10837,6 +10865,13 @@ GMAIL_INBOX_EXCLUDED_CATEGORIES = {
     "CATEGORY_UPDATES",
     "CATEGORY_FORUMS",
 }
+GMAIL_INBOX_CATEGORY_LABELS = {
+    "CATEGORY_PERSONAL",
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_UPDATES",
+    "CATEGORY_FORUMS",
+}
 
 DEFAULT_EMAIL_PROVIDER_STATE = {
     "provider": EMAIL_PROVIDER_NAME,
@@ -11497,6 +11532,10 @@ async def get_email_inbox(
 
         message_labels = set(metadata.get("labelIds") or [])
         if message_labels.intersection(GMAIL_INBOX_EXCLUDED_CATEGORIES):
+            continue
+
+        category_labels = message_labels.intersection(GMAIL_INBOX_CATEGORY_LABELS)
+        if category_labels and "CATEGORY_PERSONAL" not in category_labels:
             continue
 
         header_map = _gmail_header_map(metadata.get("payload"))
