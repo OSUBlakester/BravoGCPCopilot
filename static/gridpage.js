@@ -70,6 +70,7 @@ let wakeWordInterjection = "hey"; // Default interjection (lowercase)
 let wakeWordName = "bravo";       // Default name (lowercase)
 let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
+let scanMode = 'auto'; // auto | step
 let waitForSwitchToScan = false; // Default wait for switch state
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
@@ -485,6 +486,14 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
     if (ScanningOff) {
         console.log(`🔇 Scanning is disabled (${source}).`);
         window.waitingForInitialSwitch = false;
+        return;
+    }
+
+    // If scanning is already active (auto: interval running; step: a button is highlighted),
+    // don't disrupt it. This prevents the generateGrid setTimeout from re-entering the
+    // "waiting for initial switch" state after the user has already started scanning.
+    if (scanningInterval !== null || currentlyScannedButton !== null) {
+        console.log(`⏭️ Scanning already active — ignoring startOrWaitForScanning (${source}).`);
         return;
     }
 
@@ -941,6 +950,37 @@ async function fetchJokeOptions(limit, questionContext) {
 let announcementQueue = [];       // Queue for sequential announcements
 let isAnnouncingNow = false;      // Flag to prevent concurrent announce playback
 let audioContextResumeAttempted = false; // Flag for AudioContext auto-resume helper
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
+}
 
 // --- NEW: User Management Variables ---
 let currentAacUserId = null; // NEW: To store the currently selected individual AAC user ID
@@ -1493,6 +1533,7 @@ async function loadScanSettings() {
 
         // Load booleans
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
@@ -2646,6 +2687,27 @@ async function handleButtonClick(buttonData) {
                     const params = new URLSearchParams();
                     params.set('guess_who', '1');
                     window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'mood' || specialPage === 'mood-selection') {
+                    if (typeof clearCurrentMood === 'function') {
+                        clearCurrentMood();
+                    } else {
+                        sessionStorage.removeItem('currentSessionMood');
+                    }
+
+                    if (typeof showMoodSelection === 'function') {
+                        showMoodSelection((selectedMood) => {
+                            if (selectedMood) {
+                                console.log('Mood updated from gridpage button:', selectedMood);
+                            } else {
+                                console.log('Mood selection dismissed or unavailable from gridpage button.');
+                            }
+                            startAuditoryScanning();
+                        });
+                    } else {
+                        console.warn('showMoodSelection is unavailable; falling back to mood.html');
+                        window.location.href = 'mood.html';
+                    }
+                    return;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions
                     console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
@@ -3446,24 +3508,38 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
         console.log("playAudioToDevice: Audio source started.");
 
         return new Promise((resolve) => {
             source.onended = () => {
                 console.log("playAudioToDevice: Audio playback ended.");
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close(); // Important to release resources
                 resolve();
             };
         }).catch(err => {
             console.error("playAudioToDevice: Error during audio playback promise:", err);
             if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            if (activeAnnouncementAudioContext === audioContext) {
+                activeAnnouncementAudioContext = null;
+                activeAnnouncementAudioSource = null;
+            }
             throw err;
         });
 
     } catch (error) {
         console.error('playAudioToDevice: Fatal Error during setup or playback:', error);
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
         throw error;
     }
 }
@@ -3726,6 +3802,10 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { console.log("Auditory scanning is off."); return; }
+    if (scanMode === 'step') {
+        startStepColumnScanning();
+        return;
+    }
     console.log("Starting auditory scanning...", `Pattern: ${currentScanPattern}`);
     
     // Check which scanning pattern to use
@@ -3733,6 +3813,43 @@ function startAuditoryScanning() {
         startRowPhaseScanning();
     } else {
         startColumnPhaseScanning();
+    }
+}
+
+function startStepColumnScanning() {
+    console.log("Starting STEP scanning (column mode)...");
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    currentRowScanMode = false;
+    currentButtonIndex = -1;
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
+    advanceStepColumnScan();
+}
+
+function advanceStepColumnScan() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+    if (currentlyScannedButton) {
+        speakAndHighlight(currentlyScannedButton);
     }
 }
 
@@ -4661,6 +4778,27 @@ async function generateLlmButtons(options) {
  */
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (tab) - starting scanning on gridpage');
+                window.waitingForInitialSwitch = false;
+                startAuditoryScanning();
+                return;
+            }
+
+            if (!isLLMProcessing && !listeningForQuestion) {
+                if (!currentlyScannedButton) {
+                    startAuditoryScanning();
+                } else {
+                    advanceStepColumnScan();
+                }
+            }
+            return;
+        }
+
         if (event.code === 'Space') {
             event.preventDefault();
             

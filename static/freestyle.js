@@ -7,6 +7,8 @@ let isLLMProcessing = false; // Flag to detect if LLM query is running
 const clickDebounceDelay = 300; // Debounce for button clicks
 let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from settings
 let scanningInterval; // Holds the interval ID for scanning
+let scanMode = 'auto'; // auto | step
+let currentScanAdvanceFn = null; // step scanning advance callback for active context
 let currentButtonIndex = -1; // Tracks the index for scanning
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
@@ -35,6 +37,10 @@ let currentSpeechRate = 180;
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
+let pendingHighlightSpeechTimer = null;
+let pendingHighlightSpeechToken = 0;
 
 // --- Freestyle Specific Variables ---
 let currentBuildSpaceText = "";
@@ -465,6 +471,7 @@ async function loadScanSettings() {
         if (response.ok) {
             const settings = await response.json();
             defaultDelay = settings.scanDelay || 3500;
+            scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             scanLoopLimit = settings.scanLoopLimit || 0;
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
@@ -1207,15 +1214,7 @@ async function handleLetterClick(letter) {
     // Get word predictions
     await getWordPredictions();
     
-    // If scanning is active, restart with updated button list
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 400);
-    }
+    restartScanningForCurrentContext(400);
 }
 
 async function getWordPredictions() {
@@ -1307,15 +1306,7 @@ function clearCurrentWord() {
     currentPredictions = [];
     renderWordPredictions();
     
-    // If scanning is active, restart to account for all letters being enabled again
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 400);
-    }
+    restartScanningForCurrentContext(400);
 }
 
 function backspaceCurrentWord() {
@@ -1328,15 +1319,7 @@ function backspaceCurrentWord() {
         
         getWordPredictions();
         
-        // If scanning is active, restart to account for newly enabled letters
-        if (scanningInterval) {
-            stopScanning();
-            setTimeout(() => {
-                if (!scanningPaused) {
-                    startScanning();
-                }
-            }, 400);
-        }
+        restartScanningForCurrentContext(400);
     }
 }
 
@@ -1397,15 +1380,7 @@ function openChooseWordModal() {
     // Show category selection
     showCategorySelection();
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 function closeChooseWordModal() {
@@ -1422,15 +1397,7 @@ function closeChooseWordModal() {
     // Hide modal
     document.getElementById('choose-word-modal').classList.add('hidden');
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 function showCategorySelection() {
@@ -1446,15 +1413,7 @@ function showCategorySelection() {
     // Generate category buttons
     generateCategoryButtons();
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 function generateCategoryButtons() {
@@ -1708,15 +1667,7 @@ async function displayCategoryWords() {
         wordOptionsGrid.appendChild(button);
     }
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 async function generateDifferentWords() {
@@ -1793,6 +1744,7 @@ function startScanning() {
     
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
+    currentScanAdvanceFn = null;
     
     if (currentScanningContext === "main") {
         startMainScanning();
@@ -1857,7 +1809,10 @@ function startMainScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startSpellingLettersScanning() {
@@ -1916,7 +1871,10 @@ function startSpellingLettersScanning() {
     
     currentButtonIndex = 0;
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startSpellingPredictionsScanning() {
@@ -1954,7 +1912,10 @@ function startSpellingPredictionsScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startChooseWordCategoriesScanning() {
@@ -1971,7 +1932,7 @@ function startChooseWordCategoriesScanning() {
     const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
-            currentlyScannedButton.classList.remove('scanned');
+            currentlyScannedButton.classList.remove('scanning-highlight');
         }
         
         // Check scan limit
@@ -1997,7 +1958,10 @@ function startChooseWordCategoriesScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startChooseWordOptionsScanning() {
@@ -2014,7 +1978,7 @@ function startChooseWordOptionsScanning() {
     const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
-            currentlyScannedButton.classList.remove('scanned');
+            currentlyScannedButton.classList.remove('scanning-highlight');
         }
         
         // Check scan limit
@@ -2040,7 +2004,10 @@ function startChooseWordOptionsScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function stopScanning() {
@@ -2049,12 +2016,20 @@ function stopScanning() {
         scanningInterval = null;
         console.log('Scanning stopped');
     }
+
+    pendingHighlightSpeechToken += 1;
+    if (pendingHighlightSpeechTimer) {
+        clearTimeout(pendingHighlightSpeechTimer);
+        pendingHighlightSpeechTimer = null;
+    }
+    interruptScanningAnnouncementPlayback();
     
     // Remove highlight from current button
     if (currentlyScannedButton) {
         currentlyScannedButton.classList.remove('scanning-highlight');
         currentlyScannedButton = null;
     }
+    currentScanAdvanceFn = null;
     
     currentButtonIndex = -1;
     // Note: No need to cancel speech here as backend TTS handles its own queue
@@ -2066,9 +2041,52 @@ function speakAndHighlight(button) {
         btn.classList.remove('scanning-highlight');
     });
     
-    // Add scanning class to current button (visual highlight only, no speech)
-    // Speech only occurs when the user actually selects/clicks a button via switch input
     button.classList.add('scanning-highlight');
+
+    pendingHighlightSpeechToken += 1;
+    const speechToken = pendingHighlightSpeechToken;
+    if (pendingHighlightSpeechTimer) {
+        clearTimeout(pendingHighlightSpeechTimer);
+        pendingHighlightSpeechTimer = null;
+    }
+
+    interruptScanningAnnouncementPlayback();
+
+    const textToSpeak = getButtonScanLabel(button);
+    if (!textToSpeak) {
+        return;
+    }
+
+    pendingHighlightSpeechTimer = setTimeout(() => {
+        pendingHighlightSpeechTimer = null;
+        if (speechToken !== pendingHighlightSpeechToken || currentlyScannedButton !== button) {
+            return;
+        }
+        announce(textToSpeak, 'system', false).catch((error) => {
+            console.error('Freestyle scanning announce error:', error);
+        });
+    }, 500);
+}
+
+function getButtonScanLabel(button) {
+    if (!button) return '';
+
+    const ariaLabel = (button.getAttribute('aria-label') || '').trim();
+    if (ariaLabel) return ariaLabel;
+
+    const dataLetter = (button.getAttribute('data-letter') || '').trim();
+    if (dataLetter) return dataLetter;
+
+    return (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function restartScanningForCurrentContext(delay = 300) {
+    stopScanning();
+    setTimeout(() => {
+        if (!scanningPaused) {
+            startScanning();
+        }
+    }, delay);
 }
 
 function resumeScanning() {
@@ -2082,6 +2100,24 @@ function resumeScanning() {
 // --- Input Handling (Same as gridpage.js) ---
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+            pendingHighlightSpeechToken += 1;
+            if (pendingHighlightSpeechTimer) {
+                clearTimeout(pendingHighlightSpeechTimer);
+                pendingHighlightSpeechTimer = null;
+            }
+            interruptScanningAnnouncementPlayback();
+            if (isPausedFromScanLimit) {
+                resumeScanning();
+            } else if (currentScanAdvanceFn) {
+                currentScanAdvanceFn();
+            } else {
+                startScanning();
+            }
+            return;
+        }
+
         if (event.code === 'Space') {
             event.preventDefault();
             handleSpacebarPress();
@@ -2177,17 +2213,53 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start();
 
         return new Promise((resolve) => {
             source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close();
                 resolve();
             };
         });
     } catch (error) {
         console.error('Error playing audio:', error);
+        activeAnnouncementAudioContext = null;
+        activeAnnouncementAudioSource = null;
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {

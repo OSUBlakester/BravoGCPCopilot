@@ -588,6 +588,14 @@
                     <input type="number" id="scanLoopLimit" name="scanLoopLimit" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="e.g., 0">
                     <p class="text-xs text-gray-500 mt-1">Number of complete scanning cycles before pausing (0 = unlimited, 1-10 = limit cycles)</p>
                 </div>
+                <div>
+                    <label for="scanMode" class="block text-lg font-medium text-gray-700 mb-2">Scanning Mode:</label>
+                    <select id="scanMode" name="scanMode" class="w-full max-w-xs">
+                        <option value="auto">Auto Scanning (timer)</option>
+                        <option value="step">Step Scanning (Tab = Next, Space = Select)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Use Auto for timer-based scanning, or Step for two-switch scanning.</p>
+                </div>
                 <div class="flex items-center">
                     <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
                     <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
@@ -960,6 +968,7 @@
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Scanning Mode:</strong> Choose how scanning advances. <strong>Auto</strong> moves through options automatically based on scan speed. <strong>Step</strong> advances one option per switch activation.</p>
                                         <p><strong>Auditory Scan Speed:</strong> Time in milliseconds between button highlights during scanning. Lower = faster, higher = slower.</p>
                                         <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
                                         <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
@@ -1445,6 +1454,22 @@
     const scanningGuide = {
         id: 'scanning',
         steps: [
+            {
+                title: 'Scanning Mode',
+                content: 'Choose how scanning advances. Auto moves through options automatically based on scan speed. Step advances one option each time the switch is activated.',
+                highlight: '#scanMode',
+                action: function() {
+                    const select = document.getElementById('scanMode');
+                    if (select) {
+                        select.classList.add('guide-highlight-target');
+                        select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const select = document.getElementById('scanMode');
+                    if (select) select.classList.remove('guide-highlight-target');
+                }
+            },
             {
                 title: 'Auditory Scan Speed',
                 content: 'Time in milliseconds between button highlights during scanning. Lower values = faster scanning, higher values = slower. Start slow and increase speed as user becomes comfortable.',
@@ -2251,7 +2276,7 @@
                 ]
             },
             'configure-scanning-speed': {
-                title: 'Configure Scanning Speed',
+                title: 'Configure Scanning Mode & Speed',
                 steps: [
                     {
                         title: 'Unlock Admin Toolbar',
@@ -2296,7 +2321,7 @@
                         title: 'Find Scanning Settings',
                         icon: 'fa-tachometer-alt',
                         content: `
-                            <p class="text-gray-700 mb-3">Scroll to the Auditory Scanning Settings section.</p>
+                            <p class="text-gray-700 mb-3">Scroll to the Auditory Scanning Settings section where Scanning Mode, Scan Speed, and Loop Limit are configured.</p>
                             <div class="bg-orange-50 border-l-4 border-orange-500 p-3 mb-3">
                                 <p class="text-sm"><i class="fas fa-info-circle text-orange-600 mr-2"></i>Look for the <strong>Auditory Scanning Settings</strong> <i class="fas fa-search text-orange-600"></i> heading</p>
                             </div>
@@ -2309,6 +2334,33 @@
                                     header.scrollIntoView({ behavior: 'smooth', block: 'start' });
                                     header.classList.add('guide-highlight-target');
                                     break;
+                                }
+                            }
+                        },
+                        cleanup: function() {
+                            document.querySelectorAll('.guide-highlight-target').forEach(el => {
+                                el.classList.remove('guide-highlight-target');
+                            });
+                        }
+                    },
+                    {
+                        title: 'Set Scanning Mode',
+                        icon: 'fa-random',
+                        content: `
+                            <p class="text-gray-700 mb-3">Choose how scanning advances using the <strong>Scanning Mode</strong> setting.</p>
+                            <div class="bg-indigo-50 border-l-4 border-indigo-500 p-3 mb-3">
+                                <p class="text-sm mb-2"><i class="fas fa-info-circle text-indigo-600 mr-2"></i><strong>Mode Options:</strong></p>
+                                <p class="text-xs ml-5"><strong>Auto</strong> = scanning advances automatically based on scan speed</p>
+                                <p class="text-xs ml-5"><strong>Step</strong> = scanning advances one item per switch activation</p>
+                            </div>
+                        `,
+                        action: function() {
+                            const scanModeSelect = document.getElementById('scanMode');
+                            if (scanModeSelect) {
+                                const container = scanModeSelect.closest('div');
+                                if (container) {
+                                    container.classList.add('guide-highlight-target');
+                                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 }
                             }
                         },
@@ -3472,6 +3524,12 @@
             if (lastStep.cleanup) {
                 lastStep.cleanup();
             }
+
+            // Ensure task index reflects the actual guide that just completed
+            const completedTaskIndex = this.setupTasks.findIndex(t => t.id === this.currentTask);
+            if (completedTaskIndex !== -1) {
+                this.currentSetupTaskIndex = completedTaskIndex;
+            }
             
             // Clear active guide from localStorage
             localStorage.removeItem('activeGuide');
@@ -3619,11 +3677,11 @@
             },
             {
                 id: 'configure-scanning-speed',
-                title: 'Configure Scanning Speed',
+                title: 'Configure Scanning Mode & Speed',
                 icon: 'fa-tachometer-alt',
                 color: 'yellow',
-                description: 'Control how quickly buttons are highlighted during scanning',
-                details: 'Set scan speed delay and loop limit for Auditory Scanning mode'
+                description: 'Set scanning mode and timing behavior for scanning navigation',
+                details: 'Choose Auto or Step mode, then set scan speed delay and loop limit for Auditory Scanning'
             },
             {
                 id: 'create-user-narrative',

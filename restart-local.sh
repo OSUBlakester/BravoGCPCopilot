@@ -1,6 +1,8 @@
 #!/bin/bash
 # Restart local development server
 
+set -euo pipefail
+
 echo "🛑 Stopping existing container..."
 docker rm -f bravo-dev 2>/dev/null || true
 
@@ -22,6 +24,7 @@ fi
 echo "🚀 Starting container..."
 docker run -d --name bravo-dev -p 8000:8080 \
   -e ENVIRONMENT=development \
+  -e EMAIL_FEATURE_ENABLED=false \
   -e GCP_PROJECT_ID=bravo-dev-465400 \
   -e GOOGLE_CLOUD_PROJECT=bravo-dev-465400 \
   -e GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json \
@@ -34,6 +37,13 @@ docker run -d --name bravo-dev -p 8000:8080 \
 
 echo "⏳ Waiting for server to start..."
 sleep 3
+
+if ! docker ps --filter "name=^bravo-dev$" --filter "status=running" --format '{{.Names}}' | grep -q '^bravo-dev$'; then
+  echo "❌ Container failed to stay running"
+  echo "📋 Last logs:"
+  docker logs bravo-dev 2>&1 | tail -50
+  exit 1
+fi
 
 echo "✅ Server logs:"
 docker logs bravo-dev 2>&1 | tail -10

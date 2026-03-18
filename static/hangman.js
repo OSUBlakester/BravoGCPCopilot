@@ -36,6 +36,7 @@ let currentlyScannedButton = null;
 let currentButtonIndex = -1;
 let defaultDelay = 3500;
 let ScanningOff = false;
+let scanMode = 'auto';
 let wakeWordInterjection = 'hey';
 let wakeWordName = 'bravo';
 let gridColumns = 6;
@@ -48,6 +49,10 @@ let useTapInterface = false;
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
+let pendingScanSpeechTimer = null;
+let pendingScanSpeechToken = 0;
 
 // Speech recognition
 let recognition = null;
@@ -114,6 +119,7 @@ async function loadSettings() {
             gridColumns = Math.max(2, Math.min(12, parseInt(settings.gridColumns)));
         }
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         useTapInterface = settings.useTapInterface === true;
         
         // Force pictograms on for tap interface users
@@ -581,17 +587,46 @@ function markAlphabetLetter(letter, correct) {
 // Uses browser's built-in speechSynthesis (device default/system voice)
 // instead of the Cloud TTS personal voice.
 function speakScanLabel(text) {
-    if (!text || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel(); // Stop any in-progress scan speech
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-    window.speechSynthesis.speak(utterance);
+    interruptScanningAnnouncementPlayback();
+
+    pendingScanSpeechToken += 1;
+    const speechToken = pendingScanSpeechToken;
+
+    if (pendingScanSpeechTimer) {
+        clearTimeout(pendingScanSpeechTimer);
+        pendingScanSpeechTimer = null;
+    }
+
+    let textToSpeak = '';
+    if (text instanceof HTMLElement) {
+        const ariaLabel = (text.getAttribute('aria-label') || '').trim();
+        const dataLetter = (text.getAttribute('data-letter') || '').trim();
+        const contentText = (text.innerText || text.textContent || '').replace(/\s+/g, ' ').trim();
+        textToSpeak = ariaLabel || dataLetter || contentText;
+    } else {
+        textToSpeak = String(text || '').replace(/\s+/g, ' ').trim();
+    }
+
+    if (!textToSpeak) return;
+
+    pendingScanSpeechTimer = setTimeout(() => {
+        pendingScanSpeechTimer = null;
+        if (speechToken !== pendingScanSpeechToken) return;
+        if (text instanceof HTMLElement && currentlyScannedButton !== text) return;
+
+        announce(textToSpeak, 'system', false, false).catch((error) => {
+            console.error('Hangman scan announce error:', error);
+        });
+    }, 350);
 }
 
 function stopScanSpeech() {
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    pendingScanSpeechToken += 1;
+    if (pendingScanSpeechTimer) {
+        clearTimeout(pendingScanSpeechTimer);
+        pendingScanSpeechTimer = null;
+    }
+    interruptScanningAnnouncementPlayback();
 }
 
 // ===== ALPHABET SCANNING (Mode A: I scan alphabet buttons) =====
@@ -606,6 +641,11 @@ function startAlphabetScanning() {
 
     currentButtonIndex = -1;
 
+    if (scanMode === 'step') {
+        advanceAlphabetScanStep();
+        return;
+    }
+
     const scanStep = () => {
         if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
         currentButtonIndex++;
@@ -616,11 +656,28 @@ function startAlphabetScanning() {
         currentlyScannedButton = nextButton;
         nextButton.classList.add('scanning');
 
-        speakScanLabel(nextButton.textContent || '');
+        speakScanLabel(nextButton);
     };
 
     scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceAlphabetScanStep() {
+    if (ScanningOff || scanMode !== 'step') return;
+
+    const container = document.getElementById('alphabet-grid');
+    if (!container) return;
+    const buttons = Array.from(container.querySelectorAll('button:not(:disabled)'));
+    if (buttons.length === 0) { currentlyScannedButton = null; return; }
+
+    if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    const nextButton = buttons[currentButtonIndex];
+    if (!nextButton) return;
+    currentlyScannedButton = nextButton;
+    nextButton.classList.add('scanning');
+    speakScanLabel(nextButton);
 }
 
 function stopAlphabetScanning() {
@@ -1211,6 +1268,13 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) return;
+
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        advanceHangmanScanningStep();
+        return;
+    }
+
     const buttons = getVisibleButtons();
     if (buttons.length === 0) return;
     currentButtonIndex = -1;
@@ -1223,11 +1287,31 @@ function startAuditoryScanning() {
         if (!nextButton) return;
         currentlyScannedButton = nextButton;
         nextButton.classList.add('scanning');
-        speakScanLabel(nextButton.textContent || '');
+        speakScanLabel(nextButton);
     };
 
     scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceHangmanScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    const nextButton = buttons[currentButtonIndex];
+    if (!nextButton) return;
+    currentlyScannedButton = nextButton;
+    nextButton.classList.add('scanning');
+    speakScanLabel(nextButton);
 }
 
 function stopAuditoryScanning() {
@@ -1319,12 +1403,62 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
-        return new Promise(resolve => { source.onended = () => { audioContext.close(); resolve(); }; });
+        return new Promise(resolve => {
+            source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
+                audioContext.close();
+                resolve();
+            };
+        });
     } catch (error) {
         console.error('Audio playback error:', error);
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    pendingScanSpeechToken += 1;
+    if (pendingScanSpeechTimer) {
+        clearTimeout(pendingScanSpeechTimer);
+        pendingScanSpeechTimer = null;
+    }
+
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 function tryResumeAudioContext() {
@@ -1611,6 +1745,31 @@ function setupCustomCategoriesUI() {
 
     // Close modal on Escape key
     document.addEventListener('keydown', (e) => {
+        if (e.code === 'Tab' && scanMode === 'step') {
+            e.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            // Route to the correct scanner based on which grid is currently active
+            const alphabetGrid = document.getElementById('alphabet-grid');
+            const alphabetVisible = alphabetGrid && alphabetGrid.offsetParent !== null
+                && alphabetGrid.querySelectorAll('button:not(:disabled)').length > 0;
+
+            if (alphabetVisible) {
+                advanceAlphabetScanStep();
+            } else if (currentlyScannedButton) {
+                advanceHangmanScanningStep();
+            } else {
+                startAuditoryScanning();
+            }
+            return;
+        }
+
+        if (e.code === 'Space' && currentlyScannedButton) {
+            e.preventDefault();
+            currentlyScannedButton.click();
+            return;
+        }
+
         if (e.key === 'Escape') {
             if (customCategoriesModal && !customCategoriesModal.classList.contains('hidden')) {
                 hideCustomCategoriesModal();

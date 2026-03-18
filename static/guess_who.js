@@ -31,6 +31,7 @@ let currentlyScannedButton = null;
 let currentButtonIndex = -1;
 let defaultDelay = 3500;
 let ScanningOff = false;
+let scanMode = 'auto';
 let wakeWordInterjection = 'hey';
 let wakeWordName = 'bravo';
 let gridColumns = 6;
@@ -43,6 +44,8 @@ let useTapInterface = false; // Whether user is using tap interface
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 // Speech recognition (wake word + guess)
 let recognition = null;
@@ -97,6 +100,7 @@ async function loadGuessWhoSettings() {
         }
 
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         useTapInterface = settings.useTapInterface === true;
         
         // Force pictograms on for tap interface users
@@ -1498,6 +1502,12 @@ function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { return; }
 
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        advanceGuessWhoScanningStep();
+        return;
+    }
+
     const buttons = getVisibleButtons();
     if (buttons.length === 0) { return; }
 
@@ -1536,6 +1546,43 @@ function startAuditoryScanning() {
 
     scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function advanceGuessWhoScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    const nextButton = buttons[currentButtonIndex];
+    if (!nextButton) {
+        return;
+    }
+    currentlyScannedButton = nextButton;
+    nextButton.classList.add('scanning');
+
+    const textToSpeak = nextButton.textContent || '';
+    if (typeof Prompt === 'function') {
+        try {
+            Prompt(textToSpeak, false, false);
+        } catch (e) {
+            console.error('Scanning Prompt error:', e);
+        }
+    } else {
+        announce(textToSpeak, 'system', false, false).catch((e) => {
+            console.error('Scanning announce error:', e);
+        });
+    }
 }
 
 function stopAuditoryScanning() {
@@ -1683,10 +1730,16 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
 
         return new Promise((resolve) => {
             source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close();
                 resolve();
             };
@@ -1696,7 +1749,40 @@ async function playAudioToDevice(audioDataBuffer, sampleRate) {
         if (audioContext && audioContext.state !== 'closed') {
             audioContext.close();
         }
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {
@@ -2103,6 +2189,23 @@ function setupCustomCategoriesUI() {
     
     // Close modal on Escape key
     document.addEventListener('keydown', (e) => {
+        if (e.code === 'Tab' && scanMode === 'step') {
+            e.preventDefault();
+            interruptScanningAnnouncementPlayback();
+            if (currentlyScannedButton) {
+                advanceGuessWhoScanningStep();
+            } else {
+                startAuditoryScanning();
+            }
+            return;
+        }
+
+        if (e.code === 'Space' && currentlyScannedButton) {
+            e.preventDefault();
+            currentlyScannedButton.click();
+            return;
+        }
+
         if (e.key === 'Escape') {
             if (customCategoriesModal && !customCategoriesModal.classList.contains('hidden')) {
                 hideCustomCategoriesModal();

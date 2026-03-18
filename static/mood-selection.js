@@ -45,6 +45,9 @@ class MoodSelection {
         this.defaultDelay = 3500; // Default scanning delay
         this.isScanning = false;
         this.ScanningOff = false; // Will be loaded from settings
+        this.scanMode = 'auto'; // auto | step
+        this.activeAnnouncementAudioContext = null;
+        this.activeAnnouncementAudioSource = null;
         
         // Gamepad variables
         this.gamepadIndex = null;
@@ -227,6 +230,7 @@ class MoodSelection {
             if (this.settings) {
                 console.log('Using provided settings for mood selection');
                 this.ScanningOff = this.settings.ScanningOff === true;
+                this.scanMode = this.settings.scanMode === 'step' ? 'step' : 'auto';
                 this.waitForSwitchToScan = this.settings.waitForSwitchToScan === true;
                 this.defaultDelay = this.settings.scanDelay || 3500;
                 return this.settings.enableMoodSelection === true;
@@ -246,6 +250,7 @@ class MoodSelection {
                 
                 // Load scanning settings
                 this.ScanningOff = settings.ScanningOff === true;
+                this.scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
                 this.waitForSwitchToScan = settings.waitForSwitchToScan === true;
                 this.defaultDelay = settings.scanDelay || 3500;
                 
@@ -706,6 +711,11 @@ class MoodSelection {
 
         this.currentButtonIndex = 0;
         this.isScanning = true;
+
+        if (this.scanMode === 'step') {
+            this.scanStep();
+            return;
+        }
         
         // Delay first scan step to allow initial prompt to finish
         setTimeout(() => {
@@ -767,10 +777,12 @@ class MoodSelection {
         // Move to next button
         this.currentButtonIndex = (this.currentButtonIndex + 1) % this.moodButtons.length;
 
-        // Schedule next scan step
-        this.scanningInterval = setTimeout(() => {
-            this.scanStep();
-        }, this.defaultDelay);
+        // Schedule next scan step only in auto mode
+        if (this.scanMode !== 'step') {
+            this.scanningInterval = setTimeout(() => {
+                this.scanStep();
+            }, this.defaultDelay);
+        }
     }
 
     /**
@@ -836,10 +848,16 @@ class MoodSelection {
             source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioContext.destination);
+            this.activeAnnouncementAudioContext = audioContext;
+            this.activeAnnouncementAudioSource = source;
             source.start(0);
 
             return new Promise((resolve) => {
                 source.onended = () => {
+                    this.activeAnnouncementAudioSource = null;
+                    if (this.activeAnnouncementAudioContext === audioContext) {
+                        this.activeAnnouncementAudioContext = null;
+                    }
                     if (audioContext && audioContext.state !== 'closed') {
                         audioContext.close();
                     }
@@ -851,8 +869,38 @@ class MoodSelection {
             if (audioContext && audioContext.state !== 'closed') {
                 audioContext.close();
             }
+            if (this.activeAnnouncementAudioContext === audioContext) {
+                this.activeAnnouncementAudioContext = null;
+                this.activeAnnouncementAudioSource = null;
+            }
             throw error;
         }
+    }
+
+    interruptScanningAnnouncementPlayback() {
+        if (window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+        }
+
+        if (this.activeAnnouncementAudioSource) {
+            try {
+                this.activeAnnouncementAudioSource.onended = null;
+                this.activeAnnouncementAudioSource.stop(0);
+            } catch (e) {
+                // no-op
+            }
+            try {
+                this.activeAnnouncementAudioSource.disconnect();
+            } catch (e) {
+                // no-op
+            }
+            this.activeAnnouncementAudioSource = null;
+        }
+
+        if (this.activeAnnouncementAudioContext && this.activeAnnouncementAudioContext.state !== 'closed') {
+            this.activeAnnouncementAudioContext.close().catch(() => {});
+        }
+        this.activeAnnouncementAudioContext = null;
     }
 
     /**
@@ -1052,13 +1100,30 @@ class MoodSelection {
         console.log('Mood selection keypress:', event.code, 'target:', event.target);
 
         // Prevent all default behaviors for space, enter, and arrows when modal is active
-        if (['Space', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(event.code)) {
+        if (['Space', 'Tab', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Escape'].includes(event.code)) {
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation();
         }
 
         switch (event.code) {
+            case 'Tab':
+                if (this.scanMode === 'step') {
+                    this.interruptScanningAnnouncementPlayback();
+                    if (this.waitingForInitialSwitch) {
+                        this.waitingForInitialSwitch = false;
+                        sessionStorage.setItem('bravoScanningStarted_mood', 'true');
+                        this.startScanning();
+                    } else if (!this.ScanningOff) {
+                        if (!this.currentlyScannedButton) {
+                            this.startScanning();
+                        } else {
+                            this.scanStep();
+                        }
+                    }
+                }
+                break;
+
             case 'Space':
                 console.log('Space pressed in mood selection, ScanningOff:', this.ScanningOff, 'currentlyScannedButton:', this.currentlyScannedButton);
 

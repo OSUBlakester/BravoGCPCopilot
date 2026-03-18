@@ -46,6 +46,7 @@ const speechRateInput = document.getElementById('speechRate');
 const LLMOptionsInput = document.getElementById('LLMOptions');
 const FreestyleOptionsInput = document.getElementById('FreestyleOptions');
 const scanLoopLimitInput = document.getElementById('scanLoopLimit');
+const scanModeInput = document.getElementById('scanMode');
 const ScanningOffInput = document.getElementById('ScanningOff');
 const waitForSwitchToScanInput = document.getElementById('waitForSwitchToScan');
 // const useTapInterfaceInput = document.getElementById('useTapInterface'); // Removed from UI
@@ -213,6 +214,7 @@ async function loadSettings() {
             FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : ''; 
         }
         if (scanLoopLimitInput) { scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0; }
+        if (scanModeInput) { scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto'; }
         
         // Handle Interface Mode Radio Buttons
         if (interfaceAuditoryInput && interfaceTapInput) {
@@ -290,6 +292,7 @@ async function saveSettings() {
     const newFreestyleOptions = FreestyleOptionsInput.value;
     console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
     const newScanLoopLimit = scanLoopLimitInput.value;
+    const newScanMode = scanModeInput ? scanModeInput.value : 'auto';
     
     // Determine Interface Mode
     let newUseTapInterface = false;
@@ -371,6 +374,10 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Scan Loop Limit. Must be 0 (unlimited) or 1-10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
+    if (!['auto', 'step'].includes(newScanMode)) {
+        settingsStatus.textContent = 'Invalid Scanning Mode. Must be Auto or Step.';
+        settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
+    }
     // Validate gridColumns
     if (newGridColumns < 2 || newGridColumns > 18) {
         settingsStatus.textContent = 'Invalid Button Size. Must be between 2 and 18.';
@@ -397,6 +404,7 @@ async function saveSettings() {
         LLMOptions: parseInt(newLLMOptions),
         FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
+        scanMode: newScanMode,
         ScanningOff: newScanningOff,    
         waitForSwitchToScan: newWaitForSwitchToScan,
         SummaryOff: newSummaryOff,
@@ -454,6 +462,7 @@ async function saveSettings() {
             FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : '';
         }
         if (scanLoopLimitInput) scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0;
+        if (scanModeInput) scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto';
         if (ScanningOffInput) ScanningOffInput.checked = currentSettings.ScanningOff || false;
         if (waitForSwitchToScanInput) waitForSwitchToScanInput.checked = currentSettings.waitForSwitchToScan || false;
         if (SummaryOffInput) SummaryOffInput.checked = currentSettings.SummaryOff || false;

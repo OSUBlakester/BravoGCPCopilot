@@ -8,6 +8,7 @@ const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
 let scanDelay = 3500;
 let LLMOptions = 10;
 let ScanningOff = false;
+let scanMode = 'auto';
 let gridColumns = 10;
 let enablePictograms = false;
 
@@ -88,6 +89,7 @@ async function loadUserSettings() {
             }
 
             ScanningOff = settings.ScanningOff === true;
+            scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             enablePictograms = settings.enablePictograms === true;
 
             if (window.updateSightWordSettings) {
@@ -100,6 +102,7 @@ async function loadUserSettings() {
         LLMOptions = 10;
         gridColumns = 10;
         ScanningOff = false;
+        scanMode = 'auto';
         enablePictograms = false;
     }
 }
@@ -426,6 +429,14 @@ function getVisibleButtons() {
 
 function startAuditoryScanning() {
     stopAuditoryScanning();
+    if (ScanningOff) return;
+
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        advanceJokesScanningStep();
+        return;
+    }
+
     const buttons = getVisibleButtons();
     if (buttons.length === 0) return;
 
@@ -456,6 +467,32 @@ function startAuditoryScanning() {
     scanningInterval = setInterval(scanStep, scanDelay);
 }
 
+function advanceJokesScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.add('scanning');
+        const label = (currentlyScannedButton.dataset.scanLabel || currentlyScannedButton.textContent || '').trim();
+        if (label) {
+            announce(label, 'system', false).catch((e) => console.error('Scanning announce error:', e));
+        }
+    }
+}
+
 function stopAuditoryScanning() {
     if (scanningInterval) {
         clearInterval(scanningInterval);
@@ -474,6 +511,8 @@ function goHome() {
 // Announcement queue and processing (same pattern as gridpage)
 let announcementQueue = [];
 let isAnnouncingNow = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 function base64ToArrayBuffer(base64) {
     const binaryString = window.atob(base64);
@@ -491,12 +530,52 @@ async function playAudioToDevice(audioDataBuffer) {
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioContext.destination);
+    activeAnnouncementAudioContext = audioContext;
+    activeAnnouncementAudioSource = source;
 
     return new Promise((resolve, reject) => {
-        source.onended = resolve;
+        source.onended = () => {
+            activeAnnouncementAudioSource = null;
+            if (activeAnnouncementAudioContext === audioContext) {
+                activeAnnouncementAudioContext = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close().catch(() => {});
+            }
+            resolve();
+        };
         source.onerror = reject;
         source.start(0);
     });
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {
@@ -629,6 +708,17 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 // Spacebar selects current scanned button
 document.addEventListener('keydown', (event) => {
+    if (event.code === 'Tab' && scanMode === 'step') {
+        event.preventDefault();
+        interruptScanningAnnouncementPlayback();
+        if (currentlyScannedButton) {
+            advanceJokesScanningStep();
+        } else {
+            startAuditoryScanning();
+        }
+        return;
+    }
+
     if (event.code === 'Space' && currentlyScannedButton) {
         event.preventDefault();
         currentlyScannedButton.click();

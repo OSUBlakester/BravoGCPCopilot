@@ -19,6 +19,7 @@ let wakeWordInterjection = "hey";
 let wakeWordName = "bravo";
 let LLMOptions = 10;
 let ScanningOff = false;
+let scanMode = 'auto'; // auto | step
 let SummaryOff = false;
 let gridColumns = 10;
 let waitingForUserAction = false; // New flag to track if we're waiting for user to resume
@@ -32,6 +33,8 @@ let listeningForQuestion = false;
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 // User management variables
 let currentAacUserId = null;
@@ -210,6 +213,7 @@ async function loadScanSettings() {
             wakeWordName = (settings.wakeWordName || "bravo").toLowerCase();
             LLMOptions = settings.LLMOptions || 10;
             ScanningOff = settings.ScanningOff || false;
+            scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             SummaryOff = settings.SummaryOff || false;
             gridColumns = settings.gridColumns || 10;
             scanLoopLimit = settings.scanLoopLimit || 0;
@@ -1208,12 +1212,18 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
 
         return new Promise((resolve) => {
             source.onended = () => {
                 if (audioContext && audioContext.state !== 'closed') {
                     audioContext.close();
+                }
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
                 }
                 resolve();
             };
@@ -1228,6 +1238,10 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
                         console.warn('Thread playAudioToDevice: Error closing AudioContext on timeout:', closeError);
                     }
                 }
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                    activeAnnouncementAudioSource = null;
+                }
                 resolve();
             }, 10000); // 10 second timeout
         });
@@ -1241,10 +1255,43 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
                 console.warn('Thread playAudioToDevice: Error closing AudioContext:', closeError);
             }
         }
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
         // Don't throw error, just complete silently to prevent lockup
         console.log('Thread playAudioToDevice: Completing silently due to audio error');
         return;
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {
@@ -1337,6 +1384,13 @@ function startAuditoryScanning() {
         console.log("Thread auditory scanning is off.");
         return;
     }
+    if (scanMode === 'step') {
+        currentButtonIndex = -1;
+        scanCycleCount = 0;
+        isPausedFromScanLimit = false;
+        advanceThreadScanningStep();
+        return;
+    }
     console.log("Starting thread auditory scanning...");
     
     const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
@@ -1395,6 +1449,26 @@ function startAuditoryScanning() {
     scanningInterval = setInterval(scanStep, defaultDelay);
 }
 
+function advanceThreadScanningStep() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+    speakAndHighlight(currentlyScannedButton);
+}
+
 async function speakAndHighlight(button) {
     console.log("Thread speakAndHighlight called for button:", button.textContent);
     
@@ -1430,6 +1504,31 @@ function stopAuditoryScanning() {
 
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            if (isPausedFromScanLimit) {
+                resumeAuditoryScanning();
+                return;
+            }
+
+            if (waitingForUserAction) {
+                waitingForUserAction = false;
+                startAuditoryScanning();
+                return;
+            }
+
+            if (!isLLMProcessing && !listeningForQuestion) {
+                if (!currentlyScannedButton) {
+                    startAuditoryScanning();
+                } else {
+                    advanceThreadScanningStep();
+                }
+            }
+            return;
+        }
+
         if (event.code === 'Space') {
             event.preventDefault();
             
