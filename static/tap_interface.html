@@ -471,7 +471,7 @@
             flex: 1;
             overflow-y: auto;
             align-items: stretch;
-            padding: 0 8px 80px 8px;
+            padding: 0 8px 12px 8px;
             scrollbar-width: thin;
             scrollbar-color: #ccc #f0f0f0;
             height: 100%;
@@ -489,7 +489,6 @@
         .freestyle-options {
             display: grid;
             /* Grid columns will be set dynamically via JS */
-            grid-template-rows: repeat(auto-fill, minmax(60px, 1fr));
             gap: 8px;
             width: 100%;
             height: 100%;
@@ -708,13 +707,14 @@
         .words-section {
             flex: 1; /* Fill remaining space */
             margin-top: 0;
+            min-height: 0;
             overflow: hidden; /* Ensure content doesn't overflow container */
         }
 
         .llm-static-options {
             display: grid;
             /* Grid columns and rows will be set dynamically via JS */
-            grid-auto-rows: 102px;
+            grid-auto-rows: auto;
             gap: 12px;
             width: 100%;
             margin: 0;
@@ -726,10 +726,12 @@
         .freestyle-options {
             display: grid;
             /* Grid columns will be set dynamically via JS */
-            grid-auto-rows: 102px;
+            grid-auto-rows: auto;
             gap: 12px;
             width: 100%;
-            height: 100%;
+            flex: 1;
+            min-height: 0;
+            height: auto;
             margin: 0;
             padding: 9px;
             justify-content: center;
@@ -762,7 +764,7 @@
             position: relative;
             overflow: hidden;
             min-height: 45px;
-            height: 100%; /* Ensure button fills the grid cell */
+            height: 100%; /* Fill the grid cell (row height controls square sizing) */
         }
 
         .option-button:hover {
@@ -831,6 +833,7 @@
             font-size: 14px;
             border: 1px solid #ccc;
             z-index: 1000;
+            pointer-events: none;
             max-width: 80%;
             text-align: center;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -845,7 +848,7 @@
             height: 100%;
             overflow-y: auto;
             align-items: stretch;
-            padding: 0 8px 80px 8px;
+            padding: 0 8px 12px 8px;
             background-color: #e5e7eb; /* Darker gray background for better contrast */
             border-radius: 12px; /* Rounded corners for the container */
             scrollbar-width: thin;
@@ -2733,27 +2736,38 @@
             const freestyleOptions = document.getElementById('freestyleOptions');
             
             if (llmStaticOptions && freestyleOptions) {
-                const phraseColumns = gridColumns;
-                const wordColumns = gridColumns;
-                
-                // Only set columns here. Rows are handled dynamically by renderCategoryOptions (for phrases)
-                // and CSS grid-auto-rows (for words) to ensure proper spacing and sizing.
-                
-                llmStaticOptions.style.gridTemplateColumns = `repeat(${phraseColumns}, 1fr)`;
-                // REMOVED: llmStaticOptions.style.gridTemplateRows = ... (Handled by renderCategoryOptions)
-                
-                freestyleOptions.style.gridTemplateColumns = `repeat(${wordColumns}, 1fr)`;
-                // REMOVED: freestyleOptions.style.gridTemplateRows = ... (Handled by CSS)
+                llmStaticOptions.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+                freestyleOptions.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
                 
                 // Apply dynamic font sizing based on grid density (like gridpage)
                 const baseFontSize = 16;
                 const minFontSize = 8;
                 const maxFontSize = 18;
                 const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
-                
                 document.documentElement.style.setProperty('--tap-button-font-size', `${fontSize}px`);
                 
-                console.log(`Applied grid layout columns: ${phraseColumns}, Font: ${fontSize}px`);
+                // Defer row height calculation until the layout has rendered and clientWidth is available
+                requestAnimationFrame(updateGridRowHeight);
+                
+                console.log(`Applied grid layout columns: ${gridColumns}, Font: ${fontSize}px`);
+            }
+        }
+        
+        // Compute square grid-auto-rows from the container's actual rendered width so buttons
+        // stay proportional (square) regardless of the column count setting.
+        function updateGridRowHeight() {
+            const llmStaticOptions = document.getElementById('llmStaticOptions');
+            const freestyleOptions = document.getElementById('freestyleOptions');
+            if (!llmStaticOptions || !freestyleOptions) return;
+            const containerWidth = llmStaticOptions.clientWidth;
+            if (containerWidth > 0) {
+                const padding = 9 * 2;   // 9px padding on each side
+                const gap = 12;           // gap between columns
+                const cellWidth = (containerWidth - padding - gap * (gridColumns - 1)) / gridColumns;
+                const rowHeight = Math.max(45, Math.round(cellWidth));
+                llmStaticOptions.style.gridAutoRows = `${rowHeight}px`;
+                freestyleOptions.style.gridAutoRows = `${rowHeight}px`;
+                console.log(`Grid row height: ${rowHeight}px for ${gridColumns} columns`);
             }
         }
         
@@ -2886,6 +2900,9 @@
                 
                 // Apply dynamic grid layout after settings are loaded
                 applyGridLayout();
+                
+                // Re-compute square row height whenever the window is resized
+                window.addEventListener('resize', updateGridRowHeight);
                 
                 updateStatusMessage(getReadyMessage());
                 
@@ -3554,7 +3571,7 @@
             imageElement.style.objectFit = 'cover';
             
             const textFooter = document.createElement('div');
-            textFooter.style.minHeight = '22px';
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
             textFooter.style.backdropFilter = 'blur(4px)';
@@ -3562,8 +3579,9 @@
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
-            textFooter.style.fontSize = '10px';
+            textFooter.style.padding = '0 3px';
+            textFooter.style.fontSize = '8px';
+            textFooter.style.lineHeight = '1.0';
             textFooter.style.fontWeight = '600';
             textFooter.textContent = text;
             
@@ -3647,14 +3665,15 @@
                             imageElement.style.objectFit = 'cover';
                             
                             const textFooter = document.createElement('div');
-                            textFooter.style.height = '18px';
+                            textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
                             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
                             textFooter.style.color = 'white';
                             textFooter.style.display = 'flex';
                             textFooter.style.alignItems = 'center';
                             textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '1px 2px';
+                            textFooter.style.padding = '0 2px';
+                            textFooter.style.boxSizing = 'border-box';
                             textFooter.style.position = 'absolute';
                             textFooter.style.bottom = '0';
                             textFooter.style.left = '0';
@@ -3662,9 +3681,10 @@
                             
                             const textSpan = document.createElement('span');
                             textSpan.textContent = button.label;
-                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontSize = '0.54em';
                             textSpan.style.fontWeight = 'bold';
                             textSpan.style.textAlign = 'center';
+                            textSpan.style.lineHeight = '1.0';
                             
                             imageContainer.appendChild(imageElement);
                             textFooter.appendChild(textSpan);
@@ -3799,7 +3819,7 @@
                             imageElement.style.objectFit = 'cover';
                             
                             const textFooter = document.createElement('div');
-                            textFooter.style.height = '18px';
+                            textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
                             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
                             textFooter.style.color = 'white';
@@ -3814,7 +3834,7 @@
                             
                             const textSpan = document.createElement('span');
                             textSpan.textContent = button.label;
-                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontSize = '0.54em';
                             textSpan.style.fontWeight = 'bold';
                             textSpan.style.textAlign = 'center';
                             
@@ -4086,14 +4106,15 @@
                         imageElement.style.objectFit = 'cover';
                         
                         const textFooter = document.createElement('div');
-                        textFooter.style.height = '18px';
+                        textFooter.style.minHeight = '14px';
                         textFooter.style.width = '100%';
                         textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
                         textFooter.style.color = 'white';
                         textFooter.style.display = 'flex';
                         textFooter.style.alignItems = 'center';
                         textFooter.style.justifyContent = 'center';
-                        textFooter.style.padding = '1px 2px';
+                        textFooter.style.padding = '0 2px';
+                        textFooter.style.boxSizing = 'border-box';
                         textFooter.style.position = 'absolute';
                         textFooter.style.bottom = '0';
                         textFooter.style.left = '0';
@@ -4101,9 +4122,10 @@
                         
                         const textSpan = document.createElement('span');
                         textSpan.textContent = child.label;
-                        textSpan.style.fontSize = '0.7em';
+                        textSpan.style.fontSize = '0.54em';
                         textSpan.style.fontWeight = 'bold';
                         textSpan.style.textAlign = 'center';
+                        textSpan.style.lineHeight = '1.0';
                         
                         imageContainer.appendChild(imageElement);
                         textFooter.appendChild(textSpan);
@@ -4514,7 +4536,7 @@
                             imageElement.style.objectFit = 'cover';
                             
                             const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '22px';
+                            textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
                             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
                             textFooter.style.backdropFilter = 'blur(4px)';
@@ -4522,8 +4544,9 @@
                             textFooter.style.display = 'flex';
                             textFooter.style.alignItems = 'center';
                             textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '2px 4px';
-                            textFooter.style.fontSize = '10px';
+                            textFooter.style.padding = '0 3px';
+                            textFooter.style.fontSize = '8px';
+                            textFooter.style.lineHeight = '1.0';
                             textFooter.style.fontWeight = '600';
                             textFooter.textContent = 'Something Else';
                             
@@ -4609,7 +4632,7 @@
                             imageElement.style.objectFit = 'cover';
                             
                             const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '22px';
+                            textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
                             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
                             textFooter.style.backdropFilter = 'blur(4px)';
@@ -4617,14 +4640,16 @@
                             textFooter.style.display = 'flex';
                             textFooter.style.alignItems = 'center';
                             textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '2px 4px';
+                            textFooter.style.padding = '0 3px';
                             textFooter.style.zIndex = '10';
+                            textFooter.style.boxSizing = 'border-box';
                             
                             const textSpan = document.createElement('span');
                             textSpan.textContent = displayText;
-                            textSpan.style.fontSize = '0.7em';
+                            textSpan.style.fontSize = '0.54em';
                             textSpan.style.fontWeight = 'bold';
                             textSpan.style.textAlign = 'center';
+                            textSpan.style.lineHeight = '1.0';
                             
                             imageContainer.appendChild(imageElement);
                             textFooter.appendChild(textSpan);
@@ -5557,7 +5582,7 @@
                             imageElement.style.objectFit = 'cover';
                             
                             const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '22px';
+                            textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
                             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
                             textFooter.style.backdropFilter = 'blur(4px)';
@@ -5565,8 +5590,9 @@
                             textFooter.style.display = 'flex';
                             textFooter.style.alignItems = 'center';
                             textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '2px 4px';
-                            textFooter.style.fontSize = '10px';
+                            textFooter.style.padding = '0 3px';
+                            textFooter.style.fontSize = '8px';
+                            textFooter.style.lineHeight = '1.0';
                             textFooter.style.fontWeight = '600';
                             textFooter.textContent = 'Something Else';
                             
@@ -5632,7 +5658,7 @@
                                 imageElement.style.objectFit = 'cover';
                                 
                                 const textFooter = document.createElement('div');
-                                textFooter.style.minHeight = '22px';
+                                textFooter.style.minHeight = '14px';
                                 textFooter.style.width = '100%';
                                 textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
                                 textFooter.style.backdropFilter = 'blur(4px)';
@@ -5640,14 +5666,16 @@
                                 textFooter.style.display = 'flex';
                                 textFooter.style.alignItems = 'center';
                                 textFooter.style.justifyContent = 'center';
-                                textFooter.style.padding = '2px 4px';
+                                textFooter.style.padding = '0 3px';
                                 textFooter.style.zIndex = '10';
+                                textFooter.style.boxSizing = 'border-box';
                                 
                                 const textSpan = document.createElement('span');
                                 textSpan.textContent = text;
-                                textSpan.style.fontSize = '0.7em';
+                                textSpan.style.fontSize = '0.54em';
                                 textSpan.style.fontWeight = 'bold';
                                 textSpan.style.textAlign = 'center';
+                                textSpan.style.lineHeight = '1.0';
                                 
                                 imageContainer.appendChild(imageElement);
                                 textFooter.appendChild(textSpan);
