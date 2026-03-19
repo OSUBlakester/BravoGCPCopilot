@@ -2062,7 +2062,7 @@ function speakAndHighlight(button) {
         if (speechToken !== pendingHighlightSpeechToken || currentlyScannedButton !== button) {
             return;
         }
-        announce(textToSpeak, 'system', false).catch((error) => {
+        announce(textToSpeak, 'system', false, false).catch((error) => {
             console.error('Freestyle scanning announce error:', error);
         });
     }, 500);
@@ -2271,10 +2271,10 @@ async function processAnnouncementQueue() {
 
     while (announcementQueue.length > 0) {
         const announcement = announcementQueue.shift();
-        const { textToAnnounce, announcementType, recordHistory } = announcement;
+        const { textToAnnounce, announcementType, recordHistory, showSplash } = announcement;
 
-        // Show splash screen if enabled
-        if (typeof showSplashScreen === 'function') {
+        // Show splash screen if enabled and requested
+        if (typeof showSplashScreen === 'function' && showSplash !== false) {
             showSplashScreen(textToAnnounce);
         }
 
@@ -2324,7 +2324,8 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
     announcementQueue.push({
         textToAnnounce: textToAnnounce.trim(),
         announcementType,
-        recordHistory
+        recordHistory,
+        showSplash: arguments.length >= 4 ? arguments[3] : true
     });
 
     processAnnouncementQueue();
