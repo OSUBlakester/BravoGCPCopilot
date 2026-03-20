@@ -16,8 +16,10 @@ let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to
 let gamepadIndex = null; // To store the index of the connected gamepad
 let gamepadPollInterval = null; // Interval ID for gamepad polling
 let scanningPaused = false; // Global scanning pause flag
+let waitForSwitchToScan = false; // Wait for switch press before scanning (matches gridpage setting)
 let gridColumns = 6; // Default number of grid columns for alphabet grid sizing
 let autoClean = false; // Auto Clean setting for automatic cleanup on Speak Display
+const FREESTYLE_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_freestyle';
 
 // --- User Management Variables (Same as gridpage.js) ---
 let currentAacUserId = null;
@@ -473,6 +475,7 @@ async function loadScanSettings() {
             defaultDelay = settings.scanDelay || 3500;
             scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             scanLoopLimit = settings.scanLoopLimit || 0;
+            waitForSwitchToScan = settings.waitForSwitchToScan === true;
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
             autoClean = settings.autoClean || false; // Load Auto Clean setting
@@ -604,6 +607,20 @@ function startInitialScanning() {
             return;
         }
         
+        // If "wait for switch to begin scanning" is enabled, pause here and
+        // prompt the user to press the switch — exactly like gridpage does.
+        if (waitForSwitchToScan) {
+            window.waitingForInitialSwitch = true;
+            console.log('✋ Waiting for switch press before scanning (freestyle).');
+            const hasShownPrompt = sessionStorage.getItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+            if (!hasShownPrompt) {
+                sessionStorage.setItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY, 'true');
+                announce('Press switch to begin scanning', 'personal', false, false);
+            }
+            return;
+        }
+        
+        window.waitingForInitialSwitch = false;
         scanningPaused = false;
         startScanning();
         console.log('Initial scanning started with buttons available');
@@ -2102,12 +2119,22 @@ function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
         if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            // If waiting for initial switch, start scanning now
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (tab) - starting scanning on freestyle');
+                window.waitingForInitialSwitch = false;
+                scanningPaused = false;
+                startScanning();
+                return;
+            }
+
             pendingHighlightSpeechToken += 1;
             if (pendingHighlightSpeechTimer) {
                 clearTimeout(pendingHighlightSpeechTimer);
                 pendingHighlightSpeechTimer = null;
             }
-            interruptScanningAnnouncementPlayback();
             if (isPausedFromScanLimit) {
                 resumeScanning();
             } else if (currentScanAdvanceFn) {
@@ -2126,6 +2153,15 @@ function setupKeyboardListener() {
 }
 
 function handleSpacebarPress() {
+    // If waiting for initial switch press, treat this as the trigger to start scanning
+    if (window.waitingForInitialSwitch) {
+        console.log('Initial switch detected (spacebar) - starting scanning on freestyle');
+        window.waitingForInitialSwitch = false;
+        scanningPaused = false;
+        startScanning();
+        return;
+    }
+
     if (currentlyScannedButton) {
         // Simulate click on the currently scanned button
         currentlyScannedButton.click();
@@ -2166,7 +2202,15 @@ function startGamepadPolling() {
             if (currentTime - lastGamepadInputTime > clickDebounceDelay) {
                 if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
                     lastGamepadInputTime = currentTime;
-                    handleSpacebarPress();
+                    // If waiting for initial switch press, treat this as the trigger
+                    if (window.waitingForInitialSwitch) {
+                        console.log('Initial switch detected (gamepad) - starting scanning on freestyle');
+                        window.waitingForInitialSwitch = false;
+                        scanningPaused = false;
+                        startScanning();
+                    } else {
+                        handleSpacebarPress();
+                    }
                 }
             }
         }
