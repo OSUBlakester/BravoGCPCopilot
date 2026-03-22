@@ -30,6 +30,7 @@ let lastScanPromptTime = 0;
 const currentWordInput = document.getElementById('current-word');
 const alphabetGrid = document.getElementById('alphabet-grid');
 const predictionsGrid = document.getElementById('word-predictions');
+const SPEECH_HISTORY_LOCAL_STORAGE_KEY = (aacUserId) => `speechHistory_${aacUserId}`;
 
 async function authenticatedFetch(url, options = {}, _isRetry = false) {
     firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
@@ -358,6 +359,7 @@ async function speakDisplay() {
     if (!displayText) return;
     await announce(displayText, 'system', false, true);
     await recordChatHistory('', displayText);
+    appendToSpeechHistory(displayText);
     if (currentSpellingWord) {
         appendWordToBuildSpace(currentSpellingWord);
         clearCurrentSpellingWord();
@@ -595,7 +597,7 @@ async function announceScanPrompt(promptText) {
     }
 
     try {
-        await announce(text, 'personal', false, false);
+        await speak(text, false, false);
         lastScanPromptText = text;
         lastScanPromptTime = Date.now();
     } catch (error) {
@@ -722,6 +724,30 @@ async function recordChatHistory(question, response) {
     }
 }
 
+function appendToSpeechHistory(text) {
+    const normalized = (text || '').trim();
+    if (!normalized || !currentAacUserId) return;
+
+    const storageKey = SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId);
+    let history = (localStorage.getItem(storageKey) || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    history.unshift(normalized);
+    if (history.length > 20) {
+        history = history.slice(0, 20);
+    }
+
+    const historyText = history.join('\n');
+    localStorage.setItem(storageKey, historyText);
+
+    const speechHistoryBox = document.getElementById('speech-history');
+    if (speechHistoryBox) {
+        speechHistoryBox.value = historyText;
+    }
+}
+
 function handleSpacebarPress() {
     if (waitForSwitchToScan && window.waitingForInitialSwitch) {
         window.waitingForInitialSwitch = false;
@@ -778,8 +804,17 @@ async function announce(textToAnnounce, announcementType = 'system', recordHisto
 
     isAnnouncingNow = true;
     while (announcementQueue.length > 0) {
-        const { textToAnnounce: text, announcementType: target, recordHistory: shouldRecordHistory } = announcementQueue.shift();
+        const {
+            textToAnnounce: text,
+            announcementType: target,
+            recordHistory: shouldRecordHistory,
+            showSplash: shouldShowSplash
+        } = announcementQueue.shift();
         try {
+            if (typeof showSplashScreen === 'function' && shouldShowSplash !== false) {
+                showSplashScreen(text);
+            }
+
             const response = await authenticatedFetch('/play-audio', {
                 method: 'POST',
                 headers: {
@@ -807,6 +842,10 @@ async function announce(textToAnnounce, announcementType = 'system', recordHisto
         }
     }
     isAnnouncingNow = false;
+}
+
+async function speak(textToSpeak, recordHistory = false, showSplash = false) {
+    return announce(textToSpeak, 'personal', recordHistory, showSplash);
 }
 
 function setupEventListeners() {
