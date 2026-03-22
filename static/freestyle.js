@@ -16,8 +16,10 @@ let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to
 let gamepadIndex = null; // To store the index of the connected gamepad
 let gamepadPollInterval = null; // Interval ID for gamepad polling
 let scanningPaused = false; // Global scanning pause flag
+let waitForSwitchToScan = false; // Wait for switch press before scanning (matches gridpage setting)
 let gridColumns = 6; // Default number of grid columns for alphabet grid sizing
 let autoClean = false; // Auto Clean setting for automatic cleanup on Speak Display
+const FREESTYLE_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_freestyle';
 
 // --- User Management Variables (Same as gridpage.js) ---
 let currentAacUserId = null;
@@ -473,6 +475,12 @@ async function loadScanSettings() {
             defaultDelay = settings.scanDelay || 3500;
             scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             scanLoopLimit = settings.scanLoopLimit || 0;
+            waitForSwitchToScan = settings.waitForSwitchToScan === true;
+            // Set the waiting flag immediately so that any startScanning() calls during
+            // page load (e.g. from loadWordOptions finally block) are blocked right away.
+            if (waitForSwitchToScan) {
+                window.waitingForInitialSwitch = true;
+            }
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
             autoClean = settings.autoClean || false; // Load Auto Clean setting
@@ -604,6 +612,22 @@ function startInitialScanning() {
             return;
         }
         
+        // If "wait for switch to begin scanning" is enabled, pause here and
+        // prompt the user to press the switch — exactly like gridpage does.
+        if (waitForSwitchToScan) {
+            // Stop any scanning that may have been kicked off during page load
+            stopScanning();
+            window.waitingForInitialSwitch = true;
+            console.log('✋ Waiting for switch press before scanning (freestyle).');
+            const hasShownPrompt = sessionStorage.getItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+            if (!hasShownPrompt) {
+                sessionStorage.setItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY, 'true');
+                announce('Press switch to begin scanning', 'personal', false, false);
+            }
+            return;
+        }
+        
+        window.waitingForInitialSwitch = false;
         scanningPaused = false;
         startScanning();
         console.log('Initial scanning started with buttons available');
@@ -814,9 +838,10 @@ async function loadWordOptions() {
         showLoadingIndicator(false);
         
         // Restart scanning after new options are loaded and rendered
-        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused) {
+        // Don't restart if we're waiting for the user to press the switch first
+        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused && !window.waitingForInitialSwitch) {
             setTimeout(() => {
-                if (!scanningInterval) { // Double check
+                if (!scanningInterval && !window.waitingForInitialSwitch) { // Double check
                     startScanning();
                 }
             }, 500);
@@ -899,16 +924,17 @@ async function renderWordOptionsGrid() {
             
             // Text footer (matching gridpage)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '28px';
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
+            textFooter.style.padding = '0 3px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
+            textFooter.style.boxSizing = 'border-box';
             textFooter.style.position = 'absolute';
             textFooter.style.bottom = '0';
             textFooter.style.left = '0';
@@ -916,15 +942,15 @@ async function renderWordOptionsGrid() {
             
             const textSpan = document.createElement('span');
             textSpan.textContent = displayText;
-            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontSize = '0.54em';
             textSpan.style.fontWeight = 'bold';
             textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
+            textSpan.style.lineHeight = '1.0';
             textSpan.style.wordWrap = 'break-word';
             textSpan.style.hyphens = 'auto';
             textSpan.style.overflow = 'hidden';
             textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitLineClamp = '1';
             textSpan.style.webkitBoxOrient = 'vertical';
             
             imageContainer.appendChild(imageElement);
@@ -947,8 +973,8 @@ async function renderWordOptionsGrid() {
                 
                 const textSpan = document.createElement('span');
                 textSpan.textContent = displayText;
-                textSpan.style.fontSize = '0.9em';
-                textSpan.style.fontWeight = '500';
+                textSpan.style.fontSize = '0.54em';
+                textSpan.style.fontWeight = '700';
                 textSpan.style.display = 'block';
                 textSpan.style.textAlign = 'center';
                 textSpan.style.wordWrap = 'break-word';
@@ -957,9 +983,8 @@ async function renderWordOptionsGrid() {
                 button.appendChild(pictogramSpan);
                 button.appendChild(textSpan);
             } else {
-                // Pure text fallback - increase text size for sight words
+                // Pure text fallback
                 button.textContent = displayText;
-                button.style.fontSize = '1.8em'; // Double the size
                 button.style.fontWeight = 'bold';
                 button.style.textAlign = 'center';
                 button.style.display = 'flex';
@@ -1036,9 +1061,10 @@ async function loadMoreWordOptions() {
         showLoadingIndicator(false);
         
         // Restart scanning after new options are loaded
-        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused) {
+        // Don't restart if we're waiting for the user to press the switch first
+        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused && !window.waitingForInitialSwitch) {
             setTimeout(() => {
-                if (!scanningInterval) { // Double check
+                if (!scanningInterval && !window.waitingForInitialSwitch) { // Double check
                     startScanning();
                 }
             }, 500);
@@ -1601,16 +1627,17 @@ async function displayCategoryWords() {
             
             // Text footer (matching gridpage)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '28px';
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
+            textFooter.style.padding = '0 3px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
+            textFooter.style.boxSizing = 'border-box';
             textFooter.style.position = 'absolute';
             textFooter.style.bottom = '0';
             textFooter.style.left = '0';
@@ -1618,15 +1645,15 @@ async function displayCategoryWords() {
             
             const textSpan = document.createElement('span');
             textSpan.textContent = displayText;
-            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontSize = '0.54em';
             textSpan.style.fontWeight = 'bold';
             textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
+            textSpan.style.lineHeight = '1.0';
             textSpan.style.wordWrap = 'break-word';
             textSpan.style.hyphens = 'auto';
             textSpan.style.overflow = 'hidden';
             textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitLineClamp = '1';
             textSpan.style.webkitBoxOrient = 'vertical';
             
             imageContainer.appendChild(imageElement);
@@ -1649,8 +1676,8 @@ async function displayCategoryWords() {
                 
                 const textSpan = document.createElement('span');
                 textSpan.textContent = displayText;
-                textSpan.style.fontSize = '0.9em';
-                textSpan.style.fontWeight = '500';
+                textSpan.style.fontSize = '0.54em';
+                textSpan.style.fontWeight = '700';
                 textSpan.style.display = 'block';
                 textSpan.style.textAlign = 'center';
                 textSpan.style.wordWrap = 'break-word';
@@ -2102,12 +2129,22 @@ function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
         if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            // If waiting for initial switch, start scanning now
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (tab) - starting scanning on freestyle');
+                window.waitingForInitialSwitch = false;
+                scanningPaused = false;
+                startScanning();
+                return;
+            }
+
             pendingHighlightSpeechToken += 1;
             if (pendingHighlightSpeechTimer) {
                 clearTimeout(pendingHighlightSpeechTimer);
                 pendingHighlightSpeechTimer = null;
             }
-            interruptScanningAnnouncementPlayback();
             if (isPausedFromScanLimit) {
                 resumeScanning();
             } else if (currentScanAdvanceFn) {
@@ -2126,6 +2163,15 @@ function setupKeyboardListener() {
 }
 
 function handleSpacebarPress() {
+    // If waiting for initial switch press, treat this as the trigger to start scanning
+    if (window.waitingForInitialSwitch) {
+        console.log('Initial switch detected (spacebar) - starting scanning on freestyle');
+        window.waitingForInitialSwitch = false;
+        scanningPaused = false;
+        startScanning();
+        return;
+    }
+
     if (currentlyScannedButton) {
         // Simulate click on the currently scanned button
         currentlyScannedButton.click();
@@ -2166,7 +2212,15 @@ function startGamepadPolling() {
             if (currentTime - lastGamepadInputTime > clickDebounceDelay) {
                 if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
                     lastGamepadInputTime = currentTime;
-                    handleSpacebarPress();
+                    // If waiting for initial switch press, treat this as the trigger
+                    if (window.waitingForInitialSwitch) {
+                        console.log('Initial switch detected (gamepad) - starting scanning on freestyle');
+                        window.waitingForInitialSwitch = false;
+                        scanningPaused = false;
+                        startScanning();
+                    } else {
+                        handleSpacebarPress();
+                    }
                 }
             }
         }

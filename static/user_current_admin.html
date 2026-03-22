@@ -194,7 +194,7 @@
     </div>
 
     <div class="container mx-auto p-6">
-        <p class="mb-4 text-gray-600">Use the following format for dictation: Location: [location], People: [people], Activity: [activity]</p>
+        <p class="mb-4 text-gray-600">Dictation currently supports: Location, People, and Activity. Discussion Context fields are optional and can be entered manually or loaded from Favorites.</p>
 
         <!-- Favorites Section -->
         <div class="mb-8 p-6 bg-gray-50 rounded-lg border">
@@ -245,6 +245,26 @@
             <div>
                 <label for="activity" class="block text-sm font-medium text-gray-700 mb-1">Activity:</label>
                 <input type="text" id="activity" name="activity" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div class="pt-2 border-t border-gray-200">
+                <h2 class="text-lg font-semibold text-gray-800 mb-2">Discussion Context</h2>
+                <p class="text-xs text-gray-500 mb-3"><strong>All fields in this section are OPTIONAL.</strong> If using a stored Favorite, make sure to update the Focus Pages or Chapters and Discussion Narrative as needed.</p>
+            </div>
+
+            <div>
+                <label for="topicTitle" class="block text-sm font-medium text-gray-700 mb-1">Book Title or Subject:</label>
+                <input type="text" id="topicTitle" name="topicTitle" placeholder="Example: A Forgery of Fate" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div>
+                <label for="focusChapters" class="block text-sm font-medium text-gray-700 mb-1">Focus Pages or Chapters:</label>
+                <input type="text" id="focusChapters" name="focusChapters" placeholder="Example: Pages 120-145 or Chapters 5-6" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+
+            <div>
+                <label for="topicSummary" class="block text-sm font-medium text-gray-700 mb-1">Discussion Narrative:</label>
+                <textarea id="topicSummary" name="topicSummary" rows="3" placeholder="Short recap of the assigned pages/chapters" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"></textarea>
             </div>
         </div>
 
@@ -301,6 +321,9 @@
                         <p id="favoritePreviewLocation" class="text-sm text-gray-600"></p>
                         <p id="favoritePreviewPeople" class="text-sm text-gray-600"></p>
                         <p id="favoritePreviewActivity" class="text-sm text-gray-600"></p>
+                        <p id="favoritePreviewTopicTitle" class="text-sm text-gray-600"></p>
+                        <p id="favoritePreviewFocusChapters" class="text-sm text-gray-600"></p>
+                        <p id="favoritePreviewTopicSummary" class="text-sm text-gray-600"></p>
                     </div>
 
                     <!-- Schedule Section -->
@@ -421,8 +444,9 @@
                                             <div class="bg-purple-50 border-l-4 border-purple-500 p-3 rounded">
                                                 <p class="text-sm font-semibold text-purple-900 mb-1">Features:</p>
                                                 <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                    <li>• <strong>Load Favorite:</strong> Instantly populate Location, People, and Activity fields from saved favorite</li>
-                                                    <li>• <strong>Add to Favorites:</strong> Save current form values as a new favorite with optional scheduling</li>
+                                                    <li>• <strong>Load Favorite:</strong> Instantly populate Location, People, Activity, and Discussion Context fields</li>
+                                                    <li>• <strong>Add to Favorites:</strong> Save current form values and discussion context as a new favorite with optional scheduling</li>
+                                                    <li>• <strong>Important:</strong> After loading a Favorite, update Focus Pages or Chapters and Discussion Narrative as needed for the current assignment</li>
                                                     <li>• <strong>Manage Favorites:</strong> Edit names, view/edit schedules, or delete saved favorites</li>
                                                     <li>• <strong>Scheduling:</strong> Automatically set location based on day of week and time of day</li>
                                                 </ul>
@@ -457,6 +481,9 @@
                                                     <li>• <strong>Location:</strong> Where the user is right now (e.g., "Home", "School", "Grandma's house")</li>
                                                     <li>• <strong>People Present:</strong> Who is with the user (e.g., "Mom and Dad", "Teacher Ms. Smith", "Friends")</li>
                                                     <li>• <strong>Activity:</strong> What the user is doing (e.g., "Playing outside", "Eating lunch", "Doing homework")</li>
+                                                    <li>• <strong>Book Title or Subject:</strong> What is being discussed (e.g., "A Forgery of Fate" or "Civil War")</li>
+                                                    <li>• <strong>Focus Pages or Chapters:</strong> Current discussion range (e.g., "Pages 120-145" or "Chapters 5-6")</li>
+                                                    <li>• <strong>Discussion Narrative:</strong> Short recap of the pages/chapters being discussed</li>
                                                 </ul>
                                             </div>
                                             <p class="text-xs text-gray-600 mt-2"><i class="fas fa-info-circle text-blue-500 mr-1"></i>This information helps the AI provide more relevant and personalized responses based on the user's current context.</p>
@@ -487,11 +514,11 @@
                                             <div class="bg-green-50 border-l-4 border-green-500 p-3 rounded">
                                                 <p class="text-sm font-semibold text-green-900 mb-1">Actions:</p>
                                                 <ul class="text-xs text-gray-700 ml-4 space-y-1">
-                                                    <li>• <strong>Start Dictation:</strong> Use voice input to fill all three fields at once. Speak in format: "Location: [place], People: [names], Activity: [what doing]"</li>
-                                                    <li>• <strong>Save:</strong> Save the current location information to the user's profile. This updates their context for AI interactions.</li>
+                                                    <li>• <strong>Start Dictation:</strong> Use voice input to fill Location, People, and Activity. Speak in format: "Location: [place], People: [names], Activity: [what doing]"</li>
+                                                    <li>• <strong>Save:</strong> Save current location plus optional discussion context fields to update AI context.</li>
                                                 </ul>
                                             </div>
-                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> Dictation is faster for quick updates. You can also type directly into the fields if preferred.</p>
+                                            <p class="text-xs text-gray-600 mt-2"><i class="fas fa-lightbulb text-yellow-500 mr-1"></i><strong>Tip:</strong> Dictation is fastest for location context, then quickly update Focus Pages or Chapters and Discussion Narrative manually (or via Favorite).</p>
                                         </div>
                                     </div>
                                 </div>
@@ -691,7 +718,7 @@
             steps: [
                 {
                     title: 'Select Favorite Dropdown',
-                    content: 'Use this dropdown to choose from your saved location favorites. Each favorite contains pre-filled Location, People, and Activity information.',
+                    content: 'Use this dropdown to choose from your saved favorites. Each favorite can include Location, People, Activity, and optional Discussion Context fields.',
                     highlight: '#favoritesSelect',
                     action: function() {
                         const select = document.getElementById('favoritesSelect');
@@ -707,7 +734,7 @@
                 },
                 {
                     title: 'Load Favorite Button',
-                    content: 'Click this button to load the selected favorite into the form fields below. This quickly fills in Location, People, and Activity from your saved favorite.',
+                    content: 'Click this button to load the selected favorite into the form fields below. This fills in Location, People, Activity, and any saved discussion context.',
                     highlight: '#loadFavoriteBtn',
                     action: function() {
                         const btn = document.getElementById('loadFavoriteBtn');
@@ -723,7 +750,7 @@
                 },
                 {
                     title: 'Add to Favorites',
-                    content: 'Save the current form values as a new favorite. You can add a name and optionally create a schedule for automatic updates.',
+                    content: 'Save current form values as a new favorite, including optional discussion context fields. You can also add an optional schedule.',
                     highlight: '#addToFavoritesBtn',
                     action: function() {
                         const btn = document.getElementById('addToFavoritesBtn');
@@ -806,6 +833,38 @@
                         const input = document.getElementById('activity');
                         if (input) input.classList.remove('guide-highlight-target');
                     }
+                },
+                {
+                    title: 'Book Title or Subject & Focus Pages or Chapters',
+                    content: 'Use Book Title or Subject and Focus Pages or Chapters to tell AI what is being discussed and which range to stay within.',
+                    highlight: '#topicTitle',
+                    action: function() {
+                        const input = document.getElementById('topicTitle');
+                        if (input) {
+                            input.classList.add('guide-highlight-target');
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const input = document.getElementById('topicTitle');
+                        if (input) input.classList.remove('guide-highlight-target');
+                    }
+                },
+                {
+                    title: 'Discussion Narrative',
+                    content: 'Add a short narrative of the assigned pages/chapters so AI can generate grounded options without making up unsupported details.',
+                    highlight: '#topicSummary',
+                    action: function() {
+                        const input = document.getElementById('topicSummary');
+                        if (input) {
+                            input.classList.add('guide-highlight-target');
+                            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                    },
+                    cleanup: function() {
+                        const input = document.getElementById('topicSummary');
+                        if (input) input.classList.remove('guide-highlight-target');
+                    }
                 }
             ]
         };
@@ -815,7 +874,7 @@
             steps: [
                 {
                     title: 'Start Dictation',
-                    content: 'Use voice input to quickly fill all three fields. Speak in this format: "Location: the park, People: Mom and brother, Activity: playing on the swings"',
+                    content: 'Use voice input to quickly fill Location, People, and Activity. Speak in this format: "Location: the park, People: Mom and brother, Activity: playing on the swings". Then manually update optional discussion context fields if needed.',
                     highlight: '#dictationButton',
                     action: function() {
                         const btn = document.getElementById('dictationButton');
@@ -831,7 +890,7 @@
                 },
                 {
                     title: 'Save Current Information',
-                    content: 'Click Save to update the user\'s current location information. This makes the context available for AI-enhanced communication and location-based features.',
+                    content: 'Click Save to update current location and optional discussion context information. This makes the context available for AI-enhanced communication.',
                     highlight: '#saveButton',
                     action: function() {
                         const btn = document.getElementById('saveButton');
@@ -853,7 +912,7 @@
             steps: [
                 {
                     title: 'Adding a Scheduled Favorite',
-                    content: 'To create an automated schedule, first fill in the Location, People, and Activity fields, then click "Add to Favorites".',
+                    content: 'To create an automated schedule, fill in Location, People, and Activity (and optional discussion context if desired), then click "Add to Favorites".',
                     highlight: '#addToFavoritesBtn',
                     action: function() {
                         const btn = document.getElementById('addToFavoritesBtn');

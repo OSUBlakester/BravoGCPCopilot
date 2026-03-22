@@ -31,6 +31,8 @@ let draggedButton = null;
 // --- Special Predefined Pages ---
 const SPECIAL_PAGES = [
     { name: 'freestyle', displayName: 'Freestyle Page' },
+    { name: 'spelling', displayName: 'Spelling Page' },
+    { name: 'numbers', displayName: 'Numbers Page' },
     { name: 'threads', displayName: 'Threads Page' },
     { name: 'favorites', displayName: 'Favorites Page' },
     { name: 'mood', displayName: 'Mood Selection Page' },

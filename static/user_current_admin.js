@@ -7,6 +7,9 @@ let isDomContentLoaded = false;
 let locationInput = null;
 let peopleInput = null;
 let activityInput = null;
+let topicTitleInput = null;
+let focusChaptersInput = null;
+let topicSummaryInput = null;
 let saveButton = null;
 let dictationButton = null;
 
@@ -60,6 +63,9 @@ async function loadCurrentUserState() {
         locationInput.value = data.location || '';
         peopleInput.value = data.people || '';
         activityInput.value = data.activity || '';
+        topicTitleInput.value = data.topicTitle || '';
+        focusChaptersInput.value = data.focusChapters || '';
+        topicSummaryInput.value = data.topicSummary || data.focusPlotPoints || '';
         
         // Check if there's a loaded favorite and enable thread button if so
         if (data.favorite_name && data.loaded_at && openThreadBtn) {
@@ -134,6 +140,9 @@ async function loadSelectedFavorite() {
         locationInput.value = favorite.location || '';
         peopleInput.value = favorite.people || '';
         activityInput.value = favorite.activity || '';
+        topicTitleInput.value = favorite.topicTitle || '';
+        focusChaptersInput.value = favorite.focusChapters || '';
+        topicSummaryInput.value = favorite.topicSummary || favorite.focusPlotPoints || '';
         
         // Automatically save the loaded data to the database
         const loadTimestamp = new Date().toISOString(); // Use same timestamp for both loaded_at and saved_at
@@ -141,6 +150,9 @@ async function loadSelectedFavorite() {
             location: favorite.location || '',
             people: favorite.people || '',
             activity: favorite.activity || '',
+            topicTitle: favorite.topicTitle || '',
+            focusChapters: favorite.focusChapters || '',
+            topicSummary: favorite.topicSummary || favorite.focusPlotPoints || '',
             loaded_at: loadTimestamp,  // Timestamp when favorite is loaded
             favorite_name: favorite.name,  // Include the favorite name for tracking
             saved_at: loadTimestamp  // Use same timestamp to indicate this save is part of loading, not manual
@@ -197,6 +209,9 @@ function showAddFavoriteModal() {
     document.getElementById('favoritePreviewLocation').textContent = `Location: ${locationInput.value || '(empty)'}`;
     document.getElementById('favoritePreviewPeople').textContent = `People: ${peopleInput.value || '(empty)'}`;
     document.getElementById('favoritePreviewActivity').textContent = `Activity: ${activityInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewTopicTitle').textContent = `Book Title or Subject: ${topicTitleInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewFocusChapters').textContent = `Focus Pages or Chapters: ${focusChaptersInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewTopicSummary').textContent = `Discussion Narrative: ${topicSummaryInput.value || '(empty)'}`;
     
     // Clear the name input
     favoriteName.value = '';
@@ -233,7 +248,10 @@ async function saveFavorite() {
         name: name,
         location: locationInput.value || '',
         people: peopleInput.value || '',
-        activity: activityInput.value || ''
+        activity: activityInput.value || '',
+        topicTitle: topicTitleInput.value || '',
+        focusChapters: focusChaptersInput.value || '',
+        topicSummary: topicSummaryInput.value || ''
     };
 
     // Add schedule if enabled
@@ -375,6 +393,9 @@ async function showManageFavoritesModal() {
                             <p class="text-sm text-gray-600">Location: ${favorite.location || '(empty)'}</p>
                             <p class="text-sm text-gray-600">People: ${favorite.people || '(empty)'}</p>
                             <p class="text-sm text-gray-600">Activity: ${favorite.activity || '(empty)'}</p>
+                            <p class="text-sm text-gray-600">Book Title or Subject: ${favorite.topicTitle || '(empty)'}</p>
+                            <p class="text-sm text-gray-600">Focus Pages or Chapters: ${favorite.focusChapters || '(empty)'}</p>
+                            <p class="text-sm text-gray-600">Discussion Narrative: ${favorite.topicSummary || favorite.focusPlotPoints || '(empty)'}</p>
                         </div>
                         <div class="flex gap-2 ml-4">
                             <button onclick="editFavorite('${favorite.name.replace(/'/g, "\\'")}')" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
@@ -416,11 +437,17 @@ async function editFavorite(favoriteName) {
     locationInput.value = favorite.location || '';
     peopleInput.value = favorite.people || '';
     activityInput.value = favorite.activity || '';
+    topicTitleInput.value = favorite.topicTitle || '';
+    focusChaptersInput.value = favorite.focusChapters || '';
+    topicSummaryInput.value = favorite.topicSummary || favorite.focusPlotPoints || '';
 
     // Update preview with these values
     document.getElementById('favoritePreviewLocation').textContent = `Location: ${locationInput.value || '(empty)'}`;
     document.getElementById('favoritePreviewPeople').textContent = `People: ${peopleInput.value || '(empty)'}`;
     document.getElementById('favoritePreviewActivity').textContent = `Activity: ${activityInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewTopicTitle').textContent = `Book Title or Subject: ${topicTitleInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewFocusChapters').textContent = `Focus Pages or Chapters: ${focusChaptersInput.value || '(empty)'}`;
+    document.getElementById('favoritePreviewTopicSummary').textContent = `Discussion Narrative: ${topicSummaryInput.value || '(empty)'}`;
 
     // Populate name
     document.getElementById('favoriteName').value = favorite.name;
@@ -518,6 +545,9 @@ async function initializePage() {
         locationInput = document.getElementById('location');
         peopleInput = document.getElementById('people');
         activityInput = document.getElementById('activity');
+        topicTitleInput = document.getElementById('topicTitle');
+        focusChaptersInput = document.getElementById('focusChapters');
+        topicSummaryInput = document.getElementById('topicSummary');
         saveButton = document.getElementById('saveButton');
         dictationButton = document.getElementById('dictationButton');
         
@@ -544,7 +574,7 @@ async function initializePage() {
         scheduleEndTime = document.getElementById('scheduleEndTime');
 
         // Basic check for essential elements
-        if (!locationInput || !peopleInput || !activityInput || !saveButton || !dictationButton || !favoritesSelect || !loadFavoriteBtn || !openThreadBtn || !addToFavoritesBtn || !manageFavoritesBtn) {
+        if (!locationInput || !peopleInput || !activityInput || !topicTitleInput || !focusChaptersInput || !topicSummaryInput || !saveButton || !dictationButton || !favoritesSelect || !loadFavoriteBtn || !openThreadBtn || !addToFavoritesBtn || !manageFavoritesBtn) {
             console.error("CRITICAL ERROR: One or more essential DOM elements for user_current_admin.js not found.");
             return;
         }
@@ -616,11 +646,17 @@ async function saveCurrentUserState() {
         console.log("location input value", locationInput.value);
         console.log("people input value", peopleInput.value);
         console.log("activity input value", activityInput.value);
+        console.log("topicTitle input value", topicTitleInput.value);
+        console.log("focusChapters input value", focusChaptersInput.value);
+        console.log("topicSummary input value", topicSummaryInput.value);
         const location = locationInput.value;
         const people = peopleInput.value;
         const activity = activityInput.value;
+        const topicTitle = topicTitleInput.value;
+        const focusChapters = focusChaptersInput.value;
+        const topicSummary = topicSummaryInput.value;
 
-        console.log('Data sent to backend:', { location, people, activity }); // Add this line
+        console.log('Data sent to backend:', { location, people, activity, topicTitle, focusChapters, topicSummary }); // Add this line
         showStatus("Saving...", false, 0);
 
         try {
@@ -628,7 +664,7 @@ async function saveCurrentUserState() {
             const response = await window.authenticatedFetch('/user_current', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }, // X-User-ID added by authenticatedFetch
-                body: JSON.stringify({ location, people, activity })
+                body: JSON.stringify({ location, people, activity, topicTitle, focusChapters, topicSummary })
             });
 
             if (response.ok) {

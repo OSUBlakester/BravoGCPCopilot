@@ -72,6 +72,7 @@ let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
 let scanMode = 'auto'; // auto | step
 let waitForSwitchToScan = false; // Default wait for switch state
+let suppressSwitchActivationUntil = 0; // Timestamp guard to prevent immediate button activation after starting scan
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
 const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
@@ -489,10 +490,21 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
         return;
     }
 
+    const hasValidScannedButton = Boolean(
+        currentlyScannedButton &&
+        currentlyScannedButton.isConnected &&
+        currentlyScannedButton.closest('#gridContainer')
+    );
+
+    if (currentlyScannedButton && !hasValidScannedButton) {
+        console.log(`🧹 Clearing stale scanned button reference (${source}).`);
+        currentlyScannedButton = null;
+    }
+
     // If scanning is already active (auto: interval running; step: a button is highlighted),
     // don't disrupt it. This prevents the generateGrid setTimeout from re-entering the
     // "waiting for initial switch" state after the user has already started scanning.
-    if (scanningInterval !== null || currentlyScannedButton !== null) {
+    if (scanningInterval !== null || hasValidScannedButton) {
         console.log(`⏭️ Scanning already active — ignoring startOrWaitForScanning (${source}).`);
         return;
     }
@@ -512,6 +524,48 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
     window.waitingForInitialSwitch = false;
     console.log(`▶️ Starting auditory scanning automatically (${source}).`);
     startAuditoryScanning();
+}
+
+function markScanningStartedFromSwitch() {
+    suppressSwitchActivationUntil = Date.now() + 600;
+}
+
+function shouldSuppressSwitchActivation() {
+    return Date.now() < suppressSwitchActivationUntil;
+}
+
+function handleSpacebarPress() {
+    if (window.waitingForInitialSwitch) {
+        console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
+        window.waitingForInitialSwitch = false;
+        markScanningStartedFromSwitch();
+        startAuditoryScanning();
+        return;
+    }
+
+    if (shouldSuppressSwitchActivation()) {
+        return;
+    }
+
+    if (currentlyScannedButton && !isLLMProcessing && !listeningForQuestion) {
+        const buttonToActivate = currentlyScannedButton;
+        console.log('Spacebar pressed, activating button:', buttonToActivate.textContent);
+        buttonToActivate.click();
+        buttonToActivate.classList.add('active');
+        setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+        return;
+    }
+
+    if (isPausedFromScanLimit) {
+        resumeAuditoryScanning();
+        return;
+    }
+
+    const scanningIsIdle = scanningInterval === null && !currentlyScannedButton;
+    if (scanningIsIdle) {
+        markScanningStartedFromSwitch();
+        startAuditoryScanning();
+    }
 }
 
 function addPauseToJokeText(text) {
@@ -2148,6 +2202,12 @@ function updateGridLayout() {
 
 // --- Grid Generation ---
 async function generateGrid(page, container) {
+    stopAuditoryScanning();
+    window.waitingForInitialSwitch = false;
+    isPausedFromScanLimit = false;
+    currentRowScanMode = false;
+    currentRow = -1;
+
     container.innerHTML = '';
     updateGridLayout();
 
@@ -2235,16 +2295,17 @@ async function generateGrid(page, container) {
             
             // Text footer (overlays bottom of image)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '28px'; // Taller to accommodate 2 rows
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
+            textFooter.style.padding = '0 3px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
+            textFooter.style.boxSizing = 'border-box';
             textFooter.style.position = 'absolute';
             textFooter.style.bottom = '0';
             textFooter.style.left = '0';
@@ -2252,15 +2313,15 @@ async function generateGrid(page, container) {
             
             const textSpan = document.createElement('span');
             textSpan.textContent = buttonData.text;
-            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontSize = '0.45em';
             textSpan.style.fontWeight = 'bold';
             textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
+            textSpan.style.lineHeight = '0.95';
             textSpan.style.wordWrap = 'break-word';
             textSpan.style.hyphens = 'auto';
             textSpan.style.overflow = 'hidden';
             textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitLineClamp = '1';
             textSpan.style.webkitBoxOrient = 'vertical';
             
             imageContainer.appendChild(imageElement);
@@ -2708,6 +2769,14 @@ async function handleButtonClick(buttonData) {
                         window.location.href = 'mood.html';
                     }
                     return;
+                } else if (specialPage === 'spelling' || specialPage === 'spell') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    window.location.href = `spelling.html?${params.toString()}`;
+                } else if (specialPage === 'numbers' || specialPage === 'number') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    window.location.href = `numbers.html?${params.toString()}`;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions
                     console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
@@ -4149,14 +4218,15 @@ async function createHomeButton() {
         };
 
         const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
+        textFooter.style.minHeight = '14px';
         textFooter.style.width = '100%';
         textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
         textFooter.style.color = 'white';
         textFooter.style.display = 'flex';
         textFooter.style.alignItems = 'center';
         textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
+        textFooter.style.padding = '0 3px';
+        textFooter.style.boxSizing = 'border-box';
         textFooter.style.position = 'absolute';
         textFooter.style.bottom = '0';
         textFooter.style.left = '0';
@@ -4164,10 +4234,10 @@ async function createHomeButton() {
 
         const textSpan = document.createElement('span');
         textSpan.textContent = 'Home';
-        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
+        textSpan.style.lineHeight = '0.95';
 
         imageContainer.appendChild(imageElement);
         textFooter.appendChild(textSpan);
@@ -4419,16 +4489,17 @@ async function generateLlmButtons(options) {
                 };
 
                 const textFooter = document.createElement('div');
-                textFooter.style.height = '28px';
+                textFooter.style.minHeight = '14px';
                 textFooter.style.width = '100%';
                 textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
                 textFooter.style.color = 'white';
                 textFooter.style.display = 'flex';
                 textFooter.style.alignItems = 'center';
                 textFooter.style.justifyContent = 'center';
-                textFooter.style.padding = '2px 4px';
+                textFooter.style.padding = '0 3px';
                 textFooter.style.margin = '0';
                 textFooter.style.borderRadius = '0';
+                textFooter.style.boxSizing = 'border-box';
                 textFooter.style.position = 'absolute';
                 textFooter.style.bottom = '0';
                 textFooter.style.left = '0';
@@ -4436,15 +4507,15 @@ async function generateLlmButtons(options) {
 
                 const textSpan = document.createElement('span');
                 textSpan.textContent = optionData.summary;
-                textSpan.style.fontSize = '0.7em';
+                textSpan.style.fontSize = '0.45em';
                 textSpan.style.fontWeight = 'bold';
                 textSpan.style.textAlign = 'center';
-                textSpan.style.lineHeight = '1.1';
+                textSpan.style.lineHeight = '0.95';
                 textSpan.style.wordWrap = 'break-word';
                 textSpan.style.hyphens = 'auto';
                 textSpan.style.overflow = 'hidden';
                 textSpan.style.display = '-webkit-box';
-                textSpan.style.webkitLineClamp = '2';
+                textSpan.style.webkitLineClamp = '1';
                 textSpan.style.webkitBoxOrient = 'vertical';
 
                 imageContainer.appendChild(imageElement);
@@ -4497,14 +4568,15 @@ async function generateLlmButtons(options) {
         };
         
         const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
+        textFooter.style.minHeight = '14px';
         textFooter.style.width = '100%';
         textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
         textFooter.style.color = 'white';
         textFooter.style.display = 'flex';
         textFooter.style.alignItems = 'center';
         textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
+        textFooter.style.padding = '0 3px';
+        textFooter.style.boxSizing = 'border-box';
         textFooter.style.position = 'absolute';
         textFooter.style.bottom = '0';
         textFooter.style.left = '0';
@@ -4512,10 +4584,10 @@ async function generateLlmButtons(options) {
         
         const textSpan = document.createElement('span');
         textSpan.textContent = 'Something Else';
-        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
+        textSpan.style.lineHeight = '0.95';
         
         imageContainer.appendChild(imageElement);
         textFooter.appendChild(textSpan);
@@ -4667,14 +4739,15 @@ async function generateLlmButtons(options) {
         };
         
         const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
+        textFooter.style.minHeight = '14px';
         textFooter.style.width = '100%';
         textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
         textFooter.style.color = 'white';
         textFooter.style.display = 'flex';
         textFooter.style.alignItems = 'center';
         textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
+        textFooter.style.padding = '0 3px';
+        textFooter.style.boxSizing = 'border-box';
         textFooter.style.position = 'absolute';
         textFooter.style.bottom = '0';
         textFooter.style.left = '0';
@@ -4682,10 +4755,10 @@ async function generateLlmButtons(options) {
         
         const textSpan = document.createElement('span');
         textSpan.textContent = 'Free Style';
-        textSpan.style.fontSize = '0.7em';
+        textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
+        textSpan.style.lineHeight = '0.95';
         
         imageContainer.appendChild(imageElement);
         textFooter.appendChild(textSpan);
@@ -4778,6 +4851,9 @@ async function generateLlmButtons(options) {
  */
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.repeat) return; // Ignore key-repeat events (held key fires multiple keydown)
+        const isSpaceKey = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+
         if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
             interruptScanningAnnouncementPlayback();
@@ -4785,9 +4861,12 @@ function setupKeyboardListener() {
             if (window.waitingForInitialSwitch) {
                 console.log('Initial switch detected (tab) - starting scanning on gridpage');
                 window.waitingForInitialSwitch = false;
+                markScanningStartedFromSwitch();
                 startAuditoryScanning();
                 return;
             }
+
+            if (shouldSuppressSwitchActivation()) return;
 
             if (!isLLMProcessing && !listeningForQuestion) {
                 if (!currentlyScannedButton) {
@@ -4799,26 +4878,9 @@ function setupKeyboardListener() {
             return;
         }
 
-        if (event.code === 'Space') {
+        if (isSpaceKey) {
             event.preventDefault();
-            
-            // Check if we're waiting for initial switch press
-            if (window.waitingForInitialSwitch) {
-                console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
-                window.waitingForInitialSwitch = false;
-                startAuditoryScanning();
-                return;
-            }
-            
-            // Normal scanning behavior
-            if (!isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
-                const buttonToActivate = currentlyScannedButton; // Capture the button reference
-                console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
-                buttonToActivate.click();
-                buttonToActivate.classList.add('active');
-                // Use the captured reference in the timeout as well
-                setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
-            }
+            handleSpacebarPress();
         }
     });
     console.log("Keyboard listener (Spacebar) set up.");
@@ -4868,8 +4930,15 @@ function startGamepadPolling() {
                 if (window.waitingForInitialSwitch) {
                     console.log('Initial switch detected (gamepad) - starting scanning on gridpage');
                     window.waitingForInitialSwitch = false;
+                    markScanningStartedFromSwitch();
                     startAuditoryScanning();
                     lastGamepadInputTime = now;
+                    lastButtonState = currentButtonState;
+                    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                    return;
+                }
+
+                if (shouldSuppressSwitchActivation()) {
                     lastButtonState = currentButtonState;
                     gamepadPollInterval = requestAnimationFrame(pollGamepads);
                     return;
