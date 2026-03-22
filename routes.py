@@ -35,6 +35,8 @@ STATIC_PAGES = [
     "games.html",
     "guess_who.html",
     "mood.html",
+    "spelling.html",
+    "numbers.html",
     "symbol_admin.html",
     "accent_migration.html"
 ]
