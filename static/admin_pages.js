@@ -36,6 +36,8 @@ const SPECIAL_PAGES = [
     { name: 'threads', displayName: 'Threads Page' },
     { name: 'favorites', displayName: 'Favorites Page' },
     { name: 'mood', displayName: 'Mood Selection Page' },
+    { name: 'email', displayName: 'Email Page' },
+    { name: 'compose', displayName: 'Compose Page' },
     { name: 'games', displayName: 'Games Page' },
     { name: 'jokes', displayName: 'Jokes Page' },
     // Add more special pages here as needed

@@ -44,7 +44,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class BravoImageImporter:
-    def __init__(self):
+    def __init__(self, use_ai_tags: bool = True):
         self.project_id = CONFIG['gcp_project_id']
         self.bucket_name = f"{self.project_id}-aac-images"
         self.setup_clients()
@@ -52,6 +52,7 @@ class BravoImageImporter:
         self.processed_count = 0
         self.error_count = 0
         self.skipped_count = 0
+        self.use_ai_tags = use_ai_tags
         
     def setup_clients(self):
         """Initialize Firebase, Firestore, and Storage clients"""
@@ -373,9 +374,12 @@ class BravoImageImporter:
                 logger.info(f"📤 Uploading {concept}/{subconcept}")
                 image_url = await self.upload_image_to_storage(image_path, concept, subconcept)
                 
-                # Generate tags using AI
-                logger.info(f"🏷️ Generating tags for {concept}/{subconcept}")
-                tags = await self.generate_image_tags(image_url, concept, subconcept)
+                if self.use_ai_tags:
+                    logger.info(f"🏷️ Generating tags for {concept}/{subconcept}")
+                    tags = await self.generate_image_tags(image_url, concept, subconcept)
+                else:
+                    logger.info(f"🏷️ AI tagging disabled for {concept}/{subconcept}; using fallback tags")
+                    tags = [subconcept.replace('_', ' '), concept.replace('_', ' ')]
                 
                 # Store in Firestore
                 logger.info(f"💾 Storing {concept}/{subconcept} in database")
@@ -459,15 +463,17 @@ async def main():
     parser.add_argument('--batch-size', type=int, default=10,
                        help='Number of images to process in each batch (default: 10)')
     parser.add_argument('--path', type=str, 
-                       default='/Users/blakethomas/Documents/BravoGCPCopilot/BravoImages',
+                       default=str(Path(__file__).resolve().parent / 'BravoImages'),
                        help='Path to BravoImages folder')
     parser.add_argument('--replace', action='store_true',
                        help='Replace existing images instead of skipping')
+    parser.add_argument('--no-ai-tags', action='store_true',
+                       help='Disable Gemini tagging and use fallback tags only')
     
     args = parser.parse_args()
     
     try:
-        importer = BravoImageImporter()
+        importer = BravoImageImporter(use_ai_tags=not args.no_ai_tags)
         await importer.run_import(args.path, args.test, args.batch_size, args.replace)
         
     except KeyboardInterrupt:

@@ -20,7 +20,7 @@ Examples:
     python3 process_and_upload_images.py BravoImages/bravo_buddy_006/Categories --upload --project bravo-copilot-prod --replace
     
     # Process and upload to dev
-    python3 process_and_upload_images.py BravoImages/bravo_buddy_006/Categories --upload --project bravo-copilot-dev
+    python3 process_and_upload_images.py BravoImages/bravo_buddy_006/Categories --upload --project bravo-prod-465323
 """
 
 import os
@@ -312,7 +312,7 @@ Examples:
   %(prog)s BravoImages/bravo_buddy_006/Categories --upload --project bravo-copilot-prod --replace
   
   # Process and upload to dev
-  %(prog)s BravoImages/bravo_buddy_006/Categories --upload --project bravo-copilot-dev
+  %(prog)s BravoImages/bravo_buddy_006/Categories --upload --project bravo-prod-465323
         """
     )
     
@@ -329,8 +329,8 @@ Examples:
     
     parser.add_argument(
         "--project",
-        default="bravo-copilot-dev",
-        help="GCP project ID for upload (default: bravo-copilot-dev)"
+        default="bravo-prod-465323",
+        help="GCP project ID for upload (default: bravo-prod-465323)"
     )
     
     parser.add_argument(

@@ -5,6 +5,7 @@ This is a one-time migration script for setting up the demo readonly account.
 """
 
 import asyncio
+import argparse
 import logging
 from google.cloud import firestore
 import firebase_admin
@@ -80,6 +81,27 @@ async def get_users_from_account(account_id):
         logging.error(f"Error getting users from account {account_id}: {e}")
         return []
 
+
+def copy_subcollection_recursive(source_doc_ref, target_doc_ref):
+    """Recursively copy all nested subcollections from one user doc to another."""
+    for subcollection in source_doc_ref.collections():
+        source_subcoll = source_doc_ref.collection(subcollection.id)
+        target_subcoll = target_doc_ref.collection(subcollection.id)
+
+        for doc in source_subcoll.stream():
+            doc_data = doc.to_dict()
+            target_doc = target_subcoll.document(doc.id)
+            target_doc.set(doc_data)
+            copy_subcollection_recursive(doc.reference, target_doc)
+
+
+def delete_subcollections_recursive(doc_ref):
+    """Recursively delete all nested subcollections under a document."""
+    for subcollection in doc_ref.collections():
+        for doc in subcollection.stream():
+            delete_subcollections_recursive(doc.reference)
+            doc.reference.delete()
+
 async def copy_user_data(source_account_id, source_user_id, target_account_id, target_user_id):
     """Copy all user data from source to target"""
     try:
@@ -88,23 +110,8 @@ async def copy_user_data(source_account_id, source_user_id, target_account_id, t
         
         # Target paths
         target_user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(target_user_id)
-        
-        # Collections to copy
-        collections_to_copy = ['config', 'info', 'diary_entries', 'chat_history', 'button_activity_log', 'settings']
-        
-        for collection_name in collections_to_copy:
-            source_collection = source_user_ref.collection(collection_name)
-            target_collection = target_user_ref.collection(collection_name)
-            
-            # Get all documents from source collection
-            source_docs = source_collection.stream()
-            
-            for doc in source_docs:
-                doc_data = doc.to_dict()
-                if doc_data:
-                    # Copy document to target collection
-                    target_collection.document(doc.id).set(doc_data)
-                    logging.info(f"Copied {collection_name}/{doc.id} from {source_user_id} to {target_user_id}")
+
+        await asyncio.to_thread(copy_subcollection_recursive, source_user_ref, target_user_ref)
         
         logging.info(f"Successfully copied all data from {source_user_id} to {target_user_id}")
         
@@ -146,17 +153,9 @@ async def delete_all_users_from_account(account_id):
         for doc in users_docs:
             user_data = doc.to_dict()
             display_name = user_data.get('display_name', 'Unknown')
-            
-            # Delete all subcollections for this user
+
             user_doc_ref = users_ref.document(doc.id)
-            collections_to_delete = ['config', 'info', 'diary_entries', 'chat_history', 'button_activity_log', 'settings']
-            
-            for collection_name in collections_to_delete:
-                collection_ref = user_doc_ref.collection(collection_name)
-                docs = collection_ref.stream()
-                for sub_doc in docs:
-                    sub_doc.reference.delete()
-                    logging.info(f"Deleted {collection_name}/{sub_doc.id} from user {doc.id}")
+            await asyncio.to_thread(delete_subcollections_recursive, user_doc_ref)
             
             # Delete the user document itself
             doc.reference.delete()
@@ -182,26 +181,45 @@ async def update_account_user_limit(account_id, new_limit):
     except Exception as e:
         logging.error(f"Error updating account user limit: {e}")
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Copy demo profiles from a read-write account to a read-only account")
+    parser.add_argument("--source-email", default="demo@talkwithbravo.com", help="Source Firebase Auth email (used if --source-account-id is not provided)")
+    parser.add_argument("--target-email", default="demoreadonly@talkwithbravo.com", help="Target Firebase Auth email (used if --target-account-id is not provided)")
+    parser.add_argument("--source-account-id", default=None, help="Direct source Firestore account ID (skips Firebase Auth lookup)")
+    parser.add_argument("--target-account-id", default=None, help="Direct target Firestore account ID (skips Firebase Auth lookup)")
+    parser.add_argument("--yes", action="store_true", help="Skip interactive confirmation prompt")
+    return parser.parse_args()
+
 async def main():
+    args = parse_args()
+
     print("🚀 Starting profile copy process...")
     print("=" * 60)
-    
-    # Account emails
-    source_email = "demo@talkwithbravo.com"
-    target_email = "demoreadonly@talkwithbravo.com"
-    
-    # Get account IDs
-    print(f"📧 Getting account ID for {source_email}...")
-    source_account_id = await get_account_id_by_email(source_email)
-    if not source_account_id:
-        print(f"❌ Could not find source account for {source_email}")
-        return
-    
-    print(f"📧 Getting account ID for {target_email}...")
-    target_account_id = await get_account_id_by_email(target_email)
-    if not target_account_id:
-        print(f"❌ Could not find target account for {target_email}")
-        return
+
+    source_email = args.source_email
+    target_email = args.target_email
+
+    source_account_id = args.source_account_id
+    target_account_id = args.target_account_id
+
+    if source_account_id:
+        print(f"📌 Using source account ID: {source_account_id}")
+    else:
+        print(f"📧 Getting account ID for {source_email}...")
+        source_account_id = await get_account_id_by_email(source_email)
+        if not source_account_id:
+            print(f"❌ Could not find source account for {source_email}")
+            return
+
+    if target_account_id:
+        print(f"📌 Using target account ID: {target_account_id}")
+    else:
+        print(f"📧 Getting account ID for {target_email}...")
+        target_account_id = await get_account_id_by_email(target_email)
+        if not target_account_id:
+            print(f"❌ Could not find target account for {target_email}")
+            return
     
     print(f"✅ Source Account ID: {source_account_id}")
     print(f"✅ Target Account ID: {target_account_id}")
@@ -247,10 +265,13 @@ async def main():
         print(f"   FROM: {source_email}")
         print(f"   TO:   {target_email}")
     print()
-    response = input("Are you sure you want to proceed? (y/N): ").lower()
-    if response != 'y':
-        print("❌ Operation cancelled by user")
-        return
+    if not args.yes:
+        response = input("Are you sure you want to proceed? (y/N): ").lower()
+        if response != 'y':
+            print("❌ Operation cancelled by user")
+            return
+    else:
+        print("✅ Confirmation bypassed with --yes")
     
     print()
     print("🔄 Starting profile replacement process...")

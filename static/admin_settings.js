@@ -92,6 +92,11 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 const llmProviderSelect = document.getElementById('llmProvider'); // Updated for provider selection
+const emailProviderStatusEl = document.getElementById('email-provider-status');
+const emailServerPrereqEl = document.getElementById('email-server-prereq');
+const refreshEmailStatusButton = document.getElementById('refreshEmailStatusButton');
+const connectEmailButton = document.getElementById('connectEmailButton');
+const disconnectEmailButton = document.getElementById('disconnectEmailButton');
 
 const saveSettingsButton = document.getElementById('saveSettingsButton');
 
@@ -268,6 +273,7 @@ async function loadSettings() {
 
         // Load toolbar PIN (account level)
         await loadToolbarPIN();
+        await loadEmailProviderStatus();
 
          console.log("Settings loaded:", currentSettings);
          showTemporaryStatus(settingsStatus, 'Settings loaded.', false);
@@ -276,6 +282,96 @@ async function loadSettings() {
         console.error('Error loading settings:', error);
         showTemporaryStatus(settingsStatus, `Error loading settings: ${error.message}`, true, 5000);
     }
+}
+
+async function loadEmailProviderStatus() {
+    if (!emailProviderStatusEl || !window.authenticatedFetch) return;
+
+    emailProviderStatusEl.textContent = 'Checking…';
+    emailProviderStatusEl.style.color = '#4b5563';
+    if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
+
+    // First check Firestore connection state
+    let connected = false;
+    let address = '';
+    try {
+        const response = await window.authenticatedFetch('/api/email/status');
+        if (response.ok) {
+            const statusData = await response.json();
+            const gmailStatus = statusData?.provider_status?.gmail || {};
+            connected = gmailStatus.connected === true;
+            address = gmailStatus.email_address || '';
+        }
+    } catch (_) { /* fall through to config probe */ }
+
+    if (connected) {
+        emailProviderStatusEl.style.color = '#047857';
+        emailProviderStatusEl.textContent = `✓ Connected${address ? ` as ${address}` : ''}`;
+        if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
+        return;
+    }
+
+    // Probe whether server OAuth credentials are configured by calling connect-url
+    // (400/500 vs 200 tells us if env vars are missing)
+    try {
+        const probeResp = await window.authenticatedFetch('/api/email/connect-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: 'gmail' })
+        });
+        if (!probeResp.ok) {
+            const errText = await probeResp.text().catch(() => '');
+            if (errText.includes('Missing Google OAuth') || probeResp.status === 500) {
+                emailProviderStatusEl.style.color = '#92400e';
+                emailProviderStatusEl.textContent = '⚠ Server not configured — see setup requirements below';
+                if (emailServerPrereqEl) emailServerPrereqEl.classList.remove('hidden');
+                return;
+            }
+        }
+        // connect-url returned OK, meaning config is present but no account linked yet
+        emailProviderStatusEl.style.color = '#1d4ed8';
+        emailProviderStatusEl.textContent = 'Not connected — click Connect Gmail to authorize';
+        if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
+    } catch (_) {
+        emailProviderStatusEl.style.color = '#1d4ed8';
+        emailProviderStatusEl.textContent = 'Not connected — click Connect Gmail to authorize';
+        if (emailServerPrereqEl) emailServerPrereqEl.classList.add('hidden');
+    }
+}
+
+async function connectEmailProvider() {
+    const response = await window.authenticatedFetch('/api/email/connect-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'gmail' })
+    });
+    if (!response.ok) {
+        const text = await response.text().catch(() => 'Unable to create Gmail connect URL');
+        if (text.includes('Missing Google OAuth') || response.status === 500) {
+            throw new Error('Server OAuth credentials are not configured. Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET to your .env file, then restart the server.');
+        }
+        throw new Error(text);
+    }
+
+    const data = await response.json();
+    if (!data?.connect_url) {
+        throw new Error('Missing Gmail connect URL');
+    }
+
+    window.location.href = data.connect_url;
+}
+
+async function disconnectEmailProvider() {
+    const response = await window.authenticatedFetch('/api/email/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) {
+        const text = await response.text().catch(() => 'Unable to disconnect Gmail');
+        throw new Error(text);
+    }
+
+    await loadEmailProviderStatus();
 }
 
 /**
@@ -776,6 +872,27 @@ async function initializePage() {
         // Add Event Listeners
         if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
         if (testTtsVoiceButton) testTtsVoiceButton.addEventListener('click', testSelectedVoice);
+        if (refreshEmailStatusButton) {
+            refreshEmailStatusButton.addEventListener('click', () => {
+                loadEmailProviderStatus().catch((error) => {
+                    showTemporaryStatus(settingsStatus, `Email status error: ${error.message}`, true, 4000);
+                });
+            });
+        }
+        if (connectEmailButton) {
+            connectEmailButton.addEventListener('click', () => {
+                connectEmailProvider().catch((error) => {
+                    showTemporaryStatus(settingsStatus, `Email connect error: ${error.message}`, true, 4000);
+                });
+            });
+        }
+        if (disconnectEmailButton) {
+            disconnectEmailButton.addEventListener('click', () => {
+                disconnectEmailProvider().catch((error) => {
+                    showTemporaryStatus(settingsStatus, `Email disconnect error: ${error.message}`, true, 4000);
+                });
+            });
+        }
         
         // Mood-related event listeners
         // Grid columns slider event listener

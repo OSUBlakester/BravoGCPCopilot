@@ -50,65 +50,56 @@
         #gridContainer {
             display: grid;
             /* grid-template-columns will be set dynamically by JavaScript based on gridColumns setting */
-            gap: 10px;
-            padding: 20px;
+            gap: 24px;
+            padding: 24px;
+            max-width: 1400px;
+            margin: 0 auto;
             --button-font-size: 16px; /* CSS custom property for dynamic font sizing */
         }
 
         #gridContainer button {
-            position: relative; /* Needed for the tail pseudo-elements */
-            padding: 15px 20px; /* Adjust padding as needed for text */
-            font-size: var(--button-font-size); /* Use the CSS custom property */
-            font-weight: 500; /* Slightly bolder text */
+            position: relative;
+            padding: 12px;
+            font-size: var(--button-font-size);
+            font-weight: 600;
             cursor: pointer;
-            background-color: white;   /* White inside */
-            color: #002244;           /* Dark blue text */
-            border: 2px solid #002244; /* Dark blue border, 2px thick */
-            border-radius: 12px;       /* Somewhat rounded corners */
+            background-color: #ffffff;
+            color: #1e293b;
+            border: 1px solid rgba(255,255,255,0.5);
+            border-radius: 24px;
             text-align: center;
-            min-height: 50px;          /* Ensure buttons have some height */
-            display: flex;             /* For centering text */
+            min-height: 100px;
+            aspect-ratio: 1 / 1;
+            display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            margin-bottom: 18px; /* Add space below for the tail + grid gap consideration */
-            box-shadow: 0 1px 3px rgba(0,0,0,0.12); /* Optional: subtle shadow for depth */
-            transition: transform 0.1s ease-out, font-size 0.2s ease-out; /* Smooth transitions */
-            word-wrap: break-word;     /* Allow text to wrap if needed */
-            hyphens: auto;             /* Enable automatic hyphenation */
-            line-height: 1.2;          /* Better line spacing for readability */
+            box-shadow:
+                0 10px 15px -3px rgba(0, 0, 0, 0.08),
+                0 4px 6px -2px rgba(0, 0, 0, 0.04),
+                inset 0 0 0 1px rgba(255,255,255,0.5);
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            word-wrap: break-word;
+            hyphens: auto;
+            line-height: 1.2;
+            overflow: hidden;
         }
          #gridContainer button:hover {
-             /* You can add a subtle hover effect if desired, e.g., slight brightness change */
-             filter: brightness(97%);
+             transform: translateY(-6px) scale(1.02);
+             box-shadow:
+                0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                0 10px 10px -5px rgba(0, 0, 0, 0.04);
          }
 
          #gridContainer button:active, /* Optional: press effect */
          #gridContainer button.active { /* Visual feedback for spacebar activation */
-            transform: scale(0.97);
+            transform: scale(0.95);
          }
 
-        /* Speech Bubble Tail */
+        /* No speech bubble tails - match gridpage */
         #gridContainer button::before,
         #gridContainer button::after {
-            content: "";
-            width: 0px;
-            height: 0px;
-            position: absolute;
-            border-right: 10px solid transparent;  /* Makes the shape triangular on the right */
-            border-bottom: 10px solid transparent; /* Makes the shape triangular on the bottom */
-        }
-        #gridContainer button::before { /* This creates the dark blue border of the tail */
-            border-left: 10px solid #002244;
-            border-top: 10px solid #002244;
-            left: 15px;  /* Position from the left edge of the button */
-            bottom: -18px; /* Positions the tail below the button */
-        }
-        #gridContainer button::after { /* This creates the white fill of the tail */
-            border-left: 10px solid white;
-            border-top: 10px solid white;
-            left: 17px;  /* Offset by 2px from ::before (button border thickness) */
-            bottom: -16px; /* Offset by 2px from ::before (button border thickness) */
-            z-index: 1;  /* Ensures the white fill is on top of the blue tail border */
+            display: none;
         }
 
         /* Scanning highlight style - higher specificity to override button styles */
@@ -116,6 +107,17 @@
             box-shadow: 0 0 10px 4px #FB4F14 !important; /* Orange glow with !important to ensure it shows */
             outline: none; /* Prevent default browser focus outline */
             transition: box-shadow 0.2s ease-in-out; /* Keep existing transition if any, or add */
+        }
+
+        #gridContainer button.scanning-row {
+            box-shadow: 0 0 8px 3px #FFA500 !important;
+            outline: none;
+        }
+
+        @supports not (aspect-ratio: 1 / 1) {
+            #gridContainer button {
+                height: 120px;
+            }
         }
 
         /* LLM button styling (if needed, keep separate) */

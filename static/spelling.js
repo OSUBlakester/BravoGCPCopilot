@@ -31,6 +31,101 @@ const currentWordInput = document.getElementById('current-word');
 const alphabetGrid = document.getElementById('alphabet-grid');
 const predictionsGrid = document.getElementById('word-predictions');
 const SPEECH_HISTORY_LOCAL_STORAGE_KEY = (aacUserId) => `speechHistory_${aacUserId}`;
+const COMPOSE_SESSION_STORAGE_KEY = 'bravoComposeSession';
+const COMPOSE_PENDING_APPEND_KEY = 'bravoComposePendingAppend';
+
+function loadComposeSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(COMPOSE_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+        }
+        return {
+            active: parsed.active === true,
+            documentId: parsed.documentId || null,
+            title: parsed.title || '',
+            text: typeof parsed.text === 'string' ? parsed.text : '',
+            startedAt: parsed.startedAt || null,
+            sourceFrom: parsed.sourceFrom || null
+        };
+    } catch (error) {
+        console.warn('Failed to parse compose session in spelling:', error);
+        return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    }
+}
+
+function saveComposeSession(composeSession) {
+    if (!composeSession) return;
+    sessionStorage.setItem(COMPOSE_SESSION_STORAGE_KEY, JSON.stringify(composeSession));
+}
+
+function isComposeSessionActive() {
+    const composeSession = loadComposeSession();
+    return Boolean(composeSession && composeSession.active === true);
+}
+
+function isComposeFlowRequested() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('compose') === '1' || isComposeSessionActive()) {
+        return true;
+    }
+
+    const from = params.get('from');
+    if (!from) return false;
+
+    try {
+        const fromUrl = new URL(from, window.location.origin);
+        const fromParams = fromUrl.searchParams;
+        return (
+            fromParams.get('compose') === '1' ||
+            fromParams.get('email_compose') === '1' ||
+            fromParams.get('email_finalize') === '1' ||
+            fromParams.get('compose_entry') === '1' ||
+            fromParams.get('compose_finalize') === '1'
+        );
+    } catch (error) {
+        const decoded = decodeURIComponent(String(from || ''));
+        return /(compose=1|email_compose=1|email_finalize=1|compose_entry=1|compose_finalize=1)/.test(decoded);
+    }
+}
+
+function appendToComposeText(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) return false;
+
+    const composeSession = loadComposeSession();
+    if (!composeSession.active) {
+        if (!isComposeFlowRequested()) {
+            return false;
+        }
+        composeSession.active = true;
+        composeSession.startedAt = composeSession.startedAt || new Date().toISOString();
+        composeSession.sourceFrom = composeSession.sourceFrom || getHomeTarget();
+    }
+
+    const existing = String(composeSession.text || '').trim();
+    composeSession.text = existing ? `${existing} ${normalized}` : normalized;
+    saveComposeSession(composeSession);
+    return true;
+}
+
+function queueComposeAppend(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) return;
+
+    let queue = [];
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPOSE_PENDING_APPEND_KEY) || '[]');
+        if (Array.isArray(parsed)) {
+            queue = parsed;
+        }
+    } catch (error) {
+        console.warn('Failed to parse compose append queue in spelling:', error);
+    }
+
+    queue.push(normalized);
+    localStorage.setItem(COMPOSE_PENDING_APPEND_KEY, JSON.stringify(queue));
+}
 
 async function authenticatedFetch(url, options = {}, _isRetry = false) {
     firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
@@ -359,7 +454,15 @@ async function speakDisplay() {
     if (!displayText) return;
     await announce(displayText, 'system', false, true);
     await recordChatHistory('', displayText);
-    appendToSpeechHistory(displayText);
+    if (isComposeFlowRequested()) {
+        const didAppendDirectly = appendToComposeText(displayText);
+        if (!didAppendDirectly) {
+            queueComposeAppend(displayText);
+        }
+        console.log('Compose session updated from spelling Speak Display:', displayText);
+    } else {
+        appendToSpeechHistory(displayText);
+    }
     if (currentSpellingWord) {
         appendWordToBuildSpace(currentSpellingWord);
         clearCurrentSpellingWord();

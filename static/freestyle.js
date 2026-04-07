@@ -28,6 +28,8 @@ const AAC_USER_ID_SESSION_KEY = "currentAacUserId";
 const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
 const SELECTED_DISPLAY_NAME_SESSION_KEY = "selectedDisplayName";
 const SPEECH_HISTORY_LOCAL_STORAGE_KEY = (aacUserId) => `speechHistory_${aacUserId}`;
+const COMPOSE_SESSION_STORAGE_KEY = 'bravoComposeSession';
+const COMPOSE_PENDING_APPEND_KEY = 'bravoComposePendingAppend';
 
 // --- Audio Variables ---
 let personalSpeakerId = localStorage.getItem('bravoPersonalSpeakerId') || 'default';
@@ -54,6 +56,71 @@ let isChooseWordModalOpen = false;
 let currentChooseWordCategory = "";
 let currentCategoryWords = [];
 let currentScanningContext = "main"; // "main", "spelling-letters", "spelling-predictions", "choose-word-categories", "choose-word-options"
+
+function loadComposeSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(COMPOSE_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+        }
+        return {
+            active: parsed.active === true,
+            documentId: parsed.documentId || null,
+            title: parsed.title || '',
+            text: typeof parsed.text === 'string' ? parsed.text : '',
+            startedAt: parsed.startedAt || null,
+            sourceFrom: parsed.sourceFrom || null
+        };
+    } catch (error) {
+        console.warn('Failed to parse compose session in freestyle:', error);
+        return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    }
+}
+
+function saveComposeSession(composeSession) {
+    if (!composeSession) return;
+    sessionStorage.setItem(COMPOSE_SESSION_STORAGE_KEY, JSON.stringify(composeSession));
+}
+
+function isComposeSessionActive() {
+    const composeSession = loadComposeSession();
+    return Boolean(composeSession && composeSession.active === true);
+}
+
+function appendToComposeText(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) return;
+
+    const composeSession = loadComposeSession();
+    if (!composeSession.active) return;
+
+    const existing = String(composeSession.text || '').trim();
+    composeSession.text = existing ? `${existing} ${normalized}` : normalized;
+    saveComposeSession(composeSession);
+}
+
+function isComposeFlowRequested() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('compose') === '1' || isComposeSessionActive();
+}
+
+function queueComposeAppend(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) return;
+
+    let queue = [];
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPOSE_PENDING_APPEND_KEY) || '[]');
+        if (Array.isArray(parsed)) {
+            queue = parsed;
+        }
+    } catch (error) {
+        console.warn('Failed to parse compose append queue:', error);
+    }
+
+    queue.push(normalized);
+    localStorage.setItem(COMPOSE_PENDING_APPEND_KEY, JSON.stringify(queue));
+}
 
 // Navigation context from URL parameters
 function getNavigationContext() {
@@ -670,11 +737,23 @@ async function speakDisplayText() {
         console.log('Auto Clean enabled - cleaning text before speaking');
         await cleanupTextInternal(); // Use internal cleanup to avoid duplicate loading indicators
     }
+
+    const textToSpeak = currentBuildSpaceText.trim();
+
+    // Persist to compose immediately when compose flow is active.
+    // Also queue in localStorage as a cross-navigation fallback.
+    if (isComposeFlowRequested()) {
+        appendToComposeText(textToSpeak);
+        queueComposeAppend(textToSpeak);
+        console.log('Compose session updated directly from Speak Display:', textToSpeak);
+    }
     
-    await announce(currentBuildSpaceText, "system", true);
+    await announce(textToSpeak, "system", false);
     
-    // Record to speech history (following gridpage.js pattern)
-    recordToSpeechHistory(currentBuildSpaceText);
+    // Record to speech history only when compose flow is not active
+    if (!isComposeFlowRequested()) {
+        recordToSpeechHistory(textToSpeak);
+    }
     
     // Pause scanning for the scanning interval duration, then reset to Go Back button
     if (scanningInterval) {
@@ -784,7 +863,12 @@ async function cleanupTextInternal() {
 }
 
 function goBackToGrid() {
-    // Navigate back to gridpage.html with the home page
+    // Navigate back to gridpage.html with the home page.
+    // Preserve explicit compose mode when freestyle was used during composition.
+    if (isComposeFlowRequested()) {
+        window.location.href = '/static/gridpage.html?page=home&compose=1';
+        return;
+    }
     window.location.href = '/static/gridpage.html?page=home';
 }
 
@@ -1733,7 +1817,17 @@ async function selectCategoryWord(word) {
 
 // --- Speech History Management (Following gridpage.js pattern) ---
 function recordToSpeechHistory(textToRecord) {
-    if (!currentAacUserId || !textToRecord.trim()) {
+    if (!textToRecord || !textToRecord.trim()) {
+        return;
+    }
+
+    if (isComposeSessionActive()) {
+        appendToComposeText(textToRecord);
+        console.log('Compose session updated from freestyle Build Space:', textToRecord);
+        return;
+    }
+
+    if (!currentAacUserId) {
         return;
     }
     
