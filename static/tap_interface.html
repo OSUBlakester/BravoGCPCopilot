@@ -763,8 +763,10 @@
             padding: 0;
             position: relative;
             overflow: hidden;
+            width: 100%;
+            aspect-ratio: 1 / 1;
             min-height: 45px;
-            height: 100%; /* Fill the grid cell (row height controls square sizing) */
+            height: auto;
         }
 
         .option-button:hover {
@@ -803,6 +805,11 @@
 
         .loading {
             opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .tap-action-busy {
+            opacity: 0.75;
             pointer-events: none;
         }
 
@@ -1372,6 +1379,12 @@
             transform: scale(0.98);
             box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
         }
+        /* Focus style for option buttons and modal close */
+        .option-button:focus, .option-button:focus-visible, .categories-modal-close:focus, .modal-close:focus {
+            outline: 3px solid #0ea5e9;
+            outline-offset: 2px;
+            z-index: 2;
+        }
     </style>
 </head>
 <body>
@@ -1405,11 +1418,11 @@
     </div>
 
     <!-- Categories Modal -->
-    <div id="categoriesModal" class="categories-modal">
+    <div id="categoriesModal" class="categories-modal" role="dialog" aria-modal="true" aria-labelledby="categoriesModalTitle" tabindex="-1" style="outline: none;">
         <div class="categories-modal-content">
             <div class="categories-modal-header">
-                <h2><i class="fas fa-folder-open"></i> All Categories</h2>
-                <button class="categories-modal-close" id="categoriesModalClose">&times;</button>
+                <h2 id="categoriesModalTitle"><i class="fas fa-folder-open"></i> All Categories</h2>
+                <button class="categories-modal-close" id="categoriesModalClose" aria-label="Close Categories Modal">&times;</button>
             </div>
             <div class="categories-modal-body">
                 <div class="categories-modal-grid" id="categoriesModalGrid">
@@ -1532,7 +1545,7 @@
         </div>
         
         <!-- Status Message -->
-        <div id="statusMessage" class="status-message">Ready</div>
+        <div id="statusMessage" class="status-message" aria-live="polite" aria-atomic="true">Ready</div>
     </div>
     </div> <!-- End of app-container -->
 
@@ -1635,6 +1648,29 @@
             const statusMessageElement = document.getElementById('statusMessage');
             if (statusMessageElement) {
                 statusMessageElement.textContent = message;
+            }
+        }
+
+        async function runTapActionOnce(buttonElement, action) {
+            if (!buttonElement) {
+                await action();
+                return;
+            }
+
+            if (buttonElement.dataset.actionInFlight === 'true' || buttonElement.disabled) {
+                return;
+            }
+
+            buttonElement.dataset.actionInFlight = 'true';
+            buttonElement.disabled = true;
+            buttonElement.classList.add('tap-action-busy');
+
+            try {
+                await action();
+            } finally {
+                buttonElement.dataset.actionInFlight = 'false';
+                buttonElement.disabled = false;
+                buttonElement.classList.remove('tap-action-busy');
             }
         }
 
@@ -3713,87 +3749,78 @@
                 }
                 
                 categoryBtn.addEventListener('click', async (event) => {
-                    console.log(`[DEBUG] Button clicked: ${button.label}`);
-                    console.log(`[DEBUG] Button data:`, button);
-                    console.log(`[DEBUG] Custom audio file:`, button.custom_audio_file);
-                    
-                    // Only announce if there is a speech_text value
-                    if (button.speech_text && button.speech_text.trim() !== '') {
-                        await announce(button.speech_text, "system", true);
-                    }
-                    
-                    // Play custom audio file if assigned
-                    if (button.custom_audio_file) {
-                        console.log(`[DEBUG] Playing custom audio: ${button.custom_audio_file}`);
-                        try {
-                            await playCustomButtonAudio(button.custom_audio_file);
-                        } catch (error) {
-                            console.error('Error playing button audio:', error);
+                    await runTapActionOnce(categoryBtn, async () => {
+                        console.log(`[DEBUG] Button clicked: ${button.label}`);
+                        console.log(`[DEBUG] Button data:`, button);
+                        console.log(`[DEBUG] Custom audio file:`, button.custom_audio_file);
+                        
+                        if (button.speech_text && button.speech_text.trim() !== '') {
+                            await announce(button.speech_text, "system", true);
                         }
-                    } else {
-                        console.log(`[DEBUG] No custom audio file configured for button: ${button.label}`);
-                    }
-                    
-                    selectCategory(button, event);
+                        
+                        if (button.custom_audio_file) {
+                            console.log(`[DEBUG] Playing custom audio: ${button.custom_audio_file}`);
+                            try {
+                                await playCustomButtonAudio(button.custom_audio_file);
+                            } catch (error) {
+                                console.error('Error playing button audio:', error);
+                            }
+                        } else {
+                            console.log(`[DEBUG] No custom audio file configured for button: ${button.label}`);
+                        }
+                        
+                        await selectCategory(button, event);
+                    });
                 });
                 categoriesContent.appendChild(categoryBtn);
             });
         }
 
         // Categories Modal functionality
+        let lastFocusedElement = null;
         function openCategoriesModal() {
             const modal = document.getElementById('categoriesModal');
             const modalGrid = document.getElementById('categoriesModalGrid');
-            
+
             if (!modal || !modalGrid) {
                 console.error('Categories modal elements not found');
                 return;
             }
-            
-            // Clear existing content
+
+            lastFocusedElement = document.activeElement;
             modalGrid.innerHTML = '';
-            
+
             if (!tapConfig || !tapConfig.buttons || tapConfig.buttons.length === 0) {
                 modalGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #666;">No categories configured</div>';
-                modal.classList.add('show');
-                return;
-            }
-            
-            // Batch preload custom image matches for all modal buttons (non-blocking)
-            const buttonLabels = tapConfig.buttons
-                .filter(b => !b.hidden)
-                .map(b => b.label);
-            
-            if (buttonLabels.length > 0) {
-                // Run preload asynchronously without blocking modal display
-                batchPreloadCustomImageMatches(buttonLabels).catch(error => {
-                    console.error('Error batch preloading modal images:', error);
-                });
-            }
-            
-            // Render all non-hidden categories in the modal
-            tapConfig.buttons.forEach(button => {
-                if (button.hidden) return;
-                
-                const modalBtn = document.createElement('button');
-                modalBtn.className = 'categories-modal-button';
-                
-                const isSightWord = isTapSightWord(button.label);
-                
-                if (button.background_color && button.background_color !== '#FFFFFF') {
-                    modalBtn.style.backgroundColor = button.background_color;
+            } else {
+                const buttonLabels = tapConfig.buttons
+                    .filter(button => !button.hidden)
+                    .map(button => button.label);
+
+                if (buttonLabels.length > 0) {
+                    batchPreloadCustomImageMatches(buttonLabels).catch(error => {
+                        console.error('Error batch preloading modal images:', error);
+                    });
                 }
-                
-                if (!isSightWord) {
-                    modalBtn.style.color = button.text_color || '#000000';
-                }
-                
-                // Add image support (matching category button logic)
-                // DISABLED for faster modal display - categories shown as text-only
-                /*
-                if (!isSightWord) {
-                    getSymbolImageForText(button.label).then(imageUrl => {
-                        if (imageUrl) {
+
+                tapConfig.buttons.forEach(button => {
+                    if (button.hidden) return;
+
+                    const modalBtn = document.createElement('button');
+                    modalBtn.className = 'categories-modal-button';
+                    const isSightWord = isTapSightWord(button.label);
+
+                    if (button.background_color && button.background_color !== '#FFFFFF') {
+                        modalBtn.style.backgroundColor = button.background_color;
+                    }
+
+                    if (!isSightWord) {
+                        modalBtn.style.color = button.text_color || '#000000';
+                        getSymbolImageForText(button.label).then(imageUrl => {
+                            if (!imageUrl) {
+                                return;
+                            }
+
                             modalBtn.innerHTML = '';
                             const buttonContent = document.createElement('div');
                             buttonContent.style.position = 'relative';
@@ -3801,7 +3828,7 @@
                             buttonContent.style.height = '100%';
                             buttonContent.style.display = 'flex';
                             buttonContent.style.flexDirection = 'column';
-                            
+
                             const imageContainer = document.createElement('div');
                             imageContainer.style.flex = '1';
                             imageContainer.style.width = '100%';
@@ -3810,14 +3837,14 @@
                             imageContainer.style.display = 'flex';
                             imageContainer.style.alignItems = 'center';
                             imageContainer.style.justifyContent = 'center';
-                            
+
                             const imageElement = document.createElement('img');
                             imageElement.src = imageUrl;
                             imageElement.alt = button.label;
                             imageElement.style.width = '100%';
                             imageElement.style.height = '100%';
                             imageElement.style.objectFit = 'cover';
-                            
+
                             const textFooter = document.createElement('div');
                             textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
@@ -3831,96 +3858,130 @@
                             textFooter.style.bottom = '0';
                             textFooter.style.left = '0';
                             textFooter.style.right = '0';
-                            
+
                             const textSpan = document.createElement('span');
                             textSpan.textContent = button.label;
                             textSpan.style.fontSize = '0.54em';
                             textSpan.style.fontWeight = 'bold';
                             textSpan.style.textAlign = 'center';
-                            
+
                             imageContainer.appendChild(imageElement);
                             textFooter.appendChild(textSpan);
                             buttonContent.appendChild(imageContainer);
                             buttonContent.appendChild(textFooter);
                             modalBtn.appendChild(buttonContent);
-                        }
-                    }).catch(error => {
-                        console.error('Error loading image for modal category button:', error);
+                        }).catch(error => {
+                            console.error('Error loading image for modal category button:', error);
+                        });
+                    }
+
+                    if (isSightWord) {
+                        modalBtn.classList.add('sight-word-button');
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = button.label;
+                        textSpan.style.fontSize = '1.25em';
+                        textSpan.style.fontWeight = '900';
+                        textSpan.style.color = '#dc2626';
+                        modalBtn.appendChild(textSpan);
+                    } else {
+                        modalBtn.textContent = button.label;
+                    }
+
+                    if (currentCategory && currentCategory.label === button.label) {
+                        modalBtn.classList.add('active');
+                    }
+
+                    modalBtn.addEventListener('click', async event => {
+                        await runTapActionOnce(modalBtn, async () => {
+                            if (button.speech_text && button.speech_text.trim() !== '') {
+                                await announce(button.speech_text, "system", true);
+                            }
+
+                            if (button.custom_audio_file) {
+                                try {
+                                    await playCustomButtonAudio(button.custom_audio_file);
+                                } catch (error) {
+                                    console.error('Error playing button audio:', error);
+                                }
+                            }
+
+                            closeCategoriesModal();
+                            await selectCategory(button, event);
+                        });
                     });
-                }
-                */
-                
-                if (isSightWord) {
-                    modalBtn.classList.add('sight-word-button');
-                    const textSpan = document.createElement('span');
-                    textSpan.textContent = button.label;
-                    textSpan.style.fontSize = '1.25em';
-                    textSpan.style.fontWeight = '900';
-                    textSpan.style.color = '#dc2626';
-                    modalBtn.appendChild(textSpan);
-                } else {
-                    modalBtn.textContent = button.label;
-                }
-                
-                // Check if currently active
-                if (currentCategory && currentCategory.label === button.label) {
-                    modalBtn.classList.add('active');
-                }
-                
-                modalBtn.addEventListener('click', async (event) => {
-                    if (button.speech_text && button.speech_text.trim() !== '') {
-                        await announce(button.speech_text, "system", true);
-                    }
-                    
-                    if (button.custom_audio_file) {
-                        try {
-                            await playCustomButtonAudio(button.custom_audio_file);
-                        } catch (error) {
-                            console.error('Error playing button audio:', error);
-                        }
-                    }
-                    
-                    // Close modal and select category
-                    closeCategoriesModal();
-                    selectCategory(button, event);
+
+                    modalGrid.appendChild(modalBtn);
                 });
-                
-                modalGrid.appendChild(modalBtn);
-            });
-            
+            }
+
             modal.classList.add('show');
+            modal.setAttribute('tabindex', '-1');
+            setTimeout(() => {
+                const closeBtn = document.getElementById('categoriesModalClose');
+                if (closeBtn) {
+                    closeBtn.focus();
+                }
+            }, 10);
+            document.addEventListener('keydown', trapCategoriesModalFocus, true);
         }
 
         function closeCategoriesModal() {
             const modal = document.getElementById('categoriesModal');
             if (modal) {
                 modal.classList.remove('show');
+                modal.removeAttribute('tabindex');
+            }
+            document.removeEventListener('keydown', trapCategoriesModalFocus, true);
+            if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+                setTimeout(() => lastFocusedElement.focus(), 10);
             }
         }
 
-        // Add event listeners for categories modal
-        document.addEventListener('DOMContentLoaded', function() {
-            const categoriesHeaderBtn = document.getElementById('categoriesHeaderBtn');
-            const categoriesModalClose = document.getElementById('categoriesModalClose');
-            const categoriesModal = document.getElementById('categoriesModal');
-            
-            if (categoriesHeaderBtn) {
+        function trapCategoriesModalFocus(e) {
+            const modal = document.getElementById('categoriesModal');
+            if (!modal || !modal.classList.contains('show')) return;
+            if (e.key === 'Tab') {
+                const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+                const focusableEls = Array.prototype.slice.call(focusable);
+                if (focusableEls.length === 0) return;
+                const first = focusableEls[0];
+                const last = focusableEls[focusableEls.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                    }
+                } else {
+                    if (document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                    }
+                }
+            } else if (e.key === 'Escape') {
+                closeCategoriesModal();
+            }
+        }
+
+        const categoriesHeaderBtn = document.getElementById('categoriesHeaderBtn');
+        const categoriesModalClose = document.getElementById('categoriesModalClose');
+        const categoriesModal = document.getElementById('categoriesModal');
+
+        if (categoriesHeaderBtn) {
                 categoriesHeaderBtn.addEventListener('click', openCategoriesModal);
-            }
+        }
             
-            if (categoriesModalClose) {
+        if (categoriesModalClose) {
                 categoriesModalClose.addEventListener('click', closeCategoriesModal);
-            }
+        }
             
-            if (categoriesModal) {
+        if (categoriesModal) {
                 // Close modal when clicking outside content
                 categoriesModal.addEventListener('click', function(e) {
                     if (e.target === categoriesModal) {
                         closeCategoriesModal();
                     }
                 });
-            }
-        });
+        }
 
         async function selectCategory(category, event) {
             console.log('Selecting category:', category);
@@ -4141,29 +4202,29 @@
                 categoryBtn.textContent = child.label;
                 
                 categoryBtn.addEventListener('click', async () => {
-                    console.log(`[DEBUG] Child button clicked: ${child.label}`);
-                    console.log(`[DEBUG] Child button data:`, child);
-                    console.log(`[DEBUG] Child custom audio file:`, child.custom_audio_file);
-                    
-                    // Only announce if there is a speech_text value (same logic as main categories)
-                    if (child.speech_text && child.speech_text.trim() !== '') {
-                        await announce(child.speech_text, "system", true);
-                    }
-                    
-                    // Play custom audio file if assigned (same logic as main categories)
-                    if (child.custom_audio_file) {
-                        console.log(`[DEBUG] Playing custom audio for child: ${child.custom_audio_file}`);
-                        try {
-                            await playCustomButtonAudio(child.custom_audio_file);
-                        } catch (error) {
-                            console.error('Error playing child button audio:', error);
+                    await runTapActionOnce(categoryBtn, async () => {
+                        console.log(`[DEBUG] Child button clicked: ${child.label}`);
+                        console.log(`[DEBUG] Child button data:`, child);
+                        console.log(`[DEBUG] Child custom audio file:`, child.custom_audio_file);
+                        
+                        if (child.speech_text && child.speech_text.trim() !== '') {
+                            await announce(child.speech_text, "system", true);
                         }
-                    } else {
-                        console.log(`[DEBUG] No custom audio file configured for child button: ${child.label}`);
-                    }
-                    
-                    console.log('Subcategory clicked:', child.label);
-                    selectSubcategory(child, basePath);
+                        
+                        if (child.custom_audio_file) {
+                            console.log(`[DEBUG] Playing custom audio for child: ${child.custom_audio_file}`);
+                            try {
+                                await playCustomButtonAudio(child.custom_audio_file);
+                            } catch (error) {
+                                console.error('Error playing child button audio:', error);
+                            }
+                        } else {
+                            console.log(`[DEBUG] No custom audio file configured for child button: ${child.label}`);
+                        }
+                        
+                        console.log('Subcategory clicked:', child.label);
+                        await selectSubcategory(child, basePath);
+                    });
                 });
                 
                 modalGrid.appendChild(categoryBtn);
@@ -4485,8 +4546,7 @@
             console.log(`[GRID DEBUG] Options: ${options.length}, Actual Count: ${actualOptionsCount}, Columns: ${gridColumns}, Calculated Rows: ${rows}`);
 
             llmStaticOptions.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
-            // Use explicit rows but ensure container doesn't have min-height forcing extra space
-            llmStaticOptions.style.gridTemplateRows = `repeat(${rows}, 80px)`;
+            llmStaticOptions.style.gridTemplateRows = '';
             llmStaticOptions.style.height = 'fit-content'; // Ensure container shrinks to fit content
             
             // Use DocumentFragment for better performance (batch DOM updates)
@@ -4559,8 +4619,10 @@
                     } // End if (!deferImages)
                     
                     btn.onclick = async () => {
-                        console.log('🔄 Something Else clicked for phrases');
-                        await regeneratePhraseOptions();
+                        await runTapActionOnce(btn, async () => {
+                            console.log('🔄 Something Else clicked for phrases');
+                            await regeneratePhraseOptions();
+                        });
                     };
                     
                     fragment.appendChild(btn);
@@ -4679,51 +4741,45 @@
                     
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
-                        const previewDecision = await handlePreviewInteraction(btn, speechText, 'phrase');
-                        if (!previewDecision.proceed) {
-                            return;
-                        }
+                        await runTapActionOnce(btn, async () => {
+                            const previewDecision = await handlePreviewInteraction(btn, speechText, 'phrase');
+                            if (!previewDecision.proceed) {
+                                return;
+                            }
 
-                        // Reset status message after first button click following a question
-                        if (activeQuestionAsked) {
-                            activeQuestionAsked = false;
-                            updateStatusMessage(getReadyMessage());
-                        }
-                        
-                        addToSpeech(speechText);
-                        // Announce the speech text when phrase is selected
-                        if (!previewDecision.alreadyAnnounced) {
-                            await announce(speechText, "system", true);
-                        }
-                        
-                        // ========== FOLLOW-UP CONVERSATION LOGIC ==========
-                        console.log('💬 Tap phrase selected, generating follow-up options:', speechText);
-                        
-                        // Initialize conversation context if needed
-                        if (tapFollowUpConversation.selectedPhrases.length === 0) {
-                            if (currentQuestion) {
-                                tapFollowUpConversation.originalQuestion = currentQuestion;
+                            if (activeQuestionAsked) {
+                                activeQuestionAsked = false;
+                                updateStatusMessage(getReadyMessage());
                             }
-                            if (currentCategory && currentCategory.label) {
-                                tapFollowUpConversation.originalCategory = currentCategory.label;
+                            
+                            addToSpeech(speechText);
+                            if (!previewDecision.alreadyAnnounced) {
+                                await announce(speechText, "system", true);
                             }
-                        }
-                        
-                        // Add selected phrase to conversation history
-                        tapFollowUpConversation.selectedPhrases.push(speechText);
-                        console.log('💬 Conversation history:', tapFollowUpConversation);
-                        
-                        // Build exclusion text from current options
-                        const excludedOptionsText = currentPhraseOptions
-                            .map(opt => (typeof opt === 'object' && opt.option) ? opt.option : opt)
-                            .filter(text => typeof text === 'string' && text.trim() !== '')
-                            .join('; ');
-                        
-                        // Generate follow-up prompt with conversation context
-                        const followUpPrompt = buildFollowUpPromptForTap(excludedOptionsText);
-                        
-                        try {
-                            console.log('📤 Sending follow-up request to LLM...');
+                            
+                            console.log('💬 Tap phrase selected, generating follow-up options:', speechText);
+                            
+                            if (tapFollowUpConversation.selectedPhrases.length === 0) {
+                                if (currentQuestion) {
+                                    tapFollowUpConversation.originalQuestion = currentQuestion;
+                                }
+                                if (currentCategory && currentCategory.label) {
+                                    tapFollowUpConversation.originalCategory = currentCategory.label;
+                                }
+                            }
+                            
+                            tapFollowUpConversation.selectedPhrases.push(speechText);
+                            console.log('💬 Conversation history:', tapFollowUpConversation);
+                            
+                            const excludedOptionsText = currentPhraseOptions
+                                .map(opt => (typeof opt === 'object' && opt.option) ? opt.option : opt)
+                                .filter(text => typeof text === 'string' && text.trim() !== '')
+                                .join('; ');
+                            
+                            const followUpPrompt = buildFollowUpPromptForTap(excludedOptionsText);
+                            
+                            try {
+                                console.log('📤 Sending follow-up request to LLM...');
                             
                             // Generate follow-up options using LLM
                             const requestBody = {
@@ -4785,11 +4841,10 @@
                                 console.warn('TAP: No follow-up options after filtering');
                             }
                             
-                        } catch (error) {
-                            console.error('TAP: Error generating follow-up options:', error);
-                            // On error, keep current options
-                        }
-                        // ========== END FOLLOW-UP CONVERSATION LOGIC ==========
+                            } catch (error) {
+                                console.error('TAP: Error generating follow-up options:', error);
+                            }
+                        });
                     });
                 } else {
                     btn.classList.add('empty-state');
@@ -5531,10 +5586,7 @@
 
             // Dynamic Grid Sizing for Freestyle
             freestyleOptions.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
-            
-            // Calculate rows needed based on FreestyleWordOptions and gridColumns
-            const rows = Math.ceil(FreestyleWordOptions / gridColumns);
-            freestyleOptions.style.gridTemplateRows = `repeat(${rows}, 80px)`;
+            freestyleOptions.style.gridTemplateRows = '';
             
             // Use DocumentFragment for better performance (batch DOM updates)
             const fragment = document.createDocumentFragment();
@@ -5605,8 +5657,10 @@
                     } // End if (!deferImages)
                     
                     btn.onclick = async () => {
-                        console.log('🔄 Something Else clicked for words');
-                        await regenerateWordOptions();
+                        await runTapActionOnce(btn, async () => {
+                            console.log('🔄 Something Else clicked for words');
+                            await regenerateWordOptions();
+                        });
                     };
                     
                     fragment.appendChild(btn);
@@ -5704,46 +5758,38 @@
                     }
                     
                     btn.addEventListener('click', async () => {
-                        let phraseToAdd, phraseToAnnounce;
+                        await runTapActionOnce(btn, async () => {
+                            let phraseToAdd;
+                            let phraseToAnnounce;
 
-                        if (currentWordsPrompt) {
-                            // Combine word prompt with selected option
-                            phraseToAdd = `${currentWordsPrompt} ${text}`;
-                            phraseToAnnounce = phraseToAdd;
-                            console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
-                        } else {
-                            // No word prompt, use selection as-is
-                            phraseToAdd = text;
-                            phraseToAnnounce = text;
-                            console.log('🎯 Using selection as-is:', text);
-                        }
+                            if (currentWordsPrompt) {
+                                phraseToAdd = `${currentWordsPrompt} ${text}`;
+                                phraseToAnnounce = phraseToAdd;
+                                console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
+                            } else {
+                                phraseToAdd = text;
+                                phraseToAnnounce = text;
+                                console.log('🎯 Using selection as-is:', text);
+                            }
 
-                        const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
-                        if (!previewDecision.proceed) {
-                            return;
-                        }
+                            const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
+                            if (!previewDecision.proceed) {
+                                return;
+                            }
 
-                        // Reset status message after first button click following a question
-                        if (activeQuestionAsked) {
-                            activeQuestionAsked = false;
-                            updateStatusMessage(getReadyMessage());
-                        }
-                        
-                        // SIMPLIFIED LOGIC: 
-                        // 1. If there's a word prompt, combine it with the selection
-                        // 2. Add the result to Speech History and announce it
-                        // 3. Generate new options based on the updated Speech History
-                        
-                        // Add to Speech History and announce
-                        addToSpeech(phraseToAdd);
-                        if (!previewDecision.alreadyAnnounced) {
-                            await announce(phraseToAnnounce, "system", true);
-                        }
-                        
-                        // CRITICAL: Generate next options based on the UPDATED Speech History
-                        // This ensures continuity in the conversation
-                        console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
-                        await updateFreestyleOptionsWithSelectedWord(text);
+                            if (activeQuestionAsked) {
+                                activeQuestionAsked = false;
+                                updateStatusMessage(getReadyMessage());
+                            }
+                            
+                            addToSpeech(phraseToAdd);
+                            if (!previewDecision.alreadyAnnounced) {
+                                await announce(phraseToAnnounce, "system", true);
+                            }
+                            
+                            console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
+                            await updateFreestyleOptionsWithSelectedWord(text);
+                        });
                     });
                 } else {
                     // Empty slot - show dash or make invisible

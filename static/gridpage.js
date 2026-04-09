@@ -16,6 +16,211 @@ let followUpConversation = {
     selectedResponses: []
 };
 
+const COMPOSE_SESSION_STORAGE_KEY = 'bravoComposeSession';
+const COMPOSE_PENDING_APPEND_KEY = 'bravoComposePendingAppend';
+const EMAIL_SESSION_STORAGE_KEY = 'bravoEmailSession';
+let composeSession = null;
+let emailSession = null;
+let composeMenuActionInProgress = false;
+
+function loadEmailSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(EMAIL_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return {
+                active: false,
+                mode: 'menu',
+                recipientEmail: '',
+                recipientName: '',
+                sourceFrom: null,
+                threadId: '',
+                inReplyTo: '',
+                references: ''
+            };
+        }
+
+        return {
+            active: parsed.active === true,
+            mode: parsed.mode || 'menu',
+            recipientEmail: parsed.recipientEmail || '',
+            recipientName: parsed.recipientName || '',
+            sourceFrom: parsed.sourceFrom || null,
+            threadId: parsed.threadId || '',
+            inReplyTo: parsed.inReplyTo || '',
+            references: parsed.references || ''
+        };
+    } catch (error) {
+        console.warn('Failed to parse email session:', error);
+        return {
+            active: false,
+            mode: 'menu',
+            recipientEmail: '',
+            recipientName: '',
+            sourceFrom: null,
+            threadId: '',
+            inReplyTo: '',
+            references: ''
+        };
+    }
+}
+
+function saveEmailSession() {
+    if (!emailSession) return;
+    sessionStorage.setItem(EMAIL_SESSION_STORAGE_KEY, JSON.stringify(emailSession));
+}
+
+function clearEmailSession() {
+    emailSession = {
+        active: false,
+        mode: 'menu',
+        recipientEmail: '',
+        recipientName: '',
+        sourceFrom: null,
+        threadId: '',
+        inReplyTo: '',
+        references: ''
+    };
+    sessionStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
+}
+
+function isEmailSessionActive() {
+    return Boolean(emailSession && emailSession.active === true);
+}
+
+function loadComposeSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(COMPOSE_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+        }
+        return {
+            active: parsed.active === true,
+            documentId: parsed.documentId || null,
+            title: parsed.title || '',
+            text: typeof parsed.text === 'string' ? parsed.text : '',
+            startedAt: parsed.startedAt || null,
+            sourceFrom: parsed.sourceFrom || null
+        };
+    } catch (error) {
+        console.warn('Failed to parse compose session:', error);
+        return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    }
+}
+
+function saveComposeSession() {
+    if (!composeSession) return;
+    sessionStorage.setItem(COMPOSE_SESSION_STORAGE_KEY, JSON.stringify(composeSession));
+}
+
+function clearComposeSession() {
+    composeSession = { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    sessionStorage.removeItem(COMPOSE_SESSION_STORAGE_KEY);
+    updateSpeechHistoryPanel(); // Restore Speech History label and values
+    updateStatusBar(''); // Clear compose status from bar
+}
+
+function isComposeSessionActive() {
+    return Boolean(composeSession && composeSession.active === true);
+}
+
+function appendToComposeText(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized || !isComposeSessionActive()) return;
+
+    const existing = String(composeSession.text || '').trim();
+    composeSession.text = existing ? `${existing} ${normalized}` : normalized;
+    saveComposeSession();
+    updateSpeechHistoryPanel(); // Keep Compose box in sync
+}
+
+function consumePendingComposeAppends() {
+    const raw = localStorage.getItem(COMPOSE_PENDING_APPEND_KEY);
+    if (!raw) return;
+
+    let items = [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            items = parsed;
+        }
+    } catch (error) {
+        console.warn('Unable to parse pending compose appends:', error);
+    }
+
+    if (!items.length || !isComposeSessionActive()) {
+        return;
+    }
+
+    let didAppend = false;
+    items.forEach((item) => {
+        const text = String(item || '').trim();
+        if (!text) return;
+        appendToComposeText(text);
+        didAppend = true;
+    });
+
+    if (didAppend) {
+        localStorage.removeItem(COMPOSE_PENDING_APPEND_KEY);
+    }
+}
+
+function getComposePromptContext() {
+    if (!isComposeSessionActive()) return '';
+    const compositionText = String(composeSession.text || '').trim();
+    if (!compositionText) return '';
+    return `\n\nCREATION CONTEXT:\nThe user is actively creating a letter. Prioritize options that continue or refine this creation:\n"${compositionText}"\nKeep continuity with this creation.`;
+}
+
+/**
+ * Show or clear the sticky #status-bar at the bottom of the screen.
+ * @param {string} message  - Text to display; empty string hides the bar.
+ * @param {boolean} isListening - When true, applies the green "listening" style.
+ */
+function updateStatusBar(message = '', isListening = false) {
+    const bar = document.getElementById('status-bar');
+    if (!bar) return;
+    if (message) {
+        bar.textContent = message;
+        bar.style.display = 'block';
+        bar.classList.toggle('listening', isListening);
+    } else {
+        bar.textContent = '';
+        bar.style.display = 'none';
+        bar.classList.remove('listening');
+    }
+}
+
+/**
+ * Switch the Speech History panel between "Speech History" mode and
+ * "Create" mode based on whether a compose session is currently active.
+ * Safe to call at any time.
+ */
+function updateSpeechHistoryPanel() {
+    const label = document.getElementById('speech-history-label');
+    const textarea = document.getElementById('speech-history');
+    if (!label || !textarea) return;
+
+    if (isComposeSessionActive()) {
+        label.textContent = isEmailSessionActive() ? 'Email:' : 'Create:';
+        textarea.value = String(composeSession.text || '');
+    } else {
+        label.textContent = 'Speech History:';
+        const userId = (typeof currentAacUserId !== 'undefined' && currentAacUserId)
+            ? currentAacUserId : '__default__';
+        const stored = localStorage.getItem(`speechHistory_${userId}`) || '';
+        textarea.value = stored;
+    }
+}
+
+function syncComposeSessionFromStorage() {
+    composeSession = loadComposeSession();
+    consumePendingComposeAppends();
+    updateSpeechHistoryPanel();
+}
+
+composeSession = loadComposeSession();
+emailSession = loadEmailSession();
+
 // Restore querytype and currentQuestion from localStorage if available
 if (localStorage.getItem('llm_currentQueryType')) {
     querytype = localStorage.getItem('llm_currentQueryType');
@@ -371,6 +576,7 @@ function buildFollowUpPrompt(excludedOptionsText = '') {
     const latestFocusLine = latestSelectedResponse
         ? `Latest selected response (PRIMARY FOCUS): "${latestSelectedResponse}".`
         : '';
+    const composePromptContext = getComposePromptContext();
     
     // Build type-specific pattern examples
     const typePatternExamples = typeGuidance.patterns
@@ -429,6 +635,7 @@ RULES FOR GENERATION:
 7. Include at least 4 partner-engagement QUESTIONS that end with "?" and invite the partner to respond
 
 ${moodLine}${exclusionLine}
+${composePromptContext}
 Return ONLY a JSON list where each item has "option", "summary", and "keywords" keys.
 The "option" key should contain the FULL option text.
 ${summaryInstruction}
@@ -1797,6 +2004,866 @@ async function showMoodSelectionIfNeeded() {
     });
 }
 
+function getComposeReturnTarget() {
+    if (composeSession?.sourceFrom) {
+        return composeSession.sourceFrom;
+    }
+    return 'gridpage.html?page=home';
+}
+
+function updateComposeQuestionDisplay(message = '') {
+    // Keep hidden textarea in sync (for legacy code that reads it)
+    const questionDisplay = document.getElementById('question-display');
+    const compositionText = String(composeSession?.text || '').trim();
+    const header = message || 'Create Mode';
+    if (questionDisplay) questionDisplay.value = compositionText ? `${header}\n\n${compositionText}` : header;
+    // Show in status bar instead of the hidden question box
+    updateStatusBar(`✏️ ${header}`);
+    // Keep the compose panel label/textarea current
+    updateSpeechHistoryPanel();
+}
+
+function createComposeGridButton(label, clickHandler, index = 0) {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.classList.add('grid-button');
+    const row = Math.floor(index / gridColumns);
+    const col = index % gridColumns;
+    button.dataset.row = String(row);
+    button.dataset.col = String(col);
+    button.style.gridRowStart = row + 1;
+    button.style.gridColumnStart = col + 1;
+    button.addEventListener('click', async () => {
+        if (composeMenuActionInProgress) {
+            return;
+        }
+        composeMenuActionInProgress = true;
+        stopAuditoryScanning();
+        try {
+            await clickHandler();
+        } finally {
+            composeMenuActionInProgress = false;
+        }
+    });
+    return button;
+}
+
+async function renderComposeEntryMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateComposeQuestionDisplay('Create: Start New or Open Existing');
+
+    const options = [
+        {
+            label: 'Create New',
+            handler: async () => {
+                composeSession = {
+                    active: true,
+                    documentId: null,
+                    title: '',
+                    text: '',
+                    startedAt: new Date().toISOString(),
+                    sourceFrom: fromUrl || getComposeReturnTarget()
+                };
+                saveComposeSession();
+                window.location.href = '/static/compose_create.html';
+            }
+        },
+        {
+            label: 'Open Existing',
+            handler: async () => {
+                await renderComposeExistingDocumentsMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Cancel',
+            handler: async () => {
+                clearComposeSession();
+                window.location.href = fromUrl || 'gridpage.html?page=home';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'compose-entry-menu' }), 50);
+}
+
+async function renderComposeExistingDocumentsMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateComposeQuestionDisplay('Create: Choose an existing document');
+
+    let docs = [];
+    try {
+        const response = await authenticatedFetch('/api/compose/documents', { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            docs = Array.isArray(data.documents) ? data.documents : [];
+        }
+    } catch (error) {
+        console.error('Error loading compose documents:', error);
+    }
+
+    const storyLikeDocs = docs.filter((doc) => (doc.document_type || 'story') !== 'email').slice(0, Math.max(6, gridColumns * 2));
+    let index = 0;
+
+    if (storyLikeDocs.length === 0) {
+        container.appendChild(createComposeGridButton('No Saved Documents', async () => {
+            await announce('No saved documents found.', 'system', false);
+            await renderComposeEntryMenu(container, fromUrl);
+        }, index++));
+    } else {
+        storyLikeDocs.forEach((doc) => {
+            const displayTitle = (doc.title || 'Untitled Creation').trim();
+            container.appendChild(createComposeGridButton(displayTitle, async () => {
+                composeSession = {
+                    active: true,
+                    documentId: doc.id,
+                    title: displayTitle,
+                    text: String(doc.body || ''),
+                    startedAt: new Date().toISOString(),
+                    sourceFrom: fromUrl || getComposeReturnTarget()
+                };
+                saveComposeSession();
+                window.location.href = '/static/compose_create.html';
+            }, index++));
+        });
+    }
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderComposeEntryMenu(container, fromUrl);
+    }, index));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'compose-existing-menu' }), 50);
+}
+
+async function saveComposeDocumentAndExit() {
+    const compositionText = String(composeSession?.text || '').trim();
+    if (!compositionText) {
+        await announce('Creation is empty. Add words before saving.', 'system', false);
+        return;
+    }
+
+    let generatedTitle = 'Untitled Letter';
+    try {
+        const titleResponse = await authenticatedFetch('/api/compose/generate-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: compositionText })
+        });
+        if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            if (titleData.success && titleData.title) {
+                generatedTitle = String(titleData.title).trim() || generatedTitle;
+            }
+        }
+    } catch (error) {
+        console.warn('Create title generation failed, using fallback title:', error);
+    }
+
+    const payload = {
+        document_type: 'story',
+        title: generatedTitle,
+        body: compositionText,
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: ''
+    };
+
+    const isUpdate = Boolean(composeSession?.documentId);
+    const targetUrl = isUpdate
+        ? `/api/compose/documents/${composeSession.documentId}`
+        : '/api/compose/documents';
+    const method = isUpdate ? 'PUT' : 'POST';
+
+    const saveResponse = await authenticatedFetch(targetUrl, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!saveResponse.ok) {
+        const errText = await saveResponse.text().catch(() => 'unknown save error');
+        throw new Error(`Save failed: ${errText}`);
+    }
+
+    clearComposeSession();
+    window.location.href = 'gridpage.html?page=home';
+}
+
+async function aiEditCompositionInSession() {
+    const compositionText = String(composeSession?.text || '').trim();
+    if (!compositionText) {
+        await announce('Creation is empty. Add words before editing.', 'system', false);
+        return;
+    }
+
+    const response = await authenticatedFetch('/api/compose/ai-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: compositionText })
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => 'unknown ai edit error');
+        throw new Error(`AI edit failed: ${errText}`);
+    }
+
+    const data = await response.json();
+    if (!data.success || !data.edited_body) {
+        throw new Error(data.error || 'AI edit failed');
+    }
+
+    composeSession.text = String(data.edited_body || '').trim();
+    saveComposeSession();
+}
+
+function buildCreationExportFilename() {
+    const existingTitle = String(composeSession?.title || '').trim();
+    const textPreview = String(composeSession?.text || '').trim().split(/\s+/).slice(0, 6).join(' ');
+    const baseName = existingTitle || textPreview || `creation-${new Date().toISOString().slice(0, 10)}`;
+    const safeName = baseName
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+    return `${safeName || 'creation'}.txt`;
+}
+
+async function exportCreationToLocalDrive() {
+    const creationText = String(composeSession?.text || '').trim();
+    if (!creationText) {
+        await announce('Creation is empty. Add words before exporting.', 'system', false);
+        return false;
+    }
+
+    const filename = buildCreationExportFilename();
+
+    if (window.showSaveFilePicker) {
+        try {
+            const fileHandle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [
+                    {
+                        description: 'Text Files',
+                        accept: { 'text/plain': ['.txt'] }
+                    }
+                ]
+            });
+            const writable = await fileHandle.createWritable();
+            await writable.write(creationText);
+            await writable.close();
+            return true;
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                return false;
+            }
+            console.warn('Save picker export failed, falling back to browser download:', error);
+        }
+    }
+
+    const blob = new Blob([creationText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+}
+
+async function renderComposeFinalizeMenu(container) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateComposeQuestionDisplay('Finalize Creation');
+
+    const options = [
+        {
+            label: 'Save Creation',
+            handler: async () => {
+                try {
+                    await saveComposeDocumentAndExit();
+                } catch (error) {
+                    console.error('Error saving composition:', error);
+                    await announce('Unable to save creation right now.', 'system', false);
+                    await renderComposeFinalizeMenu(container);
+                }
+            }
+        },
+        {
+            label: 'Discard Creation',
+            handler: async () => {
+                clearComposeSession();
+                window.location.href = 'gridpage.html?page=home';
+            }
+        },
+        {
+            label: 'Read Creation',
+            handler: async () => {
+                const compositionText = String(composeSession?.text || '').trim();
+                if (!compositionText) {
+                    await announce('Creation is empty.', 'system', false);
+                } else {
+                    await announce(compositionText, 'system', false);
+                }
+                await renderComposeFinalizeMenu(container);
+            }
+        },
+        {
+            label: 'Export Creation',
+            handler: async () => {
+                try {
+                    const exported = await exportCreationToLocalDrive();
+                    if (exported) {
+                        await announce('Creation exported to local drive.', 'system', false);
+                    }
+                } catch (error) {
+                    console.error('Error exporting creation:', error);
+                    await announce('Unable to export creation right now.', 'system', false);
+                }
+                await renderComposeFinalizeMenu(container);
+            }
+        },
+        {
+            label: 'AI Edit Creation',
+            handler: async () => {
+                try {
+                    await aiEditCompositionInSession();
+                    updateComposeQuestionDisplay('AI revised creation');
+                    await announce(String(composeSession?.text || ''), 'system', false);
+                } catch (error) {
+                    console.error('Error during AI edit:', error);
+                    await announce('Unable to AI edit creation right now.', 'system', false);
+                }
+                await renderComposeFinalizeMenu(container);
+            }
+        },
+        {
+            label: 'Return to Creation',
+            handler: async () => {
+                window.location.href = '/static/compose_create.html';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'compose-finalize-menu' }), 50);
+}
+
+function getEmailReturnTarget() {
+    if (emailSession?.sourceFrom) {
+        return emailSession.sourceFrom;
+    }
+    return 'gridpage.html?page=home';
+}
+
+function updateEmailQuestionDisplay(message = '') {
+    const questionDisplay = document.getElementById('question-display');
+    const draftText = String(composeSession?.text || '').trim();
+    const header = message || 'Email';
+    if (questionDisplay) {
+        questionDisplay.value = draftText ? `${header}\n\n${draftText}` : header;
+    }
+    updateStatusBar(`📧 ${header}`);
+    updateSpeechHistoryPanel();
+}
+
+async function startGmailConnectFlow() {
+    const response = await authenticatedFetch('/api/email/connect-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'gmail' })
+    });
+    if (!response.ok) {
+        const text = await response.text().catch(() => 'Unable to create Gmail connect link');
+        throw new Error(text);
+    }
+    const data = await response.json();
+    if (!data?.connect_url) {
+        throw new Error('Missing Gmail connect URL');
+    }
+    window.location.href = data.connect_url;
+}
+
+async function renderEmailEntryMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Choose an option');
+
+    const options = [
+        {
+            label: 'Home',
+            handler: async () => {
+                clearEmailSession();
+                window.location.href = fromUrl || 'gridpage.html?page=home';
+            }
+        },
+        {
+            label: 'Create New Email',
+            handler: async () => {
+                await renderEmailContactsMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Read Existing Email',
+            handler: async () => {
+                await renderEmailInboxMenu(container, fromUrl);
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-entry-menu' }), 50);
+}
+
+async function renderEmailContactsMenu(container, fromUrl, selectedContacts = [], pageToken = null) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const selectionCount = selectedContacts.length;
+    const displayTitle = selectionCount > 0
+        ? `Email: Add another contact (${selectionCount} selected)`
+        : 'Email: Choose a contact';
+    updateEmailQuestionDisplay(displayTitle);
+
+    const pageSize = Math.max(4, LLMOptions);
+    let contacts = [];
+    let nextPageToken = null;
+    let loadError = null;
+    let usingInboxFallback = false;
+    try {
+        const contactsUrl = new URL('/api/email/contacts', window.location.origin);
+        contactsUrl.searchParams.set('max_results', String(pageSize));
+        if (pageToken) contactsUrl.searchParams.set('page_token', pageToken);
+        const response = await authenticatedFetch(`${contactsUrl.pathname}${contactsUrl.search}`, { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            contacts = Array.isArray(data.contacts) ? data.contacts : [];
+            nextPageToken = String(data.next_page_token || '').trim() || null;
+        } else {
+            loadError = `Unable to load contacts (${response.status})`;
+        }
+    } catch (error) {
+        loadError = error.message || 'Unable to load contacts';
+    }
+
+    if (loadError || !contacts.length) {
+        try {
+            const inboxUrl = new URL('/api/email/inbox', window.location.origin);
+            inboxUrl.searchParams.set('max_results', String(pageSize));
+            if (pageToken) inboxUrl.searchParams.set('page_token', pageToken);
+            const inboxResponse = await authenticatedFetch(`${inboxUrl.pathname}${inboxUrl.search}`, { method: 'GET' });
+            if (inboxResponse.ok) {
+                const inboxData = await inboxResponse.json();
+                const messages = Array.isArray(inboxData.messages) ? inboxData.messages : [];
+                const dedupe = new Set();
+                const fallbackContacts = [];
+                messages.forEach((message) => {
+                    const senderEmail = String(message?.sender_email || extractEmailAddressFromHeader(message?.from || '') || '').trim();
+                    if (!senderEmail) return;
+                    const dedupeKey = senderEmail.toLowerCase();
+                    if (dedupe.has(dedupeKey)) return;
+                    dedupe.add(dedupeKey);
+                    fallbackContacts.push({
+                        name: String(message?.sender_name || '').trim(),
+                        email: senderEmail,
+                    });
+                });
+                if (fallbackContacts.length) {
+                    contacts = fallbackContacts;
+                    nextPageToken = String(inboxData.next_page_token || '').trim() || null;
+                    usingInboxFallback = true;
+                    loadError = null;
+                }
+            }
+        } catch (fallbackError) {
+            console.warn('Email contacts fallback from inbox failed:', fallbackError);
+        }
+    }
+
+    if (usingInboxFallback) {
+        updateEmailQuestionDisplay(selectionCount > 0
+            ? `Email: Add another contact (${selectionCount} selected)`
+            : 'Email: Choose a contact (recent senders)');
+    }
+
+    let index = 0;
+    if (loadError) {
+        container.appendChild(createComposeGridButton('Try Again', async () => {
+            await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+        }, index++));
+        container.appendChild(createComposeGridButton('Connect Gmail', async () => {
+            try {
+                await startGmailConnectFlow();
+            } catch (error) {
+                await announce('Unable to connect Gmail right now.', 'system', false);
+                await renderEmailEntryMenu(container, fromUrl);
+            }
+        }, index++));
+    } else if (!contacts.length) {
+        container.appendChild(createComposeGridButton('No Contacts Found', async () => {
+            await announce('No contacts found.', 'system', false);
+            await renderEmailEntryMenu(container, fromUrl);
+        }, index++));
+    } else {
+        // Filter out already-selected contacts to avoid duplicates
+        const selectedEmails = new Set(selectedContacts.map(c => c.email.toLowerCase()));
+        const availableContacts = contacts.filter(c => {
+            const email = String(c?.email || '').trim().toLowerCase();
+            return email && !selectedEmails.has(email);
+        });
+
+        availableContacts.forEach((contact) => {
+            const recipientEmail = String(contact?.email || '').trim();
+            const recipientName = String(contact?.name || '').trim();
+            const label = recipientName || recipientEmail;
+            if (!recipientEmail) return;
+
+            container.appendChild(createComposeGridButton(label, async () => {
+                const updatedContacts = [...selectedContacts, { email: recipientEmail, name: recipientName }];
+                await renderEmailContactsConfirmMenu(container, fromUrl, updatedContacts);
+            }, index++));
+        });
+
+        if (nextPageToken) {
+            container.appendChild(createComposeGridButton('Show More', async () => {
+                await renderEmailContactsMenu(container, fromUrl, selectedContacts, nextPageToken);
+            }, index++));
+        }
+    }
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        if (selectedContacts.length > 0) {
+            await renderEmailContactsConfirmMenu(container, fromUrl, selectedContacts);
+        } else {
+            await renderEmailEntryMenu(container, fromUrl);
+        }
+    }, index));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-contacts-menu' }), 50);
+}
+
+async function renderEmailContactsConfirmMenu(container, fromUrl, selectedContacts) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const names = selectedContacts.map(c => c.name || c.email).join(', ');
+    updateEmailQuestionDisplay(`To: ${names}`);
+
+    container.appendChild(createComposeGridButton('Add More Contacts', async () => {
+        await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+    }, 0));
+
+    container.appendChild(createComposeGridButton('Create Email', async () => {
+        const primary = selectedContacts[0];
+        emailSession = {
+            active: true,
+            mode: 'compose',
+            recipientEmail: selectedContacts.map(c => c.email).join(','),
+            recipientName: selectedContacts.map(c => c.name || c.email).join(', '),
+            recipients: selectedContacts,
+            sourceFrom: fromUrl || getEmailReturnTarget(),
+            threadId: '',
+            inReplyTo: '',
+            references: ''
+        };
+        saveEmailSession();
+
+        composeSession = {
+            active: true,
+            documentId: null,
+            title: '',
+            text: '',
+            startedAt: new Date().toISOString(),
+            sourceFrom: fromUrl || getEmailReturnTarget()
+        };
+        saveComposeSession();
+
+        window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
+    }, 1));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+    }, 2));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-contacts-confirm-menu' }), 50);
+}
+
+async function renderEmailInboxMenu(container, fromUrl, pageToken = null) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Read existing messages');
+
+    let messages = [];
+    let nextPageToken = null;
+    let loadError = null;
+    try {
+        const inboxUrl = new URL('/api/email/inbox', window.location.origin);
+        inboxUrl.searchParams.set('max_results', '20');
+        if (pageToken) {
+            inboxUrl.searchParams.set('page_token', pageToken);
+        }
+
+        const response = await authenticatedFetch(`${inboxUrl.pathname}${inboxUrl.search}`, { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            messages = Array.isArray(data.messages) ? data.messages : [];
+            nextPageToken = String(data.next_page_token || '').trim() || null;
+        } else {
+            loadError = `Unable to load inbox (${response.status})`;
+        }
+    } catch (error) {
+        loadError = error.message || 'Unable to load inbox';
+    }
+
+    let index = 0;
+    if (loadError || !messages.length) {
+        container.appendChild(createComposeGridButton(loadError ? 'Inbox Unavailable' : 'No Inbox Messages', async () => {
+            await announce(loadError || 'No inbox messages available.', 'system', false);
+            await renderEmailEntryMenu(container, fromUrl);
+        }, index++));
+    } else {
+        messages.slice(0, Math.max(8, gridColumns * 3)).forEach((message) => {
+            const messageId = String(message?.id || '').trim();
+            if (!messageId) return;
+            const subject = String(message.subject || '(No subject)').trim();
+            const label = subject;
+
+            container.appendChild(createComposeGridButton(label.slice(0, 64), async () => {
+                stopAuditoryScanning();
+                try {
+                    const detailResponse = await authenticatedFetch(`/api/email/messages/${encodeURIComponent(messageId)}`, { method: 'GET' });
+                    if (!detailResponse.ok) {
+                        await announce('Unable to load that email.', 'system', false);
+                        await renderEmailInboxMenu(container, fromUrl, pageToken);
+                        return;
+                    }
+                    const detail = await detailResponse.json();
+                    const msg = detail?.message || {};
+                    const body = String(msg.body_text || msg.snippet || '').trim();
+                    const readText = body || 'No message body available.';
+                    await announce(readText, 'system', false, false);
+                    await renderEmailReadActionsMenu(container, fromUrl, messageId, msg);
+                    return;
+                } catch (error) {
+                    await announce('Unable to read that email right now.', 'system', false);
+                }
+                await renderEmailInboxMenu(container, fromUrl, pageToken);
+            }, index++));
+        });
+    }
+
+    if (nextPageToken) {
+        container.appendChild(createComposeGridButton('Show More', async () => {
+            await renderEmailInboxMenu(container, fromUrl, nextPageToken);
+        }, index++));
+    }
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderEmailEntryMenu(container, fromUrl);
+    }, index));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-inbox-menu' }), 50);
+}
+
+function extractEmailAddressFromHeader(headerValue) {
+    const raw = String(headerValue || '').trim();
+    if (!raw) return '';
+
+    const bracketMatch = raw.match(/<([^>]+)>/);
+    if (bracketMatch && bracketMatch[1]) {
+        return bracketMatch[1].trim();
+    }
+
+    const plainMatch = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return plainMatch ? plainMatch[0].trim() : '';
+}
+
+async function startReplyToEmail(fromUrl, messageId, messageData) {
+    const recipientEmail = extractEmailAddressFromHeader(messageData.from || '');
+    if (!recipientEmail) {
+        await announce('Unable to determine sender email for reply.', 'system', false);
+        return;
+    }
+
+    emailSession = {
+        active: true,
+        mode: 'reply',
+        recipientEmail,
+        recipientName: String(messageData.from || '').trim(),
+        sourceFrom: fromUrl || getEmailReturnTarget(),
+        threadId: String(messageData.thread_id || '').trim(),
+        inReplyTo: String(messageData.message_id_header || '').trim(),
+        references: String(messageData.references || '').trim()
+    };
+    saveEmailSession();
+
+    composeSession = {
+        active: true,
+        documentId: null,
+        title: String(messageData.subject || '').trim(),
+        text: '',
+        startedAt: new Date().toISOString(),
+        sourceFrom: fromUrl || getEmailReturnTarget()
+    };
+    saveComposeSession();
+
+    window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
+}
+
+async function renderEmailReadActionsMenu(container, fromUrl, messageId, messageData) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Choose an action');
+
+    container.appendChild(createComposeGridButton('Reply to Email', async () => {
+        await startReplyToEmail(fromUrl, messageId, messageData);
+    }, 0));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderEmailInboxMenu(container, fromUrl);
+    }, 1));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-read-actions-menu' }), 50);
+}
+
+async function sendCurrentEmailFromSession() {
+    if (!isEmailSessionActive()) {
+        throw new Error('Email session is not active');
+    }
+
+    const bodyText = String(composeSession?.text || '').trim();
+    if (!bodyText) {
+        throw new Error('Email body is empty');
+    }
+
+    // Support both array (multi-recipient) and legacy single-string recipient
+    let toAddresses = [];
+    if (Array.isArray(emailSession.recipients) && emailSession.recipients.length > 0) {
+        toAddresses = emailSession.recipients.map(r => String(r.email || '').trim()).filter(Boolean);
+    } else {
+        const recipientEmail = String(emailSession.recipientEmail || '').trim();
+        if (recipientEmail) {
+            toAddresses = recipientEmail.split(',').map(e => e.trim()).filter(Boolean);
+        }
+    }
+    if (!toAddresses.length) {
+        throw new Error('No recipient selected');
+    }
+
+    let subject = 'Message';
+    try {
+        const titleResponse = await authenticatedFetch('/api/compose/generate-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: bodyText })
+        });
+        if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            if (titleData?.success && titleData?.title) {
+                subject = String(titleData.title).trim() || subject;
+            }
+        }
+    } catch (error) {
+        console.warn('Email subject generation failed, using fallback subject:', error);
+    }
+
+    const sendResponse = await authenticatedFetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            to: toAddresses,
+            cc: [],
+            bcc: [],
+            subject,
+            body: bodyText,
+            thread_id: String(emailSession.threadId || '').trim(),
+            in_reply_to: String(emailSession.inReplyTo || '').trim(),
+            references: String(emailSession.references || '').trim()
+        })
+    });
+
+    if (!sendResponse.ok) {
+        const errText = await sendResponse.text().catch(() => 'send failed');
+        throw new Error(errText);
+    }
+}
+
+async function renderEmailFinalizeMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Finalize draft');
+
+    const options = [
+        {
+            label: 'Read email',
+            handler: async () => {
+                const bodyText = String(composeSession?.text || '').trim();
+                await speakLocally(bodyText || 'Email is empty.');
+                await renderEmailFinalizeMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Edit email',
+            handler: async () => {
+                window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
+            }
+        },
+        {
+            label: 'Send email',
+            handler: async () => {
+                try {
+                    await sendCurrentEmailFromSession();
+                    clearComposeSession();
+                    clearEmailSession();
+                    await announce('Email sent successfully.', 'system', false);
+                    window.location.href = `gridpage.html?email_menu=1&from=${encodeURIComponent(fromUrl || getEmailReturnTarget())}`;
+                } catch (error) {
+                    await announce('Unable to send email right now.', 'system', false);
+                    await renderEmailFinalizeMenu(container, fromUrl);
+                }
+            }
+        },
+        {
+            label: 'Discard Email',
+            handler: async () => {
+                clearComposeSession();
+                clearEmailSession();
+                window.location.href = 'gridpage.html?page=home';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-finalize-menu' }), 50);
+}
+
+function addQuitComposeButton(container) {
+    if (!isComposeSessionActive()) return;
+    if (container.querySelector('#compose-quit-button')) return;
+
+    const currentCount = container.querySelectorAll('button').length;
+    const isEmailDraft = isEmailSessionActive();
+    const quitButton = createComposeGridButton(isEmailDraft ? 'Exit Email' : 'Exit Creation', () => {
+        window.location.href = isEmailDraft ? 'gridpage.html?email_finalize=1' : 'gridpage.html?compose_finalize=1';
+    }, currentCount);
+    quitButton.id = 'compose-quit-button';
+    container.appendChild(quitButton);
+    updateComposeQuestionDisplay(isEmailDraft ? 'Email in progress' : 'Creation in progress');
+}
+
 
 
 // --- User Management Functions ---
@@ -1836,18 +2903,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 3. Initialize grid layout with loaded gridColumns setting
     updateGridLayout();
 
+    const params = new URLSearchParams(window.location.search);
+    const isComposeEntryView = params.get('compose_entry') === '1';
+    const isComposeFinalizeView = params.get('compose_finalize') === '1';
+    const isEmailEntryView = params.get('email_menu') === '1';
+    const isEmailFinalizeView = params.get('email_finalize') === '1';
+    const isEmailComposeView = params.get('email_compose') === '1';
+    const composeResumeFlag = params.get('compose') === '1';
+    const isComposeFlowView = isComposeEntryView || isComposeFinalizeView || isEmailEntryView || isEmailFinalizeView || isEmailComposeView;
+
     // Remove the user-id-selector related UI elements if they exist
     document.getElementById('user-id-selector')?.closest('div')?.remove();
 
     // 4. Show mood selection if enabled and not already set for this session
     // Lazy load non-critical features - don't block page render
     Promise.all([
-        showMoodSelectionIfNeeded(),
+        isComposeFlowView ? Promise.resolve() : showMoodSelectionIfNeeded(),
         window.avatarSelector?.initializeAfterAuth?.()
     ]).catch(err => console.warn('Non-critical feature init failed:', err));
 
     const gridContainer = document.getElementById('gridContainer');
-    const params = new URLSearchParams(window.location.search);
     let pageName = params.get('page');
 
     if (!pageName) {
@@ -1896,7 +2971,48 @@ document.addEventListener('DOMContentLoaded', async () => {
         sessionStorage.setItem('currentPageDisplayNameForBanner', pageToDisplay.displayName || capitalizeFirstLetter(pageToDisplay.name));
         setBannerAndPageTitle(); // Call again to set the correct title
 
-        await generateGrid(pageToDisplay, gridContainer);
+        if (isComposeEntryView) {
+            const fromUrl = params.get('from') || getComposeReturnTarget();
+            await renderComposeEntryMenu(gridContainer, fromUrl);
+        } else if (isComposeFinalizeView) {
+            if (!isComposeSessionActive()) {
+                window.location.href = 'gridpage.html?page=home';
+                return;
+            }
+            await renderComposeFinalizeMenu(gridContainer);
+        } else if (isEmailEntryView) {
+            const fromUrl = params.get('from') || getEmailReturnTarget();
+            await renderEmailEntryMenu(gridContainer, fromUrl);
+        } else if (isEmailFinalizeView) {
+            const fromUrl = params.get('from') || getEmailReturnTarget();
+            if (!isComposeSessionActive() || !isEmailSessionActive()) {
+                window.location.href = `gridpage.html?email_menu=1&from=${encodeURIComponent(fromUrl)}`;
+                return;
+            }
+            await renderEmailFinalizeMenu(gridContainer, fromUrl);
+        } else {
+            if (composeResumeFlag && isEmailComposeView && !isComposeSessionActive()) {
+                composeSession = {
+                    active: true,
+                    documentId: null,
+                    title: '',
+                    text: '',
+                    startedAt: new Date().toISOString(),
+                    sourceFrom: params.get('from') || getComposeReturnTarget()
+                };
+                saveComposeSession();
+            }
+
+            if (!isEmailComposeView && isComposeSessionActive() && !isEmailSessionActive()) {
+                clearComposeSession();
+            }
+
+            await generateGrid(pageToDisplay, gridContainer);
+            if (isComposeSessionActive()) {
+                addQuitComposeButton(gridContainer);
+                updateSpeechHistoryPanel(); // Switch label to "Compose" and show composition text
+            }
+        }
 
         const jokesParam = params.get('jokes');
         if (jokesParam) {
@@ -1960,7 +3076,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupGamepadListeners(); // Ensure called
 
     // --- Setup Speech Recognition ---
-    setupSpeechRecognition();
+    if (!isComposeFlowView && !isComposeSessionActive()) {
+        setupSpeechRecognition();
+    }
 
     // --- Add AudioContext Resume Listeners (MUST HAVE for playing audio) ---
     document.body.addEventListener('mousedown', tryResumeAudioContext, { once: true });
@@ -1983,6 +3101,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         const storedHistory = localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId));
         if (storedHistory) { speechHistory.value = storedHistory; }
     }
+    // If a compose session is already active (e.g. returning to compose grid), switch the panel
+    updateSpeechHistoryPanel();
+    window.addEventListener('pageshow', syncComposeSessionFromStorage);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            syncComposeSessionFromStorage();
+        }
+    });
+    window.addEventListener('focus', syncComposeSessionFromStorage);
     
     // --- NEW: Add event listeners for the admin toolbar buttons ---
     const switchUserButton = document.getElementById('switch-user-button');
@@ -2213,9 +3340,20 @@ async function generateGrid(page, container) {
 
     const buttonsArray = Array.isArray(page.buttons) ? page.buttons : [];
     // 1. Filter out hidden buttons and those without text
-    const visibleButtons = buttonsArray.filter(buttonData =>
-        buttonData && buttonData.text && buttonData.text.trim() !== '' && buttonData.hidden !== true
-    );
+    const visibleButtons = buttonsArray.filter(buttonData => {
+        if (!(buttonData && buttonData.text && buttonData.text.trim() !== '' && buttonData.hidden !== true)) {
+            return false;
+        }
+
+        if (isComposeSessionActive()) {
+            const target = String(buttonData.targetPage || '').trim().toLowerCase();
+            if (target === '!games' || target === '!compose' || target === '!composition') {
+                return false;
+            }
+        }
+
+        return true;
+    });
     if (visibleButtons.length === 0) {
         container.innerHTML = `<p class="col-span-full text-center text-gray-500">No buttons configured.</p>`;
         return;
@@ -2508,7 +3646,7 @@ async function handleButtonClick(buttonData) {
             if (speechPhrase) {
                 console.log('🎤 Has speech phrase, announcing:', speechPhrase);
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system"); // Announce while speech bubble is clear.
+                await announce(speechPhrase, "system", false); // Announce while speech bubble is clear.
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -2557,7 +3695,7 @@ async function handleButtonClick(buttonData) {
                 'The "summary" key should contain the exact same FULL text as the "option" key.' :
                 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
 
-            const promptForLLM = `"${llmQuery}". Format as a JSON list... ${summaryInstruction} ...`;
+            const promptForLLM = `"${llmQuery}". Format as a JSON list... ${summaryInstruction} ...${getComposePromptContext()}`;
             const tLLM0 = performance.now();
             const options = await getLLMResponse(promptForLLM);
             const tLLM1 = performance.now();
@@ -2641,7 +3779,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system");
+                await announce(speechPhrase, "system", false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (go-back) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -2677,7 +3815,7 @@ async function handleButtonClick(buttonData) {
                 
                 if (speechPhrase) {
                     const tAnnounce0 = performance.now();
-                    await announce(speechPhrase, "system");
+                    await announce(speechPhrase, "system", false);
                     const tAnnounce1 = performance.now();
                     console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (temp nav return) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                     
@@ -2703,7 +3841,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system");
+                await announce(speechPhrase, "system", false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (nav) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -2777,6 +3915,16 @@ async function handleButtonClick(buttonData) {
                     const params = new URLSearchParams();
                     params.set('from', window.location.href);
                     window.location.href = `numbers.html?${params.toString()}`;
+                } else if (specialPage === 'email' || specialPage === 'emails') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    params.set('email_menu', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'compose' || specialPage === 'composition') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    params.set('compose_entry', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions
                     console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
@@ -2799,6 +3947,10 @@ async function handleButtonClick(buttonData) {
                     // Pass originating button text if available
                     if (activeOriginatingButtonText) {
                         params.set('originating_button', activeOriginatingButtonText);
+                    }
+
+                    if (isComposeSessionActive()) {
+                        params.set('compose', '1');
                     }
                     
                     console.log('DEBUG: Freestyle navigation params:', params.toString());
@@ -2824,7 +3976,7 @@ async function handleButtonClick(buttonData) {
                 sessionStorage.removeItem('tempNavReturnPage');
                 
                 if (speechPhrase) {
-                    await announce(speechPhrase, "system");
+                    await announce(speechPhrase, "system", false);
                     // Record chat history for user speech selection
                     console.log('🎯 GRIDPAGE Recording temp nav speech before return:', speechPhrase);
                     recordChatHistory("", speechPhrase).catch(error => {
@@ -2844,7 +3996,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system");
+                await announce(speechPhrase, "system", false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (speak only) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -2998,10 +4150,19 @@ async function getLLMResponse(prompt) {
     console.log("Sending LLM Request (Prompt length):", prompt.length);
     try {
         function prepareJsonString(str) { /* ... */ }
+
+        // When a compose session is active, tell the server to suppress location context
+        // and focus the LLM on composition continuation instead.
+        const requestBody = { prompt };
+        if (isComposeSessionActive()) {
+            requestBody.compose_mode = true;
+            requestBody.compose_body = String(composeSession.text || '').trim();
+        }
+
         const response = await authenticatedFetch('/llm', { // Use authenticatedFetch
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
-            body: JSON.stringify({ prompt: prompt }),
+            body: JSON.stringify(requestBody),
         });
 
         if (!response.ok) {
@@ -3138,6 +4299,7 @@ function setupSpeechRecognition() {
                 questionTextarea.classList.add(LISTENING_HIGHLIGHT_CLASS);
                 questionTextarea.placeholder = "Listening for your question..."; // Update placeholder
             }
+            updateStatusBar('🎤 Listening for your question...', true);
 
             const announcement = "I'm listening.";
             console.log("Calling announce for question prompt...");
@@ -3192,6 +4354,7 @@ function setupQuestionRecognition() {
             questionTextarea.value = "";
             questionTextarea.classList.add(LISTENING_HIGHLIGHT_CLASS); // Ensure highlight is on
         }
+        updateStatusBar('🎤 Listening...', true);
         listeningForQuestion = true; // Set global state
         clearTimeout(listeningTimeout);
         listeningTimeout = setTimeout(() => {
@@ -3211,6 +4374,7 @@ function setupQuestionRecognition() {
         }
         const displayTranscript = finalTranscript || interimTranscript;
         if (questionTextarea) questionTextarea.value = displayTranscript.trim();
+        if (displayTranscript.trim()) updateStatusBar(displayTranscript.trim());
 
         const isFinishedUtterance = event.results[event.results.length - 1].isFinal;
 
@@ -3224,6 +4388,7 @@ function setupQuestionRecognition() {
 
             try {
                 announce("Okay, processing: " + finalTranscript.trim() + ". Give me a moment.", "system", false);
+                updateStatusBar('Processing: ' + finalTranscript.trim() + '...');
                 currentQuestion = finalTranscript.trim().toLowerCase();
                 initializeFollowUpConversation(currentQuestion);
 
@@ -3257,6 +4422,7 @@ function setupQuestionRecognition() {
                     ${summaryInstruction}
                     The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
                     Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
+                    ${getComposePromptContext()}
                 `;
                 document.getElementById('loading-indicator').style.display = 'flex';
                 const options = await getLLMResponse(promptForLLM);
@@ -3273,11 +4439,12 @@ function setupQuestionRecognition() {
             } finally {
                 //document.getElementById('loading-indicator').style.display = 'none';
                 document.getElementById('loading-indicator').style.display = 'none'; // Ensure indicator is hidden
-                if (questionTextarea) questionTextarea.placeholder = "Ask a question..."; 
+                if (questionTextarea) questionTextarea.placeholder = "Ask a question...";
+                updateStatusBar(''); // Clear status bar after question is processed
                 console.log("LLM processing finished for question.");
             }
         } else if (!isFinishedUtterance) { console.log("Waiting for final result..."); }
-        else { console.log("Final utterance empty."); listeningForQuestion = false; if (questionTextarea) questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); }
+        else { console.log("Final utterance empty."); listeningForQuestion = false; if (questionTextarea) questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); updateStatusBar(''); }
     };
 
     questionRecognitionInstance.onerror = (event) => {
@@ -3299,6 +4466,7 @@ function setupQuestionRecognition() {
             questionTextarea.placeholder = "Ask a question...";
             questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); // Remove highlight on error
         }
+        updateStatusBar(''); // Clear status bar on error
         listeningForQuestion = false;
         try { questionRecognitionInstance.stop(); } catch(e) {}
 
@@ -3328,7 +4496,7 @@ function setupQuestionRecognition() {
             questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); // Ensure highlight is removed
             questionTextarea.placeholder = "Ask a question...";
         }
-        // document.getElementById('loading-indicator').style.display = 'none'; // Moved to onresult's finally block
+        updateStatusBar(''); // Clear status bar when recognition ends
 
         if (stillListening && !hasProcessedResult && !wasRetried) { console.log("Ended without result/retry."); announce("Didn't catch that. Try again?", "system", false); }
 
@@ -3622,7 +4790,7 @@ async function processAnnouncementQueue() {
 
     isAnnouncingNow = true;
     const announcement = announcementQueue.shift();
-    const { textToAnnounce, announcementType, recordHistory, showSplash, resolve, reject, historyText } = announcement;
+    const { textToAnnounce, announcementType, recordHistory, showSplash, useSystemVoice, resolve, reject, historyText } = announcement;
 
     console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
@@ -3636,7 +4804,11 @@ async function processAnnouncementQueue() {
         const response = await authenticatedFetch(`/play-audio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
-            body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+            body: JSON.stringify({
+                text: textToAnnounce,
+                routing_target: announcementType,
+                use_system_voice: useSystemVoice === true
+            }),
         });
 
         if (!response.ok) {
@@ -3656,17 +4828,20 @@ async function processAnnouncementQueue() {
         await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
 
         if (recordHistory) {
-            const speechHistory = document.getElementById('speech-history');
-            if (speechHistory) {
-                // Use historyText if provided (for PAUSE-split announcements), otherwise clean the current text
-                const textForHistory = historyText || textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
-                let history = (localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId)) || '').split('\n').filter(Boolean);
-                history.unshift(textForHistory);
-                if (history.length > 20) { history = history.slice(0, 20); }
-                speechHistory.value = history.join('\n');
-                localStorage.setItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId), speechHistory.value);
+            const textForHistory = historyText || textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
+            if (isComposeSessionActive()) {
+                appendToComposeText(textForHistory);
             } else {
-                console.warn("Speech history textarea not found for recording.");
+                const speechHistory = document.getElementById('speech-history');
+                if (speechHistory) {
+                    let history = (localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId)) || '').split('\n').filter(Boolean);
+                    history.unshift(textForHistory);
+                    if (history.length > 20) { history = history.slice(0, 20); }
+                    speechHistory.value = history.join('\n');
+                    localStorage.setItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId), speechHistory.value);
+                } else {
+                    console.warn("Speech history textarea not found for recording.");
+                }
             }
         }
         
@@ -3686,7 +4861,7 @@ async function processAnnouncementQueue() {
 
 // --- Announce Function (MODIFIED to use the queue) ---
 // This function will now queue up messages for sequential playback.
-async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true) {
+async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true, useSystemVoice = false) {
     console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
     
     // Special handling for RANDOM choice - detect {RANDOM:option1|option2|option3} pattern
@@ -3732,6 +4907,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                         announcementType,
                         recordHistory: false, // Don't record the split parts
                         showSplash: showSplash,
+                        useSystemVoice,
                         resolve,
                         reject
                     });
@@ -3753,6 +4929,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                     announcementType,
                     recordHistory: recordHistory,
                     showSplash: showSplash,
+                    useSystemVoice,
                     resolve,
                     reject,
                     historyText: cleanText // Add custom property for clean history text
@@ -3780,6 +4957,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 announcementType,
                 recordHistory: false, // Don't record the split parts
                 showSplash: showSplash,
+                useSystemVoice,
                 resolve,
                 reject
             });
@@ -3796,6 +4974,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 announcementType,
                 recordHistory, // Record the full joke in history if requested
                 showSplash: showSplash,
+                useSystemVoice,
                 resolve,
                 reject
             });
@@ -3810,6 +4989,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
             announcementType,
             recordHistory,
             showSplash,
+            useSystemVoice,
             resolve, // Store the resolve function of this promise
             reject   // Store the reject function of this promise
         });
@@ -3819,6 +4999,12 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
     });
 }
 
+
+async function speakLocally(textToSpeak) {
+    const safeText = String(textToSpeak || '').trim();
+    if (!safeText) return;
+    await announce(safeText, 'system', false, false);
+}
 
 // --- Global AudioContext Resume Helper ---
 // This function tries to resume the AudioContext on first user gesture.
@@ -3960,7 +5146,7 @@ function startRowPhaseScanning() {
                 stopAuditoryScanning();
                 
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -3988,7 +5174,7 @@ function startRowPhaseScanning() {
             // Announce the row
             try {
                 const rowNumber = currentRow + 1;
-                await announce(`Row ${rowNumber}`, "system", false, false);
+                await announce(`Row ${rowNumber}`, "system", false, false, true);
             } catch (e) { 
                 console.error("Speech synthesis error:", e); 
             }
@@ -4032,7 +5218,7 @@ function startColumnPhaseScanning() {
                 stopAuditoryScanning();
                 
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -4101,7 +5287,7 @@ function startColumnPhaseForRow(rowIndex) {
                 stopAuditoryScanning();
                 
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -4137,7 +5323,7 @@ async function speakAndHighlight(button) {
     try {
         const textToSpeak = button.textContent;
         // Use backend TTS instead of browser speech synthesis
-        await announce(textToSpeak, "system", false, false);
+        await announce(textToSpeak, "system", false, false, true);
     } catch (e) { console.error("Speech synthesis error:", e); }
 }
 
@@ -4174,7 +5360,7 @@ async function resumeAuditoryScanning() {
     
     // Announce that scanning is resumed using the proper audio system
     try {
-        await announce("Scanning resumed", "system", false, false);
+        await announce("Scanning resumed", "system", false, false, true);
     } catch (e) { 
         console.error("Speech synthesis error:", e); 
     }
@@ -4787,6 +5973,10 @@ async function generateLlmButtons(options) {
         if (activeLLMPromptForContext) {
             params.set('context', activeLLMPromptForContext);
             params.set('is_llm_generated', 'true');
+        }
+
+        if (isComposeSessionActive()) {
+            params.set('compose', '1');
         }
         
         // Pass originating button text if available

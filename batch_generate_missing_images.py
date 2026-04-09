@@ -37,14 +37,25 @@ from datetime import datetime
 from pathlib import Path
 
 from google.cloud import firestore, secretmanager
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+except ImportError as e:
+    print("❌ Could not import the Google GenAI SDK.")
+    print(f"   Error: {e}")
+    print("   This script must be run with the project virtual environment.")
+    print("   Use: ./runbatch --submit --limit 20 --allow-batch-billing")
+    sys.exit(1)
 
 # --- CONFIGURATION ---
 PROJECT_ID = "bravo-prod-465323"
 MODEL_ID = "models/gemini-2.5-flash-image"  # Nano Banana - Gemini 2.5 Flash with image generation
 OUTPUT_LOCAL_DIR = os.path.join(os.path.dirname(__file__), "BravoImages", "batch_missing_images")
 STATE_FILE = os.path.join(os.path.dirname(__file__), ".batch_job_state.json")
+BATCH_DISABLED_BY_DEFAULT = True
+KNOWN_GOOD_CA_BUNDLE = "/Library/Frameworks/Python.framework/Versions/3.12/etc/openssl/cert.pem"
+DEFAULT_BATCH_IMAGE_PRICE = 0.039
+ESTIMATED_BATCH_DISCOUNT = 0.50
 
 # Image generation prompt template
 PROMPT_TEMPLATE = (
@@ -63,22 +74,43 @@ PROMPT_TEMPLATE = (
 
 
 def get_api_key():
-    """Get Gemini API key from Secret Manager or environment"""
-    # Try environment variable first
-    api_key = os.environ.get('GEMINI_API_KEY') or os.environ.get('GOOGLE_API_KEY')
-    if api_key:
-        return api_key
-    
-    # Fall back to Secret Manager
+    """Get Gemini API key from bravo-prod Secret Manager first, env fallback second."""
+    # Prefer the bravo-prod secret explicitly for billed batch runs.
     try:
         client = secretmanager.SecretManagerServiceClient()
         secret_name = f"projects/{PROJECT_ID}/secrets/bravo-google-api-key/versions/latest"
         response = client.access_secret_version(request={"name": secret_name})
-        return response.payload.data.decode("UTF-8")
+        return response.payload.data.decode("UTF-8"), f"secret_manager:{PROJECT_ID}/bravo-google-api-key"
     except Exception as e:
-        print(f"❌ Could not get API key: {e}")
-        print("   Set GEMINI_API_KEY env var or configure Secret Manager")
-        sys.exit(1)
+        print(f"⚠️  Secret Manager unavailable, trying environment fallback: {e}")
+
+    for env_var in ('GEMINI_API_KEY', 'GOOGLE_API_KEY'):
+        api_key = os.environ.get(env_var)
+        if api_key:
+            return api_key, f"env:{env_var}"
+
+    print("❌ Could not get bravo-prod batch API key.")
+    print("   Expected Secret Manager secret: projects/bravo-prod-465323/secrets/bravo-google-api-key")
+    print("   Fallback env vars checked: GEMINI_API_KEY, GOOGLE_API_KEY")
+    sys.exit(1)
+
+
+def ensure_ssl_ca_bundle():
+    """Work around broken venv certifi bundle on macOS Python.org installs."""
+    if os.environ.get("SSL_CERT_FILE") and os.environ.get("REQUESTS_CA_BUNDLE"):
+        return
+
+    if os.path.exists(KNOWN_GOOD_CA_BUNDLE):
+        os.environ.setdefault("SSL_CERT_FILE", KNOWN_GOOD_CA_BUNDLE)
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", KNOWN_GOOD_CA_BUNDLE)
+        print(f"🔒 Using CA bundle: {KNOWN_GOOD_CA_BUNDLE}")
+
+
+def estimate_batch_cost(image_count):
+    """Estimate output-image cost assuming 50% batch discount."""
+    standard_cost = image_count * DEFAULT_BATCH_IMAGE_PRICE
+    batch_cost = standard_cost * ESTIMATED_BATCH_DISCOUNT
+    return standard_cost, batch_cost
 
 
 def get_missing_images():
@@ -125,7 +157,8 @@ def build_batch_requests(missing_images):
 
 def submit_batch_job(missing_images):
     """Submit a batch job using the google-genai SDK"""
-    api_key = get_api_key()
+    api_key, key_source = get_api_key()
+    print(f"  🔐 API key source: {key_source}")
     client = genai.Client(api_key=api_key)
     
     # Build the inline requests list
@@ -184,7 +217,8 @@ def check_job_status():
         print("❌ No batch job found. Run with --submit first.")
         return None
     
-    api_key = get_api_key()
+    api_key, key_source = get_api_key()
+    print(f"🔐 API key source: {key_source}")
     client = genai.Client(api_key=api_key)
     
     job_name = state["job_name"]
@@ -226,7 +260,8 @@ def download_results():
         print("❌ No batch job found. Run with --submit first.")
         return
     
-    api_key = get_api_key()
+    api_key, key_source = get_api_key()
+    print(f"🔐 API key source: {key_source}")
     client = genai.Client(api_key=api_key)
     
     job_name = state["job_name"]
@@ -494,13 +529,15 @@ def dry_run():
     print(f"\n📝 Sample prompt for '{missing_images[0]['search_term']}':")
     print(f"   {PROMPT_TEMPLATE.format(term=missing_images[0]['search_term'])}")
     
+    standard_cost, batch_cost = estimate_batch_cost(len(missing_images))
     print(f"\n📦 Would submit {len(missing_images)} inline requests via Gemini Batch API")
     print(f"📂 Images would be saved to: {OUTPUT_LOCAL_DIR}")
     print(f"🤖 Model: {MODEL_ID}")
-    print(f"💰 Using Google AI Studio (free tier / 50% batch discount)")
+    print(f"💰 Estimated standard image-output cost: ~${standard_cost:.2f}")
+    print(f"💰 Estimated batch image-output cost:    ~${batch_cost:.2f} (assuming 50% batch discount)")
 
 
-def submit_flow():
+def submit_flow(limit=None):
     """Full submit flow: fetch missing images, submit batch"""
     print("🚀 Starting batch image generation (Google AI Studio)...\n")
     
@@ -511,8 +548,21 @@ def submit_flow():
     if not missing_images:
         print("✅ No missing images found! Nothing to generate.")
         return
+
+    if limit is not None:
+        limit = max(0, int(limit))
+        if limit == 0:
+            print("✅ Limit is 0. Nothing to submit.")
+            return
+        if limit < len(missing_images):
+            missing_images = missing_images[:limit]
+            print(f"  Limiting to {len(missing_images)} missing images for this test\n")
     
     print(f"  Found {len(missing_images)} missing images\n")
+
+    standard_cost, batch_cost = estimate_batch_cost(len(missing_images))
+    print(f"  Estimated standard image-output cost: ~${standard_cost:.2f}")
+    print(f"  Estimated batch image-output cost:    ~${batch_cost:.2f} (assuming 50% batch discount)\n")
     
     # 2. Submit batch job
     print("Step 2: Submitting to Gemini Batch API...")
@@ -599,6 +649,8 @@ def finalize():
 
 
 def main():
+    ensure_ssl_ca_bundle()
+
     parser = argparse.ArgumentParser(description="Batch generate missing images using Google AI Studio (Gemini Batch API)")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--dry-run", action="store_true", help="Show what would be generated")
@@ -606,13 +658,30 @@ def main():
     group.add_argument("--status", action="store_true", help="Check batch job status")
     group.add_argument("--download", action="store_true", help="Download completed results")
     group.add_argument("--finalize", action="store_true", help="Move processed entries to processed_images collection")
+    parser.add_argument(
+        "--allow-batch-billing",
+        action="store_true",
+        help="Required for non-dry-run batch actions because batch usage is billable",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit batch submission to the first N missing images for testing",
+    )
     
     args = parser.parse_args()
+
+    if BATCH_DISABLED_BY_DEFAULT and not args.dry_run and not args.allow_batch_billing:
+        print("❌ Batch operations are disabled by default to prevent accidental billing.")
+        print("   Re-run with --allow-batch-billing to proceed intentionally.")
+        print("   Recommended: use generate_missing_images_free.py for non-batch generation.")
+        sys.exit(1)
     
     if args.dry_run:
         dry_run()
     elif args.submit:
-        submit_flow()
+        submit_flow(limit=args.limit)
     elif args.status:
         check_job_status()
     elif args.download:

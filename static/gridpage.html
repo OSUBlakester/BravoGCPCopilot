@@ -204,11 +204,38 @@
         #question-display {
             margin-top: 4px;
         }
+
+        /* Question container hidden — question shown in #status-bar instead */
+        #question-container {
+            display: none;
+        }
         
         #speech-history:focus, #question-display:focus {
             outline: none;
             border-color: #FB4F14;
             box-shadow: 0 0 0 2px rgba(251, 79, 20, 0.1);
+        }
+
+        /* Status bar — sticky bottom strip for wake-word questions */
+        #status-bar {
+            display: none;
+            background-color: #1e293b;
+            color: #f8fafc;
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 8px 20px;
+            text-align: center;
+            border-top: 2px solid #FB4F14;
+            width: 100%;
+            box-sizing: border-box;
+            position: sticky;
+            bottom: 0;
+            z-index: 40;
+            transition: background-color 0.3s;
+        }
+        #status-bar.listening {
+            background-color: #0f172a;
+            border-top-color: #22c55e; /* green when actively listening */
         }
 
         /* Clear button positioning */
@@ -444,7 +471,7 @@
     </div>
 
     <div id="chat-history-container">
-        <label for="speech-history">Speech History:</label>
+        <label id="speech-history-label" for="speech-history">Speech History:</label>
         <div class="input-wrapper">
             <textarea id="speech-history" readonly rows="3"></textarea>
             <button id="clear-history" title="Clear History">
@@ -466,6 +493,9 @@
                  class="image-spinner">
              <p>Loading...</p>
     </div>
+    <!-- Status bar: shows wake-word question prompt / transcription -->
+    <div id="status-bar"></div>
+
     </div> <!-- End of app-container -->
 
 
