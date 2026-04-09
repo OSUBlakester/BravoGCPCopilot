@@ -26,12 +26,13 @@
                 <div class="current-word-wrap">
                     <textarea id="current-word" class="current-word-input" rows="3" readonly></textarea>
                     <div class="word-controls">
-                        <button id="exit-creation-btn" class="word-control-btn compose-button exit-btn">Exit Creation</button>
                         <button id="read-creation-btn" class="word-control-btn compose-button read-btn">Read Creation</button>
+                        <button id="exit-creation-btn" class="word-control-btn compose-button exit-btn">Exit Creation</button>
                         <button id="backspace-btn" class="word-control-btn compose-button backspace-btn">Backspace</button>
                         <button id="clear-word-btn" class="word-control-btn compose-button clear-btn">Clear</button>
                         <button id="ai-edit-btn" class="word-control-btn compose-button ai-edit-btn">Clean Up</button>
                         <button id="new-row-btn" class="word-control-btn compose-button new-row-btn">New Row</button>
+                        <button id="action-go-back-btn" class="word-control-btn compose-button">Go Back</button>
                     </div>
                 </div>
             </section>
@@ -46,7 +47,7 @@
             <section id="tool-toggle-section" data-section-id="tool-toggle" class="compose-section scan-section">
                 <h2 class="section-title">Tools</h2>
                 <div class="tool-selector-grid">
-                    <button id="categories-tool-btn" class="tool-select-btn compose-button">Categories</button>
+                    <button id="categories-tool-btn" class="tool-select-btn compose-button">Word Categories</button>
                     <button id="spelling-tool-btn" class="tool-select-btn compose-button">Spelling</button>
                     <button id="numbers-tool-btn" class="tool-select-btn compose-button">Numbers</button>
                 </div>
@@ -54,7 +55,7 @@
 
             <!-- Section 4: Active Tool Panel -->
             <section id="tool-panel-section" data-section-id="tool-panel" class="compose-section scan-section" hidden>
-                <h2 class="section-title" id="tool-panel-title">Categories</h2>
+                <h2 class="section-title" id="tool-panel-title">Word Categories</h2>
                 <div id="category-panel" class="tool-panel-content" hidden>
                     <div id="category-grid" class="category-grid"></div>
                 </div>

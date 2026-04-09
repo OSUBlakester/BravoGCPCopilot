@@ -32,6 +32,9 @@ let categoryNavigationStack = [];
 let currentNumberRange = null;
 let currentNumberPageOffset = 0;
 let currentNumberBase = 0;
+let lastAnnouncedSpellingWord = '';
+let availableCompletedSpellingWord = '';
+let spellingPriorityMode = 'none';
 
 let announcementQueue = [];
 let isAnnouncingNow = false;
@@ -41,6 +44,9 @@ let pendingScanPromptTimer = null;
 let pendingScanPromptToken = 0;
 let lastScanPromptText = '';
 let lastScanPromptTime = 0;
+let scanCycleCount = 0;
+let scanLoopLimit = 0;
+let isPausedFromScanLimit = false;
 
 // ============================================================
 // Compose Session Keys (same as gridpage.js / spelling.js)
@@ -160,6 +166,11 @@ async function loadSettings() {
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
         spellLetterOrder = typeof settings.spellLetterOrder === 'string' ? settings.spellLetterOrder : 'alphabetical';
         LLMOptions = settings.LLMOptions || 10;
+        if (typeof settings.scanLoopLimit === 'number' && !Number.isNaN(settings.scanLoopLimit)) {
+            scanLoopLimit = Math.max(0, Math.min(10, parseInt(settings.scanLoopLimit, 10)));
+        } else {
+            scanLoopLimit = 0;
+        }
         if (waitForSwitchToScan) {
             window.waitingForInitialSwitch = true;
         }
@@ -343,7 +354,10 @@ function appendWordToBuildSpace(word) {
 async function clearBuildSpace() {
     currentBuildSpaceText = '';
     currentSpellingWord = '';
+    lastAnnouncedSpellingWord = '';
+    availableCompletedSpellingWord = '';
     updateBuildSpaceInput();
+    renderSpellingActionButtons();
     currentPredictions = [];
     renderWordPredictions();
     updateLetterAvailability('');
@@ -368,10 +382,17 @@ function removeLastWordUnit(text) {
 async function backspaceCurrentWord() {
     if (currentSpellingWord.length > 0) {
         currentSpellingWord = '';
+        lastAnnouncedSpellingWord = '';
+        availableCompletedSpellingWord = '';
         updateBuildSpaceInput();
+        renderSpellingActionButtons();
         updateLetterAvailability(currentSpellingWord);
         await refreshSuggestedWords();
-        restartScanning(250, true);
+        if (activeTool === 'spelling') {
+            restartScanningInSection('tool-panel', 250);
+        } else {
+            restartScanning(250, true);
+        }
         return;
     }
     if (!currentBuildSpaceText) return;
@@ -379,12 +400,19 @@ async function backspaceCurrentWord() {
     setBuildSpaceText(nextText);
     syncBuildSpaceToComposeSession();
     await refreshSuggestedWords();
-    restartScanning(250, true);
+    if (activeTool === 'spelling') {
+        restartScanningInSection('tool-panel', 250);
+    } else {
+        restartScanning(250, true);
+    }
 }
 
 function clearCurrentSpellingWord() {
     currentSpellingWord = '';
+    lastAnnouncedSpellingWord = '';
+    availableCompletedSpellingWord = '';
     updateBuildSpaceInput();
+    renderSpellingActionButtons();
 }
 
 function ensureTerminalPunctuation(text) {
@@ -513,6 +541,10 @@ async function newRow() {
     restartScanning(250, true);
 }
 
+function goBackToSectionScanning() {
+    restartScanning(150, true);
+}
+
 // ============================================================
 // Categories
 // ============================================================
@@ -566,11 +598,11 @@ function updateCategoryPanelHeading() {
         return;
     }
     if (!categoryNavigationStack.length) {
-        toolPanelTitle.textContent = 'Categories';
+        toolPanelTitle.textContent = 'Word Categories';
         return;
     }
     const pathLabel = categoryNavigationStack.map((node) => node.label).join(' / ');
-    toolPanelTitle.textContent = `Categories — ${pathLabel}`;
+    toolPanelTitle.textContent = `Word Categories — ${pathLabel}`;
 }
 
 function buildNumberRanges(maxNumber) {
@@ -693,7 +725,7 @@ function setActiveTool(toolName) {
     toolPanelSection.hidden = !toolName;
     categoryPanel.hidden = toolName !== 'categories' && toolName !== 'numbers';
     lettersPanel.hidden = toolName !== 'spelling';
-    toolPanelTitle.textContent = toolName === 'spelling' ? 'Spelling' : 'Categories';
+    toolPanelTitle.textContent = toolName === 'spelling' ? 'Spelling' : 'Word Categories';
 
     document.querySelectorAll('.tool-select-btn').forEach((btn) => {
         btn.classList.toggle('active-tool', btn.dataset.tool === toolName);
@@ -753,6 +785,29 @@ function restartScanningInSection(sectionId, delayMs = 0) {
             lettersScanPhase = 'rows';
             activeLetterRowIndex = null;
         }
+        startAuditoryScanning();
+    }, delayMs);
+}
+
+function restartSpellingWithActionPriority(delayMs = 0) {
+    const actionButton = Array.from(document.querySelectorAll('.letter-btn')).find((button) => button.dataset.chooseWordOption === 'true')
+        || Array.from(document.querySelectorAll('.letter-btn')).find((button) => button.dataset.standardOption === 'true');
+    const actionRowIndex = actionButton ? Number(actionButton.dataset.rowIndex) : null;
+
+    if (actionRowIndex === null || Number.isNaN(actionRowIndex)) {
+        restartScanningInSection('tool-panel', delayMs);
+        return;
+    }
+
+    stopAuditoryScanning();
+    setTimeout(() => {
+        if (waitForSwitchToScan && window.waitingForInitialSwitch) return;
+        activeSectionId = 'tool-panel';
+        currentScanLevel = 'items';
+        lettersScanPhase = 'items';
+        activeLetterRowIndex = actionRowIndex;
+        currentButtonIndex = -1;
+        spellingPriorityMode = 'action-options-once';
         startAuditoryScanning();
     }, delayMs);
 }
@@ -1104,7 +1159,14 @@ async function getWordPredictionsForSpelling() {
         });
         if (response.ok) {
             const data = await response.json();
-            currentPredictions = (data.predictions || []).slice(0, Math.max(1, LLMOptions));
+            const predictions = (data.predictions || []).slice(0, Math.max(1, LLMOptions));
+            currentPredictions = predictions;
+            const normalizedSpellingWord = String(currentSpellingWord || '').trim().toLowerCase();
+            if (normalizedSpellingWord) {
+                const exactMatch = predictions.find((prediction) => String(prediction || '').trim().toLowerCase() === normalizedSpellingWord);
+                renderWordPredictions();
+                return exactMatch || null;
+            }
         } else {
             currentPredictions = [];
         }
@@ -1113,23 +1175,24 @@ async function getWordPredictionsForSpelling() {
         currentPredictions = [];
     }
     renderWordPredictions();
+    return null;
 }
 
 async function refreshSuggestedWords() {
     if (currentSpellingWord) {
-        await getWordPredictionsForSpelling();
-        return;
+        return getWordPredictionsForSpelling();
     }
     if (currentNumberRange) {
         currentPredictions = getCurrentNumberPageValues();
         renderWordPredictions();
-        return;
+        return null;
     }
     if (currentCategory) {
         await loadCategoryWords(currentCategory);
-        return;
+        return null;
     }
     await loadGeneralWords();
+    return null;
 }
 
 async function loadSomethingElseOptions() {
@@ -1259,7 +1322,7 @@ function generateAlphabetGrid() {
                 alphabetGrid.appendChild(button);
             });
         });
-        appendLettersGoBackOption();
+        renderSpellingActionButtons();
         return;
     }
 
@@ -1280,31 +1343,100 @@ function generateAlphabetGrid() {
         alphabetGrid.appendChild(button);
     });
 
-    appendLettersGoBackOption();
+    renderSpellingActionButtons();
 }
 
-function appendLettersGoBackOption() {
+function getSpellingActionRowIndex() {
+    const existingRows = Array.from(alphabetGrid.querySelectorAll('.letter-btn'))
+        .filter((button) => button.dataset.standardOption !== 'true')
+        .map((button) => Number(button.dataset.rowIndex))
+        .filter((row) => !Number.isNaN(row));
+    const maxRow = existingRows.length ? Math.max(...existingRows) : 0;
+    return maxRow + 1;
+}
+
+function renderSpellingActionButtons() {
+    Array.from(alphabetGrid.querySelectorAll('.letter-btn'))
+        .filter((button) => button.dataset.standardOption === 'true')
+        .forEach((button) => button.remove());
+
+    const actionRowIndex = getSpellingActionRowIndex();
+
+    if (availableCompletedSpellingWord) {
+        const chooseWordButton = document.createElement('button');
+        chooseWordButton.className = 'letter-btn compose-button';
+        chooseWordButton.textContent = 'Choose Word';
+        chooseWordButton.dataset.standardOption = 'true';
+        chooseWordButton.dataset.chooseWordOption = 'true';
+        chooseWordButton.dataset.rowIndex = String(actionRowIndex);
+        chooseWordButton.addEventListener('click', () => {
+            chooseCurrentSpellingWord().catch((error) => {
+                console.error('Failed to choose completed spelling word:', error);
+            });
+        });
+        alphabetGrid.appendChild(chooseWordButton);
+    }
+
     const goBackButton = document.createElement('button');
     goBackButton.className = 'letter-btn compose-button';
     goBackButton.textContent = 'Go Back';
     goBackButton.dataset.standardOption = 'true';
-    const existingRows = Array.from(alphabetGrid.querySelectorAll('.letter-btn'))
-        .map((button) => Number(button.dataset.rowIndex))
-        .filter((row) => !Number.isNaN(row));
-    const maxRow = existingRows.length ? Math.max(...existingRows) : 0;
-    goBackButton.dataset.rowIndex = String(maxRow + 1);
+    goBackButton.dataset.rowIndex = String(actionRowIndex);
     goBackButton.addEventListener('click', () => {
         closeActiveTool();
     });
     alphabetGrid.appendChild(goBackButton);
 }
 
+async function chooseCurrentSpellingWord() {
+    const chosenWord = String(availableCompletedSpellingWord || currentSpellingWord || '').trim();
+    if (!chosenWord) {
+        restartScanningInSection('tool-panel', 150);
+        return;
+    }
+
+    stopAuditoryScanning();
+    await announce(chosenWord, 'system', false, true);
+
+    const nextText = currentBuildSpaceText
+        ? /[\s\n]$/.test(currentBuildSpaceText)
+            ? `${currentBuildSpaceText}${chosenWord} `
+            : `${currentBuildSpaceText} ${chosenWord} `
+        : `${chosenWord} `;
+
+    currentSpellingWord = '';
+    lastAnnouncedSpellingWord = '';
+    availableCompletedSpellingWord = '';
+    setBuildSpaceText(nextText);
+    syncBuildSpaceToComposeSession();
+    renderSpellingActionButtons();
+    updateLetterAvailability('');
+    await refreshSuggestedWords();
+    restartScanning(250, true);
+}
+
 async function handleLetterClick(letter) {
     currentSpellingWord += letter.toLowerCase();
     updateBuildSpaceInput();
     updateLetterAvailability(currentSpellingWord);
-    await refreshSuggestedWords();
-    restartScanning(250, true);
+    const completedWord = await refreshSuggestedWords();
+    if (completedWord) {
+        const normalizedCompletedWord = String(completedWord || '').trim().toLowerCase();
+        availableCompletedSpellingWord = String(completedWord || '').trim();
+        renderSpellingActionButtons();
+        if (normalizedCompletedWord && normalizedCompletedWord !== lastAnnouncedSpellingWord) {
+            lastAnnouncedSpellingWord = normalizedCompletedWord;
+            stopAuditoryScanning();
+            await announce(completedWord, 'system', false, true);
+            restartSpellingWithActionPriority(250);
+            return;
+        }
+    } else {
+        lastAnnouncedSpellingWord = '';
+        availableCompletedSpellingWord = '';
+        renderSpellingActionButtons();
+    }
+    restartScanningInSection('tool-panel', 250);
 }
 
 // ============================================================
@@ -1418,7 +1550,7 @@ function getSectionButtonsInOrder() {
 }
 
 function getActionButtonsInOrder() {
-    const orderedIds = ['exit-creation-btn', 'read-creation-btn', 'backspace-btn', 'clear-word-btn', 'ai-edit-btn', 'new-row-btn'];
+    const orderedIds = ['read-creation-btn', 'exit-creation-btn', 'backspace-btn', 'clear-word-btn', 'ai-edit-btn', 'new-row-btn', 'action-go-back-btn'];
     return orderedIds
         .map((id) => document.getElementById(id))
         .filter((button) => button && button.offsetParent !== null && !button.disabled);
@@ -1486,13 +1618,13 @@ function getScanPromptTextForElement(element) {
 
     if (element.classList && element.classList.contains('scan-section')) {
         const sectionId = element.dataset.sectionId;
-        if (sectionId === 'action') return 'Build Space';
+        if (sectionId === 'action') return 'Actions';
         if (sectionId === 'tool-toggle') return 'Tools';
         if (sectionId === 'choose-word') return 'Choose word';
         if (sectionId === 'tool-panel') {
             if (activeTool === 'spelling') return 'Spelling';
             if (activeTool === 'numbers') return 'Numbers';
-            return 'Categories';
+            return 'Word Categories';
         }
     }
 
@@ -1547,6 +1679,8 @@ function enterSectionScan(sectionId) {
         lettersScanPhase = 'rows';
         activeLetterRowIndex = null;
     }
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
     stopAuditoryScanning();
     startAuditoryScanning();
 }
@@ -1556,10 +1690,18 @@ function returnToSectionScan() {
     currentScanLevel = 'sections';
     lettersScanPhase = 'rows';
     activeLetterRowIndex = null;
+    scanCycleCount = 0;
 }
 
 function advanceScan() {
     let buttons = [];
+
+    if (activeSectionId === 'tool-panel' && activeTool === 'spelling' && spellingPriorityMode === 'return-to-rows') {
+        lettersScanPhase = 'rows';
+        activeLetterRowIndex = null;
+        currentButtonIndex = -1;
+        spellingPriorityMode = 'none';
+    }
 
     if (currentScanLevel === 'sections') {
         buttons = getSectionButtonsInOrder();
@@ -1577,8 +1719,31 @@ function advanceScan() {
         return;
     }
 
+    const nextIndex = currentButtonIndex + 1;
+    if (nextIndex >= buttons.length) {
+        scanCycleCount += 1;
+        if (scanMode !== 'step' && scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
+            isPausedFromScanLimit = true;
+            stopAuditoryScanning();
+            currentButtonIndex = 0;
+            currentlyScannedButton = buttons[0];
+            if (currentlyScannedButton.type === 'letter-row') {
+                const rowButtons = getVisibleEnabledButtons('.letter-btn').filter((button) => {
+                    return Number(button.dataset.rowIndex) === currentlyScannedButton.rowIndex;
+                });
+                rowButtons.forEach((button) => button.classList.add('scanned'));
+            } else {
+                currentlyScannedButton.classList.add('scanned');
+            }
+            announce('Scanning paused', 'system', false, false).catch((error) => {
+                console.error('Error announcing scan pause:', error);
+            });
+            return;
+        }
+    }
+
     clearScanHighlight();
-    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentButtonIndex = nextIndex % buttons.length;
     currentlyScannedButton = buttons[currentButtonIndex];
 
     if (currentlyScannedButton.type === 'letter-row') {
@@ -1590,6 +1755,10 @@ function advanceScan() {
         currentlyScannedButton.classList.add('scanned');
     }
 
+    if (activeSectionId === 'tool-panel' && activeTool === 'spelling' && spellingPriorityMode === 'action-options-once') {
+        spellingPriorityMode = 'return-to-rows';
+    }
+
     scheduleScanPromptForElement(currentlyScannedButton);
 }
 
@@ -1598,11 +1767,15 @@ function startAuditoryScanning() {
     if (scanMode === 'step') {
         if (!currentlyScannedButton) {
             currentButtonIndex = -1;
+            scanCycleCount = 0;
+            isPausedFromScanLimit = false;
             advanceScan();
         }
         return;
     }
     currentButtonIndex = -1;
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
     advanceScan();
     scanningInterval = setInterval(advanceScan, defaultDelay);
 }
@@ -1626,10 +1799,46 @@ function restartScanning(delayMs = 0, resetToSections = false) {
     }, delayMs);
 }
 
+async function resumeAuditoryScanning() {
+    if (!isPausedFromScanLimit) {
+        startAuditoryScanning();
+        return;
+    }
+
+    isPausedFromScanLimit = false;
+    scanCycleCount = 0;
+    if (currentScanLevel === 'sections') {
+        currentButtonIndex = -1;
+    } else if (activeSectionId === 'tool-panel' && activeTool === 'spelling') {
+        currentButtonIndex = -1;
+        if (lettersScanPhase === 'rows') {
+            activeLetterRowIndex = null;
+        }
+    } else {
+        currentButtonIndex = -1;
+    }
+
+    try {
+        await announce('Scanning resumed', 'system', false, false);
+    } catch (error) {
+        console.error('Error announcing scan resume:', error);
+    }
+
+    setTimeout(() => {
+        startAuditoryScanning();
+    }, 1500);
+}
+
 function handleSpacebarPress() {
     if (waitForSwitchToScan && window.waitingForInitialSwitch) {
         window.waitingForInitialSwitch = false;
         startAuditoryScanning();
+        return;
+    }
+    if (isPausedFromScanLimit) {
+        resumeAuditoryScanning().catch((error) => {
+            console.error('Error resuming scan:', error);
+        });
         return;
     }
     if (!currentlyScannedButton) {
@@ -1678,6 +1887,7 @@ function setupEventListeners() {
 
     document.getElementById('ai-edit-btn').addEventListener('click', aiEditCreation);
     document.getElementById('new-row-btn').addEventListener('click', newRow);
+    document.getElementById('action-go-back-btn').addEventListener('click', goBackToSectionScanning);
     document.getElementById('categories-tool-btn').dataset.tool = 'categories';
     document.getElementById('numbers-tool-btn').dataset.tool = 'numbers';
     document.getElementById('spelling-tool-btn').dataset.tool = 'spelling';

@@ -10592,9 +10592,9 @@ async def get_freestyle_word_prediction(
         user_context = user_info.get("narrative", "")
         
         if context_text:
-            prompt = f"Given the user context: '{user_context}' and the existing text: '{context_text}', provide {freestyle_options} complete words that start with '{partial_word}'. The words should be contextually appropriate and commonly used. Return only the complete words, one per line."
+            prompt = f"Given the user context: '{user_context}' and the existing text: '{context_text}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         else:
-            prompt = f"Given the user context: '{user_context}', provide {freestyle_options} complete words that start with '{partial_word}'. The words should be commonly used. Return only the complete words, one per line."
+            prompt = f"Given the user context: '{user_context}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         
         # Use LLM to generate predictions
         response_text = await _generate_gemini_content_with_fallback(prompt)
@@ -10602,13 +10602,23 @@ async def get_freestyle_word_prediction(
         # Parse predictions - ensure they are complete words starting with the partial word
         raw_predictions = [line.strip() for line in response_text.split('\n') if line.strip()]
         predictions = []
+        seen_predictions = set()
         
         for pred in raw_predictions[:freestyle_options * 2]:  # Get extra to filter
+            normalized_pred = pred.strip()
+            normalized_key = normalized_pred.lower()
+            if not normalized_pred or normalized_key in seen_predictions:
+                continue
             # Ensure the prediction starts with the partial word and is a complete word
-            if pred.lower().startswith(partial_word.lower()) and len(pred) > len(partial_word):
-                predictions.append(pred)
+            if normalized_key == partial_word.lower():
+                predictions.append(normalized_pred)
+                seen_predictions.add(normalized_key)
+            elif normalized_key.startswith(partial_word.lower()) and len(normalized_pred) > len(partial_word):
+                predictions.append(normalized_pred)
+                seen_predictions.add(normalized_key)
             elif not partial_word and pred:  # If no partial word, just add valid predictions
-                predictions.append(pred)
+                predictions.append(normalized_pred)
+                seen_predictions.add(normalized_key)
         
         # Limit to freestyle_options predictions
         predictions = predictions[:freestyle_options]
