@@ -4790,7 +4790,7 @@ async function processAnnouncementQueue() {
 
     isAnnouncingNow = true;
     const announcement = announcementQueue.shift();
-    const { textToAnnounce, announcementType, recordHistory, showSplash, resolve, reject, historyText } = announcement;
+    const { textToAnnounce, announcementType, recordHistory, showSplash, useSystemVoice, resolve, reject, historyText } = announcement;
 
     console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
@@ -4804,7 +4804,11 @@ async function processAnnouncementQueue() {
         const response = await authenticatedFetch(`/play-audio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
-            body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
+            body: JSON.stringify({
+                text: textToAnnounce,
+                routing_target: announcementType,
+                use_system_voice: useSystemVoice === true
+            }),
         });
 
         if (!response.ok) {
@@ -4857,7 +4861,7 @@ async function processAnnouncementQueue() {
 
 // --- Announce Function (MODIFIED to use the queue) ---
 // This function will now queue up messages for sequential playback.
-async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true) {
+async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true, useSystemVoice = false) {
     console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
     
     // Special handling for RANDOM choice - detect {RANDOM:option1|option2|option3} pattern
@@ -4903,6 +4907,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                         announcementType,
                         recordHistory: false, // Don't record the split parts
                         showSplash: showSplash,
+                        useSystemVoice,
                         resolve,
                         reject
                     });
@@ -4924,6 +4929,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                     announcementType,
                     recordHistory: recordHistory,
                     showSplash: showSplash,
+                    useSystemVoice,
                     resolve,
                     reject,
                     historyText: cleanText // Add custom property for clean history text
@@ -4951,6 +4957,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 announcementType,
                 recordHistory: false, // Don't record the split parts
                 showSplash: showSplash,
+                useSystemVoice,
                 resolve,
                 reject
             });
@@ -4967,6 +4974,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 announcementType,
                 recordHistory, // Record the full joke in history if requested
                 showSplash: showSplash,
+                useSystemVoice,
                 resolve,
                 reject
             });
@@ -4981,6 +4989,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
             announcementType,
             recordHistory,
             showSplash,
+            useSystemVoice,
             resolve, // Store the resolve function of this promise
             reject   // Store the reject function of this promise
         });
@@ -5137,7 +5146,7 @@ function startRowPhaseScanning() {
                 stopAuditoryScanning();
                 
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -5165,7 +5174,7 @@ function startRowPhaseScanning() {
             // Announce the row
             try {
                 const rowNumber = currentRow + 1;
-                await announce(`Row ${rowNumber}`, "system", false, false);
+                await announce(`Row ${rowNumber}`, "system", false, false, true);
             } catch (e) { 
                 console.error("Speech synthesis error:", e); 
             }
@@ -5209,7 +5218,7 @@ function startColumnPhaseScanning() {
                 stopAuditoryScanning();
                 
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -5278,7 +5287,7 @@ function startColumnPhaseForRow(rowIndex) {
                 stopAuditoryScanning();
                 
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
@@ -5314,7 +5323,7 @@ async function speakAndHighlight(button) {
     try {
         const textToSpeak = button.textContent;
         // Use backend TTS instead of browser speech synthesis
-        await announce(textToSpeak, "system", false, false);
+        await announce(textToSpeak, "system", false, false, true);
     } catch (e) { console.error("Speech synthesis error:", e); }
 }
 
@@ -5351,7 +5360,7 @@ async function resumeAuditoryScanning() {
     
     // Announce that scanning is resumed using the proper audio system
     try {
-        await announce("Scanning resumed", "system", false, false);
+        await announce("Scanning resumed", "system", false, false, true);
     } catch (e) { 
         console.error("Speech synthesis error:", e); 
     }

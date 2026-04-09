@@ -6673,6 +6673,7 @@ class PlayAudioRequest(BaseModel):
     text: str
     routing_target: Optional[RoutingTarget] = "default"
     voice_name_override: Optional[str] = None
+    use_system_voice: bool = False
     speech_rate_override: Optional[int] = Field(None, gt=49, lt=401)
 
 
@@ -6688,8 +6689,14 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
         # NEW: Load user-specific settings for voice and rate
         user_settings = await load_settings_from_file(account_id, aac_user_id) # Load settings
 
-        # Use settings, falling back to global defaults if setting is missing
-        voice_to_use = request.voice_name_override or user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
+        # Use explicit overrides first. Otherwise, scan/system prompts can opt into the
+        # default system voice while normal announcements continue using the selected TTS voice.
+        if request.voice_name_override:
+            voice_to_use = request.voice_name_override
+        elif request.use_system_voice:
+            voice_to_use = DEFAULT_TTS_VOICE
+        else:
+            voice_to_use = user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
         rate_to_use = request.speech_rate_override or user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
 
         logging.info(f"Synthesizing speech for account {account_id} user {aac_user_id} with text: '{request.text[:50]}...' for routing target: {request.routing_target}")

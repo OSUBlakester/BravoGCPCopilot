@@ -48,6 +48,35 @@ let scanCycleCount = 0;
 let scanLoopLimit = 0;
 let isPausedFromScanLimit = false;
 
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (error) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (error) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
+}
+
 // ============================================================
 // Compose Session Keys (same as gridpage.js / spelling.js)
 // ============================================================
@@ -238,15 +267,15 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
     }
 }
 
-async function announce(textToAnnounce, announcementType = 'system', recordHistory = true, showSplash = true) {
+async function announce(textToAnnounce, announcementType = 'system', recordHistory = true, showSplash = true, useSystemVoice = false) {
     if (!textToAnnounce || !textToAnnounce.trim()) return;
 
-    announcementQueue.push({ textToAnnounce: textToAnnounce.trim(), announcementType, recordHistory, showSplash });
+    announcementQueue.push({ textToAnnounce: textToAnnounce.trim(), announcementType, recordHistory, showSplash, useSystemVoice });
     if (isAnnouncingNow) return;
 
     isAnnouncingNow = true;
     while (announcementQueue.length > 0) {
-        const { textToAnnounce: text, announcementType: target, showSplash: shouldShowSplash } = announcementQueue.shift();
+        const { textToAnnounce: text, announcementType: target, showSplash: shouldShowSplash, useSystemVoice: useSystemVoiceForRequest } = announcementQueue.shift();
         try {
             if (typeof showSplashScreen === 'function' && shouldShowSplash !== false) {
                 showSplashScreen(text);
@@ -254,7 +283,11 @@ async function announce(textToAnnounce, announcementType = 'system', recordHisto
             const response = await authenticatedFetch('/play-audio', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, routing_target: target === 'personal' ? 'personal' : 'system' })
+                body: JSON.stringify({
+                    text,
+                    routing_target: target === 'personal' ? 'personal' : 'system',
+                    use_system_voice: useSystemVoiceForRequest === true
+                })
             });
             if (!response.ok) throw new Error(`Audio synthesis failed: ${response.status}`);
             const jsonResponse = await response.json();
@@ -1651,7 +1684,7 @@ async function announceScanPrompt(promptText) {
     if (text === lastScanPromptText && now - lastScanPromptTime < 700) return;
 
     try {
-        await speak(text);
+        await announce(text, 'system', false, false, true);
         lastScanPromptText = text;
         lastScanPromptTime = Date.now();
     } catch (error) {
@@ -1735,7 +1768,7 @@ function advanceScan() {
             } else {
                 currentlyScannedButton.classList.add('scanned');
             }
-            announce('Scanning paused', 'system', false, false).catch((error) => {
+            announce('Scanning paused', 'system', false, false, true).catch((error) => {
                 console.error('Error announcing scan pause:', error);
             });
             return;
@@ -1819,7 +1852,7 @@ async function resumeAuditoryScanning() {
     }
 
     try {
-        await announce('Scanning resumed', 'system', false, false);
+        await announce('Scanning resumed', 'system', false, false, true);
     } catch (error) {
         console.error('Error announcing scan resume:', error);
     }
@@ -1865,6 +1898,7 @@ function bindKeyboardScanning() {
         }
         if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
             advanceScan();
         }
     });
