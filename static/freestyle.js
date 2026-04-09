@@ -83,8 +83,7 @@ function saveComposeSession(composeSession) {
 }
 
 function isComposeSessionActive() {
-    const composeSession = loadComposeSession();
-    return Boolean(composeSession && composeSession.active === true);
+    return false;
 }
 
 function appendToComposeText(text) {
@@ -100,8 +99,7 @@ function appendToComposeText(text) {
 }
 
 function isComposeFlowRequested() {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('compose') === '1' || isComposeSessionActive();
+    return false;
 }
 
 function queueComposeAppend(text) {

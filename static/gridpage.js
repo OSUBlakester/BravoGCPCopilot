@@ -2066,7 +2066,7 @@ async function renderComposeEntryMenu(container, fromUrl) {
                     sourceFrom: fromUrl || getComposeReturnTarget()
                 };
                 saveComposeSession();
-                window.location.href = 'gridpage.html?page=home&compose=1';
+                window.location.href = '/static/compose_create.html';
             }
         },
         {
@@ -2128,7 +2128,7 @@ async function renderComposeExistingDocumentsMenu(container, fromUrl) {
                     sourceFrom: fromUrl || getComposeReturnTarget()
                 };
                 saveComposeSession();
-                window.location.href = 'gridpage.html?page=home&compose=1';
+                window.location.href = '/static/compose_create.html';
             }, index++));
         });
     }
@@ -2346,7 +2346,7 @@ async function renderComposeFinalizeMenu(container) {
         {
             label: 'Return to Creation',
             handler: async () => {
-                window.location.href = 'gridpage.html?page=home&compose=1';
+                window.location.href = '/static/compose_create.html';
             }
         }
     ];
@@ -2908,8 +2908,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isComposeFinalizeView = params.get('compose_finalize') === '1';
     const isEmailEntryView = params.get('email_menu') === '1';
     const isEmailFinalizeView = params.get('email_finalize') === '1';
+    const isEmailComposeView = params.get('email_compose') === '1';
     const composeResumeFlag = params.get('compose') === '1';
-    const isComposeFlowView = isComposeEntryView || isComposeFinalizeView || isEmailEntryView || isEmailFinalizeView || composeResumeFlag;
+    const isComposeFlowView = isComposeEntryView || isComposeFinalizeView || isEmailEntryView || isEmailFinalizeView || isEmailComposeView;
 
     // Remove the user-id-selector related UI elements if they exist
     document.getElementById('user-id-selector')?.closest('div')?.remove();
@@ -2990,7 +2991,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
             await renderEmailFinalizeMenu(gridContainer, fromUrl);
         } else {
-            if (composeResumeFlag && !isComposeSessionActive()) {
+            if (composeResumeFlag && isEmailComposeView && !isComposeSessionActive()) {
                 composeSession = {
                     active: true,
                     documentId: null,
@@ -3000,6 +3001,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     sourceFrom: params.get('from') || getComposeReturnTarget()
                 };
                 saveComposeSession();
+            }
+
+            if (!isEmailComposeView && isComposeSessionActive() && !isEmailSessionActive()) {
+                clearComposeSession();
             }
 
             await generateGrid(pageToDisplay, gridContainer);

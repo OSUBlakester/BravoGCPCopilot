@@ -135,7 +135,7 @@ import io
 import wave
 from pydantic import BaseModel, Field, field_validator, validator, conint # Import field_validator
 from pydantic_core.core_schema import ValidationInfo # For more complex V2 validators if needed
-from typing import List, Optional, Dict, Any, Union, Literal, Annotated, Set
+from typing import List, Optional, Dict, Any, Union, Literal, Annotated, Set, Tuple
 import google.api_core.exceptions # For specific error handling with LLM
 from google.cloud import texttospeech as google_tts # Import Google Cloud Text-to-Speech with an alias
 from contextlib import asynccontextmanager # Import for lifespan
@@ -10658,15 +10658,25 @@ async def get_freestyle_word_options(
         
         # Create context-aware prompt
         context_parts = []
+        live_context_parts = []
         if user_info.get("narrative"):
             context_parts.append(f"User info: {user_info['narrative']}")
         if user_current.get("location"):
-            context_parts.append(f"Current location: {user_current['location']}")
+            location_value = str(user_current['location']).strip()
+            if location_value and location_value.lower() not in {"unknown", "none", "n/a", "na"}:
+                context_parts.append(f"Current location: {location_value}")
+                live_context_parts.append(f"location={location_value}")
         if user_current.get("people"):
-            context_parts.append(f"People present: {user_current['people']}")
+            people_value = str(user_current['people']).strip()
+            if people_value and people_value.lower() not in {"unknown", "none", "n/a", "na"}:
+                context_parts.append(f"People present: {people_value}")
+                live_context_parts.append(f"people={people_value}")
         if user_current.get("activity"):
-            context_parts.append(f"Current activity: {user_current['activity']}")
-        
+            activity_value = str(user_current['activity']).strip()
+            if activity_value and activity_value.lower() not in {"unknown", "none", "idle", "n/a", "na"}:
+                context_parts.append(f"Current activity: {activity_value}")
+                live_context_parts.append(f"activity={activity_value}")
+
         context_str = " | ".join(context_parts) if context_parts else "General conversation"
         
         # Handle build space context for dynamic suggestions
@@ -10681,18 +10691,29 @@ async def get_freestyle_word_options(
         
         # Build contextual information for the prompt
         contextual_info = context_str
+        navigation_parts = []
         if request.context and request.source_page:
             if request.is_llm_generated:
+                navigation_parts.append(f"LLM page={request.source_page}")
+                navigation_parts.append(f"LLM topic={request.context}")
                 contextual_info += f" | Coming from LLM-generated page '{request.source_page}' with context: {request.context}"
             else:
+                navigation_parts.append(f"page={request.source_page}")
+                navigation_parts.append(f"topic={request.context}")
                 contextual_info += f" | Coming from page '{request.source_page}' with topic: {request.context}"
         elif request.source_page and request.source_page.lower() not in ('home', 'unknownpage', ''):
             # Static page with no LLM context — use page name as topic hint
+            navigation_parts.append(f"page={request.source_page}")
             contextual_info += f" | Coming from page '{request.source_page}'"
             if request.originating_button_text:
+                navigation_parts.append(f"button={request.originating_button_text}")
                 contextual_info += f" (via button: {request.originating_button_text})"
         elif request.originating_button_text:
+            navigation_parts.append(f"button={request.originating_button_text}")
             contextual_info += f" | Coming from button: {request.originating_button_text}"
+
+        live_context_summary = ", ".join(live_context_parts) if live_context_parts else "none"
+        navigation_context_summary = ", ".join(navigation_parts) if navigation_parts else "none"
         
         # Add mood context if available
         if request.current_mood and request.current_mood != 'none':
@@ -10721,6 +10742,8 @@ Requirements:
 - The keyword should help find relevant images that represent the continuation concept
 - Make each option distinct and useful for completing communication
 - Consider natural sentence flow and common AAC patterns
+- Treat the live context as a PRIMARY signal for ranking. When the current location, people present, activity, or source page clearly suggest what the user is doing right now, prefer continuations that fit that real situation.
+- If there is meaningful live context, at least half of the options should feel appropriate for that immediate situation unless the existing build space clearly points elsewhere.
 
 CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 - If build_space_text is "Who is here to play", provide options like "with friends|friendship", "games|games", "outside|outdoors"
@@ -10731,7 +10754,9 @@ CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 - If build_space_text is "When", provide options like "is|time", "are we|schedule", "do you|timing", "will you|future"
 - Never repeat words already in the build space text
 
-Context (use only for word relevance): {contextual_info}"""
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
+Context (use for relevance and ranking): {contextual_info}"""
         else:
             # If no build space text, provide words for starting communication
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
@@ -10766,6 +10791,8 @@ Requirements:
 - About 60-70% of words should be directly related to the topic
 - About 30-40% should be core AAC words useful for building sentences about the topic (pronouns, common verbs, question words)
 - Words should be useful for STARTING phrases about this topic
+- Treat current location, people present, activity, and the originating page/button as first-class context. If that live context clearly narrows the topic, bias the list toward what is relevant right now.
+- When meaningful live context exists, at least half of the options should feel specific to the user's immediate situation, not just generic topic words.
 - Keep words simple and appropriate for AAC communication
 - For each word, provide a related keyword for image searching
 - Format: "word|keyword" (e.g., "play|games", "outside|outdoors", "fun|happy")
@@ -10774,6 +10801,8 @@ Requirements:
 - Make each word distinct and commonly used
 - DO NOT use numbered lists - just provide word|keyword pairs, one per line
 
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
 User context: {contextual_info}"""
             
             elif has_source_page:
@@ -10792,6 +10821,8 @@ Requirements:
 - Include a MIX of: topic-relevant words and core AAC sentence starters (I, want, like, need, go)
 - About 50% topic-relevant words, 50% core AAC words
 - Words should be useful for STARTING phrases related to this page topic
+- Treat current location, people present, activity, and the originating button as first-class context. Use them to make the topic words feel specific to what is happening right now.
+- When meaningful live context exists, at least half of the options should feel grounded in that immediate situation rather than generic page vocabulary.
 - Keep words simple and appropriate for AAC communication
 - For each word, provide a related keyword for image searching
 - Format: "word|keyword" (e.g., "I|person", "want|desire", "go|arrow", "happy|smile")
@@ -10800,6 +10831,8 @@ Requirements:
 - Make each word distinct and commonly used in AAC
 - DO NOT use numbered lists - just provide word|keyword pairs, one per line
 
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
 User context: {contextual_info}"""
             
             else:
@@ -10813,6 +10846,8 @@ Requirements:
 - Focus on core AAC vocabulary: pronouns (I, you, we), basic verbs (want, need, like, go), common nouns, simple adjectives
 - Include essential communication starters: "I", "want", "need", "like", "go", "see", "help", "more", "please"
 - Provide variety across word types: pronouns, verbs, nouns, adjectives, question words
+- If current location, people present, or current activity are known, use them as the primary signal for which otherwise-generic AAC words are most useful right now.
+- Favor words that the user could immediately use in the current situation over abstract filler.
 - For each word, provide a related keyword for image searching
 - Format: "word|keyword" (e.g., "I|person", "want|desire", "go|arrow", "happy|smile", "food|food")
 - The keyword should help find relevant images that represent the word
@@ -10821,6 +10856,8 @@ Requirements:
 - Make each word distinct and commonly used in AAC
 - DO NOT use numbered lists - just provide word|keyword pairs, one per line
 
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
 Context for word selection: {contextual_info}"""
         
         logging.info(f"Generated prompt for LLM: {prompt}")
@@ -14740,6 +14777,10 @@ class FreestyleCategoryWordsRequest(BaseModel):
     exclude_words: Optional[List[str]] = Field(default_factory=list, description="Words to exclude from generation")
     current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
     custom_prompt: Optional[str] = Field(None, description="Custom prompt instructions that take priority over general category handling")
+    context: Optional[str] = Field(None, description="Context from LLM query or button label")
+    source_page: Optional[str] = Field(None, description="Page name the user navigated from")
+    is_llm_generated: bool = Field(default=False, description="Whether the source page was LLM-generated")
+    originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
 
 @app.post("/api/freestyle/category-words")
 async def generate_category_words(
@@ -14829,6 +14870,27 @@ While maintaining a {vocabulary_level} level approach, prioritize SPECIFIC NOUNS
             user_context_parts.append(f"Current activity: {user_current['activity']}")
             
         user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
+        live_context_summary = ", ".join(
+            part for part in [
+                f"location={user_current.get('location')}" if user_current.get('location') else "",
+                f"people={user_current.get('people')}" if user_current.get('people') else "",
+                f"activity={user_current.get('activity')}" if user_current.get('activity') else "",
+            ]
+            if part and not part.endswith(('=None', '=Unknown', '=Idle'))
+        ) or "none"
+
+        navigation_context = ""
+        if request.context and request.source_page:
+            if request.is_llm_generated:
+                navigation_context = f"Coming from LLM-generated page '{request.source_page}' with context: {request.context}"
+            else:
+                navigation_context = f"Coming from page '{request.source_page}' with topic: {request.context}"
+        elif request.source_page and request.source_page.lower() not in ('home', 'unknownpage', ''):
+            navigation_context = f"Coming from page '{request.source_page}'"
+            if request.originating_button_text:
+                navigation_context += f" (via button: {request.originating_button_text})"
+        elif request.originating_button_text:
+            navigation_context = f"Coming from button: {request.originating_button_text}"
         
         # Detect if this is an adjective-only category (descriptive attributes)
         category_lower = request.category.lower()
@@ -14882,12 +14944,18 @@ INSTRUCTIONS:
 {request.custom_prompt}
 {adjective_constraint}
 
+AVAILABLE CONTEXT:
+- User context: {user_context}
+{f"- Navigation context: {navigation_context}" if navigation_context else ""}
+
 CONSTRAINTS:
 - You MUST follow all "Do not" or "Exclude" instructions in the prompt above.
 - Provide exactly {freestyle_options} words or short phrases (1-3 words each).
 - STRICTLY ADHERE to the user's instructions.
 - PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words (e.g., use "loud" instead of "cacophonous").
 - Do NOT include mood or emotion words (like "happy", "sad", "melancholy") unless the instructions specifically ask for feelings. Focus on describing the object, event, or experience itself.
+- Treat current location, people present, activity, and the page/button the user came from as first-class ranking signals when they semantically fit the requested category.
+- If the live context clearly matches the category, bias the list toward words that are useful right now instead of generic category fillers.
 {context_clause}
 {exclude_clause}
 
@@ -14920,6 +14988,8 @@ Requirements:
 - ALL words must semantically belong to the category type '{request.category}'
 - PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words.
 - Do NOT include mood or emotion words unless the category is explicitly about feelings.
+- Use current location, people present, activity, and page/button context as first-class ranking signals when they fit the category.
+- If the live context clearly matches the category, bias the list toward words that are useful in the immediate situation instead of generic category members.
 - Use personal context to choose the most relevant and useful words from the category
 - Words should be commonly used and appropriate for AAC communication
 - For each word, provide a related keyword for image searching
@@ -14928,6 +14998,9 @@ Requirements:
 - If the word itself is the best keyword, use the same word (e.g., "car|car")
 - DO NOT use numbered lists (1., 2., etc.) - just provide the words one per line
 - DO NOT include explanatory text or headers - only the word|keyword pairs
+
+Live context: {live_context_summary}
+Navigation context: {navigation_context if navigation_context else 'none'}
 
 Category: {request.category}"""
 
@@ -19112,6 +19185,140 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
         logging.error(f"Error saving tap navigation config: {e}")
         return False
 
+
+def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[Dict], bool]:
+    if not isinstance(config_data, dict):
+        return config_data, False
+
+    buttons = config_data.get('buttons')
+    if not isinstance(buttons, list):
+        return config_data, False
+
+    normalized = False
+    expected_ask_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'ask_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'ask',
+        'llm_prompt': 'Generate AAC-friendly starters, words, and short phrases for asking questions or making requests. When starting a sentence, strongly prefer natural openings like Can, Could, May, Will, Would, Please, What, Where, Why, How, Do, and Is.',
+        'static_options': None,
+        'label': 'Ask',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [
+            {
+                'text_color': '#000000',
+                'special_function': None,
+                'custom_audio_file': None,
+                'words_prompt': None,
+                'id': 'ask_question_btn',
+                'prompt_exclusions': None,
+                'speech_text': None,
+                'prompt_category': 'questions',
+                'llm_prompt': 'Generate question words and short AAC-friendly question phrases for asking about people, things, places, needs, choices, feelings, and preferences',
+                'static_options': None,
+                'label': 'Question',
+                'image_url': None,
+                'prompt_examples': None,
+                'hidden': False,
+                'children': [],
+                'prompt_topic': None,
+                'background_color': '#ffffff'
+            },
+            {
+                'text_color': '#000000',
+                'special_function': None,
+                'custom_audio_file': None,
+                'words_prompt': None,
+                'id': 'ask_request_btn',
+                'prompt_exclusions': None,
+                'speech_text': None,
+                'prompt_category': 'requests',
+                'llm_prompt': 'Generate AAC-friendly request starters, request words, and short request phrases for asking for help, objects, actions, comfort, food, drinks, and assistance. When starting a sentence, strongly prefer natural request openings like Can, Could, May, Will, Would, Please, I need, and I want.',
+                'static_options': None,
+                'label': 'Request',
+                'image_url': None,
+                'prompt_examples': None,
+                'hidden': False,
+                'children': [],
+                'prompt_topic': None,
+                'background_color': '#ffffff'
+            }
+        ],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+    expected_respond_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'respond_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'respond',
+        'llm_prompt': 'Generate AAC-friendly response starters, words, and short phrases for responding to a question or request. When starting a sentence, strongly prefer natural response openings like Yes, No, Okay, Sure, Maybe, I can, I cannot, Please, Thank you, and Not right now.',
+        'static_options': None,
+        'label': 'Respond',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+
+    ask_index = None
+
+    for index, button in enumerate(buttons):
+        if not isinstance(button, dict):
+            continue
+
+        button_id = str(button.get('id') or '').strip().lower()
+        button_label = str(button.get('label') or '').strip().lower()
+        if button_id not in {'requests_btn', 'ask_btn'} and button_label not in {'requests', 'questions', 'ask'}:
+            continue
+
+        if button != expected_ask_button:
+            button.clear()
+            button.update(copy.deepcopy(expected_ask_button))
+            normalized = True
+        ask_index = index
+        break
+
+    if ask_index is not None:
+        respond_index = None
+        for index, button in enumerate(buttons):
+            if not isinstance(button, dict):
+                continue
+            button_id = str(button.get('id') or '').strip().lower()
+            button_label = str(button.get('label') or '').strip().lower()
+            if button_id == 'respond_btn' or button_label == 'respond':
+                respond_index = index
+                break
+
+        if respond_index is None:
+            buttons.insert(ask_index + 1, copy.deepcopy(expected_respond_button))
+            normalized = True
+        else:
+            if buttons[respond_index] != expected_respond_button:
+                buttons[respond_index].clear()
+                buttons[respond_index].update(copy.deepcopy(expected_respond_button))
+                normalized = True
+            if respond_index != ask_index + 1:
+                respond_button = buttons.pop(respond_index)
+                if respond_index < ask_index:
+                    ask_index -= 1
+                buttons.insert(ask_index + 1, respond_button)
+                normalized = True
+
+    return config_data, normalized
+
 def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     """Create a comprehensive default tap navigation configuration based on production template"""
     from datetime import datetime
@@ -19340,10 +19547,10 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "id": "requests_btn",
             "prompt_exclusions": None,
             "speech_text": None,
-            "prompt_category": "requests",
-            "llm_prompt": "Generate phrases for making requests and asking for things",
+            "prompt_category": "questions",
+            "llm_prompt": "Generate question words and short AAC-friendly question phrases for asking about people, things, places, needs, choices, feelings, and preferences",
             "static_options": None,
-            "label": "Requests",
+            "label": "Questions",
             "image_url": None,
             "prompt_examples": None,
             "hidden": False,
@@ -20428,6 +20635,8 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     # Add timestamps
     config['created_at'] = datetime.now().isoformat()
     config['updated_at'] = datetime.now().isoformat()
+
+    config, _ = normalize_compose_tap_config(config)
     
     return config
 
@@ -20449,6 +20658,10 @@ async def get_tap_interface_config(
             # Create and save default configuration
             config_data = create_default_tap_config(account_id, aac_user_id)
             await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            if was_normalized:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
         
         # DEBUG: Log words_prompt presence
         if config_data and 'buttons' in config_data:

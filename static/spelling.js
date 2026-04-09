@@ -60,33 +60,11 @@ function saveComposeSession(composeSession) {
 }
 
 function isComposeSessionActive() {
-    const composeSession = loadComposeSession();
-    return Boolean(composeSession && composeSession.active === true);
+    return false;
 }
 
 function isComposeFlowRequested() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('compose') === '1' || isComposeSessionActive()) {
-        return true;
-    }
-
-    const from = params.get('from');
-    if (!from) return false;
-
-    try {
-        const fromUrl = new URL(from, window.location.origin);
-        const fromParams = fromUrl.searchParams;
-        return (
-            fromParams.get('compose') === '1' ||
-            fromParams.get('email_compose') === '1' ||
-            fromParams.get('email_finalize') === '1' ||
-            fromParams.get('compose_entry') === '1' ||
-            fromParams.get('compose_finalize') === '1'
-        );
-    } catch (error) {
-        const decoded = decodeURIComponent(String(from || ''));
-        return /(compose=1|email_compose=1|email_finalize=1|compose_entry=1|compose_finalize=1)/.test(decoded);
-    }
+    return false;
 }
 
 function appendToComposeText(text) {
