@@ -3089,10 +3089,10 @@ Undated Diary Entries (use cautiously, max 5):
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
-            # Gemini 2.5 Flash minimum cache size - temporarily lowered to 512 for testing
-            # Use a more accurate token estimation: roughly 4 chars per token for English text
+            # Gemini cached content rejects requests below 2048 total tokens in production.
+            # Use a rough 4 chars/token estimate and skip cache creation when we are clearly under.
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 512
+            min_tokens_required = 2048
             
             logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
@@ -10890,30 +10890,63 @@ Context for word selection: {contextual_info}"""
         response_text = await _generate_gemini_content_with_fallback(prompt, generation_config, account_id, aac_user_id)
         logging.warning(f"DEBUG Freestyle API - LLM response length: {len(response_text)}, content: {response_text[:500]}...")
         
-        # Parse options with keywords and ensure uniqueness  
+        # Parse options with keywords and ensure uniqueness.
         all_lines = [line.strip() for line in response_text.split('\n') if line.strip()]
         
-        # Filter out preamble/instructional lines that aren't actual options
+        # Filter out preamble/instructional lines that aren't actual options.
         def is_preamble_line(line):
             preamble_indicators = [
                 "here are", "here's", "i'll provide", "providing", "below are",
                 "the following", "these are", "let me give", "i can offer",
                 "varied and diverse", "different and unique", "suggestions:",
                 "options:", "words:", "phrases:", "requirements:",
-                "format:", "examples:", "note:", "remember:"
+                "format:", "examples:", "note:", "remember:",
+                "let's brainstorm", "brainstorm continuations", "continuations for",
+                "live context:", "navigation context:", "user context:", "context:"
             ]
             line_lower = line.lower()
             # Check if line is too long (likely explanatory text)
             if len(line) > 50:
+                return True
+            if line.endswith(':'):
                 return True
             # Check for preamble indicators
             for indicator in preamble_indicators:
                 if indicator in line_lower:
                     return True
             return False
+
+        def normalize_candidate_line(line):
+            cleaned = re.sub(r'^\s*(?:[-*•]+|\d+[.)])\s*', '', line).strip()
+            return cleaned.strip('"\'` ').strip()
+
+        def is_valid_option_text(text):
+            if not text:
+                return False
+
+            text_lower = text.lower()
+            invalid_indicators = [
+                "let's brainstorm", "brainstorm", "continuations for", "provide exactly",
+                "generate exactly", "requirements", "format", "example", "live context",
+                "navigation context", "user context", "the user is", "aac communication"
+            ]
+
+            if any(indicator in text_lower for indicator in invalid_indicators):
+                return False
+            if any(char in text for char in ['"', '“', '”']):
+                return False
+            if text.endswith((':', '.', '?', '!')):
+                return False
+
+            word_count = len([part for part in text.split() if part])
+            if word_count == 0 or word_count > 3:
+                return False
+
+            return True
         
         # Filter out preamble lines
-        word_lines = [line for line in all_lines if not is_preamble_line(line)]
+        word_lines = [normalize_candidate_line(line) for line in all_lines if not is_preamble_line(line)]
+        word_lines = [line for line in word_lines if line]
         
         # Remove duplicates while preserving order and parse word|keyword format
         unique_options = []
@@ -10922,8 +10955,8 @@ Context for word selection: {contextual_info}"""
             if '|' in line:
                 # Parse word|keyword format
                 parts = line.split('|', 1)
-                first_part = parts[0].strip()
-                second_part = parts[1].strip() if len(parts) > 1 else first_part
+                first_part = normalize_candidate_line(parts[0])
+                second_part = normalize_candidate_line(parts[1]) if len(parts) > 1 else first_part
                 
                 # For build space continuation, first part is the continuation text to display
                 # For initial generation, first part is also the word to display
@@ -10931,7 +10964,7 @@ Context for word selection: {contextual_info}"""
                 keyword = second_part  # Always use the second part as the keyword for images
                 unique_key = word.lower().strip()  # Use the word text for uniqueness
                 
-                if unique_key not in seen and word:
+                if unique_key not in seen and is_valid_option_text(word):
                     unique_options.append({
                         "text": word,
                         "keywords": [keyword] if keyword != word else []
@@ -10939,9 +10972,9 @@ Context for word selection: {contextual_info}"""
                     seen.add(unique_key)
             else:
                 # Fallback for lines without keyword format
-                word = line.strip()
+                word = normalize_candidate_line(line)
                 unique_key = word.lower()
-                if unique_key not in seen and word:
+                if unique_key not in seen and is_valid_option_text(word):
                     unique_options.append({
                         "text": word,
                         "keywords": []
