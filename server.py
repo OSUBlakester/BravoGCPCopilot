@@ -7828,6 +7828,312 @@ async def update_toolbar_pin(
         logging.error(f"Error updating toolbar PIN: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update toolbar PIN: {str(e)}")
 
+
+PROFILE_SETTINGS_EXPORT_TYPE = "bravo_profile_settings"
+PROFILE_SETTINGS_SCHEMA_VERSION = 1
+PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS = (
+    "guess_who_categories",
+    "guess_where_categories",
+    "guess_what_categories",
+    "hangman_categories",
+)
+
+
+async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    """Load a transferable bundle of profile settings/configuration data."""
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    birthdays = await load_birthdays_from_file(account_id, aac_user_id)
+    user_narrative = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy(),
+    )
+    current_state = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/current_state",
+        default_data=DEFAULT_USER_CURRENT.copy(),
+    )
+    scraping_config = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="config/scraping_config",
+        default_data={"news_sources": [], "sports_sources": [], "entertainment_sources": []},
+    )
+    favorites_config = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="config/favorites_config",
+        default_data=DEFAULT_FAVORITES_CONFIG.copy(),
+    )
+    audio_config = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="config/audio_config",
+        default_data={"personal_device": None, "system_device": None},
+    )
+    pages = await load_pages_from_file(account_id, aac_user_id)
+    tap_interface_config = await load_tap_nav_config(account_id, aac_user_id)
+
+    display_name = None
+    custom_categories: Dict[str, List[str]] = {}
+    try:
+        user_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        user_doc = await asyncio.to_thread(user_doc_ref.get)
+        if user_doc.exists:
+            user_data = user_doc.to_dict() or {}
+            display_name = user_data.get("display_name")
+            for field_name in PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS:
+                field_value = user_data.get(field_name)
+                if isinstance(field_value, list):
+                    custom_categories[field_name] = field_value
+    except Exception as e:
+        logging.warning(
+            f"Could not load profile metadata/custom categories for {account_id}/{aac_user_id}: {e}"
+        )
+
+    return {
+        "display_name": display_name,
+        "settings": settings,
+        "birthdays": birthdays,
+        "user_narrative": user_narrative,
+        "current_state": current_state,
+        "scraping_config": scraping_config,
+        "favorites_config": favorites_config,
+        "audio_config": audio_config,
+        "pages": pages,
+        "tap_interface_config": tap_interface_config,
+        "custom_categories": custom_categories,
+    }
+
+
+async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bundle: Dict[str, Any]) -> List[str]:
+    """Apply a transferred profile settings bundle to target account/user."""
+    imported_sections: List[str] = []
+
+    if "settings" in bundle:
+        settings_data = bundle["settings"]
+        if not isinstance(settings_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid settings payload format.")
+        if not await save_settings_to_file(account_id, aac_user_id, settings_data):
+            raise HTTPException(status_code=500, detail="Failed to import settings.")
+        imported_sections.append("settings")
+
+    if "birthdays" in bundle:
+        birthdays_data = bundle["birthdays"]
+        if not isinstance(birthdays_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid birthdays payload format.")
+        if not await save_birthdays_to_file(account_id, aac_user_id, birthdays_data):
+            raise HTTPException(status_code=500, detail="Failed to import birthdays.")
+        imported_sections.append("birthdays")
+
+    if "user_narrative" in bundle:
+        user_narrative_data = bundle["user_narrative"]
+        if not isinstance(user_narrative_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid user_narrative payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            data_to_save=user_narrative_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import user narrative.")
+        imported_sections.append("user_narrative")
+
+    if "current_state" in bundle:
+        current_state_data = bundle["current_state"]
+        if not isinstance(current_state_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid current_state payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/current_state",
+            data_to_save=current_state_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import current state.")
+        imported_sections.append("current_state")
+
+    if "scraping_config" in bundle:
+        scraping_config_data = bundle["scraping_config"]
+        if not isinstance(scraping_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid scraping_config payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/scraping_config",
+            data_to_save=scraping_config_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import scraping config.")
+        imported_sections.append("scraping_config")
+
+    if "favorites_config" in bundle:
+        favorites_config_data = bundle["favorites_config"]
+        if not isinstance(favorites_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid favorites_config payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/favorites_config",
+            data_to_save=favorites_config_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import favorites config.")
+        imported_sections.append("favorites_config")
+
+    if "audio_config" in bundle:
+        audio_config_data = bundle["audio_config"]
+        if not isinstance(audio_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid audio_config payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/audio_config",
+            data_to_save=audio_config_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import audio config.")
+        imported_sections.append("audio_config")
+
+    if "pages" in bundle:
+        pages_data = bundle["pages"]
+        if not isinstance(pages_data, list):
+            raise HTTPException(status_code=400, detail="Invalid pages payload format.")
+        if not await save_pages_to_file(account_id, aac_user_id, pages_data):
+            raise HTTPException(status_code=500, detail="Failed to import pages config.")
+        imported_sections.append("pages")
+
+    if "tap_interface_config" in bundle and bundle["tap_interface_config"] is not None:
+        tap_config_data = bundle["tap_interface_config"]
+        if not isinstance(tap_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid tap_interface_config payload format.")
+        if not await save_tap_nav_config(account_id, aac_user_id, tap_config_data):
+            raise HTTPException(status_code=500, detail="Failed to import tap interface config.")
+        imported_sections.append("tap_interface_config")
+
+    if "custom_categories" in bundle:
+        custom_categories = bundle["custom_categories"]
+        if not isinstance(custom_categories, dict):
+            raise HTTPException(status_code=400, detail="Invalid custom_categories payload format.")
+
+        user_updates = {}
+        for field_name in PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS:
+            if field_name not in custom_categories:
+                continue
+
+            field_value = custom_categories[field_name]
+            if field_value is None:
+                user_updates[field_name] = firestore.DELETE_FIELD
+                continue
+
+            if not isinstance(field_value, list):
+                raise HTTPException(status_code=400, detail=f"Invalid custom category field '{field_name}'.")
+
+            normalized_values = []
+            seen = set()
+            for item in field_value:
+                item_text = str(item).strip()
+                if not item_text:
+                    continue
+                item_key = item_text.lower()
+                if item_key in seen:
+                    continue
+                seen.add(item_key)
+                normalized_values.append(item_text)
+            user_updates[field_name] = normalized_values
+
+        if user_updates:
+            user_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+                account_id
+            ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+            await asyncio.to_thread(user_doc_ref.set, user_updates, merge=True)
+            imported_sections.append("custom_categories")
+
+    return imported_sections
+
+
+@app.get("/api/profile-settings/export")
+async def export_profile_settings(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Export profile settings/configuration for transfer to another account/profile."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        bundle = await _load_profile_settings_bundle(account_id, aac_user_id)
+        export_payload = {
+            "export_type": PROFILE_SETTINGS_EXPORT_TYPE,
+            "schema_version": PROFILE_SETTINGS_SCHEMA_VERSION,
+            "exported_at": dt.now(timezone.utc).isoformat(),
+            "profile": {
+                "aac_user_id": aac_user_id,
+                "display_name": bundle.get("display_name"),
+            },
+            "payload": bundle,
+        }
+        return JSONResponse(content=export_payload)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(
+            f"Error exporting profile settings for account {account_id}, user {aac_user_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to export profile settings.")
+
+
+@app.post("/api/profile-settings/import")
+async def import_profile_settings(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Import profile settings/configuration from a previously exported file."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        incoming = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=400, detail="Invalid import payload format.")
+
+    # Accept either a wrapped export file or a direct payload object.
+    if "payload" in incoming:
+        export_type = incoming.get("export_type")
+        schema_version = incoming.get("schema_version")
+
+        if export_type is not None and export_type != PROFILE_SETTINGS_EXPORT_TYPE:
+            raise HTTPException(status_code=400, detail="Unsupported export_type in import file.")
+        if schema_version is not None and schema_version != PROFILE_SETTINGS_SCHEMA_VERSION:
+            raise HTTPException(status_code=400, detail="Unsupported schema_version in import file.")
+
+        bundle = incoming.get("payload")
+    else:
+        bundle = incoming
+
+    if not isinstance(bundle, dict):
+        raise HTTPException(status_code=400, detail="Import payload missing valid 'payload' object.")
+
+    imported_sections = await _apply_profile_settings_bundle(account_id, aac_user_id, bundle)
+
+    # Imported settings affect user context and option generation; clear cache.
+    try:
+        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after profile settings import")
+    except Exception as e:
+        logging.error(f"Failed to invalidate cache after profile settings import: {e}")
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "Profile settings imported successfully.",
+            "imported_sections": imported_sections,
+        }
+    )
+
 # NEW: Model for account update requests
 class UpdateAccountRequest(BaseModel):
     account_name: Optional[str] = None

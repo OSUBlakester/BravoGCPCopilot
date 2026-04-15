@@ -97,6 +97,9 @@ const emailServerPrereqEl = document.getElementById('email-server-prereq');
 const refreshEmailStatusButton = document.getElementById('refreshEmailStatusButton');
 const connectEmailButton = document.getElementById('connectEmailButton');
 const disconnectEmailButton = document.getElementById('disconnectEmailButton');
+const exportProfileSettingsButton = document.getElementById('exportProfileSettingsButton');
+const importProfileSettingsButton = document.getElementById('importProfileSettingsButton');
+const importProfileSettingsFileInput = document.getElementById('importProfileSettingsFileInput');
 
 const saveSettingsButton = document.getElementById('saveSettingsButton');
 
@@ -372,6 +375,126 @@ async function disconnectEmailProvider() {
     }
 
     await loadEmailProviderStatus();
+}
+
+function sanitizeFilenamePart(value, fallback = 'profile') {
+    const normalized = String(value || '').trim();
+    if (!normalized) return fallback;
+    const cleaned = normalized
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    return cleaned || fallback;
+}
+
+async function exportProfileSettings() {
+    if (!window.authenticatedFetch) {
+        showTemporaryStatus(settingsStatus, 'Authentication is not ready. Please refresh.', true, 4000);
+        return;
+    }
+
+    showTemporaryStatus(settingsStatus, 'Exporting profile settings...', false, 0);
+    try {
+        const response = await window.authenticatedFetch('/api/profile-settings/export', {
+            method: 'GET'
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Export failed: ${response.status} ${errorText}`);
+        }
+
+        const exportData = await response.json();
+        const profileName = sanitizeFilenamePart(exportData?.profile?.display_name, 'profile');
+        const dateStamp = new Date().toISOString().slice(0, 10);
+        const filename = `bravo_profile_settings_${profileName}_${dateStamp}.json`;
+
+        const jsonText = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([jsonText], { type: 'application/json' });
+        const blobUrl = window.URL.createObjectURL(blob);
+
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+
+        showTemporaryStatus(settingsStatus, 'Profile settings export complete.', false, 4000);
+    } catch (error) {
+        console.error('Error exporting profile settings:', error);
+        showTemporaryStatus(settingsStatus, `Export failed: ${error.message}`, true, 5000);
+    }
+}
+
+async function importProfileSettingsFromText(fileText) {
+    if (!window.authenticatedFetch) {
+        showTemporaryStatus(settingsStatus, 'Authentication is not ready. Please refresh.', true, 4000);
+        return;
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(fileText);
+    } catch (e) {
+        showTemporaryStatus(settingsStatus, 'Invalid JSON file. Please choose a valid export file.', true, 5000);
+        return;
+    }
+
+    const sourceName = parsed?.profile?.display_name || parsed?.profile?.aac_user_id || 'unknown profile';
+    const confirmed = window.confirm(
+        `Import settings from "${sourceName}" into the currently selected profile? This will overwrite matching settings sections.`
+    );
+    if (!confirmed) {
+        showTemporaryStatus(settingsStatus, 'Import cancelled.', false, 2500);
+        return;
+    }
+
+    showTemporaryStatus(settingsStatus, 'Importing profile settings...', false, 0);
+    try {
+        const response = await window.authenticatedFetch('/api/profile-settings/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(parsed)
+        });
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Import failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
+        const importedSections = Array.isArray(result.imported_sections) ? result.imported_sections : [];
+        await loadSettings();
+        showTemporaryStatus(
+            settingsStatus,
+            importedSections.length > 0
+                ? `Import complete: ${importedSections.join(', ')}`
+                : 'Import complete.',
+            false,
+            5000
+        );
+    } catch (error) {
+        console.error('Error importing profile settings:', error);
+        showTemporaryStatus(settingsStatus, `Import failed: ${error.message}`, true, 6000);
+    }
+}
+
+async function handleImportProfileSettingsFileSelection(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) {
+        return;
+    }
+
+    try {
+        const fileText = await file.text();
+        await importProfileSettingsFromText(fileText);
+    } catch (error) {
+        console.error('Error reading import file:', error);
+        showTemporaryStatus(settingsStatus, 'Could not read import file.', true, 5000);
+    } finally {
+        // Allow selecting the same file again after import.
+        event.target.value = '';
+    }
 }
 
 /**
@@ -892,6 +1015,19 @@ async function initializePage() {
                     showTemporaryStatus(settingsStatus, `Email disconnect error: ${error.message}`, true, 4000);
                 });
             });
+        }
+        if (exportProfileSettingsButton) {
+            exportProfileSettingsButton.addEventListener('click', () => {
+                exportProfileSettings().catch((error) => {
+                    showTemporaryStatus(settingsStatus, `Export error: ${error.message}`, true, 4000);
+                });
+            });
+        }
+        if (importProfileSettingsButton && importProfileSettingsFileInput) {
+            importProfileSettingsButton.addEventListener('click', () => {
+                importProfileSettingsFileInput.click();
+            });
+            importProfileSettingsFileInput.addEventListener('change', handleImportProfileSettingsFileSelection);
         }
         
         // Mood-related event listeners
