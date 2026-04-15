@@ -458,8 +458,8 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Speech Rate. Must be a number (e.g., 50-400).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-     if (!newLLMOptions || isNaN(parseInt(newLLMOptions)) || parseInt(newLLMOptions) < 1 || parseInt(newLLMOptions) > 50) {
-        settingsStatus.textContent = 'Invalid LLM Options. Must be a number (e.g., 1-50).';
+      if (newLLMOptions === '' || isNaN(parseInt(newLLMOptions)) || parseInt(newLLMOptions) < 0 || parseInt(newLLMOptions) > 50) {
+          settingsStatus.textContent = 'Invalid LLM Options. Must be a number (e.g., 0-50).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
      if (newFreestyleOptions !== '' && (isNaN(parseInt(newFreestyleOptions)) || parseInt(newFreestyleOptions) < 1 || parseInt(newFreestyleOptions) > 50)) {

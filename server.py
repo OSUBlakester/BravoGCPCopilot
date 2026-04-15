@@ -7566,7 +7566,7 @@ class SettingsModel(BaseModel):
     wakeWordName: Optional[str] = Field(None, description="The name part of the wake word (e.g., 'Brady').", min_length=1, max_length=50)
     CountryCode: Optional[str] = Field(None, description="Country code for holiday lookups (e.g., US, CA).", min_length=2, max_length=2)
     speech_rate: Optional[int] = Field(None, description="Speech rate in WPM (e.g., 100-300).", gt=49, lt=401) # Added speech_rate
-    LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 1-50)", ge=1, le=50) 
+    LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 0-50)", ge=0, le=50) 
     FreestyleOptions: Optional[int] = Field(20, description="Number of word options returned for freestyle communication (e.g., 1-50)", ge=1, le=50)
     llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
@@ -22152,7 +22152,11 @@ async def _generate_items(request: GuessWhoGeneratePeopleRequest, current_ids: D
     try:
         # Load user settings for LLMOptions
         settings = await load_settings_from_file(account_id, aac_user_id)
-        llm_options = settings.get("LLMOptions", 10)
+        raw_llm_options = settings.get("LLMOptions", 10)
+        # Allow Tap phrases to be disabled with LLMOptions=0 without breaking Guess Games.
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 10
+        if llm_options <= 0:
+            llm_options = 5
         
         # Build exclusion instruction
         exclusion_instruction = ""
@@ -22215,7 +22219,11 @@ async def _generate_clues(request: GuessWhoGenerateCluesRequest, current_ids: Di
     
     try:
         settings = await load_settings_from_file(account_id, aac_user_id)
-        llm_options = settings.get("LLMOptions", 5)
+        raw_llm_options = settings.get("LLMOptions", 5)
+        # Allow Tap phrases to be disabled with LLMOptions=0 without breaking Guess Games.
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 5
+        if llm_options <= 0:
+            llm_options = 5
         
         exclusion_instruction = ""
         if request.previous_clues and len(request.previous_clues) > 0:
@@ -22296,7 +22304,11 @@ async def _generate_guesses(request: GuessWhoGenerateGuessesRequest, current_ids
     
     try:
         settings = await load_settings_from_file(account_id, aac_user_id)
-        llm_options = settings.get("LLMOptions", 5)
+        raw_llm_options = settings.get("LLMOptions", 5)
+        # Allow Tap phrases to be disabled with LLMOptions=0 without breaking Guess Games.
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 5
+        if llm_options <= 0:
+            llm_options = 5
         total_guesses_needed = llm_options * 2
         
         clues_context = "\n".join([f"- {clue}" for clue in request.clues])

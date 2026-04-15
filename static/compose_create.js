@@ -35,6 +35,7 @@ let currentNumberBase = 0;
 let lastAnnouncedSpellingWord = '';
 let availableCompletedSpellingWord = '';
 let spellingPriorityMode = 'none';
+let spellingPredictionRequestToken = 0;
 
 let announcementQueue = [];
 let isAnnouncingNow = false;
@@ -367,6 +368,10 @@ function updateBuildSpaceInput() {
     currentWordInput.value = getCombinedBuildText();
 }
 
+function invalidateSpellingPredictionRequests() {
+    spellingPredictionRequestToken += 1;
+}
+
 function setBuildSpaceText(text) {
     currentBuildSpaceText = typeof text === 'string' ? text : '';
     updateBuildSpaceInput();
@@ -387,6 +392,7 @@ function appendWordToBuildSpace(word) {
 async function clearBuildSpace() {
     currentBuildSpaceText = '';
     currentSpellingWord = '';
+    invalidateSpellingPredictionRequests();
     lastAnnouncedSpellingWord = '';
     availableCompletedSpellingWord = '';
     updateBuildSpaceInput();
@@ -415,6 +421,7 @@ function removeLastWordUnit(text) {
 async function backspaceCurrentWord() {
     if (currentSpellingWord.length > 0) {
         currentSpellingWord = '';
+        invalidateSpellingPredictionRequests();
         lastAnnouncedSpellingWord = '';
         availableCompletedSpellingWord = '';
         updateBuildSpaceInput();
@@ -442,6 +449,7 @@ async function backspaceCurrentWord() {
 
 function clearCurrentSpellingWord() {
     currentSpellingWord = '';
+    invalidateSpellingPredictionRequests();
     lastAnnouncedSpellingWord = '';
     availableCompletedSpellingWord = '';
     updateBuildSpaceInput();
@@ -503,6 +511,7 @@ function exitCreation() {
     if (currentSpellingWord) {
         appendWordToBuildSpace(currentSpellingWord);
         currentSpellingWord = '';
+        invalidateSpellingPredictionRequests();
     }
     syncBuildSpaceToComposeSession();
     window.location.href = '/static/gridpage.html?compose_finalize=1';
@@ -530,6 +539,7 @@ async function aiEditCreation() {
     try {
         const cleaned = await cleanupTextValue(text);
         currentSpellingWord = '';
+        invalidateSpellingPredictionRequests();
         setBuildSpaceText(cleaned);
         syncBuildSpaceToComposeSession();
         await refreshSuggestedWords();
@@ -559,6 +569,7 @@ async function newRow() {
             : `${finalizedLine}\n`;
 
         currentSpellingWord = '';
+        invalidateSpellingPredictionRequests();
         setBuildSpaceText(rebuiltText);
         currentCategory = null;
         setActiveCategoryButton('General');
@@ -681,6 +692,14 @@ function renderNumbersToolPanel() {
     categoryGridEl.innerHTML = '';
     updateCategoryPanelHeading();
 
+    const goBackButton = document.createElement('button');
+    goBackButton.className = 'category-btn compose-button';
+    goBackButton.textContent = 'Go Back';
+    goBackButton.addEventListener('click', () => {
+        closeActiveTool();
+    });
+    categoryGridEl.appendChild(goBackButton);
+
     buildNumberRanges(1000).forEach((range) => {
         const btn = document.createElement('button');
         btn.className = 'category-btn compose-button';
@@ -722,14 +741,6 @@ function renderNumbersToolPanel() {
         restartScanningInSection('tool-panel', 150);
     });
     categoryGridEl.appendChild(resetButton);
-
-    const goBackButton = document.createElement('button');
-    goBackButton.className = 'category-btn compose-button';
-    goBackButton.textContent = 'Go Back';
-    goBackButton.addEventListener('click', () => {
-        closeActiveTool();
-    });
-    categoryGridEl.appendChild(goBackButton);
 }
 
 function setActiveCategoryButton(label) {
@@ -909,6 +920,20 @@ function renderCurrentCategoryPanel() {
     categoryGridEl.innerHTML = '';
     updateCategoryPanelHeading();
 
+    const goBackButton = document.createElement('button');
+    goBackButton.className = 'category-btn compose-button';
+    goBackButton.textContent = 'Go Back';
+    goBackButton.addEventListener('click', () => {
+        if (parentNode) {
+            categoryNavigationStack.pop();
+            renderCurrentCategoryPanel();
+            restartScanningInSection('tool-panel', 150);
+            return;
+        }
+        closeActiveTool();
+    });
+    categoryGridEl.appendChild(goBackButton);
+
     if (!parentNode) {
         const generalButton = document.createElement('button');
         generalButton.className = 'category-btn compose-button';
@@ -950,20 +975,6 @@ function renderCurrentCategoryPanel() {
         });
         categoryGridEl.appendChild(btn);
     });
-
-    const goBackButton = document.createElement('button');
-    goBackButton.className = 'category-btn compose-button';
-    goBackButton.textContent = parentNode ? 'Back' : 'Go Back';
-    goBackButton.addEventListener('click', () => {
-        if (parentNode) {
-            categoryNavigationStack.pop();
-            renderCurrentCategoryPanel();
-            restartScanningInSection('tool-panel', 150);
-            return;
-        }
-        closeActiveTool();
-    });
-    categoryGridEl.appendChild(goBackButton);
 
     setActiveCategoryButton(currentCategory ? currentCategory.label : 'General');
 }
@@ -1272,6 +1283,16 @@ async function loadSomethingElseOptions() {
 function renderWordPredictions() {
     predictionsGrid.classList.toggle('numbers-mode', Boolean(currentNumberRange));
     predictionsGrid.innerHTML = '';
+
+    const goBackButton = document.createElement('button');
+    goBackButton.className = 'prediction-btn compose-button';
+    goBackButton.textContent = 'Go Back';
+    goBackButton.dataset.standardOption = 'true';
+    goBackButton.addEventListener('click', () => {
+        restartScanning(120, true);
+    });
+    predictionsGrid.appendChild(goBackButton);
+
     currentPredictions.forEach((word) => {
         const button = document.createElement('button');
         button.className = 'prediction-btn compose-button';
@@ -1290,15 +1311,6 @@ function renderWordPredictions() {
         });
         predictionsGrid.appendChild(somethingElseButton);
     }
-
-    const goBackButton = document.createElement('button');
-    goBackButton.className = 'prediction-btn compose-button';
-    goBackButton.textContent = 'Go Back';
-    goBackButton.dataset.standardOption = 'true';
-    goBackButton.addEventListener('click', () => {
-        restartScanning(120, true);
-    });
-    predictionsGrid.appendChild(goBackButton);
 
     const totalButtons = predictionsGrid.querySelectorAll('.prediction-btn').length;
     const wordGridColumns = Math.max(4, Math.ceil(totalButtons / 2));
@@ -1395,6 +1407,17 @@ function renderSpellingActionButtons() {
 
     const actionRowIndex = getSpellingActionRowIndex();
 
+    const goBackButton = document.createElement('button');
+    goBackButton.className = 'letter-btn compose-button';
+    goBackButton.textContent = 'Go Back';
+    goBackButton.dataset.standardOption = 'true';
+    goBackButton.dataset.rowIndex = '-1';
+    goBackButton.style.order = '999';
+    goBackButton.addEventListener('click', () => {
+        closeActiveTool();
+    });
+    alphabetGrid.appendChild(goBackButton);
+
     if (availableCompletedSpellingWord) {
         const chooseWordButton = document.createElement('button');
         chooseWordButton.className = 'letter-btn compose-button';
@@ -1409,16 +1432,6 @@ function renderSpellingActionButtons() {
         });
         alphabetGrid.appendChild(chooseWordButton);
     }
-
-    const goBackButton = document.createElement('button');
-    goBackButton.className = 'letter-btn compose-button';
-    goBackButton.textContent = 'Go Back';
-    goBackButton.dataset.standardOption = 'true';
-    goBackButton.dataset.rowIndex = String(actionRowIndex);
-    goBackButton.addEventListener('click', () => {
-        closeActiveTool();
-    });
-    alphabetGrid.appendChild(goBackButton);
 }
 
 async function chooseCurrentSpellingWord() {
@@ -1438,6 +1451,7 @@ async function chooseCurrentSpellingWord() {
         : `${chosenWord} `;
 
     currentSpellingWord = '';
+    invalidateSpellingPredictionRequests();
     lastAnnouncedSpellingWord = '';
     availableCompletedSpellingWord = '';
     setBuildSpaceText(nextText);
@@ -1448,11 +1462,17 @@ async function chooseCurrentSpellingWord() {
     restartScanning(250, true);
 }
 
-async function handleLetterClick(letter) {
-    currentSpellingWord += letter.toLowerCase();
-    updateBuildSpaceInput();
-    updateLetterAvailability(currentSpellingWord);
+async function finalizeSpellingPredictions(requestToken, spellingWordSnapshot) {
     const completedWord = await refreshSuggestedWords();
+    if (requestToken !== spellingPredictionRequestToken) {
+        return;
+    }
+    if (String(currentSpellingWord || '') !== spellingWordSnapshot) {
+        return;
+    }
+
+    updateLetterAvailability(currentSpellingWord);
+
     if (completedWord) {
         const normalizedCompletedWord = String(completedWord || '').trim().toLowerCase();
         availableCompletedSpellingWord = String(completedWord || '').trim();
@@ -1469,7 +1489,29 @@ async function handleLetterClick(letter) {
         availableCompletedSpellingWord = '';
         renderSpellingActionButtons();
     }
+
+    if (activeTool === 'spelling') {
+        restartScanningInSection('tool-panel', 150);
+    }
+}
+
+function handleLetterClick(letter) {
+    currentSpellingWord += letter.toLowerCase();
+    const requestToken = ++spellingPredictionRequestToken;
+    const spellingWordSnapshot = currentSpellingWord;
+    updateBuildSpaceInput();
+    updateLetterAvailability(currentSpellingWord);
     restartScanningInSection('tool-panel', 250);
+
+    finalizeSpellingPredictions(requestToken, spellingWordSnapshot).catch((error) => {
+        if (requestToken !== spellingPredictionRequestToken) {
+            return;
+        }
+        console.error('Error finalizing spelling predictions:', error);
+        if (activeTool === 'spelling') {
+            restartScanningInSection('tool-panel', 150);
+        }
+    });
 }
 
 // ============================================================
@@ -1477,72 +1519,78 @@ async function handleLetterClick(letter) {
 // ============================================================
 
 function getValidLetters(currentWord) {
-    if (!currentWord || currentWord.length === 0) {
-        return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const allLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const normalizedCurrentWord = String(currentWord || '').trim().toLowerCase();
+
+    if (!normalizedCurrentWord) {
+        return allLetters;
     }
 
-    const lastChar = currentWord.slice(-1).toUpperCase();
-    const lastTwoChars = currentWord.slice(-2).toUpperCase();
+    // After a few letters, keep spelling fully flexible.
+    if (normalizedCurrentWord.length >= 4) {
+        return allLetters;
+    }
+
+    const predictedNextLetters = new Set();
+    currentPredictions.forEach((prediction) => {
+        const normalizedPrediction = String(prediction || '').trim().toLowerCase();
+        if (!normalizedPrediction.startsWith(normalizedCurrentWord)) {
+            return;
+        }
+        if (normalizedPrediction.length <= normalizedCurrentWord.length) {
+            return;
+        }
+        const nextLetter = normalizedPrediction.charAt(normalizedCurrentWord.length).toUpperCase();
+        if (/^[A-Z]$/.test(nextLetter)) {
+            predictedNextLetters.add(nextLetter);
+        }
+    });
+
+    const vowelsAndCommon = ['A', 'E', 'I', 'O', 'U', 'Y', 'R', 'N', 'S', 'T', 'L'];
+    const baseSet = new Set(vowelsAndCommon);
+    const lastChar = normalizedCurrentWord.charAt(normalizedCurrentWord.length - 1).toUpperCase();
+    if (/^[A-Z]$/.test(lastChar)) {
+        baseSet.add(lastChar);
+    }
+
+    // If predictions are available, bias toward them but keep broad fallback letters.
+    if (predictedNextLetters.size > 0) {
+        predictedNextLetters.forEach((letter) => baseSet.add(letter));
+        return Array.from(baseSet);
+    }
 
     const likelyAfter = {
-        'A': ['B', 'C', 'D', 'F', 'G', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'W', 'Y'],
-        'B': ['A', 'E', 'I', 'L', 'O', 'R', 'U', 'Y'],
-        'C': ['A', 'E', 'H', 'I', 'L', 'O', 'R', 'U'],
-        'D': ['A', 'E', 'I', 'O', 'R', 'U', 'Y'],
-        'E': ['A', 'D', 'L', 'M', 'N', 'R', 'S', 'T', 'V', 'W', 'X'],
-        'F': ['A', 'E', 'I', 'L', 'O', 'R', 'U'],
-        'G': ['A', 'E', 'I', 'L', 'O', 'R', 'U'],
-        'H': ['A', 'E', 'I', 'O', 'U', 'Y'],
-        'I': ['C', 'D', 'F', 'G', 'L', 'M', 'N', 'R', 'S', 'T'],
-        'J': ['A', 'E', 'O', 'U'],
-        'K': ['A', 'E', 'I', 'N'],
-        'L': ['A', 'E', 'I', 'O', 'U', 'Y'],
-        'M': ['A', 'E', 'I', 'O', 'U', 'Y'],
-        'N': ['A', 'C', 'D', 'E', 'G', 'I', 'K', 'O', 'S', 'T', 'U', 'Y', 'Z'],
-        'O': ['B', 'C', 'D', 'F', 'G', 'K', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'W'],
-        'P': ['A', 'E', 'I', 'L', 'O', 'R', 'U'],
-        'Q': ['U'],
-        'R': ['A', 'E', 'I', 'O', 'U', 'Y'],
-        'S': ['A', 'C', 'E', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'T', 'U', 'W'],
-        'T': ['A', 'E', 'H', 'I', 'O', 'R', 'U', 'W'],
-        'U': ['B', 'C', 'G', 'L', 'M', 'N', 'P', 'R', 'S', 'T'],
-        'V': ['A', 'E', 'I', 'O'],
-        'W': ['A', 'E', 'H', 'I', 'O'],
-        'X': ['A', 'E', 'I'],
-        'Y': ['A', 'E', 'O', 'U'],
-        'Z': ['A', 'E', 'I', 'O']
+        A: ['B', 'C', 'D', 'F', 'G', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'W', 'Y'],
+        B: ['A', 'E', 'I', 'L', 'O', 'R', 'U', 'Y'],
+        C: ['A', 'E', 'H', 'I', 'L', 'O', 'R', 'U'],
+        D: ['A', 'E', 'I', 'O', 'R', 'U', 'Y'],
+        E: ['A', 'D', 'L', 'M', 'N', 'R', 'S', 'T', 'V', 'W', 'X'],
+        F: ['A', 'E', 'I', 'L', 'O', 'R', 'U'],
+        G: ['A', 'E', 'I', 'L', 'O', 'R', 'U'],
+        H: ['A', 'E', 'I', 'O', 'U', 'Y'],
+        I: ['C', 'D', 'F', 'G', 'L', 'M', 'N', 'R', 'S', 'T'],
+        J: ['A', 'E', 'O', 'U'],
+        K: ['A', 'E', 'I', 'N'],
+        L: ['A', 'E', 'I', 'L', 'O', 'U', 'Y'],
+        M: ['A', 'E', 'I', 'O', 'U', 'Y'],
+        N: ['A', 'C', 'D', 'E', 'G', 'I', 'K', 'O', 'S', 'T', 'U', 'Y', 'Z'],
+        O: ['B', 'C', 'D', 'F', 'G', 'K', 'L', 'M', 'N', 'P', 'R', 'S', 'T', 'V', 'W'],
+        P: ['A', 'E', 'I', 'L', 'O', 'R', 'U'],
+        Q: ['U'],
+        R: ['A', 'E', 'I', 'O', 'R', 'U', 'Y'],
+        S: ['A', 'C', 'E', 'H', 'I', 'K', 'L', 'M', 'N', 'O', 'P', 'T', 'U', 'W'],
+        T: ['A', 'E', 'H', 'I', 'O', 'R', 'U', 'W'],
+        U: ['B', 'C', 'G', 'L', 'M', 'N', 'P', 'R', 'S', 'T'],
+        V: ['A', 'E', 'I', 'O'],
+        W: ['A', 'E', 'H', 'I', 'O'],
+        X: ['A', 'E', 'I'],
+        Y: ['A', 'E', 'O', 'U'],
+        Z: ['A', 'E', 'I', 'O']
     };
 
-    const likelyAfterTwoLetters = {
-        'TH': ['A', 'E', 'I', 'O', 'R'],
-        'CH': ['A', 'E', 'I', 'O', 'U'],
-        'SH': ['A', 'E', 'I', 'O', 'U'],
-        'WH': ['A', 'E', 'I', 'O', 'U'],
-        'PH': ['A', 'E', 'I', 'O', 'U'],
-        'ST': ['A', 'E', 'I', 'O', 'R', 'U'],
-        'SP': ['A', 'E', 'I', 'O', 'R'],
-        'SC': ['A', 'E', 'I', 'O', 'R'],
-        'FL': ['A', 'E', 'I', 'O', 'U'],
-        'BL': ['A', 'E', 'I', 'O', 'U'],
-        'CL': ['A', 'E', 'I', 'O', 'U'],
-        'GL': ['A', 'E', 'I', 'O', 'U'],
-        'PL': ['A', 'E', 'I', 'O', 'U'],
-        'BR': ['A', 'E', 'I', 'O', 'U'],
-        'CR': ['A', 'E', 'I', 'O', 'U'],
-        'DR': ['A', 'E', 'I', 'O', 'U'],
-        'FR': ['A', 'E', 'I', 'O', 'U'],
-        'GR': ['A', 'E', 'I', 'O', 'U'],
-        'PR': ['A', 'E', 'I', 'O', 'U'],
-        'TR': ['A', 'E', 'I', 'O', 'U'],
-        'ON': ['A', 'C', 'D', 'E', 'G', 'K', 'S', 'T', 'Y', 'Z'],
-        'RO': ['A', 'B', 'C', 'D', 'E', 'G', 'L', 'M', 'N', 'O', 'P', 'S', 'T', 'U', 'W'],
-        'RN': ['A', 'E', 'I', 'O']
-    };
-
-    if (currentWord.length >= 4) return 'ABCDEFGHIKLMNOPRSTUVWYZ'.split('');
-    if (currentWord.length >= 2 && likelyAfterTwoLetters[lastTwoChars]) return likelyAfterTwoLetters[lastTwoChars];
-    if (likelyAfter[lastChar]) return likelyAfter[lastChar];
-    return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const likelyLetters = likelyAfter[lastChar] || allLetters;
+    likelyLetters.forEach((letter) => baseSet.add(letter));
+    return Array.from(baseSet);
 }
 
 function updateLetterAvailability(currentWord) {
@@ -1646,6 +1694,7 @@ function getScanPromptTextForElement(element) {
     if (!element) return '';
 
     if (element.type === 'letter-row') {
+        if (element.rowIndex === -1) return 'Go Back';
         return `Row ${element.rowIndex + 1}`;
     }
 

@@ -521,49 +521,16 @@
             color: #667eea;
         }
 
-        /* Categories header button styling */
-        .categories-header-btn {
-            width: 100%;
-            background: linear-gradient(145deg, #ffffff, #f0f0f0);
-            border: 1px solid rgba(255, 255, 255, 0.6);
-            border-radius: 9px;
-            padding: 8px 9px;
-            margin: 0;
-            font-size: 0.68em;
-            font-weight: 600;
-            color: #333;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-            box-shadow: 
-                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
-                0 2px 5px -2px rgba(0, 0, 0, 0.2),
-                inset 0 1px 0 rgba(255, 255, 255, 1);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
+        /* Categories modal launcher in speech toolbar */
+        .categories-toolbar-btn {
+            flex: 0 0 60px;
+            min-width: 60px;
+            background: linear-gradient(145deg, #fb4f14, #ea3f0a);
+            border: 2px solid rgba(255, 255, 255, 0.8);
         }
 
-        .categories-header-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 
-                0 8px 12px -3px rgba(50, 50, 93, 0.2), 
-                0 4px 8px -3px rgba(0, 0, 0, 0.25),
-                inset 0 1px 0 rgba(255, 255, 255, 1);
-            background: linear-gradient(145deg, #f8f8f8, #e8e8e8);
-        }
-
-        .categories-header-btn:active {
-            transform: translateY(0);
-            box-shadow: 
-                0 2px 4px -1px rgba(50, 50, 93, 0.15), 
-                0 1px 3px -1px rgba(0, 0, 0, 0.2),
-                inset 0 1px 0 rgba(255, 255, 255, 1);
-        }
-
-        .categories-header-btn i {
-            margin-right: 4px;
-            color: #667eea;
+        .categories-toolbar-btn:hover {
+            background: linear-gradient(145deg, #ff5f1f, #ed4a12);
         }
 
         /* Categories Modal */
@@ -595,45 +562,45 @@
         }
 
         .categories-modal-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px 24px;
+            background-color: #002244;
+            color: #FB4F14;
+            padding: 0.375em 0.75em;
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-radius: 20px 20px 0 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .categories-modal-header h2 {
             margin: 0;
-            font-size: 1.5em;
+            font-size: 1.25em;
             font-weight: 600;
-            display: flex;
+            color: #FB4F14;
+            display: inline-flex;
             align-items: center;
-        }
-
-        .categories-modal-header i {
-            margin-right: 10px;
+            white-space: nowrap;
         }
 
         .categories-modal-close {
-            background: none;
+            background: rgba(255, 255, 255, 0.15);
             border: none;
-            color: white;
-            font-size: 1.8em;
+            color: #FB4F14;
+            font-size: 1.25em;
             cursor: pointer;
             padding: 0;
-            width: 36px;
-            height: 36px;
+            width: 28px;
+            height: 28px;
             display: flex;
             align-items: center;
             justify-content: center;
             border-radius: 50%;
-            transition: background 0.2s;
+            transition: background 0.2s, transform 0.2s;
         }
 
         .categories-modal-close:hover {
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(102, 126, 234, 0.16);
+            transform: translateY(-1px);
         }
 
         .categories-modal-body {
@@ -649,7 +616,7 @@
         }
 
         .categories-modal-button {
-            height: 80px;
+            height: 96px;
             background: linear-gradient(145deg, #ffffff, #f0f0f0);
             border: 1px solid rgba(255, 255, 255, 0.6);
             border-radius: 12px;
@@ -666,7 +633,7 @@
             align-items: center;
             justify-content: center;
             text-align: center;
-            padding: 6px;
+            padding: 0;
             position: relative;
             overflow: hidden;
         }
@@ -735,6 +702,7 @@
             margin: 0;
             padding: 9px;
             justify-content: center;
+            align-content: start;
             overflow-y: auto;
         }
 
@@ -1421,7 +1389,7 @@
     <div id="categoriesModal" class="categories-modal" role="dialog" aria-modal="true" aria-labelledby="categoriesModalTitle" tabindex="-1" style="outline: none;">
         <div class="categories-modal-content">
             <div class="categories-modal-header">
-                <h2 id="categoriesModalTitle"><i class="fas fa-folder-open"></i> All Categories</h2>
+                <h2 id="categoriesModalTitle">All Categories</h2>
                 <button class="categories-modal-close" id="categoriesModalClose" aria-label="Close Categories Modal">&times;</button>
             </div>
             <div class="categories-modal-body">
@@ -1450,8 +1418,13 @@
         <div class="tap-content-wrapper">
         <!-- Speech History Section -->
         <div class="speech-history-container">
-            <label for="build-space">Speech History:</label>
             <div class="speech-history-row">
+                <button id="categoriesHeaderBtn" class="control-btn categories-toolbar-btn" title="All Categories" aria-label="All Categories">
+                    <div class="control-btn-icon">
+                        <i class="fas fa-folder-open"></i>
+                    </div>
+                    <div class="control-btn-label">Categories</div>
+                </button>
                 <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
                 <div class="control-buttons">
                     <button id="speak-build-btn" class="control-btn speak-btn" title="Speak exactly as written" aria-label="Speak exactly as written">
@@ -1511,9 +1484,6 @@
         <div class="main-grid">
             <!-- Categories Column -->
             <div class="categories-column" id="categoriesColumn">
-                <button class="categories-header-btn" id="categoriesHeaderBtn">
-                    <i class="fas fa-folder-open"></i> Categories
-                </button>
                 <div class="categories-content">
                     <!-- Categories will be loaded dynamically -->
                 </div>
@@ -1523,9 +1493,6 @@
             <div class="options-grid-container">
                 <!-- Phrases Section (Top 2 rows) -->
                 <div class="phrases-section">
-                    <div class="section-header">
-                        <h3><i class="fas fa-comment"></i> Quick Talk</h3>
-                    </div>
                     <div class="llm-static-options" id="llmStaticOptions">
                         <!-- Generated phrases will appear here -->
                     </div>
@@ -1533,9 +1500,6 @@
 
                 <!-- Words Section (Bottom 3 rows) -->
                 <div class="words-section">
-                    <div class="section-header">
-                        <h3><i class="fas fa-font"></i> Free Style</h3>
-                    </div>
                     <div class="freestyle-options" id="freestyleOptions">
                         <!-- Word options will appear here -->
                     </div>
@@ -2721,7 +2685,7 @@
                 
                 // Load LLMOptions
                 if (settings && typeof settings.LLMOptions === 'number' && !isNaN(settings.LLMOptions)) {
-                    LLMOptions = Math.max(1, parseInt(settings.LLMOptions));
+                    LLMOptions = Math.max(0, parseInt(settings.LLMOptions));
                     console.log(`LLM Options loaded: ${LLMOptions}`);
                 } else {
                     LLMOptions = 10;
@@ -3683,6 +3647,8 @@
                             buttonContent.style.height = '100%';
                             buttonContent.style.display = 'flex';
                             buttonContent.style.flexDirection = 'column';
+                            buttonContent.style.overflow = 'hidden';
+                            buttonContent.style.overflow = 'hidden';
                             
                             const imageContainer = document.createElement('div');
                             imageContainer.style.flex = '1';
@@ -3703,13 +3669,15 @@
                             const textFooter = document.createElement('div');
                             textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
-                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+                            textFooter.style.backdropFilter = 'blur(4px)';
                             textFooter.style.color = 'white';
                             textFooter.style.display = 'flex';
                             textFooter.style.alignItems = 'center';
                             textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '0 2px';
+                            textFooter.style.padding = '0 3px';
                             textFooter.style.boxSizing = 'border-box';
+                            textFooter.style.zIndex = '10';
                             textFooter.style.position = 'absolute';
                             textFooter.style.bottom = '0';
                             textFooter.style.left = '0';
@@ -3718,7 +3686,7 @@
                             const textSpan = document.createElement('span');
                             textSpan.textContent = button.label;
                             textSpan.style.fontSize = '0.54em';
-                            textSpan.style.fontWeight = 'bold';
+                            textSpan.style.fontWeight = '600';
                             textSpan.style.textAlign = 'center';
                             textSpan.style.lineHeight = '1.0';
                             
@@ -3848,25 +3816,20 @@
                             const textFooter = document.createElement('div');
                             textFooter.style.minHeight = '14px';
                             textFooter.style.width = '100%';
-                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+                            textFooter.style.backdropFilter = 'blur(4px)';
                             textFooter.style.color = 'white';
                             textFooter.style.display = 'flex';
                             textFooter.style.alignItems = 'center';
                             textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '1px 2px';
-                            textFooter.style.position = 'absolute';
-                            textFooter.style.bottom = '0';
-                            textFooter.style.left = '0';
-                            textFooter.style.right = '0';
-
-                            const textSpan = document.createElement('span');
-                            textSpan.textContent = button.label;
-                            textSpan.style.fontSize = '0.54em';
-                            textSpan.style.fontWeight = 'bold';
-                            textSpan.style.textAlign = 'center';
+                            textFooter.style.padding = '0 3px';
+                            textFooter.style.boxSizing = 'border-box';
+                            textFooter.style.fontSize = '8px';
+                            textFooter.style.lineHeight = '1.0';
+                            textFooter.style.fontWeight = '600';
+                            textFooter.textContent = button.label;
 
                             imageContainer.appendChild(imageElement);
-                            textFooter.appendChild(textSpan);
                             buttonContent.appendChild(imageContainer);
                             buttonContent.appendChild(textFooter);
                             modalBtn.appendChild(buttonContent);
@@ -4149,6 +4112,7 @@
                         buttonContent.style.height = '100%';
                         buttonContent.style.display = 'flex';
                         buttonContent.style.flexDirection = 'column';
+                        buttonContent.style.overflow = 'hidden';
                         
                         const imageContainer = document.createElement('div');
                         imageContainer.style.flex = '1';
@@ -4169,13 +4133,15 @@
                         const textFooter = document.createElement('div');
                         textFooter.style.minHeight = '14px';
                         textFooter.style.width = '100%';
-                        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+                        textFooter.style.backdropFilter = 'blur(4px)';
                         textFooter.style.color = 'white';
                         textFooter.style.display = 'flex';
                         textFooter.style.alignItems = 'center';
                         textFooter.style.justifyContent = 'center';
-                        textFooter.style.padding = '0 2px';
+                        textFooter.style.padding = '0 3px';
                         textFooter.style.boxSizing = 'border-box';
+                        textFooter.style.zIndex = '10';
                         textFooter.style.position = 'absolute';
                         textFooter.style.bottom = '0';
                         textFooter.style.left = '0';
@@ -4184,7 +4150,7 @@
                         const textSpan = document.createElement('span');
                         textSpan.textContent = child.label;
                         textSpan.style.fontSize = '0.54em';
-                        textSpan.style.fontWeight = 'bold';
+                        textSpan.style.fontWeight = '600';
                         textSpan.style.textAlign = 'center';
                         textSpan.style.lineHeight = '1.0';
                         
