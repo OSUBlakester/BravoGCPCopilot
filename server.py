@@ -19654,6 +19654,16 @@ def ensure_tap_boards_structure(
         m for m in (existing_menu or [])
         if isinstance(m, dict) and m.get('source') != 'legacy_category'
     ]
+    legacy_menu_items = [
+        m for m in (existing_menu or [])
+        if isinstance(m, dict) and m.get('source') == 'legacy_category'
+    ]
+
+    legacy_menu_by_source_button: Dict[str, Dict[str, Any]] = {}
+    for legacy_item in legacy_menu_items:
+        key = str(legacy_item.get('source_button_id') or '').strip()
+        if key:
+            legacy_menu_by_source_button[key] = legacy_item
 
     derived_boards: List[Dict[str, Any]] = []
     derived_menu_items: List[Dict[str, Any]] = []
@@ -19703,20 +19713,41 @@ def ensure_tap_boards_structure(
         }
         derived_boards.append(board)
 
+        source_button_id = button.get('id')
+        source_button_key = str(source_button_id or '').strip()
+        existing_legacy_menu_item = legacy_menu_by_source_button.get(source_button_key) if source_button_key else None
+
         menu_item = {
             'id': f"menu_{_sanitize_board_slug(button.get('id') or button.get('label') or index)}",
             'label': str(button.get('label') or f'Board {index + 1}'),
             'board_id': board_id,
             'source': 'legacy_category',
-            'source_button_id': button.get('id'),
+            'source_button_id': source_button_id,
             'sort_order': index,
             'hidden': bool(button.get('hidden', False)),
             'image_url': button.get('image_url'),
             'speech_text': button.get('speech_text'),
+            'custom_audio_file': button.get('custom_audio_file'),
             'background_color': button.get('background_color', '#FFFFFF'),
             'text_color': button.get('text_color', '#000000'),
             'children': [],
         }
+
+        # Preserve previously-edited legacy menu properties (especially nested children)
+        # so hierarchy survives GET/POST round trips.
+        if isinstance(existing_legacy_menu_item, dict):
+            if existing_legacy_menu_item.get('id'):
+                menu_item['id'] = existing_legacy_menu_item.get('id')
+            menu_item['label'] = str(existing_legacy_menu_item.get('label') or menu_item['label'])
+            menu_item['hidden'] = bool(existing_legacy_menu_item.get('hidden', menu_item['hidden']))
+            menu_item['image_url'] = existing_legacy_menu_item.get('image_url')
+            menu_item['speech_text'] = existing_legacy_menu_item.get('speech_text')
+            menu_item['custom_audio_file'] = existing_legacy_menu_item.get('custom_audio_file')
+            menu_item['background_color'] = existing_legacy_menu_item.get('background_color') or menu_item['background_color']
+            menu_item['text_color'] = existing_legacy_menu_item.get('text_color') or menu_item['text_color']
+            existing_children = existing_legacy_menu_item.get('children')
+            menu_item['children'] = existing_children if isinstance(existing_children, list) else []
+
         derived_menu_items.append(menu_item)
 
     merged_boards = custom_boards + derived_boards
