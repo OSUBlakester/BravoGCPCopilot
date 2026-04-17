@@ -19540,6 +19540,7 @@ class TapBoardsMenuItem(BaseModel):
     speech_text: Optional[str] = Field(None, description="Speech text when selected")
     background_color: Optional[str] = Field("#FFFFFF", description="Menu tile background")
     text_color: Optional[str] = Field("#000000", description="Menu tile text color")
+    children: List["TapBoardsMenuItem"] = Field(default_factory=list, description="Nested menu items")
 
 
 class TapBoardSettings(BaseModel):
@@ -19571,6 +19572,7 @@ class TapBoardsMenuUpdateRequest(BaseModel):
 
 # Update forward references
 TapNavigationButton.model_rebuild()
+TapBoardsMenuItem.model_rebuild()
 
 
 def _sanitize_board_slug(raw_value: Any) -> str:
@@ -19712,6 +19714,7 @@ def ensure_tap_boards_structure(
             'speech_text': button.get('speech_text'),
             'background_color': button.get('background_color', '#FFFFFF'),
             'text_color': button.get('text_color', '#000000'),
+            'children': [],
         }
         derived_menu_items.append(menu_item)
 
@@ -19753,38 +19756,64 @@ def normalize_boards_menu_items(
     menu_items: Any,
     valid_board_ids: set[str],
 ) -> List[Dict[str, Any]]:
-    """Normalize and validate boards menu items for persistence."""
-    normalized: List[Dict[str, Any]] = []
+    """Normalize and validate boards menu items for persistence (tree-aware)."""
+    def _normalize_level(items: Any, level: int) -> List[Dict[str, Any]]:
+        normalized_level: List[Dict[str, Any]] = []
+        if not isinstance(items, list):
+            return normalized_level
+
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+
+            board_id = str(item.get('board_id') or '').strip()
+            if not board_id or board_id not in valid_board_ids:
+                raise ValueError(f"Invalid board_id in boards_menu: {board_id or '<empty>'}")
+
+            item_id = str(item.get('id') or '').strip()
+            if not item_id:
+                item_id = f"menu_{_sanitize_board_slug(item.get('label') or board_id)}_{level}_{index + 1}"
+
+            normalized_children = _normalize_level(item.get('children'), level + 1)
+
+            normalized_level.append({
+                'id': item_id,
+                'label': str(item.get('label') or board_id),
+                'board_id': board_id,
+                'source': str(item.get('source') or 'custom'),
+                'source_button_id': item.get('source_button_id'),
+                'sort_order': index,
+                'hidden': bool(item.get('hidden', False)),
+                'image_url': item.get('image_url'),
+                'speech_text': item.get('speech_text'),
+                'background_color': item.get('background_color') or '#FFFFFF',
+                'text_color': item.get('text_color') or '#000000',
+                'children': normalized_children,
+            })
+
+        return normalized_level
+
+    return _normalize_level(menu_items, 0)
+
+
+def sort_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
+    """Sort boards menu recursively by sort_order while preserving hierarchy."""
     if not isinstance(menu_items, list):
-        return normalized
+        return []
 
-    for index, item in enumerate(menu_items):
-        if not isinstance(item, dict):
-            continue
+    sorted_items = sorted(
+        [item for item in menu_items if isinstance(item, dict)],
+        key=lambda item: int(item.get('sort_order', 0)),
+    )
 
-        board_id = str(item.get('board_id') or '').strip()
-        if not board_id or board_id not in valid_board_ids:
-            raise ValueError(f"Invalid board_id in boards_menu: {board_id or '<empty>'}")
+    output: List[Dict[str, Any]] = []
+    for index, item in enumerate(sorted_items):
+        cloned = dict(item)
+        cloned['sort_order'] = index
+        cloned['children'] = sort_boards_menu_tree(item.get('children'))
+        output.append(cloned)
 
-        item_id = str(item.get('id') or '').strip()
-        if not item_id:
-            item_id = f"menu_{_sanitize_board_slug(item.get('label') or board_id)}_{index + 1}"
-
-        normalized.append({
-            'id': item_id,
-            'label': str(item.get('label') or board_id),
-            'board_id': board_id,
-            'source': str(item.get('source') or 'custom'),
-            'source_button_id': item.get('source_button_id'),
-            'sort_order': index,
-            'hidden': bool(item.get('hidden', False)),
-            'image_url': item.get('image_url'),
-            'speech_text': item.get('speech_text'),
-            'background_color': item.get('background_color') or '#FFFFFF',
-            'text_color': item.get('text_color') or '#000000',
-        })
-
-    return normalized
+    return output
 
 # --- Helper Functions ---
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
@@ -21381,10 +21410,7 @@ async def get_tap_boards_menu_config(
         boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
         board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
 
-        boards_menu_sorted = sorted(
-            [m for m in boards_menu if isinstance(m, dict)],
-            key=lambda m: int(m.get('sort_order', 0)),
-        )
+        boards_menu_sorted = sort_boards_menu_tree(boards_menu)
 
         return JSONResponse(content={
             'boards_schema_version': int(config_data.get('boards_schema_version') or 1),

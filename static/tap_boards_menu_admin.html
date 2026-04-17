@@ -13,24 +13,60 @@
             color: #111827;
         }
 
-        .menu-row {
+        .root-drop-zone {
+            min-height: 44px;
+            border: 2px dashed #93c5fd;
+            border-radius: 10px;
+            color: #1d4ed8;
+            background: #eff6ff;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+
+        .root-drop-zone.show {
+            display: flex;
+        }
+
+        .root-drop-zone.drag-over {
+            background: #dbeafe;
+            border-color: #2563eb;
+        }
+
+        .tree-row {
             display: grid;
-            grid-template-columns: 36px 1fr 1fr 140px 120px;
+            grid-template-columns: 36px minmax(120px, 0.9fr) minmax(140px, 1fr) minmax(140px, 1fr) 110px 130px;
             gap: 0.75rem;
             align-items: center;
             background: white;
             border: 1px solid #e5e7eb;
             border-radius: 10px;
             padding: 0.75rem;
+            margin-bottom: 0.6rem;
+            margin-left: var(--depth, 0px);
         }
 
-        .menu-row.dragging {
+        .tree-row.dragging {
             opacity: 0.5;
         }
 
-        .menu-row.drag-over {
+        .tree-row.drag-over {
             border-color: #3b82f6;
             box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+        }
+
+        .tree-row.drag-over.child-mode {
+            border-color: #16a34a;
+            box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15);
+            background: #f0fdf4;
+        }
+
+        .tree-row .node-depth {
+            font-size: 0.72rem;
+            color: #6b7280;
         }
 
         .drag-handle {
@@ -80,6 +116,18 @@
         .btn-danger { background: #ef4444; color: white; }
         .btn-danger:hover { background: #dc2626; }
 
+        .btn-tiny {
+            border: none;
+            border-radius: 8px;
+            padding: 0.35rem 0.5rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            background: #e5e7eb;
+            color: #111827;
+        }
+
+        .btn-tiny:hover { background: #d1d5db; }
+
         .badge {
             display: inline-flex;
             align-items: center;
@@ -108,11 +156,11 @@
         .notification.error { background: #dc2626; }
 
         @media (max-width: 1080px) {
-            .menu-row {
+            .tree-row {
                 grid-template-columns: 32px 1fr;
                 gap: 0.5rem;
             }
-            .menu-row .compact-break {
+            .tree-row .compact-break {
                 grid-column: 1 / -1;
             }
         }
@@ -140,11 +188,13 @@
     <main class="max-w-7xl mx-auto p-4 lg:p-6">
         <section class="bg-white border border-gray-200 rounded-xl p-4 mb-4">
             <h2 class="text-lg font-semibold mb-2">Boards Menu</h2>
-            <p class="text-sm text-gray-600 mb-2">Assign boards to the top-level menu and control display order. Legacy categories are already auto-converted into boards.</p>
-            <p class="text-sm text-gray-600">Drag rows by the handle to reorder, or edit labels and board targets directly.</p>
+            <p class="text-sm text-gray-600 mb-2">This menu is now hierarchical. Use drag handles to reorder, and hold Shift while dropping on another item to make it a child.</p>
+            <p class="text-sm text-gray-600">Buttons on individual boards remain flat/configurable separately in Board Builder.</p>
         </section>
 
-        <section class="space-y-3" id="menuList">
+        <div id="rootDropZone" class="root-drop-zone">Drop here to move item to root level</div>
+
+        <section id="menuTree">
             <div class="text-gray-500 text-sm bg-white border border-dashed border-gray-300 rounded-lg p-4">Loading boards menu...</div>
         </section>
     </main>
@@ -158,12 +208,13 @@
         let authToken = null;
         let currentAacUserId = null;
         let boards = [];
-        let menuItems = [];
-        let draggingIndex = null;
+        let menuTree = [];
+        let draggedPath = null;
 
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('saveBtn').addEventListener('click', saveBoardsMenu);
             document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
+            setupTreeDragAndDrop();
             initializeFirebaseAndAuth();
         });
 
@@ -227,8 +278,8 @@
 
                 const payload = await response.json();
                 boards = Array.isArray(payload.boards) ? payload.boards : [];
-                menuItems = Array.isArray(payload.boards_menu) ? payload.boards_menu : [];
-                renderMenuList();
+                menuTree = Array.isArray(payload.boards_menu) ? payload.boards_menu : [];
+                renderMenuTree();
             } catch (error) {
                 console.error(error);
                 showNotification('Failed to load boards menu', 'error');
@@ -237,7 +288,7 @@
         }
 
         function renderEmptyState(message) {
-            document.getElementById('menuList').innerHTML = `<div class="text-gray-500 text-sm bg-white border border-dashed border-gray-300 rounded-lg p-4">${message}</div>`;
+            document.getElementById('menuTree').innerHTML = `<div class="text-gray-500 text-sm bg-white border border-dashed border-gray-300 rounded-lg p-4">${message}</div>`;
         }
 
         function createBoardOptions(selectedBoardId) {
@@ -249,137 +300,215 @@
             return options.join('');
         }
 
-        function renderMenuList() {
-            const list = document.getElementById('menuList');
-            if (!menuItems.length) {
+        function renderMenuTree() {
+            const container = document.getElementById('menuTree');
+            if (!menuTree.length) {
                 renderEmptyState('No menu items yet. Click Add Menu Item.');
                 return;
             }
 
-            list.innerHTML = '';
-            menuItems.forEach((item, index) => {
-                const row = document.createElement('div');
-                row.className = 'menu-row';
-                row.dataset.index = String(index);
-                row.draggable = true;
-
-                const hideChecked = item.hidden ? 'checked' : '';
-                row.innerHTML = `
-                    <div class="drag-handle" title="Drag to reorder">
-                        <i class="fas fa-grip-vertical"></i>
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">Menu Label</label>
-                        <input class="field compact-break" type="text" value="${escapeHtml(item.label || '')}" data-field="label" data-index="${index}" />
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">Board Target</label>
-                        <select class="field compact-break" data-field="board_id" data-index="${index}">
-                            ${createBoardOptions(item.board_id)}
-                        </select>
-                    </div>
-                    <div class="compact-break">
-                        <label class="block text-xs text-gray-500 mb-1">Visibility</label>
-                        <label class="inline-flex items-center gap-2 text-sm text-gray-700">
-                            <input type="checkbox" data-field="hidden" data-index="${index}" ${hideChecked}>
-                            Hidden
-                        </label>
-                    </div>
-                    <div class="compact-break" style="display:flex; gap: 0.5rem; justify-content:flex-end;">
-                        <button class="btn btn-secondary" data-action="up" data-index="${index}" title="Move up"><i class="fas fa-arrow-up"></i></button>
-                        <button class="btn btn-secondary" data-action="down" data-index="${index}" title="Move down"><i class="fas fa-arrow-down"></i></button>
-                        <button class="btn btn-danger" data-action="delete" data-index="${index}" title="Delete"><i class="fas fa-trash"></i></button>
-                    </div>
-                `;
-
-                list.appendChild(row);
-            });
-
-            wireRowHandlers();
+            container.innerHTML = '';
+            menuTree.forEach((node, index) => renderNode(node, [index], 0, container));
+            wireTreeHandlers();
         }
 
-        function wireRowHandlers() {
-            const list = document.getElementById('menuList');
+        function renderNode(node, path, depth, container) {
+            const row = document.createElement('div');
+            row.className = 'tree-row';
+            row.style.setProperty('--depth', `${depth * 24}px`);
+            row.draggable = true;
+            row.dataset.path = JSON.stringify(path);
 
-            list.querySelectorAll('[data-field]').forEach((input) => {
+            const hideChecked = node.hidden ? 'checked' : '';
+            row.innerHTML = `
+                <div class="drag-handle" title="Drag to move">
+                    <i class="fas fa-grip-vertical"></i>
+                </div>
+                <div class="compact-break">
+                    <label class="block text-xs text-gray-500 mb-1">Depth</label>
+                    <div class="node-depth">Level ${depth + 1}</div>
+                </div>
+                <div class="compact-break">
+                    <label class="block text-xs text-gray-500 mb-1">Menu Label</label>
+                    <input class="field" type="text" value="${escapeHtml(node.label || '')}" data-field="label" data-path='${JSON.stringify(path)}'>
+                </div>
+                <div class="compact-break">
+                    <label class="block text-xs text-gray-500 mb-1">Board Target</label>
+                    <select class="field" data-field="board_id" data-path='${JSON.stringify(path)}'>
+                        ${createBoardOptions(node.board_id)}
+                    </select>
+                </div>
+                <div class="compact-break">
+                    <label class="block text-xs text-gray-500 mb-1">Visibility</label>
+                    <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" data-field="hidden" data-path='${JSON.stringify(path)}' ${hideChecked}>
+                        Hidden
+                    </label>
+                </div>
+                <div class="compact-break" style="display:flex; gap: 0.45rem; justify-content:flex-end; flex-wrap: wrap;">
+                    <button class="btn-tiny" data-action="add-child" data-path='${JSON.stringify(path)}' title="Add child"><i class="fas fa-plus"></i> Child</button>
+                    <button class="btn-tiny" data-action="move-up" data-path='${JSON.stringify(path)}' title="Move up"><i class="fas fa-arrow-up"></i></button>
+                    <button class="btn-tiny" data-action="move-down" data-path='${JSON.stringify(path)}' title="Move down"><i class="fas fa-arrow-down"></i></button>
+                    <button class="btn btn-danger" data-action="delete" data-path='${JSON.stringify(path)}' title="Delete"><i class="fas fa-trash"></i></button>
+                </div>
+            `;
+
+            container.appendChild(row);
+
+            const children = Array.isArray(node.children) ? node.children : [];
+            children.forEach((child, childIndex) => {
+                renderNode(child, [...path, childIndex], depth + 1, container);
+            });
+        }
+
+        function wireTreeHandlers() {
+            const tree = document.getElementById('menuTree');
+
+            tree.querySelectorAll('[data-field]').forEach((input) => {
                 input.addEventListener('change', (e) => {
-                    const index = Number(e.target.dataset.index);
+                    const path = parsePath(e.target.dataset.path);
                     const field = e.target.dataset.field;
-                    if (Number.isNaN(index) || !menuItems[index]) {
+                    const node = getNodeByPath(path);
+                    if (!node) {
                         return;
                     }
                     if (field === 'hidden') {
-                        menuItems[index][field] = !!e.target.checked;
+                        node[field] = !!e.target.checked;
                     } else {
-                        menuItems[index][field] = e.target.value;
+                        node[field] = e.target.value;
                     }
                 });
             });
 
-            list.querySelectorAll('[data-action]').forEach((button) => {
+            tree.querySelectorAll('[data-action]').forEach((button) => {
                 button.addEventListener('click', (e) => {
-                    const index = Number(e.currentTarget.dataset.index);
+                    const path = parsePath(e.currentTarget.dataset.path);
                     const action = e.currentTarget.dataset.action;
-                    if (Number.isNaN(index)) {
+                    if (!path) {
                         return;
                     }
                     if (action === 'delete') {
-                        menuItems.splice(index, 1);
-                    } else if (action === 'up' && index > 0) {
-                        [menuItems[index - 1], menuItems[index]] = [menuItems[index], menuItems[index - 1]];
-                    } else if (action === 'down' && index < menuItems.length - 1) {
-                        [menuItems[index], menuItems[index + 1]] = [menuItems[index + 1], menuItems[index]];
+                        removeNodeFromPath(path);
+                    } else if (action === 'add-child') {
+                        addChildAtPath(path);
+                    } else if (action === 'move-up') {
+                        moveNode(path, -1);
+                    } else if (action === 'move-down') {
+                        moveNode(path, 1);
                     }
-                    renderMenuList();
-                });
-            });
-
-            list.querySelectorAll('.menu-row').forEach((row) => {
-                row.addEventListener('dragstart', (e) => {
-                    const fromHandle = e.target.closest('.drag-handle');
-                    if (!fromHandle) {
-                        e.preventDefault();
-                        return;
-                    }
-                    draggingIndex = Number(row.dataset.index);
-                    row.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                });
-
-                row.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    if (!row.classList.contains('dragging')) {
-                        row.classList.add('drag-over');
-                    }
-                });
-
-                row.addEventListener('dragleave', () => {
-                    row.classList.remove('drag-over');
-                });
-
-                row.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    const targetIndex = Number(row.dataset.index);
-                    if (draggingIndex === null || Number.isNaN(targetIndex) || draggingIndex === targetIndex) {
-                        cleanupDragStyles();
-                        return;
-                    }
-                    const moved = menuItems.splice(draggingIndex, 1)[0];
-                    menuItems.splice(targetIndex, 0, moved);
-                    draggingIndex = null;
-                    renderMenuList();
-                });
-
-                row.addEventListener('dragend', () => {
-                    draggingIndex = null;
-                    cleanupDragStyles();
+                    renderMenuTree();
                 });
             });
         }
 
-        function cleanupDragStyles() {
-            document.querySelectorAll('.menu-row.dragging, .menu-row.drag-over').forEach((el) => {
-                el.classList.remove('dragging', 'drag-over');
+        function setupTreeDragAndDrop() {
+            const tree = document.getElementById('menuTree');
+            const rootDropZone = document.getElementById('rootDropZone');
+
+            function cleanupDragState() {
+                draggedPath = null;
+                rootDropZone.classList.remove('show', 'drag-over');
+                document.querySelectorAll('.tree-row.dragging, .tree-row.drag-over, .tree-row.child-mode').forEach((el) => {
+                    el.classList.remove('dragging', 'drag-over', 'child-mode');
+                });
+            }
+
+            document.addEventListener('dragstart', (e) => {
+                const handle = e.target.closest('.drag-handle');
+                const row = e.target.closest('.tree-row');
+                if (!handle || !row) {
+                    e.preventDefault();
+                    return;
+                }
+
+                draggedPath = parsePath(row.dataset.path);
+                if (!draggedPath) {
+                    e.preventDefault();
+                    return;
+                }
+
+                row.classList.add('dragging');
+                rootDropZone.classList.add('show');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            document.addEventListener('dragend', () => {
+                cleanupDragState();
+            });
+
+            document.addEventListener('dragover', (e) => {
+                const row = e.target.closest('.tree-row');
+                const onRoot = e.target.id === 'rootDropZone';
+                if (!row && !onRoot) {
+                    return;
+                }
+
+                e.preventDefault();
+
+                if (onRoot) {
+                    rootDropZone.classList.add('drag-over');
+                    return;
+                }
+
+                if (row.classList.contains('dragging')) {
+                    return;
+                }
+
+                document.querySelectorAll('.tree-row.drag-over, .tree-row.child-mode').forEach((el) => {
+                    if (el !== row) {
+                        el.classList.remove('drag-over', 'child-mode');
+                    }
+                });
+
+                row.classList.add('drag-over');
+                if (e.shiftKey) {
+                    row.classList.add('child-mode');
+                } else {
+                    row.classList.remove('child-mode');
+                }
+            });
+
+            document.addEventListener('dragleave', (e) => {
+                const row = e.target.closest('.tree-row');
+                if (row) {
+                    row.classList.remove('drag-over', 'child-mode');
+                }
+                if (e.target.id === 'rootDropZone') {
+                    rootDropZone.classList.remove('drag-over');
+                }
+            });
+
+            document.addEventListener('drop', (e) => {
+                if (!draggedPath) {
+                    return;
+                }
+                e.preventDefault();
+
+                try {
+                    if (e.target.id === 'rootDropZone') {
+                        moveNodeToRoot(draggedPath);
+                        renderMenuTree();
+                        return;
+                    }
+
+                    const targetRow = e.target.closest('.tree-row');
+                    if (!targetRow) {
+                        return;
+                    }
+                    const targetPath = parsePath(targetRow.dataset.path);
+                    if (!targetPath) {
+                        return;
+                    }
+
+                    if (e.shiftKey) {
+                        moveNodeAsChild(draggedPath, targetPath);
+                    } else {
+                        moveNodeAfter(draggedPath, targetPath);
+                    }
+                    renderMenuTree();
+                } finally {
+                    cleanupDragState();
+                }
             });
         }
 
@@ -389,29 +518,27 @@
                 return;
             }
             const firstBoard = boards[0];
-            menuItems.push({
+            menuTree.push({
                 id: `menu_custom_${Date.now()}`,
                 label: firstBoard.label || 'New Menu Item',
                 board_id: firstBoard.id,
                 source: 'custom',
                 source_button_id: null,
-                sort_order: menuItems.length,
+                sort_order: menuTree.length,
                 hidden: false,
                 image_url: null,
                 speech_text: null,
                 background_color: '#FFFFFF',
-                text_color: '#000000'
+                text_color: '#000000',
+                children: []
             });
-            renderMenuList();
+            renderMenuTree();
         }
 
         async function saveBoardsMenu() {
             try {
                 const payload = {
-                    boards_menu: menuItems.map((item, index) => ({
-                        ...item,
-                        sort_order: index
-                    }))
+                    boards_menu: serializeTree(menuTree)
                 };
 
                 const response = await fetch('/api/tap-interface/boards-menu', {
@@ -431,6 +558,206 @@
                 console.error(error);
                 showNotification('Save failed: ' + error.message, 'error');
             }
+        }
+
+        function parsePath(pathText) {
+            try {
+                const parsed = JSON.parse(pathText || '[]');
+                return Array.isArray(parsed) ? parsed : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function cloneNode(node) {
+            return JSON.parse(JSON.stringify(node));
+        }
+
+        function getChildrenAtDepth(path) {
+            if (!Array.isArray(path) || path.length === 0) {
+                return menuTree;
+            }
+            if (path.length === 1) {
+                return menuTree;
+            }
+            const parent = getNodeByPath(path.slice(0, -1));
+            if (!parent) {
+                return null;
+            }
+            if (!Array.isArray(parent.children)) {
+                parent.children = [];
+            }
+            return parent.children;
+        }
+
+        function getNodeByPath(path) {
+            if (!Array.isArray(path) || path.length === 0) {
+                return null;
+            }
+            let currentList = menuTree;
+            let node = null;
+            for (let i = 0; i < path.length; i++) {
+                const idx = path[i];
+                if (!Array.isArray(currentList) || !currentList[idx]) {
+                    return null;
+                }
+                node = currentList[idx];
+                currentList = Array.isArray(node.children) ? node.children : [];
+            }
+            return node;
+        }
+
+        function removeNodeFromPath(path) {
+            const list = getChildrenAtDepth(path);
+            if (!list) {
+                return null;
+            }
+            const index = path[path.length - 1];
+            if (index < 0 || index >= list.length) {
+                return null;
+            }
+            return list.splice(index, 1)[0] || null;
+        }
+
+        function insertAfterPath(node, afterPath) {
+            const list = getChildrenAtDepth(afterPath);
+            if (!list) {
+                return;
+            }
+            const index = afterPath[afterPath.length - 1];
+            list.splice(index + 1, 0, node);
+        }
+
+        function isDescendantPath(path, potentialAncestor) {
+            if (!Array.isArray(path) || !Array.isArray(potentialAncestor)) {
+                return false;
+            }
+            if (path.length <= potentialAncestor.length) {
+                return false;
+            }
+            for (let i = 0; i < potentialAncestor.length; i++) {
+                if (path[i] !== potentialAncestor[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        function adjustPathAfterRemoval(targetPath, removedPath) {
+            const adjusted = [...targetPath];
+            if (targetPath.length !== removedPath.length) {
+                return adjusted;
+            }
+            const sameParent = targetPath.slice(0, -1).every((v, i) => v === removedPath[i]);
+            if (!sameParent) {
+                return adjusted;
+            }
+            const targetIndex = targetPath[targetPath.length - 1];
+            const removedIndex = removedPath[removedPath.length - 1];
+            if (targetIndex > removedIndex) {
+                adjusted[adjusted.length - 1] = targetIndex - 1;
+            }
+            return adjusted;
+        }
+
+        function addChildAtPath(path) {
+            const parent = getNodeByPath(path);
+            if (!parent) {
+                return;
+            }
+            if (!Array.isArray(parent.children)) {
+                parent.children = [];
+            }
+            const firstBoard = boards[0] || { id: '', label: 'New Item' };
+            parent.children.push({
+                id: `menu_custom_${Date.now()}`,
+                label: firstBoard.label || 'New Child Item',
+                board_id: firstBoard.id,
+                source: 'custom',
+                source_button_id: null,
+                sort_order: parent.children.length,
+                hidden: false,
+                image_url: null,
+                speech_text: null,
+                background_color: '#FFFFFF',
+                text_color: '#000000',
+                children: []
+            });
+        }
+
+        function moveNode(path, delta) {
+            const list = getChildrenAtDepth(path);
+            if (!list) {
+                return;
+            }
+            const index = path[path.length - 1];
+            const next = index + delta;
+            if (next < 0 || next >= list.length) {
+                return;
+            }
+            [list[index], list[next]] = [list[next], list[index]];
+        }
+
+        function moveNodeToRoot(sourcePath) {
+            if (sourcePath.length === 1) {
+                return;
+            }
+            const moved = removeNodeFromPath(sourcePath);
+            if (!moved) {
+                return;
+            }
+            menuTree.push(moved);
+        }
+
+        function moveNodeAfter(sourcePath, targetPath) {
+            if (JSON.stringify(sourcePath) === JSON.stringify(targetPath) || isDescendantPath(targetPath, sourcePath)) {
+                return;
+            }
+            const moved = removeNodeFromPath(sourcePath);
+            if (!moved) {
+                return;
+            }
+            const adjustedTarget = adjustPathAfterRemoval(targetPath, sourcePath);
+            insertAfterPath(moved, adjustedTarget);
+        }
+
+        function moveNodeAsChild(sourcePath, targetPath) {
+            if (JSON.stringify(sourcePath) === JSON.stringify(targetPath) || isDescendantPath(targetPath, sourcePath)) {
+                return;
+            }
+            const moved = removeNodeFromPath(sourcePath);
+            if (!moved) {
+                return;
+            }
+            const adjustedTarget = adjustPathAfterRemoval(targetPath, sourcePath);
+            const parent = getNodeByPath(adjustedTarget);
+            if (!parent) {
+                return;
+            }
+            if (!Array.isArray(parent.children)) {
+                parent.children = [];
+            }
+            parent.children.push(moved);
+        }
+
+        function serializeTree(items) {
+            if (!Array.isArray(items)) {
+                return [];
+            }
+            return items.map((item, index) => ({
+                id: item.id || `menu_custom_${Date.now()}_${index}`,
+                label: item.label || item.board_id || `Menu Item ${index + 1}`,
+                board_id: item.board_id,
+                source: item.source || 'custom',
+                source_button_id: item.source_button_id || null,
+                sort_order: index,
+                hidden: !!item.hidden,
+                image_url: item.image_url || null,
+                speech_text: item.speech_text || null,
+                background_color: item.background_color || '#FFFFFF',
+                text_color: item.text_color || '#000000',
+                children: serializeTree(item.children)
+            }));
         }
 
         function escapeHtml(value) {
