@@ -19757,7 +19757,9 @@ def normalize_boards_menu_items(
     menu_items: Any,
     valid_board_ids: set[str],
 ) -> List[Dict[str, Any]]:
-    """Normalize and validate boards menu items for persistence (tree-aware)."""
+    """Normalize and validate boards menu items for persistence (tree-aware).
+    board_id is optional — a node may be a category-only parent with no associated board.
+    """
     def _normalize_level(items: Any, level: int) -> List[Dict[str, Any]]:
         normalized_level: List[Dict[str, Any]] = []
         if not isinstance(items, list):
@@ -19767,19 +19769,20 @@ def normalize_boards_menu_items(
             if not isinstance(item, dict):
                 continue
 
-            board_id = str(item.get('board_id') or '').strip()
-            if not board_id or board_id not in valid_board_ids:
-                raise ValueError(f"Invalid board_id in boards_menu: {board_id or '<empty>'}")
+            raw_board_id = str(item.get('board_id') or '').strip()
+            # board_id is optional; only validate if provided
+            board_id: Optional[str] = raw_board_id if raw_board_id and raw_board_id in valid_board_ids else None
 
+            label = str(item.get('label') or board_id or f'Menu Item {index + 1}')
             item_id = str(item.get('id') or '').strip()
             if not item_id:
-                item_id = f"menu_{_sanitize_board_slug(item.get('label') or board_id)}_{level}_{index + 1}"
+                item_id = f"menu_{_sanitize_board_slug(label)}_{level}_{index + 1}"
 
             normalized_children = _normalize_level(item.get('children'), level + 1)
 
             normalized_level.append({
                 'id': item_id,
-                'label': str(item.get('label') or board_id),
+                'label': label,
                 'board_id': board_id,
                 'source': str(item.get('source') or 'custom'),
                 'source_button_id': item.get('source_button_id'),
@@ -19787,6 +19790,7 @@ def normalize_boards_menu_items(
                 'hidden': bool(item.get('hidden', False)),
                 'image_url': item.get('image_url'),
                 'speech_text': item.get('speech_text'),
+                'custom_audio_file': item.get('custom_audio_file'),
                 'background_color': item.get('background_color') or '#FFFFFF',
                 'text_color': item.get('text_color') or '#000000',
                 'children': normalized_children,

@@ -31,11 +31,7 @@
         .tree-button.drag-over.child-mode { background-color: #e8f5e8; border-color: #4caf50; box-shadow: 0 0 0 2px rgba(76,175,80,0.25); }
         .tree-button.drag-over::after { content: '↕️ Reorder'; position: absolute; top: 50%; right: 10px; transform: translateY(-50%); background: #ff9800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 12px; z-index: 1000; pointer-events: none; }
         .tree-button.drag-over.child-mode::after { content: '➕ Add Child'; background: #4caf50; }
-        .button-content { flex: 1; display: flex; flex-direction: column; }
-        .button-label { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.2rem; }
-        .button-details { font-size: 0.78rem; color: #7f8c8d; }
-        .button-actions { display: flex; gap: 0.5rem; margin-left: 0.5rem; }
-        .btn-small { padding: 0.25rem 0.5rem; font-size: 0.75rem; border-radius: 3px; }
+        .button-label { flex: 1; font-weight: 500; font-size: 0.9rem; }
         .add-button { margin: 1rem 0; text-align: center; }
         .content-area { flex: 1; background-color: white; display: flex; flex-direction: column; overflow-y: auto; }
         .content-header { padding: 1.5rem 2rem 1rem; border-bottom: 1px solid #eee; background-color: #f8f9fa; }
@@ -286,38 +282,29 @@
             menuTree.forEach((node, i) => renderNode(node, [i], 0, container));
         }
 
-        function renderNode(node, path, depth, container) {
-            const isSelected = selectedPath && JSON.stringify(selectedPath) === JSON.stringify(path);
-            const item = document.createElement('div');
-            item.className = 'tree-item';
-            const btn = document.createElement('div');
-            btn.className = 'tree-button' + (isSelected ? ' selected' : '');
-            btn.style.setProperty('--depth', (depth * 20) + 'px');
-            btn.setAttribute('draggable', 'false');
-            btn.dataset.path = JSON.stringify(path);
+                function renderNode(node, path, depth, container) {
+                        const isSelected = selectedPath && JSON.stringify(selectedPath) === JSON.stringify(path);
+                        const hasChildren = Array.isArray(node.children) && node.children.length > 0;
 
-            const board = boards.find(b => b.id === node.board_id);
-            const boardLabel = board ? (board.label || board.id) : (node.board_id ? node.board_id : '—');
+                        const btn = document.createElement('div');
+                        btn.className = 'tree-button' + (isSelected ? ' selected' : '');
+                        btn.style.setProperty('--depth', (depth * 22) + 'px');
+                        btn.setAttribute('draggable', 'false');
+                        btn.dataset.path = JSON.stringify(path);
 
-            btn.innerHTML =
-                '<div class="drag-handle" draggable="true" data-path=\'' + JSON.stringify(path) + '\' title="Drag to reorder"><i class="fas fa-grip-vertical"></i></div>' +
-                '<div class="button-content">' +
-                  '<div class="button-label">' + escapeHtml(node.label || '(unlabeled)') + (node.hidden ? ' <span class="hidden-badge">HIDDEN</span>' : '') + '</div>' +
-                  '<div class="button-details">Board: ' + escapeHtml(boardLabel) + '</div>' +
-                '</div>' +
-                '<div class="button-actions">' +
-                  '<button class="btn btn-primary btn-small" data-action="select" data-path=\'' + JSON.stringify(path) + '\' title="Edit"><i class="fas fa-edit"></i></button>' +
-                '</div>';
+                        const folderIcon = hasChildren ? 'fa-folder' : 'fa-file-alt';
+                        btn.innerHTML =
+                                '<div class="drag-handle" draggable="true" data-path=\'' + JSON.stringify(path) + '\' title="Drag to reorder"><i class="fas fa-grip-vertical"></i></div>' +
+                                '<i class="fas ' + folderIcon + '" style="color:#6b7280;margin-right:6px;font-size:0.85rem;"></i>' +
+                                '<span class="button-label">' + escapeHtml(node.label || '(unlabeled)') + '</span>' +
+                                (node.hidden ? ' <span class="hidden-badge">HIDDEN</span>' : '');
 
-            item.appendChild(btn);
-            container.appendChild(item);
+                        container.appendChild(btn);
+                        btn.addEventListener('click', (e) => { if (e.target.closest('.drag-handle')) return; selectItem(path); });
 
-            btn.querySelector('[data-action="select"]').addEventListener('click', (e) => { e.stopPropagation(); selectItem(path); });
-            btn.addEventListener('click', (e) => { if (e.target.closest('.drag-handle') || e.target.closest('.button-actions')) return; selectItem(path); });
-
-            const children = Array.isArray(node.children) ? node.children : [];
-            children.forEach((child, ci) => renderNode(child, [...path, ci], depth + 1, container));
-        }
+                        const children = Array.isArray(node.children) ? node.children : [];
+                        children.forEach((child, ci) => renderNode(child, [...path, ci], depth + 1, container));
+                }
 
         // ── Selection / form ──────────────────────────────────────────────────────
         function selectItem(path) {
