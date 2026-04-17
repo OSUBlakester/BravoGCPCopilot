@@ -19673,19 +19673,129 @@ def ensure_tap_boards_structure(
 
     _collect_legacy_menu_items(legacy_menu_items)
 
+    derived_boards: List[Dict[str, Any]] = []
+    derived_menu_items: List[Dict[str, Any]] = []
+
+    existing_legacy_boards = [
+        b for b in (existing_boards or [])
+        if isinstance(b, dict) and b.get('source') == 'legacy_category'
+    ]
+    legacy_board_by_source_button: Dict[str, Dict[str, Any]] = {}
+    for legacy_board in existing_legacy_boards:
+        key = str(legacy_board.get('source_button_id') or '').strip()
+        if key:
+            legacy_board_by_source_button[key] = legacy_board
+
+    # map source_button_id -> board_id for all derived legacy boards
+    legacy_board_id_by_source_button: Dict[str, str] = {}
+    used_board_ids: set[str] = {str(b.get('id')) for b in custom_boards if isinstance(b.get('id'), str)}
+
+    def _should_create_legacy_board(button_node: Dict[str, Any], depth: int) -> bool:
+        if depth == 0:
+            return True
+        if str(button_node.get('special_function') or '').strip():
+            return True
+        if str(button_node.get('static_options') or '').strip():
+            return True
+        if str(button_node.get('llm_prompt') or '').strip():
+            return True
+        if str(button_node.get('prompt_category') or '').strip():
+            return True
+        if str(button_node.get('prompt_topic') or '').strip():
+            return True
+        if str(button_node.get('prompt_examples') or '').strip():
+            return True
+        if str(button_node.get('prompt_exclusions') or '').strip():
+            return True
+        return False
+
+    def _next_legacy_board_id(button_node: Dict[str, Any], fallback_index: int) -> str:
+        base_slug = _sanitize_board_slug(button_node.get('id') or button_node.get('label') or f'board_{fallback_index}')
+        board_id = f"board_{base_slug}"
+        suffix = 2
+        while board_id in used_board_ids:
+            board_id = f"board_{base_slug}_{suffix}"
+            suffix += 1
+        return board_id
+
+    def _collect_derived_legacy_boards(button_nodes: Any, depth: int) -> None:
+        if not isinstance(button_nodes, list):
+            return
+
+        for index, button_node in enumerate(button_nodes):
+            if not isinstance(button_node, dict):
+                continue
+
+            source_button_id = button_node.get('id')
+            source_button_key = str(source_button_id or '').strip()
+
+            create_board = _should_create_legacy_board(button_node, depth)
+            board_id: Optional[str] = None
+
+            existing_legacy_board = legacy_board_by_source_button.get(source_button_key) if source_button_key else None
+            if create_board:
+                existing_id = str(existing_legacy_board.get('id') or '').strip() if isinstance(existing_legacy_board, dict) else ''
+                if existing_id and existing_id not in used_board_ids:
+                    board_id = existing_id
+                else:
+                    board_id = _next_legacy_board_id(button_node, index)
+
+                used_board_ids.add(board_id)
+                if source_button_key:
+                    legacy_board_id_by_source_button[source_button_key] = board_id
+
+                special_function = button_node.get('special_function')
+                has_static_options = bool(str(button_node.get('static_options') or '').strip())
+                if special_function:
+                    board_type = 'system'
+                elif has_static_options:
+                    board_type = 'static'
+                else:
+                    board_type = 'ai'
+
+                owner_scope_default = 'global' if str(button_node.get('id') or '').endswith('_btn') else 'user'
+                owner_scope = owner_scope_default
+                if isinstance(existing_legacy_board, dict):
+                    owner_scope = str(existing_legacy_board.get('owner_scope') or owner_scope_default)
+
+                board = {
+                    'id': board_id,
+                    'label': str(button_node.get('label') or f'Board {index + 1}'),
+                    'board_type': board_type,
+                    'source': 'legacy_category',
+                    'source_button_id': source_button_id,
+                    'owner_scope': owner_scope,
+                    'hidden': bool(button_node.get('hidden', False)),
+                    'llm_prompt': button_node.get('llm_prompt'),
+                    'prompt_category': button_node.get('prompt_category'),
+                    'prompt_topic': button_node.get('prompt_topic'),
+                    'prompt_examples': button_node.get('prompt_examples'),
+                    'prompt_exclusions': button_node.get('prompt_exclusions'),
+                    'static_options': button_node.get('static_options'),
+                    'special_function': special_function,
+                    'default_columns': 12,
+                    'max_rows': 7,
+                    'buttons': _convert_children_to_board_buttons(button_node.get('children')),
+                }
+                derived_boards.append(board)
+
+            _collect_derived_legacy_boards(button_node.get('children'), depth + 1)
+
+    _collect_derived_legacy_boards(buttons, 0)
+
     def _build_legacy_menu_node(
         button_node: Dict[str, Any],
         sort_order: int,
-        board_id: Optional[str],
     ) -> Dict[str, Any]:
         source_button_id = button_node.get('id')
         source_button_key = str(source_button_id or '').strip()
         existing_legacy_menu_item = legacy_menu_by_source_button.get(source_button_key) if source_button_key else None
+        derived_board_id = legacy_board_id_by_source_button.get(source_button_key) if source_button_key else None
 
         menu_node = {
             'id': f"menu_{_sanitize_board_slug(button_node.get('id') or button_node.get('label') or sort_order)}",
             'label': str(button_node.get('label') or f'Board {sort_order + 1}'),
-            'board_id': board_id,
+            'board_id': derived_board_id,
             'source': 'legacy_category',
             'source_button_id': source_button_id,
             'sort_order': sort_order,
@@ -19709,8 +19819,8 @@ def ensure_tap_boards_structure(
             menu_node['background_color'] = existing_legacy_menu_item.get('background_color') or menu_node['background_color']
             menu_node['text_color'] = existing_legacy_menu_item.get('text_color') or menu_node['text_color']
             # If a node has a board target, keep that target; otherwise preserve any existing target.
-            if board_id:
-                menu_node['board_id'] = board_id
+            if derived_board_id:
+                menu_node['board_id'] = derived_board_id
             else:
                 menu_node['board_id'] = existing_legacy_menu_item.get('board_id')
 
@@ -19720,61 +19830,15 @@ def ensure_tap_boards_structure(
             for child_index, child_node in enumerate(raw_children):
                 if not isinstance(child_node, dict):
                     continue
-                # Legacy child buttons are menu-only nodes by default.
-                built_children.append(_build_legacy_menu_node(child_node, child_index, None))
+                built_children.append(_build_legacy_menu_node(child_node, child_index))
             menu_node['children'] = built_children
 
         return menu_node
 
-    derived_boards: List[Dict[str, Any]] = []
-    derived_menu_items: List[Dict[str, Any]] = []
-    used_board_ids: set[str] = {str(b.get('id')) for b in custom_boards if isinstance(b.get('id'), str)}
-
     for index, button in enumerate(buttons):
         if not isinstance(button, dict):
             continue
-
-        base_slug = _sanitize_board_slug(button.get('id') or button.get('label') or f'board_{index}')
-        board_id = f"board_{base_slug}"
-        suffix = 2
-        while board_id in used_board_ids:
-            board_id = f"board_{base_slug}_{suffix}"
-            suffix += 1
-        used_board_ids.add(board_id)
-
-        special_function = button.get('special_function')
-        has_static_options = bool(str(button.get('static_options') or '').strip())
-        if special_function:
-            board_type = 'system'
-        elif has_static_options:
-            board_type = 'static'
-        else:
-            board_type = 'ai'
-
-        owner_scope = 'global' if str(button.get('id') or '').endswith('_btn') else 'user'
-
-        board = {
-            'id': board_id,
-            'label': str(button.get('label') or f'Board {index + 1}'),
-            'board_type': board_type,
-            'source': 'legacy_category',
-            'source_button_id': button.get('id'),
-            'owner_scope': owner_scope,
-            'hidden': bool(button.get('hidden', False)),
-            'llm_prompt': button.get('llm_prompt'),
-            'prompt_category': button.get('prompt_category'),
-            'prompt_topic': button.get('prompt_topic'),
-            'prompt_examples': button.get('prompt_examples'),
-            'prompt_exclusions': button.get('prompt_exclusions'),
-            'static_options': button.get('static_options'),
-            'special_function': special_function,
-            'default_columns': 12,
-            'max_rows': 7,
-            'buttons': _convert_children_to_board_buttons(button.get('children')),
-        }
-        derived_boards.append(board)
-
-        menu_item = _build_legacy_menu_node(button, index, board_id)
+        menu_item = _build_legacy_menu_node(button, index)
         derived_menu_items.append(menu_item)
 
     merged_boards = custom_boards + derived_boards
