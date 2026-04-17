@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Board Builder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; color: #111827; }
+        .layout { display: flex; height: calc(100vh - 56px); }
+        .sidebar { width: 320px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; }
+        .main { flex: 1; overflow: auto; background: #fff; }
+        .board-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.65rem 0.75rem; cursor: pointer; }
+        .board-item:hover { border-color: #93c5fd; background: #eff6ff; }
+        .board-item.selected { border-color: #2563eb; background: #dbeafe; }
+        .field { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.6rem 0.65rem; }
+        .field:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
+        .btn { border-radius: 8px; border: none; padding: 0.55rem 0.9rem; font-size: 0.9rem; cursor: pointer; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-secondary { background: #e5e7eb; color: #111827; }
+        .btn-secondary:hover { background: #d1d5db; }
+        .btn-danger { background: #ef4444; color: #fff; }
+        .btn-danger:hover { background: #dc2626; }
+        .notification { position: fixed; top: 1rem; right: 1rem; border-radius: 8px; padding: 0.75rem 1rem; color: #fff; font-weight: 600; transform: translateX(140%); transition: transform 0.2s ease; z-index: 1000; }
+        .notification.show { transform: translateX(0); }
+        .notification.success { background: #16a34a; }
+        .notification.error { background: #dc2626; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #e5e7eb; padding: 0.45rem; vertical-align: top; }
+        th { background: #f9fafb; text-align: left; font-size: 0.8rem; color: #374151; }
+        td input, td select { width: 100%; }
+    </style>
+</head>
+<body>
+    <div class="bg-[#002244] text-[#FB4F14] px-4 py-2 shadow flex items-center justify-between" style="min-height:56px;">
+        <div class="flex items-center gap-2">
+            <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back to Boards Menu">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <h1 class="text-xl font-semibold">Board Builder</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="saveBoardBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Board</button>
+            <button id="deleteBoardBtn" class="btn btn-danger"><i class="fas fa-trash"></i> Delete Board</button>
+        </div>
+    </div>
+
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+                <h2 class="font-semibold">Boards</h2>
+                <button id="newBoardBtn" class="btn btn-secondary"><i class="fas fa-plus"></i> New</button>
+            </div>
+            <div class="p-3">
+                <input id="boardSearch" class="field" placeholder="Search boards...">
+            </div>
+            <div id="boardList" class="p-3 space-y-2 overflow-auto" style="flex:1;"></div>
+        </aside>
+
+        <main class="main p-6">
+            <div id="emptyState" class="text-gray-500">Select a board from the list, or create a new board.</div>
+            <div id="editor" style="display:none;" class="space-y-6">
+                <section>
+                    <h3 class="text-lg font-semibold mb-3">Board Settings</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                            <label class="text-sm font-medium">Board ID</label>
+                            <input id="boardId" class="field" readonly>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Label</label>
+                            <input id="boardLabel" class="field">
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Type</label>
+                            <select id="boardType" class="field">
+                                <option value="ai">AI</option>
+                                <option value="static">Static</option>
+                                <option value="system">System</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Owner Scope</label>
+                            <select id="ownerScope" class="field">
+                                <option value="user">User</option>
+                                <option value="global">Global</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Columns</label>
+                            <input id="defaultColumns" class="field" type="number" min="1" max="24" value="12">
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Max Rows</label>
+                            <input id="maxRows" class="field" type="number" min="1" max="24" value="7">
+                        </div>
+                    </div>
+                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-sm font-medium">Prompt Category</label>
+                            <input id="promptCategory" class="field" placeholder="e.g. food, people, emotions">
+                        </div>
+                        <div>
+                            <label class="text-sm font-medium">Special Function</label>
+                            <input id="specialFunction" class="field" placeholder="e.g. spell, games">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-sm font-medium">LLM Prompt</label>
+                            <textarea id="llmPrompt" class="field" rows="2"></textarea>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-sm font-medium">Static Options</label>
+                            <textarea id="staticOptions" class="field" rows="2" placeholder="Comma-separated options"></textarea>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-lg font-semibold">Board Buttons</h3>
+                        <button id="addButtonBtn" class="btn btn-secondary"><i class="fas fa-plus"></i> Add Button</button>
+                    </div>
+                    <div style="overflow:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="min-width:140px;">Label</th>
+                                    <th style="min-width:120px;">Action</th>
+                                    <th style="min-width:150px;">Target Board</th>
+                                    <th style="min-width:140px;">Speech Text</th>
+                                    <th style="min-width:140px;">Audio URL</th>
+                                    <th style="min-width:130px;">Image URL</th>
+                                    <th style="min-width:100px;">BG Color</th>
+                                    <th style="min-width:100px;">Text Color</th>
+                                    <th style="min-width:80px;">Hidden</th>
+                                    <th style="min-width:70px;">Delete</th>
+                                </tr>
+                            </thead>
+                            <tbody id="buttonsTableBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script>
+        let authToken = null;
+        let currentAacUserId = null;
+        let boards = [];
+        let selectedBoardId = null;
+        let isNewBoard = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('newBoardBtn').addEventListener('click', createNewDraftBoard);
+            document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
+            document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
+            document.getElementById('addButtonBtn').addEventListener('click', addBoardButtonRow);
+            document.getElementById('boardSearch').addEventListener('input', renderBoardList);
+            initializeFirebaseAndAuth();
+        });
+
+        async function initializeFirebaseAndAuth() {
+            try {
+                const configResponse = await fetch('/api/frontend-config');
+                const configData = await configResponse.json();
+                const firebaseConfig = configData.firebase_config || configData;
+                if (!firebaseConfig || !firebaseConfig.apiKey) throw new Error('Missing Firebase config');
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
+                firebase.auth().onAuthStateChanged(async (user) => {
+                    if (!user) {
+                        window.location.href = '/auth.html?redirect=' + encodeURIComponent(window.location.pathname);
+                        return;
+                    }
+                    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+                    if (!currentAacUserId) {
+                        window.location.href = 'auth.html';
+                        return;
+                    }
+                    authToken = await user.getIdToken();
+                    await loadBoards();
+
+                    const params = new URLSearchParams(window.location.search);
+                    const requestedId = params.get('board_id');
+                    if (requestedId && boards.some(b => b.id === requestedId)) {
+                        selectBoard(requestedId);
+                    }
+                });
+            } catch (error) {
+                console.error(error);
+                showNotification('Authentication init failed', 'error');
+            }
+        }
+
+        function getAuthHeaders() {
+            const headers = { 'Content-Type': 'application/json' };
+            if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+            if (currentAacUserId) headers['X-User-ID'] = currentAacUserId;
+            const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+            if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+            return headers;
+        }
+
+        async function loadBoards() {
+            const res = await fetch('/api/tap-interface/boards', { headers: getAuthHeaders() });
+            if (!res.ok) throw new Error('Failed to load boards');
+            const data = await res.json();
+            boards = Array.isArray(data.boards) ? data.boards : [];
+            renderBoardList();
+        }
+
+        function renderBoardList() {
+            const q = (document.getElementById('boardSearch').value || '').trim().toLowerCase();
+            const list = document.getElementById('boardList');
+            list.innerHTML = '';
+
+            const filtered = boards.filter(b => {
+                const label = String(b.label || '').toLowerCase();
+                const id = String(b.id || '').toLowerCase();
+                return !q || label.includes(q) || id.includes(q);
+            });
+
+            if (!filtered.length) {
+                list.innerHTML = '<div class="text-sm text-gray-500">No boards found.</div>';
+                return;
+            }
+
+            filtered.forEach((board) => {
+                const div = document.createElement('div');
+                div.className = 'board-item' + (board.id === selectedBoardId ? ' selected' : '');
+                div.innerHTML = '<div class="font-medium text-sm">' + escapeHtml(board.label || board.id) + '</div>' +
+                    '<div class="text-xs text-gray-500">' + escapeHtml(board.id) + ' · ' + escapeHtml(board.board_type || 'ai') + '</div>';
+                div.addEventListener('click', () => selectBoard(board.id));
+                list.appendChild(div);
+            });
+        }
+
+        function selectBoard(boardId) {
+            const board = boards.find(b => b.id === boardId);
+            if (!board) return;
+            selectedBoardId = boardId;
+            isNewBoard = false;
+            renderBoardList();
+            bindBoardToEditor(board);
+        }
+
+        function createNewDraftBoard() {
+            selectedBoardId = '__new__';
+            isNewBoard = true;
+            renderBoardList();
+            bindBoardToEditor({
+                id: '',
+                label: 'New Board',
+                board_type: 'ai',
+                owner_scope: 'user',
+                hidden: false,
+                llm_prompt: '',
+                prompt_category: '',
+                special_function: '',
+                static_options: '',
+                default_columns: 12,
+                max_rows: 7,
+                buttons: []
+            });
+        }
+
+        function bindBoardToEditor(board) {
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('editor').style.display = '';
+
+            document.getElementById('boardId').value = board.id || '(auto-generated on create)';
+            document.getElementById('boardLabel').value = board.label || '';
+            document.getElementById('boardType').value = board.board_type || 'ai';
+            document.getElementById('ownerScope').value = board.owner_scope || 'user';
+            document.getElementById('defaultColumns').value = Number(board.default_columns || 12);
+            document.getElementById('maxRows').value = Number(board.max_rows || 7);
+            document.getElementById('promptCategory').value = board.prompt_category || '';
+            document.getElementById('specialFunction').value = board.special_function || '';
+            document.getElementById('llmPrompt').value = board.llm_prompt || '';
+            document.getElementById('staticOptions').value = board.static_options || '';
+
+            renderButtonsTable(Array.isArray(board.buttons) ? board.buttons : []);
+        }
+
+        function renderButtonsTable(buttons) {
+            const tbody = document.getElementById('buttonsTableBody');
+            tbody.innerHTML = '';
+            buttons.forEach((btn, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><input class="field" data-k="label" value="${escapeHtml(btn.label || '')}"></td>
+                    <td>
+                        <select class="field" data-k="action_type">
+                            <option value="announce" ${btn.action_type === 'announce' ? 'selected' : ''}>announce</option>
+                            <option value="navigate" ${btn.action_type === 'navigate' ? 'selected' : ''}>navigate</option>
+                            <option value="audio" ${btn.action_type === 'audio' ? 'selected' : ''}>audio</option>
+                            <option value="special" ${btn.action_type === 'special' ? 'selected' : ''}>special</option>
+                        </select>
+                    </td>
+                    <td>${renderBoardTargetSelect(btn.target_board_id)}</td>
+                    <td><input class="field" data-k="speech_text" value="${escapeHtml(btn.speech_text || '')}"></td>
+                    <td><input class="field" data-k="custom_audio_file" value="${escapeHtml(btn.custom_audio_file || '')}"></td>
+                    <td><input class="field" data-k="image_url" value="${escapeHtml(btn.image_url || '')}"></td>
+                    <td><input class="field" data-k="background_color" value="${escapeHtml(btn.background_color || '#FFFFFF')}"></td>
+                    <td><input class="field" data-k="text_color" value="${escapeHtml(btn.text_color || '#000000')}"></td>
+                    <td><input type="checkbox" data-k="hidden" ${btn.hidden ? 'checked' : ''}></td>
+                    <td><button class="btn btn-danger" data-action="delete-row">X</button></td>
+                `;
+                tr.dataset.rowIndex = String(index);
+                tbody.appendChild(tr);
+            });
+
+            tbody.querySelectorAll('[data-action="delete-row"]').forEach((btn) => {
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const tr = e.currentTarget.closest('tr');
+                    if (tr) tr.remove();
+                });
+            });
+        }
+
+        function renderBoardTargetSelect(selectedValue) {
+            const opts = ['<option value="">-- none --</option>']
+                .concat(boards.map(b => {
+                    const selected = b.id === selectedValue ? 'selected' : '';
+                    return '<option value="' + escapeHtml(b.id) + '" ' + selected + '>' + escapeHtml(b.label || b.id) + '</option>';
+                }))
+                .join('');
+            return '<select class="field" data-k="target_board_id">' + opts + '</select>';
+        }
+
+        function addBoardButtonRow() {
+            const tbody = document.getElementById('buttonsTableBody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input class="field" data-k="label" value=""></td>
+                <td>
+                    <select class="field" data-k="action_type">
+                        <option value="announce" selected>announce</option>
+                        <option value="navigate">navigate</option>
+                        <option value="audio">audio</option>
+                        <option value="special">special</option>
+                    </select>
+                </td>
+                <td>${renderBoardTargetSelect('')}</td>
+                <td><input class="field" data-k="speech_text" value=""></td>
+                <td><input class="field" data-k="custom_audio_file" value=""></td>
+                <td><input class="field" data-k="image_url" value=""></td>
+                <td><input class="field" data-k="background_color" value="#FFFFFF"></td>
+                <td><input class="field" data-k="text_color" value="#000000"></td>
+                <td><input type="checkbox" data-k="hidden"></td>
+                <td><button class="btn btn-danger" data-action="delete-row">X</button></td>
+            `;
+            tbody.appendChild(tr);
+            tr.querySelector('[data-action="delete-row"]').addEventListener('click', (e) => {
+                e.preventDefault();
+                tr.remove();
+            });
+        }
+
+        function collectButtonsFromTable() {
+            const rows = Array.from(document.querySelectorAll('#buttonsTableBody tr'));
+            return rows.map((row, index) => {
+                const get = (k) => row.querySelector('[data-k="' + k + '"]');
+                return {
+                    id: 'btn_' + (index + 1),
+                    label: (get('label')?.value || '').trim() || ('Button ' + (index + 1)),
+                    speech_text: (get('speech_text')?.value || '').trim() || null,
+                    action_type: (get('action_type')?.value || 'announce'),
+                    target_board_id: (get('target_board_id')?.value || '').trim() || null,
+                    custom_audio_file: (get('custom_audio_file')?.value || '').trim() || null,
+                    image_url: (get('image_url')?.value || '').trim() || null,
+                    background_color: (get('background_color')?.value || '#FFFFFF').trim() || '#FFFFFF',
+                    text_color: (get('text_color')?.value || '#000000').trim() || '#000000',
+                    hidden: !!get('hidden')?.checked
+                };
+            });
+        }
+
+        async function saveBoard() {
+            if (!document.getElementById('editor').offsetParent) return;
+
+            const payload = {
+                label: document.getElementById('boardLabel').value.trim() || 'Untitled Board',
+                board_type: document.getElementById('boardType').value,
+                owner_scope: document.getElementById('ownerScope').value,
+                hidden: false,
+                llm_prompt: document.getElementById('llmPrompt').value || null,
+                prompt_category: document.getElementById('promptCategory').value || null,
+                special_function: document.getElementById('specialFunction').value || null,
+                static_options: document.getElementById('staticOptions').value || null,
+                default_columns: Number(document.getElementById('defaultColumns').value || 12),
+                max_rows: Number(document.getElementById('maxRows').value || 7),
+                buttons: collectButtonsFromTable()
+            };
+
+            try {
+                let res;
+                if (isNewBoard) {
+                    res = await fetch('/api/tap-interface/boards', {
+                        method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload)
+                    });
+                } else {
+                    res = await fetch('/api/tap-interface/boards/' + encodeURIComponent(selectedBoardId), {
+                        method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(payload)
+                    });
+                }
+
+                if (!res.ok) {
+                    const error = await res.json().catch(() => ({}));
+                    throw new Error(error.detail || ('HTTP ' + res.status));
+                }
+
+                const body = await res.json();
+                await loadBoards();
+                if (body.board && body.board.id) {
+                    selectBoard(body.board.id);
+                    selectedBoardId = body.board.id;
+                    isNewBoard = false;
+                }
+                showNotification('Board saved', 'success');
+            } catch (err) {
+                console.error(err);
+                showNotification('Save failed: ' + err.message, 'error');
+            }
+        }
+
+        async function deleteBoard() {
+            if (isNewBoard || !selectedBoardId) {
+                showNotification('Select an existing board first', 'error');
+                return;
+            }
+            if (!confirm('Delete this board? Board targets pointing to it will be cleared.')) return;
+
+            try {
+                const res = await fetch('/api/tap-interface/boards/' + encodeURIComponent(selectedBoardId), {
+                    method: 'DELETE', headers: getAuthHeaders()
+                });
+                if (!res.ok) {
+                    const error = await res.json().catch(() => ({}));
+                    throw new Error(error.detail || ('HTTP ' + res.status));
+                }
+                selectedBoardId = null;
+                isNewBoard = false;
+                await loadBoards();
+                document.getElementById('editor').style.display = 'none';
+                document.getElementById('emptyState').style.display = '';
+                showNotification('Board deleted', 'success');
+            } catch (err) {
+                console.error(err);
+                showNotification('Delete failed: ' + err.message, 'error');
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function showNotification(message, type) {
+            const el = document.getElementById('notification');
+            el.textContent = message;
+            el.className = 'notification ' + type + ' show';
+            setTimeout(() => el.classList.remove('show'), 2500);
+        }
+    </script>
+</body>
+</html>

@@ -69,6 +69,9 @@
             <h1 class="ml-2 text-xl font-semibold">Boards Menu Administration</h1>
         </div>
         <div class="flex items-center gap-2">
+            <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-white bg-indigo-600 rounded-full text-sm hover:bg-indigo-700">
+                <i class="fas fa-table-cells-large mr-1"></i>Board Builder
+            </button>
             <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
             <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
                 <i class="fas fa-save mr-1"></i>Save
@@ -119,9 +122,12 @@
 
                         <div class="form-group">
                             <label for="boardTarget">Board Target</label>
-                            <select id="boardTarget">
+                            <div style="display:flex; gap:0.5rem; align-items:center;">
+                                <select id="boardTarget" style="flex:1;">
                                 <option value="">— None / Category only —</option>
-                            </select>
+                                </select>
+                                <button type="button" id="openBoardBuilderBtn" class="btn btn-primary" style="padding:0.7rem 0.9rem;">Open</button>
+                            </div>
                             <small style="color:#7f8c8d;font-size:0.8rem;">The board displayed when the user taps this menu item.</small>
                         </div>
 
@@ -360,6 +366,18 @@
                 const el = document.getElementById(id);
                 if (el) { el.addEventListener('change', markAsChanged); el.addEventListener('input', markAsChanged); }
             });
+
+            const openBoardBuilderBtn = document.getElementById('openBoardBuilderBtn');
+            if (openBoardBuilderBtn) {
+                openBoardBuilderBtn.addEventListener('click', () => {
+                    const targetBoardId = (document.getElementById('boardTarget').value || '').trim();
+                    if (targetBoardId) {
+                        window.location.href = 'tap_board_builder.html?board_id=' + encodeURIComponent(targetBoardId);
+                    } else {
+                        window.location.href = 'tap_board_builder.html';
+                    }
+                });
+            }
         }
 
         function populateBoardSelect(selectedId) {
