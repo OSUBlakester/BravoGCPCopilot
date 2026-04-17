@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Boards Menu Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f3f4f6;
+            color: #111827;
+        }
+
+        .menu-row {
+            display: grid;
+            grid-template-columns: 36px 1fr 1fr 140px 120px;
+            gap: 0.75rem;
+            align-items: center;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 0.75rem;
+        }
+
+        .menu-row.dragging {
+            opacity: 0.5;
+        }
+
+        .menu-row.drag-over {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+        }
+
+        .drag-handle {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #6b7280;
+            background: #f9fafb;
+            cursor: grab;
+        }
+
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+
+        .field {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 0.5rem 0.625rem;
+            font-size: 0.9rem;
+            background: white;
+        }
+
+        .field:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+        }
+
+        .btn {
+            border: none;
+            border-radius: 8px;
+            padding: 0.55rem 0.9rem;
+            font-size: 0.86rem;
+            cursor: pointer;
+        }
+
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-secondary { background: #e5e7eb; color: #111827; }
+        .btn-secondary:hover { background: #d1d5db; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 0.2rem 0.55rem;
+            font-size: 0.75rem;
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .notification {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: white;
+            font-weight: 600;
+            transform: translateX(140%);
+            transition: transform 0.25s ease;
+        }
+
+        .notification.show { transform: translateX(0); }
+        .notification.success { background: #16a34a; }
+        .notification.error { background: #dc2626; }
+
+        @media (max-width: 1080px) {
+            .menu-row {
+                grid-template-columns: 32px 1fr;
+                gap: 0.5rem;
+            }
+            .menu-row .compact-break {
+                grid-column: 1 / -1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-[#002244] text-[#FB4F14] px-4 py-3 shadow flex items-center justify-between">
+        <div class="flex items-center gap-2">
+            <button onclick="window.location.href='tap_interface_admin.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back to Tap Interface Admin">
+                <i class="fas fa-arrow-left"></i>
+            </button>
+            <h1 class="text-xl font-semibold">Boards Menu Admin</h1>
+            <span class="badge">Step 1: Menu Composition</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <button id="addMenuItemBtn" class="btn btn-secondary">
+                <i class="fas fa-plus"></i> Add Menu Item
+            </button>
+            <button id="saveBtn" class="btn btn-primary">
+                <i class="fas fa-save"></i> Save Menu
+            </button>
+        </div>
+    </div>
+
+    <main class="max-w-7xl mx-auto p-4 lg:p-6">
+        <section class="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+            <h2 class="text-lg font-semibold mb-2">Boards Menu</h2>
+            <p class="text-sm text-gray-600 mb-2">Assign boards to the top-level menu and control display order. Legacy categories are already auto-converted into boards.</p>
+            <p class="text-sm text-gray-600">Drag rows by the handle to reorder, or edit labels and board targets directly.</p>
+        </section>
+
+        <section class="space-y-3" id="menuList">
+            <div class="text-gray-500 text-sm bg-white border border-dashed border-gray-300 rounded-lg p-4">Loading boards menu...</div>
+        </section>
+    </main>
+
+    <div id="notification" class="notification"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <script>
+        let authToken = null;
+        let currentAacUserId = null;
+        let boards = [];
+        let menuItems = [];
+        let draggingIndex = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('saveBtn').addEventListener('click', saveBoardsMenu);
+            document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
+            initializeFirebaseAndAuth();
+        });
+
+        async function initializeFirebaseAndAuth() {
+            try {
+                const configResponse = await fetch('/api/frontend-config');
+                const configData = await configResponse.json();
+                const firebaseConfig = configData.firebase_config || configData;
+                if (!firebaseConfig || !firebaseConfig.apiKey) {
+                    throw new Error('Missing firebase config');
+                }
+
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfig);
+                }
+
+                firebase.auth().onAuthStateChanged(async (user) => {
+                    if (!user) {
+                        window.location.href = '/auth.html?redirect=' + encodeURIComponent(window.location.pathname);
+                        return;
+                    }
+
+                    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+                    if (!currentAacUserId) {
+                        window.location.href = 'auth.html';
+                        return;
+                    }
+
+                    authToken = await user.getIdToken();
+                    await loadBoardsMenu();
+                });
+            } catch (error) {
+                console.error(error);
+                showNotification('Failed to initialize authentication', 'error');
+            }
+        }
+
+        function getAuthHeaders() {
+            const headers = { 'Content-Type': 'application/json' };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+            if (currentAacUserId) {
+                headers['X-User-ID'] = currentAacUserId;
+            }
+            const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
+            if (adminTargetAccountId) {
+                headers['X-Admin-Target-Account'] = adminTargetAccountId;
+            }
+            return headers;
+        }
+
+        async function loadBoardsMenu() {
+            try {
+                const response = await fetch('/api/tap-interface/boards-menu', {
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const payload = await response.json();
+                boards = Array.isArray(payload.boards) ? payload.boards : [];
+                menuItems = Array.isArray(payload.boards_menu) ? payload.boards_menu : [];
+                renderMenuList();
+            } catch (error) {
+                console.error(error);
+                showNotification('Failed to load boards menu', 'error');
+                renderEmptyState('Failed to load boards menu.');
+            }
+        }
+
+        function renderEmptyState(message) {
+            document.getElementById('menuList').innerHTML = `<div class="text-gray-500 text-sm bg-white border border-dashed border-gray-300 rounded-lg p-4">${message}</div>`;
+        }
+
+        function createBoardOptions(selectedBoardId) {
+            const options = boards.map((board) => {
+                const selected = board.id === selectedBoardId ? 'selected' : '';
+                const suffix = board.board_type ? ` (${board.board_type})` : '';
+                return `<option value="${escapeHtml(board.id)}" ${selected}>${escapeHtml(board.label || board.id)}${escapeHtml(suffix)}</option>`;
+            });
+            return options.join('');
+        }
+
+        function renderMenuList() {
+            const list = document.getElementById('menuList');
+            if (!menuItems.length) {
+                renderEmptyState('No menu items yet. Click Add Menu Item.');
+                return;
+            }
+
+            list.innerHTML = '';
+            menuItems.forEach((item, index) => {
+                const row = document.createElement('div');
+                row.className = 'menu-row';
+                row.dataset.index = String(index);
+                row.draggable = true;
+
+                const hideChecked = item.hidden ? 'checked' : '';
+                row.innerHTML = `
+                    <div class="drag-handle" title="Drag to reorder">
+                        <i class="fas fa-grip-vertical"></i>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Menu Label</label>
+                        <input class="field compact-break" type="text" value="${escapeHtml(item.label || '')}" data-field="label" data-index="${index}" />
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Board Target</label>
+                        <select class="field compact-break" data-field="board_id" data-index="${index}">
+                            ${createBoardOptions(item.board_id)}
+                        </select>
+                    </div>
+                    <div class="compact-break">
+                        <label class="block text-xs text-gray-500 mb-1">Visibility</label>
+                        <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" data-field="hidden" data-index="${index}" ${hideChecked}>
+                            Hidden
+                        </label>
+                    </div>
+                    <div class="compact-break" style="display:flex; gap: 0.5rem; justify-content:flex-end;">
+                        <button class="btn btn-secondary" data-action="up" data-index="${index}" title="Move up"><i class="fas fa-arrow-up"></i></button>
+                        <button class="btn btn-secondary" data-action="down" data-index="${index}" title="Move down"><i class="fas fa-arrow-down"></i></button>
+                        <button class="btn btn-danger" data-action="delete" data-index="${index}" title="Delete"><i class="fas fa-trash"></i></button>
+                    </div>
+                `;
+
+                list.appendChild(row);
+            });
+
+            wireRowHandlers();
+        }
+
+        function wireRowHandlers() {
+            const list = document.getElementById('menuList');
+
+            list.querySelectorAll('[data-field]').forEach((input) => {
+                input.addEventListener('change', (e) => {
+                    const index = Number(e.target.dataset.index);
+                    const field = e.target.dataset.field;
+                    if (Number.isNaN(index) || !menuItems[index]) {
+                        return;
+                    }
+                    if (field === 'hidden') {
+                        menuItems[index][field] = !!e.target.checked;
+                    } else {
+                        menuItems[index][field] = e.target.value;
+                    }
+                });
+            });
+
+            list.querySelectorAll('[data-action]').forEach((button) => {
+                button.addEventListener('click', (e) => {
+                    const index = Number(e.currentTarget.dataset.index);
+                    const action = e.currentTarget.dataset.action;
+                    if (Number.isNaN(index)) {
+                        return;
+                    }
+                    if (action === 'delete') {
+                        menuItems.splice(index, 1);
+                    } else if (action === 'up' && index > 0) {
+                        [menuItems[index - 1], menuItems[index]] = [menuItems[index], menuItems[index - 1]];
+                    } else if (action === 'down' && index < menuItems.length - 1) {
+                        [menuItems[index], menuItems[index + 1]] = [menuItems[index + 1], menuItems[index]];
+                    }
+                    renderMenuList();
+                });
+            });
+
+            list.querySelectorAll('.menu-row').forEach((row) => {
+                row.addEventListener('dragstart', (e) => {
+                    const fromHandle = e.target.closest('.drag-handle');
+                    if (!fromHandle) {
+                        e.preventDefault();
+                        return;
+                    }
+                    draggingIndex = Number(row.dataset.index);
+                    row.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                row.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    if (!row.classList.contains('dragging')) {
+                        row.classList.add('drag-over');
+                    }
+                });
+
+                row.addEventListener('dragleave', () => {
+                    row.classList.remove('drag-over');
+                });
+
+                row.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const targetIndex = Number(row.dataset.index);
+                    if (draggingIndex === null || Number.isNaN(targetIndex) || draggingIndex === targetIndex) {
+                        cleanupDragStyles();
+                        return;
+                    }
+                    const moved = menuItems.splice(draggingIndex, 1)[0];
+                    menuItems.splice(targetIndex, 0, moved);
+                    draggingIndex = null;
+                    renderMenuList();
+                });
+
+                row.addEventListener('dragend', () => {
+                    draggingIndex = null;
+                    cleanupDragStyles();
+                });
+            });
+        }
+
+        function cleanupDragStyles() {
+            document.querySelectorAll('.menu-row.dragging, .menu-row.drag-over').forEach((el) => {
+                el.classList.remove('dragging', 'drag-over');
+            });
+        }
+
+        function addMenuItem() {
+            if (!boards.length) {
+                showNotification('No boards are available yet', 'error');
+                return;
+            }
+            const firstBoard = boards[0];
+            menuItems.push({
+                id: `menu_custom_${Date.now()}`,
+                label: firstBoard.label || 'New Menu Item',
+                board_id: firstBoard.id,
+                source: 'custom',
+                source_button_id: null,
+                sort_order: menuItems.length,
+                hidden: false,
+                image_url: null,
+                speech_text: null,
+                background_color: '#FFFFFF',
+                text_color: '#000000'
+            });
+            renderMenuList();
+        }
+
+        async function saveBoardsMenu() {
+            try {
+                const payload = {
+                    boards_menu: menuItems.map((item, index) => ({
+                        ...item,
+                        sort_order: index
+                    }))
+                };
+
+                const response = await fetch('/api/tap-interface/boards-menu', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.json().catch(() => ({}));
+                    throw new Error(errorBody.detail || `HTTP ${response.status}`);
+                }
+
+                showNotification('Boards menu saved', 'success');
+                await loadBoardsMenu();
+            } catch (error) {
+                console.error(error);
+                showNotification('Save failed: ' + error.message, 'error');
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function showNotification(message, type) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 2500);
+        }
+    </script>
+</body>
+</html>

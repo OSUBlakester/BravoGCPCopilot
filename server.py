@@ -19563,6 +19563,12 @@ class TapNavigationConfig(BaseModel):
     boards_menu: Optional[List[TapBoardsMenuItem]] = Field(None, description="Boards menu configuration")
     boards: Optional[List[TapBoard]] = Field(None, description="Board definitions")
 
+
+class TapBoardsMenuUpdateRequest(BaseModel):
+    """Payload for updating only the Boards Menu portion of tap configuration."""
+    boards_menu: List[TapBoardsMenuItem] = Field(default_factory=list, description="Ordered menu items")
+    board_settings: Optional[TapBoardSettings] = Field(None, description="Optional board settings update")
+
 # Update forward references
 TapNavigationButton.model_rebuild()
 
@@ -19741,6 +19747,44 @@ def ensure_tap_boards_structure(
         changed = True
 
     return config_data, changed
+
+
+def normalize_boards_menu_items(
+    menu_items: Any,
+    valid_board_ids: set[str],
+) -> List[Dict[str, Any]]:
+    """Normalize and validate boards menu items for persistence."""
+    normalized: List[Dict[str, Any]] = []
+    if not isinstance(menu_items, list):
+        return normalized
+
+    for index, item in enumerate(menu_items):
+        if not isinstance(item, dict):
+            continue
+
+        board_id = str(item.get('board_id') or '').strip()
+        if not board_id or board_id not in valid_board_ids:
+            raise ValueError(f"Invalid board_id in boards_menu: {board_id or '<empty>'}")
+
+        item_id = str(item.get('id') or '').strip()
+        if not item_id:
+            item_id = f"menu_{_sanitize_board_slug(item.get('label') or board_id)}_{index + 1}"
+
+        normalized.append({
+            'id': item_id,
+            'label': str(item.get('label') or board_id),
+            'board_id': board_id,
+            'source': str(item.get('source') or 'custom'),
+            'source_button_id': item.get('source_button_id'),
+            'sort_order': index,
+            'hidden': bool(item.get('hidden', False)),
+            'image_url': item.get('image_url'),
+            'speech_text': item.get('speech_text'),
+            'background_color': item.get('background_color') or '#FFFFFF',
+            'text_color': item.get('text_color') or '#000000',
+        })
+
+    return normalized
 
 # --- Helper Functions ---
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
@@ -21311,6 +21355,112 @@ async def save_tap_interface_config(
             raise HTTPException(status_code=500, detail="Failed to save configuration")
     except Exception as e:
         logging.error(f"Error saving tap interface config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tap-interface/boards-menu")
+async def get_tap_boards_menu_config(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get board-oriented menu config (parallel structure) for tap interface."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id)
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            if was_normalized or boards_changed:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+
+        boards_menu_sorted = sorted(
+            [m for m in boards_menu if isinstance(m, dict)],
+            key=lambda m: int(m.get('sort_order', 0)),
+        )
+
+        return JSONResponse(content={
+            'boards_schema_version': int(config_data.get('boards_schema_version') or 1),
+            'board_settings': {
+                'max_columns': int(board_settings.get('max_columns', 12) or 12),
+                'max_rows': int(board_settings.get('max_rows', 7) or 7),
+                'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
+                'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+            },
+            'boards_menu': boards_menu_sorted,
+            'boards': [
+                {
+                    'id': b.get('id'),
+                    'label': b.get('label'),
+                    'board_type': b.get('board_type'),
+                    'owner_scope': b.get('owner_scope'),
+                    'hidden': bool(b.get('hidden', False)),
+                    'source': b.get('source'),
+                    'source_button_id': b.get('source_button_id'),
+                }
+                for b in boards
+                if isinstance(b, dict)
+            ],
+        })
+    except Exception as e:
+        logging.error(f"Error getting tap boards menu config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/boards-menu")
+async def save_tap_boards_menu_config(
+    payload: TapBoardsMenuUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save board-oriented menu config (parallel structure) for tap interface."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id)
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        valid_board_ids = {
+            str(b.get('id')).strip()
+            for b in boards
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+
+        requested_menu = [item.model_dump() for item in payload.boards_menu]
+        normalized_menu = normalize_boards_menu_items(requested_menu, valid_board_ids)
+        config_data['boards_menu'] = normalized_menu
+
+        if payload.board_settings is not None:
+            config_data['board_settings'] = payload.board_settings.model_dump()
+
+        config_data['boards_schema_version'] = 1
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to save boards menu config')
+
+        return JSONResponse(content={
+            'success': True,
+            'message': 'Boards menu saved successfully',
+            'boards_menu_count': len(normalized_menu),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error saving tap boards menu config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Note: Single configuration per user - no need for list, activate, or delete endpoints
