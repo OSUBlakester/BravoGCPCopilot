@@ -19833,6 +19833,10 @@ def ensure_tap_boards_structure(
                 built_children.append(_build_legacy_menu_node(child_node, child_index))
             menu_node['children'] = built_children
 
+        # Enforce leaf-only board target assignment.
+        if isinstance(menu_node.get('children'), list) and len(menu_node['children']) > 0:
+            menu_node['board_id'] = None
+
         return menu_node
 
     for index, button in enumerate(buttons):
@@ -19902,7 +19906,7 @@ def normalize_boards_menu_items(
 
             normalized_children = _normalize_level(item.get('children'), level + 1)
 
-            normalized_level.append({
+            normalized_item = {
                 'id': item_id,
                 'label': label,
                 'board_id': board_id,
@@ -19916,7 +19920,13 @@ def normalize_boards_menu_items(
                 'background_color': item.get('background_color') or '#FFFFFF',
                 'text_color': item.get('text_color') or '#000000',
                 'children': normalized_children,
-            })
+            }
+
+            # Enforce leaf-only board target assignment.
+            if len(normalized_children) > 0:
+                normalized_item['board_id'] = None
+
+            normalized_level.append(normalized_item)
 
         return normalized_level
 
