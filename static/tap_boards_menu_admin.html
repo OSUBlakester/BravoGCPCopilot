@@ -63,15 +63,15 @@
 <body>
     <div class="page-banner flex items-center justify-between bg-[#002244] text-[#FB4F14] px-4 py-2 shadow" style="min-height:56px;">
         <div class="flex items-center gap-2">
-            <button onclick="window.location.href='tap_interface_admin.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back">
-                <i class="fas fa-arrow-left"></i>
+            <button onclick="window.location.href='tap_interface.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Return to Tap Interface">
+                <i class="fas fa-house mr-2"></i>Home
+            </button>
+            <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back to Board Builder">
+                <i class="fas fa-table-cells-large mr-2"></i>Board Builder
             </button>
             <h1 class="ml-2 text-xl font-semibold">Boards Menu Administration</h1>
         </div>
         <div class="flex items-center gap-2">
-            <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-white bg-indigo-600 rounded-full text-sm hover:bg-indigo-700">
-                <i class="fas fa-table-cells-large mr-1"></i>Board Builder
-            </button>
             <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
             <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
                 <i class="fas fa-save mr-1"></i>Save
@@ -366,6 +366,8 @@
                 const el = document.getElementById(id);
                 if (el) { el.addEventListener('change', markAsChanged); el.addEventListener('input', markAsChanged); }
             });
+            const boardTargetSel = document.getElementById('boardTarget');
+            if (boardTargetSel) { boardTargetSel.addEventListener('change', updateOpenBoardBtnState); }
 
             const openBoardBuilderBtn = document.getElementById('openBoardBuilderBtn');
             if (openBoardBuilderBtn) {
@@ -380,16 +382,33 @@
             }
         }
 
+        function updateOpenBoardBtnState() {
+            const sel = document.getElementById('boardTarget');
+            const btn = document.getElementById('openBoardBuilderBtn');
+            if (!btn) return;
+            const selected = sel && sel.options[sel.selectedIndex];
+            const boardType = selected ? (selected.dataset.boardType || '') : '';
+            const source = selected ? (selected.dataset.source || '') : '';
+            const isReadOnly = boardType === 'system' || source === 'legacy_category';
+            btn.disabled = isReadOnly;
+            btn.title = isReadOnly ? 'Cannot open built-in / standard boards in the Board Builder' : 'Open this board in the Board Builder';
+            btn.style.opacity = isReadOnly ? '0.45' : '';
+            btn.style.cursor = isReadOnly ? 'not-allowed' : '';
+        }
+
         function populateBoardSelect(selectedId) {
             const sel = document.getElementById('boardTarget');
             sel.innerHTML = '<option value="">— None / Category only —</option>';
             boards.forEach(b => {
                 const opt = document.createElement('option');
                 opt.value = b.id;
+                opt.dataset.boardType = b.board_type || '';
+                opt.dataset.source = b.source || '';
                 opt.textContent = (b.label || b.id) + (b.board_type ? ' (' + b.board_type + ')' : '');
                 if (b.id === selectedId) opt.selected = true;
                 sel.appendChild(opt);
             });
+            updateOpenBoardBtnState();
         }
 
         function setColorField(textId, pickerId, value) {

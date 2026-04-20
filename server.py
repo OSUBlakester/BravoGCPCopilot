@@ -4497,6 +4497,7 @@ def log_token_usage(response, request_type: str, account_id: str, aac_user_id: s
 
 class LLMRequest(BaseModel):
     prompt: str
+    count: Optional[int] = None          # Override max options returned (e.g., for bulk board builder)
     compose_mode: bool = False          # True when the user is in an active compose session
     compose_body: str = ""               # Current composition text (sent for context when compose_mode is True)
 
@@ -4949,18 +4950,27 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             logging.error(f"Logic Error: After processing, extracted LLM options were not a list: {type(extracted_options_list)} - Content: {llm_response_json_str}")
             raise HTTPException(status_code=500, detail="Internal server error: Failed to extract LLM options as a list.")
 
-        enforced_options = enforce_ai_option_overrides(extracted_options_list, ai_option_overrides, llm_options_value)
+        logging.info(f"📊 1. Extracted options count: {len(extracted_options_list)}")
+        effective_max_options = request_data.count if request_data.count and request_data.count > 0 else llm_options_value
+        logging.info(f"📊 Using max_options={effective_max_options} (request.count={request_data.count}, llm_options_value={llm_options_value})")
+        enforced_options = enforce_ai_option_overrides(extracted_options_list, ai_option_overrides, effective_max_options)
+        logging.info(f"📊 2. After enforce_ai_option_overrides: {len(enforced_options)}")
+        
         sentiment_aligned_options = apply_prompt_sentiment_alignment(
             enforced_options,
             user_prompt_content,
-            llm_options_value
+            effective_max_options
         )
+        logging.info(f"📊 3. After apply_prompt_sentiment_alignment: {len(sentiment_aligned_options)}")
+        
         biased_options = apply_inclusion_preference_bias(
             sentiment_aligned_options,
             ai_option_overrides,
             user_prompt_content,
-            llm_options_value
+            effective_max_options
         )
+        logging.info(f"📊 4. After apply_inclusion_preference_bias: {len(biased_options)}")
+        logging.info(f"📊 5. FINAL OPTIONS BEING RETURNED: {biased_options[:2] if biased_options else 'empty'}")
         return JSONResponse(content=biased_options)
 
     except HTTPException:
@@ -19495,8 +19505,11 @@ class TapBoardButton(BaseModel):
     """Static board button definition for board-oriented AAC mode."""
     id: str = Field(..., description="Unique button ID")
     label: str = Field(..., description="Display label")
+    row: int = Field(0, ge=0, description="Zero-based row in board grid")
+    col: int = Field(0, ge=0, description="Zero-based column in board grid")
     speech_text: Optional[str] = Field(None, description="Speech output text")
     action_type: str = Field("announce", description="announce|navigate|audio|special")
+    after_selection: Optional[str] = Field(None, description="do_nothing|navigate|use_ai")
     target_board_id: Optional[str] = Field(None, description="Board ID for navigate action")
     custom_audio_file: Optional[str] = Field(None, description="Audio URL for audio action")
     special_function: Optional[str] = Field(None, description="Special function for special action")
@@ -19550,6 +19563,7 @@ class TapBoardSettings(BaseModel):
     max_rows: int = Field(7, ge=1, le=24, description="Default max rows")
     allow_user_boards: bool = Field(True, description="Allow per-user custom boards")
     default_ai_boards_global: bool = Field(True, description="Treat legacy/default AI boards as global")
+    home_board_id: Optional[str] = Field(None, description="Board ID loaded as the default home board")
 
 class TapNavigationConfig(BaseModel):
     """Complete tap interface navigation configuration for a user"""
@@ -19589,6 +19603,7 @@ class TapBoardCreateRequest(BaseModel):
     default_columns: int = Field(12, ge=1, le=24, description="Board columns")
     max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
+    set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
 
 
 class TapBoardUpdateRequest(BaseModel):
@@ -19607,6 +19622,7 @@ class TapBoardUpdateRequest(BaseModel):
     default_columns: int = Field(12, ge=1, le=24, description="Board columns")
     max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
+    set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
 
 # Update forward references
 TapNavigationButton.model_rebuild()
@@ -19638,8 +19654,11 @@ def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[
     return {
         'id': str(button.get('id') or f'btn_{index + 1}'),
         'label': str(button.get('label') or f'Button {index + 1}'),
+        'row': int(button.get('row', index // 12) or 0),
+        'col': int(button.get('col', index % 12) or 0),
         'speech_text': button.get('speech_text'),
         'action_type': _normalize_action_type(button.get('action_type')),
+        'after_selection': str(button.get('after_selection') or '').strip() or None,
         'target_board_id': button.get('target_board_id'),
         'custom_audio_file': button.get('custom_audio_file'),
         'special_function': button.get('special_function'),
@@ -19707,12 +19726,14 @@ def _convert_children_to_board_buttons(children: Any) -> List[Dict[str, Any]]:
         return []
 
     board_buttons: List[Dict[str, Any]] = []
-    for child in children:
+    for index, child in enumerate(children):
         if not isinstance(child, dict):
             continue
         board_buttons.append({
             'id': str(child.get('id') or _sanitize_board_slug(child.get('label') or 'button')),
             'label': str(child.get('label') or 'Untitled Button'),
+            'row': index // 12,
+            'col': index % 12,
             'speech_text': child.get('speech_text'),
             'action_type': _derive_action_type(child),
             'target_board_id': None,
@@ -19964,11 +19985,59 @@ def ensure_tap_boards_structure(
             settings = candidate
     if not isinstance(settings, dict):
         settings = {}
+
+    existing_home_board_id = str(settings.get('home_board_id') or '').strip()
+    merged_board_ids = {
+        str(board.get('id')).strip()
+        for board in merged_boards
+        if isinstance(board, dict) and str(board.get('id') or '').strip()
+    }
+
+    home_board_id = existing_home_board_id if existing_home_board_id in merged_board_ids else ''
+    if not home_board_id:
+        existing_home_board = next(
+            (
+                board for board in merged_boards
+                if isinstance(board, dict) and str(board.get('source') or '') == 'default_home'
+            ),
+            None,
+        )
+        if isinstance(existing_home_board, dict) and str(existing_home_board.get('id') or '').strip():
+            home_board_id = str(existing_home_board.get('id')).strip()
+        else:
+            home_board_id = 'board_home'
+            suffix = 2
+            while home_board_id in merged_board_ids:
+                home_board_id = f'board_home_{suffix}'
+                suffix += 1
+
+            merged_boards.append({
+                'id': home_board_id,
+                'label': 'Home',
+                'board_type': 'ai',
+                'source': 'default_home',
+                'source_button_id': None,
+                'owner_scope': 'user',
+                'hidden': False,
+                'llm_prompt': None,
+                'prompt_category': None,
+                'prompt_topic': None,
+                'prompt_examples': None,
+                'prompt_exclusions': None,
+                'static_options': None,
+                'special_function': None,
+                'default_columns': 12,
+                'max_rows': 7,
+                'buttons': [],
+            })
+            merged_board_ids.add(home_board_id)
+
     merged_settings = {
         'max_columns': int(settings.get('max_columns', 12) or 12),
         'max_rows': int(settings.get('max_rows', 7) or 7),
         'allow_user_boards': bool(settings.get('allow_user_boards', True)),
         'default_ai_boards_global': bool(settings.get('default_ai_boards_global', True)),
+        'home_board_id': home_board_id,
     }
 
     changed = False
@@ -20060,6 +20129,98 @@ def sort_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
         output.append(cloned)
 
     return output
+
+
+def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build legacy tap-interface buttons from boards_menu/boards so existing UI can render board menu changes."""
+    if not isinstance(config_data, dict):
+        return []
+
+    boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+    boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+    existing_buttons = config_data.get('buttons') if isinstance(config_data.get('buttons'), list) else []
+
+    if not boards_menu:
+        return existing_buttons
+
+    boards_by_id: Dict[str, Dict[str, Any]] = {
+        str(board.get('id')): board
+        for board in boards
+        if isinstance(board, dict) and str(board.get('id') or '').strip()
+    }
+
+    def _build_word_options_from_board(board: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw_buttons = board.get('buttons') if isinstance(board.get('buttons'), list) else []
+        sorted_buttons = sorted(
+            [b for b in raw_buttons if isinstance(b, dict)],
+            key=lambda b: (int(b.get('row', 0) or 0), int(b.get('col', 0) or 0), str(b.get('id') or '')),
+        )
+        word_options: List[Dict[str, Any]] = []
+        for index, btn in enumerate(sorted_buttons):
+            if bool(btn.get('hidden', False)):
+                continue
+            label = str(btn.get('label') or f"Button {index + 1}").strip()
+            if label:
+                word_options.append({
+                    'text': label,
+                    'row': int(btn.get('row', 0) or 0),
+                    'col': int(btn.get('col', 0) or 0),
+                    'speech_text': str(btn.get('speech_text') or '').strip() or label,
+                    'image_url': btn.get('image_url'),
+                    'custom_audio_file': btn.get('custom_audio_file'),
+                    'action_type': btn.get('action_type'),
+                    'after_selection': btn.get('after_selection') or 'do_nothing',
+                    'target_board_id': btn.get('target_board_id'),
+                    'background_color': btn.get('background_color') or '#FFFFFF',
+                    'text_color': btn.get('text_color') or '#000000',
+                })
+        return word_options
+
+    def _build_menu_node(menu_item: Dict[str, Any], path_index: str) -> Dict[str, Any]:
+        board_id = str(menu_item.get('board_id') or '').strip()
+        board = boards_by_id.get(board_id) if board_id else None
+        menu_children = menu_item.get('children') if isinstance(menu_item.get('children'), list) else []
+
+        built_children: List[Dict[str, Any]] = []
+        if menu_children:
+            for idx, child in enumerate(menu_children):
+                if isinstance(child, dict):
+                    built_children.append(_build_menu_node(child, f"{path_index}_{idx}"))
+
+        board_word_options = _build_word_options_from_board(board) if isinstance(board, dict) else []
+        board_static_options = ', '.join(
+            option.get('text', '') for option in board_word_options if isinstance(option, dict) and option.get('text')
+        ) or None
+
+        return {
+            'id': str(menu_item.get('id') or f"menu_{path_index}"),
+            'board_id': board_id or None,
+            'label': str(menu_item.get('label') or (board.get('label') if isinstance(board, dict) else f"Menu {path_index}")),
+            'speech_text': menu_item.get('speech_text'),
+            'image_url': menu_item.get('image_url') if menu_item.get('image_url') else (board.get('image_url') if isinstance(board, dict) else None),
+            'background_color': menu_item.get('background_color') or '#FFFFFF',
+            'text_color': menu_item.get('text_color') or '#000000',
+            'llm_prompt': board.get('llm_prompt') if isinstance(board, dict) else None,
+            'words_prompt': None,
+            'prompt_category': board.get('prompt_category') if isinstance(board, dict) else None,
+            'prompt_topic': board.get('prompt_topic') if isinstance(board, dict) else None,
+            'prompt_examples': board.get('prompt_examples') if isinstance(board, dict) else None,
+            'prompt_exclusions': board.get('prompt_exclusions') if isinstance(board, dict) else None,
+            'static_options': board.get('static_options') if isinstance(board, dict) and board.get('static_options') else board_static_options,
+            'board_word_options': board_word_options,
+            'custom_audio_file': menu_item.get('custom_audio_file') if menu_item.get('custom_audio_file') else (board.get('custom_audio_file') if isinstance(board, dict) else None),
+            'special_function': board.get('special_function') if isinstance(board, dict) else None,
+            'hidden': bool(menu_item.get('hidden', False) or (bool(board.get('hidden', False)) if isinstance(board, dict) else False)),
+            'children': built_children,
+        }
+
+    sorted_menu = sort_boards_menu_tree(boards_menu)
+    legacy_buttons: List[Dict[str, Any]] = []
+    for index, item in enumerate(sorted_menu):
+        if isinstance(item, dict):
+            legacy_buttons.append(_build_menu_node(item, str(index)))
+
+    return legacy_buttons
 
 # --- Helper Functions ---
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
@@ -21589,7 +21750,9 @@ async def get_tap_interface_config(
                         if c.get('words_prompt'):
                             logging.info(f"DEBUG: Loaded child '{c.get('label')}' with words_prompt: {c.get('words_prompt')[:20]}...")
 
-        return JSONResponse(content=config_data)
+        config_response = dict(config_data)
+        config_response['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+        return JSONResponse(content=config_response)
     except Exception as e:
         logging.error(f"Error getting tap interface config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -21665,6 +21828,7 @@ async def get_tap_boards_menu_config(
                 'max_rows': int(board_settings.get('max_rows', 7) or 7),
                 'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
                 'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+                'home_board_id': board_settings.get('home_board_id'),
             },
             'boards_menu': boards_menu_sorted,
             'boards': [
@@ -21774,9 +21938,17 @@ async def list_tap_boards(
                 await save_tap_nav_config(account_id, aac_user_id, config_data)
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
         return JSONResponse(content={
             'boards': [b for b in boards if isinstance(b, dict)],
             'count': len(boards),
+            'board_settings': {
+                'max_columns': int(board_settings.get('max_columns', 12) or 12),
+                'max_rows': int(board_settings.get('max_rows', 7) or 7),
+                'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
+                'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+                'home_board_id': board_settings.get('home_board_id'),
+            },
         })
     except Exception as e:
         logging.error(f"Error listing tap boards: {e}")
@@ -21800,12 +21972,13 @@ async def get_tap_board(
         config_data, _ = normalize_compose_tap_config(config_data)
         config_data, _ = ensure_tap_boards_structure(config_data)
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
 
         board = next((b for b in boards if isinstance(b, dict) and b.get('id') == board_id), None)
         if not board:
             raise HTTPException(status_code=404, detail='Board not found')
 
-        return JSONResponse(content={'board': board})
+        return JSONResponse(content={'board': board, 'board_settings': board_settings})
     except HTTPException:
         raise
     except Exception as e:
@@ -21853,13 +22026,17 @@ async def create_tap_board(
         board = _normalize_board_payload(payload.model_dump(), board_id=board_id, source='custom', source_button_id=None)
         boards.append(board)
         config_data['boards'] = boards
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if payload.set_as_home:
+            board_settings['home_board_id'] = board_id
+        config_data['board_settings'] = board_settings
         config_data['updated_at'] = dt.now().isoformat()
 
         success = await save_tap_nav_config(account_id, aac_user_id, config_data)
         if not success:
             raise HTTPException(status_code=500, detail='Failed to create board')
 
-        return JSONResponse(content={'success': True, 'board': board})
+        return JSONResponse(content={'success': True, 'board': board, 'board_settings': config_data.get('board_settings', {})})
     except HTTPException:
         raise
     except Exception as e:
@@ -21894,6 +22071,9 @@ async def update_tap_board(
             raise HTTPException(status_code=404, detail='Board not found')
 
         existing_board = boards[board_index]
+        if str(existing_board.get('source') or '') == 'legacy_category' or str(existing_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='Legacy and system boards are read-only')
+
         updated_board = _normalize_board_payload(
             payload.model_dump(),
             board_id=board_id,
@@ -21903,13 +22083,17 @@ async def update_tap_board(
         boards[board_index] = updated_board
 
         config_data['boards'] = boards
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if payload.set_as_home:
+            board_settings['home_board_id'] = board_id
+        config_data['board_settings'] = board_settings
         config_data['updated_at'] = dt.now().isoformat()
 
         success = await save_tap_nav_config(account_id, aac_user_id, config_data)
         if not success:
             raise HTTPException(status_code=500, detail='Failed to update board')
 
-        return JSONResponse(content={'success': True, 'board': updated_board})
+        return JSONResponse(content={'success': True, 'board': updated_board, 'board_settings': config_data.get('board_settings', {})})
     except HTTPException:
         raise
     except Exception as e:
@@ -21941,6 +22125,14 @@ async def delete_tap_board(
         )
         if board_index is None:
             raise HTTPException(status_code=404, detail='Board not found')
+
+        removed_board = boards[board_index]
+        if str(removed_board.get('source') or '') == 'legacy_category' or str(removed_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='Legacy and system boards cannot be deleted')
+
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if str(board_settings.get('home_board_id') or '').strip() == board_id:
+            raise HTTPException(status_code=400, detail='Cannot delete the current home board')
 
         removed_board = boards.pop(board_index)
         config_data['boards'] = boards

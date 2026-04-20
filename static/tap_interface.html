@@ -282,19 +282,19 @@
         }
 
         .clear-text-btn {
-            background: linear-gradient(145deg, #6366f1, #4f46e5);
-        }
-
-        .clear-text-btn:hover {
-            background: linear-gradient(145deg, #4f46e5, #4338ca);
-        }
-
-        .reset-btn {
             background: linear-gradient(145deg, #EF4444, #DC2626);
         }
 
-        .reset-btn:hover {
+        .clear-text-btn:hover {
             background: linear-gradient(145deg, #DC2626, #B91C1C);
+        }
+
+        .reset-btn {
+            background: linear-gradient(145deg, #6366f1, #4f46e5);
+        }
+
+        .reset-btn:hover {
+            background: linear-gradient(145deg, #4f46e5, #4338ca);
         }
 
 
@@ -525,12 +525,23 @@
         .categories-toolbar-btn {
             flex: 0 0 60px;
             min-width: 60px;
-            background: linear-gradient(145deg, #fb4f14, #ea3f0a);
+            background: linear-gradient(145deg, #c4b5fd, #a78bfa);
             border: 2px solid rgba(255, 255, 255, 0.8);
         }
 
+        .categories-column .categories-toolbar-btn {
+            width: 75%;
+            min-width: 0;
+            align-self: center;
+        }
+
         .categories-toolbar-btn:hover {
-            background: linear-gradient(145deg, #ff5f1f, #ed4a12);
+            background: linear-gradient(145deg, #b8a6fb, #9a84f8);
+        }
+
+        .speech-reset-btn {
+            flex: 0 0 60px;
+            min-width: 60px;
         }
 
         /* Categories Modal */
@@ -657,11 +668,13 @@
             display: flex;
             flex-direction: column;
             margin: 0;
-            padding: 0;
+            padding: 6px;
             width: 100%;
             max-width: 100%;
             margin-left: auto;
             margin-right: auto;
+            border-radius: 14px;
+            border: 1px solid transparent;
         }
 
         .phrases-section {
@@ -669,13 +682,19 @@
             margin-top: 8px;
             margin-bottom: 0;
             transition: all 0.3s ease; /* Smooth transition when resizing */
+            background: linear-gradient(180deg, #eef6ff 0%, #e2efff 100%);
+            border-color: #bfd8ff;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
         }
 
         .words-section {
             flex: 1; /* Fill remaining space */
-            margin-top: 0;
+            margin-top: 8px;
             min-height: 0;
             overflow: hidden; /* Ensure content doesn't overflow container */
+            background: linear-gradient(180deg, #f7f8fa 0%, #eef1f5 100%);
+            border-color: #d7dde8;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
         }
 
         .llm-static-options {
@@ -1367,7 +1386,7 @@
             <div id="admin-icons" class="hidden flex items-center gap-0.4rem">
                 <button id="lock-toolbar-button" title="Lock Admin Toolbar" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-lock"></i></button>
                 <span class="border-l border-white h-6 mx-1"></span>
-                <a href="tap_interface_admin.html" title="Tap Interface Admin" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-hand-pointer"></i></a>
+                <a href="tap_board_builder.html" title="Board Builder" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-table-cells-large"></i></a>
                 <a href="admin_settings.html" title="Global Settings" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-cog"></i></a>
                 <a href="user_current_admin.html" title="User Current Location" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-map-marker-alt"></i></a>
                 <a href="user_info_admin.html" title="User Info & Birthdays" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-info-circle"></i></a>
@@ -1389,7 +1408,7 @@
     <div id="categoriesModal" class="categories-modal" role="dialog" aria-modal="true" aria-labelledby="categoriesModalTitle" tabindex="-1" style="outline: none;">
         <div class="categories-modal-content">
             <div class="categories-modal-header">
-                <h2 id="categoriesModalTitle">All Categories</h2>
+                <h2 id="categoriesModalTitle">All Boards</h2>
                 <button class="categories-modal-close" id="categoriesModalClose" aria-label="Close Categories Modal">&times;</button>
             </div>
             <div class="categories-modal-body">
@@ -1419,11 +1438,11 @@
         <!-- Speech History Section -->
         <div class="speech-history-container">
             <div class="speech-history-row">
-                <button id="categoriesHeaderBtn" class="control-btn categories-toolbar-btn" title="All Categories" aria-label="All Categories">
+                <button id="reset-btn" class="control-btn reset-btn speech-reset-btn" title="Reset" aria-label="Reset">
                     <div class="control-btn-icon">
-                        <i class="fas fa-folder-open"></i>
+                        <i class="fas fa-house"></i>
                     </div>
-                    <div class="control-btn-label">Categories</div>
+                    <div class="control-btn-label">Reset</div>
                 </button>
                 <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
                 <div class="control-buttons">
@@ -1450,12 +1469,6 @@
                             <i class="fas fa-eraser"></i>
                         </div>
                         <div class="control-btn-label">Clear Text</div>
-                    </button>
-                    <button id="reset-btn" class="control-btn reset-btn" title="Reset" aria-label="Reset">
-                        <div class="control-btn-icon">
-                            <i class="fas fa-redo"></i>
-                        </div>
-                        <div class="control-btn-label">Reset</div>
                     </button>
                     <button id="preview-toggle-btn" class="control-btn preview-btn" title="Preview options before selecting" aria-label="Preview options before selecting" aria-pressed="false">
                         <div class="control-btn-icon">
@@ -1484,6 +1497,12 @@
         <div class="main-grid">
             <!-- Categories Column -->
             <div class="categories-column" id="categoriesColumn">
+                <button id="categoriesHeaderBtn" class="control-btn categories-toolbar-btn" title="All Categories" aria-label="All Categories">
+                    <div class="control-btn-icon">
+                        <i class="fas fa-copy"></i>
+                    </div>
+                    <div class="control-btn-label">Categories</div>
+                </button>
                 <div class="categories-content">
                     <!-- Categories will be loaded dynamically -->
                 </div>
@@ -1538,6 +1557,9 @@
         let currentPhraseContext = null; // Track current phrase context (category/subcategory)
         let currentPhraseOptions = []; // Track current phrase options for exclusion
         let currentWordOptions = []; // Track current word options for exclusion
+        let startupHomeBoardId = null; // Home board id from /api/tap-interface/boards
+        let startupHomeBoardLabel = null; // Home board label from /api/tap-interface/boards
+        let startupHomeBoard = null; // Full home board object from /api/tap-interface/boards
 
         // Follow-up conversation tracking (like gridpage)
         let tapFollowUpConversation = {
@@ -2763,11 +2785,12 @@
             if (containerWidth > 0) {
                 const padding = 9 * 2;   // 9px padding on each side
                 const gap = 12;           // gap between columns
-                const cellWidth = (containerWidth - padding - gap * (gridColumns - 1)) / gridColumns;
+                const freestyleColumns = Number(freestyleOptions.dataset.boardLayoutCols || gridColumns) || gridColumns;
+                const cellWidth = (containerWidth - padding - gap * (freestyleColumns - 1)) / freestyleColumns;
                 const rowHeight = Math.max(45, Math.round(cellWidth));
                 llmStaticOptions.style.gridAutoRows = `${rowHeight}px`;
                 freestyleOptions.style.gridAutoRows = `${rowHeight}px`;
-                console.log(`Grid row height: ${rowHeight}px for ${gridColumns} columns`);
+                console.log(`Grid row height: ${rowHeight}px for ${freestyleColumns} columns`);
             }
         }
         
@@ -2908,15 +2931,20 @@
                 
                 // Render categories first (synchronous)
                 renderCategories();
+
+                // If a home board is configured, open it on refresh instead of loading generic defaults.
+                let openedHomeBoard = await navigateToHomeBoard();
                 
                 // Load phrases and words in PARALLEL
-                console.log('⏱️ Starting parallel load of phrases and words at:', Date.now());
-                const phrasesPromise = loadInitialPhrases();
-                const wordsPromise = loadFreestyleOptions();
-                
-                console.log('⏱️ Waiting for both to complete at:', Date.now());
-                await Promise.all([phrasesPromise, wordsPromise]);
-                console.log('⏱️ Both completed at:', Date.now());
+                if (!openedHomeBoard) {
+                    console.log('⏱️ Starting parallel load of phrases and words at:', Date.now());
+                    const phrasesPromise = loadInitialPhrases();
+                    const wordsPromise = loadFreestyleOptions();
+
+                    console.log('⏱️ Waiting for both to complete at:', Date.now());
+                    await Promise.all([phrasesPromise, wordsPromise]);
+                    console.log('⏱️ Both completed at:', Date.now());
+                }
                 
                 // Pre-cache images in BACKGROUND - DISABLED for performance
                 // preCacheCategoryImages();
@@ -3078,9 +3106,10 @@
                 clearPreviewSelection();
                 clearTextOnly();
             });
-            resetBtn.addEventListener('click', () => {
+            resetBtn.addEventListener('click', async () => {
                 clearPreviewSelection();
-                clearBuildSpace();
+                clearTextOnly();
+                await navigateToHomeBoard();
             });
             
             // Modal controls
@@ -3183,9 +3212,307 @@
                 await loadUserSettings();
                 // Load tap interface configuration
                 await loadTapConfig();
+                // Load board settings from boards endpoint (authoritative for home board selection)
+                await loadTapBoardStartupSettings();
                 // Rendering moved to initializeTapInterface to allow pre-caching
             } catch (error) {
                 console.error('Failed to initialize user data:', error);
+            }
+        }
+
+        async function loadTapBoardStartupSettings() {
+            startupHomeBoardId = null;
+            startupHomeBoardLabel = null;
+            startupHomeBoard = null;
+            try {
+                const response = await authenticatedFetch(`/api/tap-interface/boards?t=${Date.now()}`);
+                if (!response.ok) {
+                    return;
+                }
+
+                const data = await response.json();
+                const boardSettings = (data && typeof data === 'object' && data.board_settings && typeof data.board_settings === 'object')
+                    ? data.board_settings
+                    : {};
+                const boards = Array.isArray(data?.boards) ? data.boards : [];
+                const homeId = String(boardSettings.home_board_id || '').trim();
+                if (!homeId) {
+                    return;
+                }
+
+                startupHomeBoardId = homeId;
+                const homeBoard = boards.find(board => String(board?.id || '').trim() === homeId);
+                startupHomeBoardLabel = homeBoard && homeBoard.label ? String(homeBoard.label).trim() : null;
+                startupHomeBoard = homeBoard && typeof homeBoard === 'object' ? homeBoard : null;
+            } catch (error) {
+                console.warn('Failed to load tap board startup settings:', error);
+            }
+        }
+
+        function buildWordOptionsFromBoard(board) {
+            if (!board || typeof board !== 'object' || !Array.isArray(board.buttons)) {
+                return [];
+            }
+
+            const sortedButtons = [...board.buttons]
+                .filter(btn => btn && typeof btn === 'object' && !btn.hidden)
+                .sort((a, b) => {
+                    const rowA = Number(a.row || 0);
+                    const rowB = Number(b.row || 0);
+                    if (rowA !== rowB) {
+                        return rowA - rowB;
+                    }
+                    const colA = Number(a.col || 0);
+                    const colB = Number(b.col || 0);
+                    return colA - colB;
+                });
+
+            return sortedButtons
+                .map((btn, index) => {
+                    const text = String(btn.label || `Button ${index + 1}`).trim();
+                    if (!text) {
+                        return null;
+                    }
+
+                    return {
+                        text,
+                        row: Number(btn.row || 0),
+                        col: Number(btn.col || 0),
+                        speech_text: String(btn.speech_text || '').trim() || text,
+                        image_url: btn.image_url || null,
+                        custom_audio_file: btn.custom_audio_file || null,
+                        action_type: btn.action_type || null,
+                        after_selection: btn.after_selection || 'do_nothing',
+                        target_board_id: btn.target_board_id || null,
+                        background_color: btn.background_color || null,
+                        text_color: btn.text_color || null,
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        function buildStartupCategoryFromBoard(board) {
+            if (!board || typeof board !== 'object') {
+                return null;
+            }
+
+            const boardWordOptions = buildWordOptionsFromBoard(board);
+            const staticOptions = board.static_options
+                || boardWordOptions.map(opt => opt.text).filter(Boolean).join(', ')
+                || null;
+
+            return {
+                id: board.id || null,
+                board_id: board.id || null,
+                label: board.label || 'Home',
+                is_home_board: true,
+                speech_text: board.speech_text || null,
+                image_url: board.image_url || null,
+                background_color: board.background_color || '#FFFFFF',
+                text_color: board.text_color || '#000000',
+                llm_prompt: board.llm_prompt || null,
+                words_prompt: null,
+                prompt_category: board.prompt_category || null,
+                prompt_topic: board.prompt_topic || null,
+                prompt_examples: board.prompt_examples || null,
+                prompt_exclusions: board.prompt_exclusions || null,
+                static_options: staticOptions,
+                board_word_options: boardWordOptions,
+                custom_audio_file: board.custom_audio_file || null,
+                special_function: board.special_function || null,
+                hidden: !!board.hidden,
+                children: [],
+            };
+        }
+
+        function hasExplicitWordOptions(category) {
+            if (!category || typeof category !== 'object') {
+                return false;
+            }
+
+            return (Array.isArray(category.board_word_options) && category.board_word_options.length > 0)
+                || !!String(category.static_options || '').trim();
+        }
+
+        function isConfiguredHomeCategory(category) {
+            if (!category || typeof category !== 'object') {
+                return false;
+            }
+
+            if (category.is_home_board) {
+                return true;
+            }
+
+            const configuredHomeBoardId = String(startupHomeBoardId || tapConfig?.board_settings?.home_board_id || '').trim();
+            const categoryBoardId = String(category.board_id || category.id || '').trim();
+            if (configuredHomeBoardId && categoryBoardId && configuredHomeBoardId === categoryBoardId) {
+                return true;
+            }
+
+            return String(category.label || '').trim().toLowerCase() === 'home';
+        }
+
+        function shouldUseDefaultHomeStarterWords(category) {
+            return isConfiguredHomeCategory(category) && !hasExplicitWordOptions(category);
+        }
+
+        function getDefaultHomeStarterPrompt(desiredCount) {
+            return `Generate exactly ${desiredCount} AAC starter words/short phrases for a Home communication board.
+
+STYLE TARGET:
+- Keep output similar to classic AAC starters (pronouns, core verbs, helpers, basic feelings, time/location words)
+- Prefer 1-2 words per option (allow up to 3 words when useful)
+- Avoid long personalized greetings like "Hi [name]" unless context strongly calls for one
+- Keep options broadly useful for starting many conversations
+
+REQUIRED COVERAGE MIX:
+- pronouns/self-reference (I, you, we)
+- core actions (want, need, go, see, help, talk, play)
+- social/politeness (please, yes, no, okay)
+- descriptors/feelings (good, bad, happy, sad)
+- time/place words (here, there, now, later)
+- context-aware words based on current location/activity/people when available
+
+VARIETY RULES:
+- Do not output duplicates
+- Include some familiar core words and some context-aware variation
+- Keep the list practical and AAC-friendly`;
+        }
+
+        function normalizeStarterWordOptions(options = []) {
+            if (!Array.isArray(options)) {
+                return [];
+            }
+
+            const normalized = [];
+            const seen = new Set();
+
+            options.forEach(item => {
+                const text = (typeof item === 'string')
+                    ? item.trim()
+                    : String(item?.text || item?.option || '').trim();
+                if (!text) {
+                    return;
+                }
+
+                const key = text.toLowerCase();
+                if (seen.has(key)) {
+                    return;
+                }
+                seen.add(key);
+
+                normalized.push({
+                    text,
+                    keywords: Array.isArray(item?.keywords) ? item.keywords : []
+                });
+            });
+
+            return normalized;
+        }
+
+        function getFallbackStarterWords(count = null) {
+            const starterPool = [
+                { text: "I", keywords: ["person"] },
+                { text: "You", keywords: ["person"] },
+                { text: "We", keywords: ["group"] },
+                { text: "Me", keywords: ["self"] },
+                { text: "My", keywords: ["self"] },
+                { text: "Want", keywords: ["desire"] },
+                { text: "Need", keywords: ["need"] },
+                { text: "Like", keywords: ["preference"] },
+                { text: "Go", keywords: ["travel"] },
+                { text: "See", keywords: ["look"] },
+                { text: "Help", keywords: ["assist"] },
+                { text: "More", keywords: ["plus"] },
+                { text: "Please", keywords: ["polite"] },
+                { text: "Yes", keywords: ["affirmative"] },
+                { text: "No", keywords: ["negative"] },
+                { text: "Okay", keywords: ["confirm"] },
+                { text: "Stop", keywords: ["halt"] },
+                { text: "Again", keywords: ["repeat"] },
+                { text: "Good", keywords: ["positive"] },
+                { text: "Bad", keywords: ["negative"] },
+                { text: "Happy", keywords: ["emotion"] },
+                { text: "Sad", keywords: ["emotion"] },
+                { text: "Tired", keywords: ["emotion"] },
+                { text: "This", keywords: ["point"] },
+                { text: "That", keywords: ["point"] },
+                { text: "Here", keywords: ["location"] },
+                { text: "There", keywords: ["location"] },
+                { text: "Now", keywords: ["time"] },
+                { text: "Later", keywords: ["time"] },
+                { text: "Today", keywords: ["time"] },
+                { text: "Talk", keywords: ["speak"] },
+                { text: "Play", keywords: ["fun"] },
+                { text: "Eat", keywords: ["food"] },
+                { text: "Drink", keywords: ["water"] },
+                { text: "Look", keywords: ["see"] },
+                { text: "Listen", keywords: ["hear"] },
+                { text: "Read", keywords: ["book"] },
+                { text: "Write", keywords: ["pencil"] },
+                { text: "Home", keywords: ["house"] },
+                { text: "School", keywords: ["school"] },
+                { text: "Bathroom", keywords: ["toilet"] },
+                { text: "Outside", keywords: ["outside"] },
+                { text: "Inside", keywords: ["inside"] },
+                { text: "Hot", keywords: ["temperature"] },
+                { text: "Cold", keywords: ["temperature"] },
+                { text: "Big", keywords: ["size"] },
+                { text: "Small", keywords: ["size"] },
+                { text: "Fast", keywords: ["speed"] },
+                { text: "Slow", keywords: ["speed"] },
+                { text: "Who", keywords: ["question"] },
+                { text: "What", keywords: ["question"] },
+                { text: "Where", keywords: ["question"] },
+                { text: "When", keywords: ["question"] },
+                { text: "Why", keywords: ["question"] },
+                { text: "How", keywords: ["question"] }
+            ];
+
+            const desiredCount = Math.max(1, Number(count) || FreestyleWordOptions || 29);
+            return starterPool.slice(0, desiredCount);
+        }
+
+        async function generateDefaultHomeStarterWords(count = null) {
+            const desiredCount = Math.max(1, Number(count) || FreestyleWordOptions || 29);
+
+            try {
+                const currentMood = getCurrentMood ? getCurrentMood() : null;
+                const requestBody = {
+                    category: 'Home',
+                    build_space_content: '',
+                    exclude_words: [],
+                    current_mood: currentMood,
+                    custom_prompt: getDefaultHomeStarterPrompt(desiredCount),
+                    context: 'home starters',
+                    source_page: 'tap_home',
+                    is_llm_generated: false,
+                    originating_button_text: 'Home'
+                };
+
+                const response = await authenticatedFetch('/api/freestyle/category-words', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Home starter generation failed: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const normalized = normalizeStarterWordOptions(data.words || []);
+
+                if (normalized.length >= desiredCount) {
+                    return normalized.slice(0, desiredCount);
+                }
+
+                const fallback = getFallbackStarterWords(desiredCount * 2);
+                const merged = normalizeStarterWordOptions([...normalized, ...fallback]);
+                return merged.slice(0, desiredCount);
+            } catch (error) {
+                console.error('Error generating default home starter words:', error);
+                return getFallbackStarterWords(desiredCount);
             }
         }
 
@@ -3413,7 +3740,7 @@
 
         async function loadImagesForWords(options, initialLoad = false) {
             console.log(`🖼️ Loading images for ${options.length} words (initialLoad: ${initialLoad})`);
-            const buttons = freestyleOptions.querySelectorAll('.freestyle-button');
+            const buttons = Array.from(freestyleOptions.querySelectorAll('.freestyle-button'));
             
             // Batch preload custom image matches for all word options (non-blocking)
             // Exclude 'Something Else' from batch search
@@ -3460,28 +3787,34 @@
             const imagePromises = [];
             const buttonMappings = [];
             
-            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
-                const option = options[i];
-                const btn = buttons[i];
-                
+            for (const btn of buttons) {
                 // Skip if button already has an image or is sight word
-                if (btn.querySelector('img') || btn.classList.contains('sight-word')) continue;
-                
+                if (btn.querySelector('img') || btn.classList.contains('sight-word-button')) continue;
+
                 // Handle "Something Else" button specially
-                if (btn.textContent === 'Something Else') {
+                if (btn.dataset.specialButton === 'something-else') {
                     console.log('📦 Loading image for Something Else button in Words');
                     const cacheOnly = initialLoad;
                     imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
                     buttonMappings.push({ btn, text: 'Something Else' });
                     continue;
                 }
-                
+
+                const optionIndex = Number(btn.dataset.optionIndex);
+                if (Number.isNaN(optionIndex) || optionIndex < 0 || optionIndex >= options.length) continue;
+
+                const option = options[optionIndex];
                 const text = typeof option === 'object' ? (option.text || option.option) : option;
                 const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                const configuredImageUrl = (typeof option === 'object' && option.image_url) ? option.image_url : null;
                 
                 // On initial load: cache only. Background: fetch if needed.
                 const cacheOnly = initialLoad;
-                imagePromises.push(getSymbolImageForText(text, keywords, cacheOnly));
+                imagePromises.push(
+                    configuredImageUrl
+                        ? Promise.resolve(configuredImageUrl)
+                        : getSymbolImageForText(text, keywords, cacheOnly)
+                );
                 buttonMappings.push({ btn, text });
             }
             
@@ -3622,13 +3955,16 @@
 
                 const categoryBtn = document.createElement('button');
                 categoryBtn.className = 'category-button';
+                if (button.board_id) {
+                    categoryBtn.dataset.boardId = String(button.board_id);
+                }
                 
                 // Check if this is a sight word - if so, apply special styling and skip images
                 const isSightWord = isTapSightWord(button.label);
                 
                 // Only apply custom background if specified in config, otherwise let CSS handle it
                 if (button.background_color && button.background_color !== '#FFFFFF') {
-                    categoryBtn.style.backgroundColor = button.background_color;
+                    categoryBtn.style.background = button.background_color;
                 }
                 
                 if (!isSightWord) {
@@ -3744,6 +4080,167 @@
             });
         }
 
+        function findCategoryByBoardId(boardId, categories) {
+            if (!boardId || !Array.isArray(categories)) {
+                return null;
+            }
+
+            for (const category of categories) {
+                if (!category || typeof category !== 'object') {
+                    continue;
+                }
+
+                if (String(category.board_id || '') === String(boardId)) {
+                    return category;
+                }
+
+                if (String(category.id || '') === String(boardId)) {
+                    return category;
+                }
+
+                if (Array.isArray(category.children) && category.children.length > 0) {
+                    const nestedMatch = findCategoryByBoardId(boardId, category.children);
+                    if (nestedMatch) {
+                        return nestedMatch;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        function findCategoryByLabel(label, categories) {
+            if (!label || !Array.isArray(categories)) {
+                return null;
+            }
+
+            const target = String(label).trim().toLowerCase();
+            if (!target) {
+                return null;
+            }
+
+            for (const category of categories) {
+                if (!category || typeof category !== 'object') {
+                    continue;
+                }
+
+                if (String(category.label || '').trim().toLowerCase() === target) {
+                    return category;
+                }
+
+                if (Array.isArray(category.children) && category.children.length > 0) {
+                    const nestedMatch = findCategoryByLabel(label, category.children);
+                    if (nestedMatch) {
+                        return nestedMatch;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        async function navigateToHomeBoard() {
+            const configuredHomeBoardId = startupHomeBoardId || tapConfig?.board_settings?.home_board_id;
+            if (startupHomeBoard) {
+                const startupCategory = buildStartupCategoryFromBoard(startupHomeBoard);
+                if (isStartupEligibleCategory(startupCategory)) {
+                    await selectCategory(startupCategory, null);
+                    return true;
+                }
+            }
+            if (configuredHomeBoardId) {
+                const homeCategory = resolveHomeCategory(configuredHomeBoardId, startupHomeBoardLabel);
+                if (isStartupEligibleCategory(homeCategory)) {
+                    const homeCategoryButton = document.querySelector(`.category-button[data-board-id="${CSS.escape(configuredHomeBoardId)}"]`);
+                    await selectCategory(homeCategory, homeCategoryButton ? { target: homeCategoryButton } : null);
+                    return true;
+                }
+            }
+            const homeByLabel = findCategoryByLabel('Home', tapConfig?.buttons || []);
+            if (isStartupEligibleCategory(homeByLabel)) {
+                await selectCategory(homeByLabel, null);
+                return true;
+            }
+            const firstVisibleCategory = findFirstStartupEligibleCategory(tapConfig?.buttons || []);
+            if (firstVisibleCategory) {
+                await selectCategory(firstVisibleCategory, null);
+                return true;
+            }
+            return false;
+        }
+
+        function resolveHomeCategory(homeBoardId, homeBoardLabel = null) {
+            const categories = tapConfig?.buttons || [];
+            if (!homeBoardId || categories.length === 0) {
+                return null;
+            }
+
+            // Primary: board_id / id direct match
+            let match = findCategoryByBoardId(homeBoardId, categories);
+            if (match) {
+                return match;
+            }
+
+            // Fallback: lookup board label in full boards list, then match category label
+            const boards = Array.isArray(tapConfig?.boards) ? tapConfig.boards : [];
+            const homeBoard = boards.find(board => String(board?.id || '') === String(homeBoardId));
+            const homeLabel = homeBoardLabel || (homeBoard && homeBoard.label ? String(homeBoard.label).trim() : '');
+            if (homeLabel) {
+                match = findCategoryByLabel(homeLabel, categories);
+                if (match) {
+                    return match;
+                }
+            }
+
+            // Final fallback for common legacy naming
+            return findCategoryByLabel('Home', categories);
+        }
+
+        function isStartupEligibleCategory(category) {
+            if (!category || typeof category !== 'object') {
+                return false;
+            }
+
+            if (category.hidden) {
+                return false;
+            }
+
+            if (category.special_function) {
+                return false;
+            }
+
+            if (Array.isArray(category.children) && category.children.length > 0) {
+                return false;
+            }
+
+            return true;
+        }
+
+        function findFirstStartupEligibleCategory(categories) {
+            if (!Array.isArray(categories)) {
+                return null;
+            }
+
+            for (const category of categories) {
+                if (!category || typeof category !== 'object' || category.hidden) {
+                    continue;
+                }
+
+                if (isStartupEligibleCategory(category)) {
+                    return category;
+                }
+
+                if (Array.isArray(category.children) && category.children.length > 0) {
+                    const nested = findFirstStartupEligibleCategory(category.children);
+                    if (nested) {
+                        return nested;
+                    }
+                }
+            }
+
+            return null;
+        }
+
         // Categories Modal functionality
         let lastFocusedElement = null;
         function openCategoriesModal() {
@@ -3779,7 +4276,7 @@
                     const isSightWord = isTapSightWord(button.label);
 
                     if (button.background_color && button.background_color !== '#FFFFFF') {
-                        modalBtn.style.backgroundColor = button.background_color;
+                        modalBtn.style.background = button.background_color;
                     }
 
                     if (!isSightWord) {
@@ -4031,12 +4528,18 @@
 
                 // WORDS SECTION LOGIC
                 console.log('⏱️ Starting words fetch at:', Date.now());
-                if (category.static_options) {
+                if (Array.isArray(category.board_word_options) && category.board_word_options.length > 0) {
+                    console.log('Using structured board word options for Words section:', category.board_word_options);
+                    wordsPromise = Promise.resolve(category.board_word_options);
+                } else if (category.static_options) {
                     console.log('Using static options for Words section:', category.static_options);
                     const staticWords = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
+                } else if (shouldUseDefaultHomeStarterWords(category)) {
+                    console.log('Using default Home starter prompt for Words section');
+                    wordsPromise = generateDefaultHomeStarterWords(FreestyleWordOptions);
                 } else {
-                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, 29, category.words_prompt, category.llm_prompt);
+                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, FreestyleWordOptions, category.words_prompt, category.llm_prompt);
                 }
 
                 console.log('⏱️ Waiting for both fetches at:', Date.now());
@@ -4096,7 +4599,7 @@
                 console.log('Adding child option:', child.label);
                 const categoryBtn = document.createElement('button');
                 categoryBtn.className = 'modal-option category-button';
-                categoryBtn.style.backgroundColor = child.background_color || '#FFFFFF';
+                categoryBtn.style.background = child.background_color || '#FFFFFF';
                 categoryBtn.style.color = child.text_color || '#000000';
                 
                 // Add image support for child categories (same as main categories)
@@ -4506,7 +5009,7 @@
 
             // Calculate actual rows needed based on options count, not just max LLMOptions
             // This prevents empty rows if fewer options are returned
-            const actualOptionsCount = Math.min(options.length + 1, LLMOptions); // +1 for "Something Else"
+            const actualOptionsCount = Math.min(options.length, LLMOptions) + 1; // full AI options + Something Else
             const rows = Math.ceil(actualOptionsCount / gridColumns);
             
             console.log(`[GRID DEBUG] Options: ${options.length}, Actual Count: ${actualOptionsCount}, Columns: ${gridColumns}, Calculated Rows: ${rows}`);
@@ -4518,15 +5021,14 @@
             // Use DocumentFragment for better performance (batch DOM updates)
             const fragment = document.createDocumentFragment();
             
-            // Fill up to available phrase slots based on LLMOptions setting
-            // Reserve one slot for "Something Else" button
-            const maxPhraseOptions = Math.max(1, LLMOptions - 1);
-            
-            // Only iterate up to actualOptionsCount to avoid creating empty buttons
+            // Fill up to LLMOptions AI options, then add Something Else as an extra slot
+            const maxPhraseOptions = LLMOptions;
+
+            // Iterate over AI options plus one extra slot for Something Else
             for (let i = 0; i < actualOptionsCount; i++) {
                 const btn = document.createElement('button');
                 
-                // Create "Something Else" button in the last slot
+                // Create "Something Else" button after all AI options
                 if (i === actualOptionsCount - 1) {
                     console.log('🚨 CREATING PHRASE SOMETHING ELSE BUTTON - SLOT', i, 'of', actualOptionsCount);
                     btn.className = 'option-button';
@@ -4849,7 +5351,8 @@
                 
                 // Check cache first
                 const cachedWords = getCachedData(CACHE_KEYS.INITIAL_WORDS);
-                if (cachedWords && !containsUITechnicalWords(cachedWords)) {
+                const expectedHomeWordCount = Math.max(1, FreestyleWordOptions || 29);
+                if (cachedWords && !containsUITechnicalWords(cachedWords) && Array.isArray(cachedWords) && cachedWords.length === expectedHomeWordCount) {
                     console.log('⏱️ loadFreestyleOptions: Rendering from cache at:', Date.now());
                     renderFreestyleOptions(cachedWords, true); // true = defer images
                     // Load cached images INSTANTLY (200ms delay for DOM)
@@ -4863,7 +5366,7 @@
                 
                 // Generate initial freestyle options (general communication words)
                 console.log('⏱️ loadFreestyleOptions: Fetching fresh words at:', Date.now());
-                let options = await generateGeneralStarterWords(29); // Use safer function with fallback
+                let options = await generateDefaultHomeStarterWords(FreestyleWordOptions);
                 console.log('⏱️ loadFreestyleOptions: Got', options ? options.length : 0, 'words at:', Date.now());
                 
                 // If for some reason we still got bad words, use the curated fallback
@@ -4901,14 +5404,14 @@
                     console.log('Using category-specific words for:', categoryOrPath);
                     // categoryOrPath may be an object or a string full path
                     const categoryPath = (typeof categoryOrPath === 'string') ? categoryOrPath : (categoryOrPath.label || '');
-                    const options = await generateFreestyleOptionsForCategory(categoryPath, 29, wordsPrompt, instructionPrompt);
+                    const options = await generateFreestyleOptionsForCategory(categoryPath, FreestyleWordOptions, wordsPrompt, instructionPrompt);
                     renderFreestyleOptions(options, true); // Defer images for batch loading
                     setTimeout(() => loadImagesForWords(options), 50);
                     return;
                 }
 
                 // Otherwise use the freestyle /word-options endpoint which uses navigation/build-space context
-                const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, 29, wordsPrompt);
+                const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, FreestyleWordOptions, wordsPrompt);
                 renderFreestyleOptions(options, true); // Defer images for batch loading
                 setTimeout(() => loadImagesForWords(options), 50);
             } catch (error) {
@@ -5496,21 +5999,6 @@
             }
         }
         
-        function getFallbackStarterWords() {
-            return [
-                { text: "I", keywords: ["person"] },
-                { text: "want", keywords: ["desire"] },
-                { text: "need", keywords: ["need"] },
-                { text: "like", keywords: ["happy"] },
-                { text: "go", keywords: ["travel"] },
-                { text: "see", keywords: ["eye"] },
-                { text: "help", keywords: ["help"] },
-                { text: "more", keywords: ["plus"] },
-                { text: "please", keywords: ["polite"] },
-                { text: "thank you", keywords: ["thanks"] }
-            ];
-        }
-
         async function updateFreestyleOptionsWithSelectedWord(selectedWord) {
             try {
                 // Clear words prompt since we're now using Speech History context
@@ -5523,9 +6011,11 @@
                 // Generate new options based on what's currently in the Speech History
                 let options;
                 if (currentSpeech) {
-                    options = await generateWordsBasedOnSpeechHistory(currentSpeech, 29);
+                    options = await generateWordsBasedOnSpeechHistory(currentSpeech, FreestyleWordOptions);
+                } else if (currentCategory && (currentCategory.label === 'general' || shouldUseDefaultHomeStarterWords(currentCategory))) {
+                    options = await generateDefaultHomeStarterWords(FreestyleWordOptions);
                 } else {
-                    options = await generateGeneralStarterWords(29);
+                    options = await generateGeneralStarterWords(FreestyleWordOptions);
                 }
                 
                 renderFreestyleOptions(options);
@@ -5547,8 +6037,215 @@
                 console.error('freestyleOptions element not found!');
                 return;
             }
-            
+
             freestyleOptions.innerHTML = '';
+
+            const hasBoardCoordinates = Array.isArray(options)
+                && options.some(opt => opt && typeof opt === 'object' && Number.isFinite(Number(opt.row)) && Number.isFinite(Number(opt.col)));
+
+            if (hasBoardCoordinates) {
+                freestyleOptions.dataset.boardLayout = 'true';
+                const boardCols = Math.max(1, Number(gridColumns) || 1);
+                freestyleOptions.style.gridTemplateColumns = `repeat(${boardCols}, 1fr)`;
+                freestyleOptions.dataset.boardLayoutCols = String(boardCols);
+                freestyleOptions.style.alignContent = 'start';
+
+                const optionsBySourceRow = new Map();
+                options.forEach(opt => {
+                    if (!opt || typeof opt !== 'object') {
+                        return;
+                    }
+                    const row = Number(opt.row);
+                    const col = Number(opt.col);
+                    if (!Number.isInteger(row) || !Number.isInteger(col)) {
+                        return;
+                    }
+                    if (row < 0 || col < 0) {
+                        return;
+                    }
+
+                    const rowList = optionsBySourceRow.get(row) || [];
+                    rowList.push(opt);
+                    optionsBySourceRow.set(row, rowList);
+                });
+
+                // Render only rows that actually contain defined buttons; if a row has more buttons
+                // than configured columns, spill into additional display rows.
+                const displayRows = [];
+                const sortedSourceRows = [...optionsBySourceRow.keys()].sort((a, b) => a - b);
+                sortedSourceRows.forEach(sourceRow => {
+                    const rowOptions = (optionsBySourceRow.get(sourceRow) || []).sort((a, b) => {
+                        const colA = Number(a.col || 0);
+                        const colB = Number(b.col || 0);
+                        return colA - colB;
+                    });
+
+                    for (let i = 0; i < rowOptions.length; i += boardCols) {
+                        displayRows.push(rowOptions.slice(i, i + boardCols));
+                    }
+                });
+
+                const effectiveDisplayRows = Math.max(1, displayRows.length);
+                // Leave rows as auto-sized tracks so spacing remains standard and rows do not stretch.
+                freestyleOptions.style.gridTemplateRows = '';
+
+                const boardFragment = document.createDocumentFragment();
+
+                for (let row = 0; row < effectiveDisplayRows; row++) {
+                    const rowOptions = displayRows[row] || [];
+                    for (let col = 0; col < boardCols; col++) {
+                        const option = rowOptions[col] || null;
+                        const btn = document.createElement('button');
+                        btn.className = 'option-button freestyle-button';
+
+                        if (!option) {
+                            btn.classList.add('empty-state');
+                            btn.textContent = '—';
+                            btn.disabled = true;
+                            boardFragment.appendChild(btn);
+                            continue;
+                        }
+
+                        const text = option.text || '';
+                        const announcementText = option.speech_text || text;
+                        const afterSelection = option.after_selection || null;
+                        const optionTargetBoardId = option.target_board_id || null;
+                        const configuredImageUrl = option.image_url || null;
+                        const isSightWord = isTapSightWord(text);
+                        const optionIndex = options.findIndex(candidate => candidate === option);
+                        if (optionIndex >= 0) {
+                            btn.dataset.optionIndex = String(optionIndex);
+                        }
+                        if (option.text_color && option.text_color !== '#000000') {
+                            btn.style.color = option.text_color;
+                        }
+
+                        if (!isSightWord && !deferImages) {
+                            const imagePromise = configuredImageUrl
+                                ? Promise.resolve(configuredImageUrl)
+                                : getSymbolImageForText(extractKeywordForImage(text));
+
+                            imagePromise.then(imageUrl => {
+                                if (imageUrl) {
+                                    btn.innerHTML = '';
+                                    const buttonContent = document.createElement('div');
+                                    buttonContent.style.position = 'relative';
+                                    buttonContent.style.width = '100%';
+                                    buttonContent.style.height = '100%';
+                                    buttonContent.style.display = 'flex';
+                                    buttonContent.style.flexDirection = 'column';
+
+                                    const imageContainer = document.createElement('div');
+                                    imageContainer.style.flex = '1';
+                                    imageContainer.style.width = '100%';
+                                    imageContainer.style.overflow = 'hidden';
+                                    imageContainer.style.borderRadius = '8px 8px 0 0';
+                                    imageContainer.style.display = 'flex';
+                                    imageContainer.style.alignItems = 'center';
+                                    imageContainer.style.justifyContent = 'center';
+
+                                    const imageElement = document.createElement('img');
+                                    imageElement.src = imageUrl;
+                                    imageElement.alt = text;
+                                    imageElement.style.width = '100%';
+                                    imageElement.style.height = '100%';
+                                    imageElement.style.objectFit = 'cover';
+
+                                    const textFooter = document.createElement('div');
+                                    textFooter.style.minHeight = '14px';
+                                    textFooter.style.width = '100%';
+                                    textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+                                    textFooter.style.backdropFilter = 'blur(4px)';
+                                    textFooter.style.color = 'white';
+                                    textFooter.style.display = 'flex';
+                                    textFooter.style.alignItems = 'center';
+                                    textFooter.style.justifyContent = 'center';
+                                    textFooter.style.padding = '0 3px';
+                                    textFooter.style.zIndex = '10';
+                                    textFooter.style.boxSizing = 'border-box';
+
+                                    const textSpan = document.createElement('span');
+                                    textSpan.textContent = text;
+                                    textSpan.style.fontSize = '0.54em';
+                                    textSpan.style.fontWeight = 'bold';
+                                    textSpan.style.textAlign = 'center';
+                                    textSpan.style.lineHeight = '1.0';
+
+                                    imageContainer.appendChild(imageElement);
+                                    textFooter.appendChild(textSpan);
+                                    buttonContent.appendChild(imageContainer);
+                                    buttonContent.appendChild(textFooter);
+                                    btn.appendChild(buttonContent);
+                                }
+                            }).catch(error => {
+                                console.error('Error loading image for board word button:', error);
+                            });
+                        }
+
+                        if (isSightWord) {
+                            btn.classList.add('sight-word-button');
+                            const textSpan = document.createElement('span');
+                            textSpan.textContent = text;
+                            textSpan.style.fontSize = '1.25em';
+                            textSpan.style.fontWeight = '900';
+                            textSpan.style.color = '#dc2626';
+                            btn.appendChild(textSpan);
+                        } else {
+                            btn.textContent = text;
+                        }
+
+                        btn.addEventListener('click', async () => {
+                            await runTapActionOnce(btn, async () => {
+                                let phraseToAdd;
+                                let phraseToAnnounce;
+
+                                if (currentWordsPrompt) {
+                                    phraseToAdd = `${currentWordsPrompt} ${text}`;
+                                    phraseToAnnounce = phraseToAdd;
+                                } else {
+                                    phraseToAdd = text;
+                                    phraseToAnnounce = announcementText;
+                                }
+
+                                const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
+                                if (!previewDecision.proceed) {
+                                    return;
+                                }
+
+                                if (activeQuestionAsked) {
+                                    activeQuestionAsked = false;
+                                    updateStatusMessage(getReadyMessage());
+                                }
+
+                                addToSpeech(phraseToAdd);
+                                if (!previewDecision.alreadyAnnounced) {
+                                    await announce(phraseToAnnounce, 'system', true);
+                                }
+
+                                const effectiveAfterSel = afterSelection || 'use_ai';
+                                if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
+                                    const targetCategoryBtn = tapConfig && tapConfig.buttons && tapConfig.buttons.find(b => b.board_id === optionTargetBoardId || b.id === optionTargetBoardId);
+                                    if (targetCategoryBtn) {
+                                        await selectCategory(targetCategoryBtn, null);
+                                    }
+                                } else if (effectiveAfterSel === 'use_ai') {
+                                    await updateFreestyleOptionsWithSelectedWord(text);
+                                }
+                            });
+                        });
+
+                        boardFragment.appendChild(btn);
+                    }
+                }
+
+                freestyleOptions.appendChild(boardFragment);
+                requestAnimationFrame(updateGridRowHeight);
+                return;
+            }
+
+            delete freestyleOptions.dataset.boardLayout;
+            delete freestyleOptions.dataset.boardLayoutCols;
+            freestyleOptions.style.alignContent = '';
 
             // Dynamic Grid Sizing for Freestyle
             freestyleOptions.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
@@ -5557,17 +6254,18 @@
             // Use DocumentFragment for better performance (batch DOM updates)
             const fragment = document.createDocumentFragment();
             
-            // Create freestyle slots based on FreestyleWordOptions setting
-            // Reserve one slot for "Something Else" button
-            const maxWordOptions = Math.max(1, FreestyleWordOptions - 1);
-            
-            for (let i = 0; i < FreestyleWordOptions; i++) {
+            // Fill up to FreestyleWordOptions word options, then add Something Else as an extra slot
+            const maxWordOptions = FreestyleWordOptions;
+            const totalWordSlots = Math.min(options.length, FreestyleWordOptions) + 1; // full word options + Something Else
+
+            for (let i = 0; i < totalWordSlots; i++) {
                 const btn = document.createElement('button');
-                
-                // Create "Something Else" button in the last slot
-                if (i === FreestyleWordOptions - 1) {
+
+                // Create "Something Else" button after all word options
+                if (i === totalWordSlots - 1) {
                     console.log('🚨 CREATING WORD SOMETHING ELSE BUTTON - SLOT', i, 'of', FreestyleWordOptions);
                     btn.className = 'option-button freestyle-button';
+                        btn.dataset.specialButton = 'something-else';
                     btn.textContent = 'Something Else';
                     
                     // Apply image matching like other buttons - skip when deferring
@@ -5637,8 +6335,13 @@
                 
                 if (i < Math.min(options.length, maxWordOptions) && options[i]) {
                     const option = options[i];
-                    // Handle freestyle word format {text: "word", keywords: []}
+                    // Handle freestyle word format {text: "word", speech_text?: "announcement", keywords: []}
                     const text = option.text || option;
+                    const announcementText = (typeof option === 'object' && option.speech_text) ? option.speech_text : text;
+                    const afterSelection = (typeof option === 'object' && option.after_selection) ? option.after_selection : null;
+                    const optionTargetBoardId = (typeof option === 'object' && option.target_board_id) ? option.target_board_id : null;
+                    const configuredImageUrl = (typeof option === 'object' && option.image_url) ? option.image_url : null;
+                    btn.dataset.optionIndex = String(i);
                     
                     // Check if this is a sight word - if so, skip image loading
                     const isSightWord = isTapSightWord(text);
@@ -5646,11 +6349,11 @@
                     // Add Firestore image support for words (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
                         console.log(`🔍 Attempting image load for word: "${text}"`);
-                        // Extract the main keyword for better image matching
-                        const imageKeyword = extractKeywordForImage(text);
-                        console.log(`🔑 Extracted keyword for image matching: "${text}" -> "${imageKeyword}"`);
-                        getSymbolImageForText(imageKeyword).then(imageUrl => {
-                            console.log(`🎯 Image result for "${text}" (keyword: "${imageKeyword}"): ${imageUrl ? 'Found' : 'Not found'}`);
+                        const imagePromise = configuredImageUrl
+                            ? Promise.resolve(configuredImageUrl)
+                            : getSymbolImageForText(extractKeywordForImage(text));
+                        imagePromise.then(imageUrl => {
+                            console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
                             if (imageUrl) {
                                 // Create image + text layout like gridpage
                                 btn.innerHTML = '';
@@ -5734,8 +6437,8 @@
                                 console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
                             } else {
                                 phraseToAdd = text;
-                                phraseToAnnounce = text;
-                                console.log('🎯 Using selection as-is:', text);
+                                phraseToAnnounce = announcementText;
+                                console.log('🎯 Using selection with announcement:', text, '=>', announcementText);
                             }
 
                             const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
@@ -5753,8 +6456,20 @@
                                 await announce(phraseToAnnounce, "system", true);
                             }
                             
-                            console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
-                            await updateFreestyleOptionsWithSelectedWord(text);
+                            // Determine post-selection board behavior.
+                            // afterSelection is null for legacy/AI-board options → treat as 'use_ai' (backward compat).
+                            const effectiveAfterSel = afterSelection || 'use_ai';
+                            if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
+                                const targetCategoryBtn = tapConfig && tapConfig.buttons && tapConfig.buttons.find(b => b.board_id === optionTargetBoardId || b.id === optionTargetBoardId);
+                                if (targetCategoryBtn) {
+                                    console.log('🎯 Navigating to board:', optionTargetBoardId);
+                                    await selectCategory(targetCategoryBtn, null);
+                                }
+                            } else if (effectiveAfterSel === 'use_ai') {
+                                console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
+                                await updateFreestyleOptionsWithSelectedWord(text);
+                            }
+                            // do_nothing: no board change
                         });
                     });
                 } else {

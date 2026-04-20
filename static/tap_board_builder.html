@@ -7,200 +7,311 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; color: #111827; }
-        .layout { display: flex; height: calc(100vh - 56px); }
-        .sidebar { width: 320px; background: #fff; border-right: 1px solid #e5e7eb; display: flex; flex-direction: column; }
-        .main { flex: 1; overflow: auto; background: #fff; }
-        .board-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.65rem 0.75rem; cursor: pointer; }
-        .board-item:hover { border-color: #93c5fd; background: #eff6ff; }
-        .board-item.selected { border-color: #2563eb; background: #dbeafe; }
-        .field { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.6rem 0.65rem; }
-        .field:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15); }
-        .btn { border-radius: 8px; border: none; padding: 0.55rem 0.9rem; font-size: 0.9rem; cursor: pointer; }
-        .btn-primary { background: #2563eb; color: #fff; }
-        .btn-primary:hover { background: #1d4ed8; }
-        .btn-secondary { background: #e5e7eb; color: #111827; }
-        .btn-secondary:hover { background: #d1d5db; }
-        .btn-danger { background: #ef4444; color: #fff; }
-        .btn-danger:hover { background: #dc2626; }
-        .notification { position: fixed; top: 1rem; right: 1rem; border-radius: 8px; padding: 0.75rem 1rem; color: #fff; font-weight: 600; transform: translateX(140%); transition: transform 0.2s ease; z-index: 1000; }
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #111827; }
+        #buttonGrid { display: grid; grid-template-columns: repeat(12, minmax(100px, 1fr)); gap: 8px; width: 100%; border: 1px solid #d1d5db; margin-top: 1rem; margin-bottom: 1rem; background-color: #f9fafb; overflow-x: auto; padding: 8px; }
+        .visual-button { border: 2px solid #d1d5db; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; background-color: white; min-height: 70px; cursor: pointer; transition: all 0.2s ease; font-size: 0.8rem; font-weight: 500; text-align: center; word-wrap: break-word; position: relative; }
+        .visual-button:hover { border-color: #3b82f6; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); transform: translateY(-1px); }
+        .visual-button.undefined { background-color: #f9fafb; color: #6b7280; border-style: dashed; font-style: italic; }
+        .visual-button.has-content { background-color: #ffffff; color: #1f2937; border-color: #059669; }
+        .visual-button.has-navigation { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-color: #d97706; }
+        .visual-button.dragging { opacity: 0.5; transform: rotate(4deg); }
+        .visual-button.drop-target { border-color: #ef4444; border-width: 3px; background-color: #fef2f2; }
+        .button-indicator { position: absolute; top: 4px; right: 4px; width: 14px; height: 14px; border-radius: 50%; font-size: 8px; display: flex; align-items: center; justify-content: center; }
+        .indicator-nav { background-color: #d97706; color: white; }
+        .indicator-speech { background-color: #059669; color: white; }
+        .indicator-audio { background-color: #2563eb; color: white; }
+        .notification { position: fixed; top: 1rem; right: 1rem; z-index: 1000; border-radius: 8px; padding: 0.75rem 1rem; color: white; font-weight: 600; transform: translateX(140%); transition: transform 0.25s ease; }
         .notification.show { transform: translateX(0); }
         .notification.success { background: #16a34a; }
         .notification.error { background: #dc2626; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #e5e7eb; padding: 0.45rem; vertical-align: top; }
-        th { background: #f9fafb; text-align: left; font-size: 0.8rem; color: #374151; }
-        td input, td select { width: 100%; }
+        .readonly-overlay { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.85); border: 2px dashed #f59e0b; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #92400e; font-weight: 600; font-size: 0.9rem; z-index: 20; }
     </style>
 </head>
 <body>
-    <div class="bg-[#002244] text-[#FB4F14] px-4 py-2 shadow flex items-center justify-between" style="min-height:56px;">
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+
+    <div class="page-banner flex items-center justify-between bg-[#002244] text-[#FB4F14] px-4 py-2 shadow">
         <div class="flex items-center gap-2">
-            <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back to Boards Menu">
-                <i class="fas fa-arrow-left"></i>
+            <button onclick="window.location.href='tap_interface.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Return to Tap Interface">
+                <i class="fas fa-house mr-2"></i>Home
             </button>
-            <h1 class="text-xl font-semibold">Board Builder</h1>
+            <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Open Boards Menu Admin">
+                <i class="fas fa-sitemap mr-2"></i>Boards Menu
+            </button>
+            <h1 class="ml-2 text-xl font-semibold">Board Builder</h1>
         </div>
         <div class="flex items-center gap-2">
-            <button id="saveBoardBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Board</button>
-            <button id="deleteBoardBtn" class="btn btn-danger"><i class="fas fa-trash"></i> Delete Board</button>
+            <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
+            <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
         </div>
     </div>
 
-    <div class="layout">
-        <aside class="sidebar">
-            <div class="p-4 border-b border-gray-200 flex items-center justify-between">
-                <h2 class="font-semibold">Boards</h2>
-                <button id="newBoardBtn" class="btn btn-secondary"><i class="fas fa-plus"></i> New</button>
+    <main class="max-w-[1700px] mx-auto p-4">
+        <div class="bg-white p-4 border rounded-md mb-4">
+            <div class="flex flex-wrap gap-3 items-end">
+                <div class="min-w-[360px] flex-1">
+                    <label for="selectBoard" class="block text-sm font-medium text-gray-700">Select Board</label>
+                    <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+                </div>
+                <div>
+                    <button id="createNewBoardBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Create New Board</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="setAsHomeBoard">
+                    <label for="setAsHomeBoard" class="text-sm text-gray-700">Set as Home Board</label>
+                </div>
             </div>
-            <div class="p-3">
-                <input id="boardSearch" class="field" placeholder="Search boards...">
-            </div>
-            <div id="boardList" class="p-3 space-y-2 overflow-auto" style="flex:1;"></div>
-        </aside>
+            <p class="text-sm text-gray-600 mt-3">Recommended workflow: build or edit boards here first, then open Boards Menu to decide how those boards appear in Tap Interface.</p>
+            <p id="readOnlyHint" class="text-sm text-amber-700 mt-2 hidden">This board is read-only because it is a standard legacy/system board.</p>
+        </div>
 
-        <main class="main p-6">
-            <div id="emptyState" class="text-gray-500">Select a board from the list, or create a new board.</div>
-            <div id="editor" style="display:none;" class="space-y-6">
-                <section>
-                    <h3 class="text-lg font-semibold mb-3">Board Settings</h3>
+        <form id="boardForm" class="mb-6 p-4 border rounded-md bg-white">
+            <h3 class="text-xl font-semibold mb-3">Board Details</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="boardLabel" class="block text-sm font-medium text-gray-700">Display Name</label>
+                    <input type="text" id="boardLabel" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g., Home, Food, Feelings">
+                </div>
+                <div>
+                    <label for="boardType" class="block text-sm font-medium text-gray-700">Board Mode</label>
+                    <select id="boardType" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
+                        <option value="ai">AI-defined Board</option>
+                        <option value="static">Static Board</option>
+                        <option value="system">System Board</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="aiSettingsSection" class="mt-4">
+                <h4 class="font-semibold text-gray-800 mb-2">AI Settings</h4>
+                <div class="grid grid-cols-1 gap-3">
+                    <div>
+                        <label for="llmPrompt" class="block text-sm font-medium text-gray-700">LLM Prompt</label>
+                        <textarea id="llmPrompt" rows="3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe what the AI board should generate"></textarea>
+                    </div>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div>
-                            <label class="text-sm font-medium">Board ID</label>
-                            <input id="boardId" class="field" readonly>
+                            <label for="promptTopic" class="block text-sm font-medium text-gray-700">Prompt Topic</label>
+                            <input type="text" id="promptTopic" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
                         </div>
                         <div>
-                            <label class="text-sm font-medium">Label</label>
-                            <input id="boardLabel" class="field">
+                            <label for="promptExamples" class="block text-sm font-medium text-gray-700">Prompt Examples</label>
+                            <input type="text" id="promptExamples" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
                         </div>
                         <div>
-                            <label class="text-sm font-medium">Type</label>
-                            <select id="boardType" class="field">
-                                <option value="ai">AI</option>
-                                <option value="static">Static</option>
-                                <option value="system">System</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium">Owner Scope</label>
-                            <select id="ownerScope" class="field">
-                                <option value="user">User</option>
-                                <option value="global">Global</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium">Columns</label>
-                            <input id="defaultColumns" class="field" type="number" min="1" max="24" value="12">
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium">Max Rows</label>
-                            <input id="maxRows" class="field" type="number" min="1" max="24" value="7">
+                            <label for="promptExclusions" class="block text-sm font-medium text-gray-700">Prompt Exclusions</label>
+                            <input type="text" id="promptExclusions" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
                         </div>
                     </div>
-                    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <label class="text-sm font-medium">Prompt Category</label>
-                            <input id="promptCategory" class="field" placeholder="e.g. food, people, emotions">
-                        </div>
-                        <div>
-                            <label class="text-sm font-medium">Special Function</label>
-                            <input id="specialFunction" class="field" placeholder="e.g. spell, games">
-                        </div>
-                        <div class="md:col-span-2">
-                            <label class="text-sm font-medium">LLM Prompt</label>
-                            <textarea id="llmPrompt" class="field" rows="2"></textarea>
-                        </div>
-                        <div class="md:col-span-2">
-                            <label class="text-sm font-medium">Static Options</label>
-                            <textarea id="staticOptions" class="field" rows="2" placeholder="Comma-separated options"></textarea>
-                        </div>
-                    </div>
-                </section>
-
-                <section>
-                    <div class="flex items-center justify-between mb-3">
-                        <h3 class="text-lg font-semibold">Board Buttons</h3>
-                        <button id="addButtonBtn" class="btn btn-secondary"><i class="fas fa-plus"></i> Add Button</button>
-                    </div>
-                    <div style="overflow:auto;">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style="min-width:140px;">Label</th>
-                                    <th style="min-width:120px;">Action</th>
-                                    <th style="min-width:150px;">Target Board</th>
-                                    <th style="min-width:140px;">Speech Text</th>
-                                    <th style="min-width:140px;">Audio URL</th>
-                                    <th style="min-width:130px;">Image URL</th>
-                                    <th style="min-width:100px;">BG Color</th>
-                                    <th style="min-width:100px;">Text Color</th>
-                                    <th style="min-width:80px;">Hidden</th>
-                                    <th style="min-width:70px;">Delete</th>
-                                </tr>
-                            </thead>
-                            <tbody id="buttonsTableBody"></tbody>
-                        </table>
-                    </div>
-                </section>
+                </div>
             </div>
-        </main>
+        </form>
+
+        <section id="gridSection" class="bg-white p-4 border rounded-md relative">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
+                <button id="aiBulkBuildBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>AI Build Options</button>
+            </div>
+            <p class="text-gray-600 mb-3">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
+            <div id="buttonGrid"></div>
+            <div id="gridReadOnlyOverlay" class="readonly-overlay hidden">Read-only board</div>
+        </section>
+    </main>
+
+    <div id="buttonEditorModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5000;">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">Edit Button</h3>
+                <button id="closeButtonEditor" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <div class="mb-4"><label for="buttonText" class="block text-sm font-medium text-gray-700 mb-2">Button Label</label><input type="text" id="buttonText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Enter button text"></div>
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Button Image (Optional)</label>
+                        <div class="flex items-center space-x-3">
+                            <div id="assignedImagePreview" class="w-16 h-16 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center bg-gray-50 hidden"><img id="assignedImageThumb" class="w-full h-full object-cover rounded-md" alt="Selected image"></div>
+                            <div class="flex-1">
+                                <button type="button" id="browseImagesBtn" class="w-full px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-image mr-2"></i>Browse Images</button>
+                                <button type="button" id="clearImageBtn" class="w-full px-3 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600 mt-2 hidden"><i class="fas fa-times mr-2"></i>Clear Image</button>
+                            </div>
+                        </div>
+                        <input type="hidden" id="assignedImageUrl" value="">
+                    </div>
+                    <div class="mb-4"><label for="speechText" class="block text-sm font-medium text-gray-700 mb-2">Announcement (Optional)</label><input type="text" id="speechText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Announced out loud on selection"></div>
+                    <div class="mb-4">
+                        <label for="customAudioFile" class="block text-sm font-medium text-gray-700 mb-2">Custom Audio File (Optional)</label>
+                        <input type="file" id="customAudioFile" accept="audio/*" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                        <input type="hidden" id="customAudioFileUrl" value="">
+                        <div id="audioUploadStatus" class="text-xs mt-1 hidden"></div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="afterSelection" class="block text-sm font-medium text-gray-700 mb-2">After Selection</label>
+                        <select id="afterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="do_nothing">Do nothing (stay on current board)</option>
+                            <option value="navigate">Navigate to Target Board</option>
+                            <option value="use_ai">Use AI to generate next options</option>
+                        </select>
+                    </div>
+                    <div class="mb-4" id="targetBoardWrapper" style="display:none;"><label for="targetBoard" class="block text-sm font-medium text-gray-700 mb-2">Target Board</label><select id="targetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">-- Select board --</option></select></div>
+                    <div class="mb-4">
+                        <div><label for="buttonBgColor" class="block text-sm font-medium text-gray-700 mb-2">Background Color</label><select id="buttonBgColor" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="#FFFFFF">Default</option><option value="#F9FAFB">Light Gray</option><option value="#FEF3C7">Light Yellow</option><option value="#D1FAE5">Light Green</option><option value="#DBEAFE">Light Blue</option><option value="#EDE9FE">Light Purple</option><option value="#FCE7F3">Light Pink</option><option value="#FEE2E2">Light Red</option><option value="#FFF7ED">Light Orange</option><option value="#059669">Green</option><option value="#2563EB">Blue</option><option value="#7C3AED">Purple</option><option value="#DB2777">Pink</option><option value="#DC2626">Red</option><option value="#D97706">Orange/Amber</option><option value="#1F2937">Dark Gray</option><option value="#000000">Black</option></select></div>
+                    </div>
+                    <div class="mb-4"><label class="flex items-center"><input type="checkbox" id="buttonHidden" class="mr-2"><span class="text-sm font-medium text-gray-700">Hide this button</span></label></div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-medium text-gray-700 mb-2">Button Preview</h4>
+                    <div id="buttonPreview" class="border-2 border-dashed border-gray-300 rounded-md p-4 text-center min-h-[100px] flex items-center justify-center"><span class="text-gray-500">Button preview will appear here</span></div>
+                    <div class="mt-4"><h4 class="text-sm font-medium text-gray-700 mb-2">Configuration Summary</h4><div id="configSummary" class="bg-gray-50 p-3 rounded-md text-sm"><div><strong>Position:</strong> <span id="positionInfo">-</span></div><div><strong>Type:</strong> <span id="buttonTypeInfo">-</span></div><div><strong>Action:</strong> <span id="actionInfo">-</span></div></div></div>
+                </div>
+            </div>
+            <div class="flex justify-end space-x-3 mt-6"><button id="clearButtonBtn" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600">Clear Button</button><button id="cancelButtonEdit" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancel</button><button id="saveButtonEdit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Save Button</button></div>
+        </div>
+    </div>
+
+    <div id="imagePickerModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5100;">
+        <div class="relative top-8 mx-auto p-5 border w-11/12 max-w-6xl shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-900">Browse Images</h3><button id="closeImagePicker" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button></div>
+            <div class="mb-4 flex gap-2"><input id="imageSearchInput" type="text" class="flex-1 px-3 py-2 border border-gray-300 rounded-md" placeholder="Search images..."><button id="imageSearchBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Search</button><button id="clearImageSearch" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600">Clear</button></div>
+            <div class="mb-2 flex items-center justify-between text-sm text-gray-600"><div id="imageResultsInfo">Loading...</div><div class="flex items-center gap-2"><button id="imagePrevPage" class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50">Prev</button><span id="imagePageInfo">Page 1 of 1</span><button id="imageNextPage" class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50">Next</button></div></div>
+            <div id="imageLoadingIndicator" class="hidden text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>Loading...</div>
+            <div id="imageGrid" class="grid grid-cols-6 gap-3 max-h-[420px] overflow-y-auto"></div>
+            <div class="flex justify-end gap-2 mt-4"><button id="cancelImageSelection" class="px-4 py-2 bg-gray-300 rounded-md">Cancel</button><button id="selectImageBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" disabled>Select Image</button></div>
+        </div>
+    </div>
+
+    <div id="aiBulkBuilderModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5200;">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">AI Build Board Options</h3>
+                <button id="closeAIBulkBuilder" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                    <label for="aiBulkPrompt" class="block text-sm font-medium text-gray-700 mb-2">Prompt</label>
+                    <textarea id="aiBulkPrompt" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Example: Generate common food choices for lunch"></textarea>
+                </div>
+                <div>
+                    <label for="aiBulkTotalOptions" class="block text-sm font-medium text-gray-700 mb-2">Total Options</label>
+                    <input type="number" id="aiBulkTotalOptions" min="1" max="84" value="24" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+                <div>
+                    <label for="aiBulkOptionsPerRow" class="block text-sm font-medium text-gray-700 mb-2">Options Per Row</label>
+                    <input type="number" id="aiBulkOptionsPerRow" min="1" max="12" value="12" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                </div>
+                <div>
+                    <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default After Selection</label>
+                    <select id="aiBulkAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                        <option value="do_nothing">Do nothing (default)</option>
+                        <option value="use_ai">Use AI</option>
+                        <option value="navigate">Navigate to Target Board</option>
+                    </select>
+                </div>
+                <div id="aiBulkTargetBoardWrapper" class="hidden">
+                    <label for="aiBulkTargetBoard" class="block text-sm font-medium text-gray-700 mb-2">Target Board</label>
+                    <select id="aiBulkTargetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">-- Select board --</option></select>
+                </div>
+                <div>
+                    <label for="aiBulkBgColor" class="block text-sm font-medium text-gray-700 mb-2">Background Color</label>
+                    <select id="aiBulkBgColor" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="#FFFFFF">Default</option><option value="#F9FAFB">Light Gray</option><option value="#FEF3C7">Light Yellow</option><option value="#D1FAE5">Light Green</option><option value="#DBEAFE">Light Blue</option><option value="#EDE9FE">Light Purple</option><option value="#FCE7F3">Light Pink</option><option value="#FEE2E2">Light Red</option><option value="#FFF7ED">Light Orange</option><option value="#059669">Green</option><option value="#2563EB">Blue</option><option value="#7C3AED">Purple</option><option value="#DB2777">Pink</option><option value="#DC2626">Red</option><option value="#D97706">Orange/Amber</option><option value="#1F2937">Dark Gray</option><option value="#000000">Black</option></select>
+                </div>
+            </div>
+
+            <div class="mt-4">
+                <div class="flex items-center justify-between">
+                    <h4 class="text-sm font-semibold text-gray-800">Preview</h4>
+                    <span id="aiBulkPreviewMeta" class="text-xs text-gray-500"></span>
+                </div>
+                <div id="aiBulkPreviewList" class="mt-2 max-h-52 overflow-y-auto border border-gray-200 rounded-md p-3 text-sm text-gray-700 bg-gray-50">No preview generated yet.</div>
+            </div>
+
+            <div class="flex justify-end gap-2 mt-5">
+                <button id="aiBulkPreviewBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Preview</button>
+                <button id="aiBulkApplyBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" disabled>OK</button>
+                <button id="aiBulkCancelBtn" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <div id="notification" class="notification"></div>
 
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
     <script>
-        let authToken = null;
-        let currentAacUserId = null;
-        let boards = [];
-        let selectedBoardId = null;
-        let isNewBoard = false;
+        const GRID_ROWS = 7, GRID_COLS = 12;
+        let authToken = null, currentAacUserId = null;
+        let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
+        let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
+        let aiBulkPreviewOptions = [];
 
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('newBoardBtn').addEventListener('click', createNewDraftBoard);
-            document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
-            document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
-            document.getElementById('addButtonBtn').addEventListener('click', addBoardButtonRow);
-            document.getElementById('boardSearch').addEventListener('input', renderBoardList);
+            setupEventListeners();
             initializeFirebaseAndAuth();
         });
 
-        async function initializeFirebaseAndAuth() {
-            try {
-                const configResponse = await fetch('/api/frontend-config');
-                const configData = await configResponse.json();
-                const firebaseConfig = configData.firebase_config || configData;
-                if (!firebaseConfig || !firebaseConfig.apiKey) throw new Error('Missing Firebase config');
-                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-
-                firebase.auth().onAuthStateChanged(async (user) => {
-                    if (!user) {
-                        window.location.href = '/auth.html?redirect=' + encodeURIComponent(window.location.pathname);
-                        return;
-                    }
-                    currentAacUserId = sessionStorage.getItem('currentAacUserId');
-                    if (!currentAacUserId) {
-                        window.location.href = 'auth.html';
-                        return;
-                    }
-                    authToken = await user.getIdToken();
-                    await loadBoards();
-
-                    const params = new URLSearchParams(window.location.search);
-                    const requestedId = params.get('board_id');
-                    if (requestedId && boards.some(b => b.id === requestedId)) {
-                        selectBoard(requestedId);
-                    }
-                });
-            } catch (error) {
-                console.error(error);
-                showNotification('Authentication init failed', 'error');
-            }
+        function setupEventListeners() {
+            document.getElementById('selectBoard').addEventListener('change', handleBoardSelected);
+            document.getElementById('createNewBoardBtn').addEventListener('click', createNewBoardDraft);
+            document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
+            document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
+            document.getElementById('boardType').addEventListener('change', updateBoardModeUI);
+            document.getElementById('aiBulkBuildBtn').addEventListener('click', openAIBulkBuilderModal);
+            document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
+            document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
+            document.getElementById('saveButtonEdit').addEventListener('click', saveButtonEdit);
+            document.getElementById('clearButtonBtn').addEventListener('click', clearCurrentButton);
+            ['buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.addEventListener('input', updateButtonPreview); el.addEventListener('change', updateButtonPreview); }
+            });
+            document.getElementById('afterSelection').addEventListener('change', () => {
+                const val = document.getElementById('afterSelection').value;
+                document.getElementById('targetBoardWrapper').style.display = val === 'navigate' ? '' : 'none';
+                updateButtonPreview();
+            });
+            document.getElementById('customAudioFile').addEventListener('change', uploadButtonAudioFile);
+            document.getElementById('browseImagesBtn').addEventListener('click', openImagePicker);
+            document.getElementById('clearImageBtn').addEventListener('click', clearAssignedImage);
+            document.getElementById('closeImagePicker').addEventListener('click', closeImagePicker);
+            document.getElementById('cancelImageSelection').addEventListener('click', closeImagePicker);
+            document.getElementById('selectImageBtn').addEventListener('click', selectAssignedImage);
+            document.getElementById('imageSearchBtn').addEventListener('click', searchImages);
+            document.getElementById('clearImageSearch').addEventListener('click', clearImageSearch);
+            document.getElementById('imagePrevPage').addEventListener('click', () => navigateImagePage(-1));
+            document.getElementById('imageNextPage').addEventListener('click', () => navigateImagePage(1));
+            document.getElementById('imageSearchInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') searchImages(); });
+            document.getElementById('closeAIBulkBuilder').addEventListener('click', closeAIBulkBuilderModal);
+            document.getElementById('aiBulkCancelBtn').addEventListener('click', closeAIBulkBuilderModal);
+            document.getElementById('aiBulkPreviewBtn').addEventListener('click', previewAIBulkOptions);
+            document.getElementById('aiBulkApplyBtn').addEventListener('click', applyAIBulkOptions);
+            document.getElementById('aiBulkAfterSelection').addEventListener('change', handleAIBulkAfterSelectionChange);
         }
 
-        function getAuthHeaders() {
-            const headers = { 'Content-Type': 'application/json' };
+        async function initializeFirebaseAndAuth() {
+            const configResponse = await fetch('/api/frontend-config');
+            const configData = await configResponse.json();
+            const firebaseConfig = configData.firebase_config || configData;
+            if (!firebaseConfig || !firebaseConfig.apiKey) throw new Error('Missing Firebase config');
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            firebase.auth().onAuthStateChanged(async (user) => {
+                if (!user) { window.location.href = '/auth.html?redirect=' + encodeURIComponent(window.location.pathname); return; }
+                currentAacUserId = sessionStorage.getItem('currentAacUserId');
+                if (!currentAacUserId) { window.location.href = 'auth.html'; return; }
+                authToken = await user.getIdToken();
+                await loadBoards();
+                const params = new URLSearchParams(window.location.search);
+                const boardId = params.get('board_id');
+                if (boardId && allBoards.some(b => b.id === boardId)) { document.getElementById('selectBoard').value = boardId; handleBoardSelected(); }
+                else if (allBoards.length > 0) {
+                    const firstEditable = allBoards.find(b => !isBoardReadOnly(b));
+                    document.getElementById('selectBoard').value = firstEditable ? firstEditable.id : allBoards[0].id;
+                    handleBoardSelected();
+                }
+            });
+        }
+
+        function getAuthHeaders(contentType = 'application/json') {
+            const headers = {};
+            if (contentType) headers['Content-Type'] = contentType;
             if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
             if (currentAacUserId) headers['X-User-ID'] = currentAacUserId;
             const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId');
@@ -209,271 +320,633 @@
         }
 
         async function loadBoards() {
-            const res = await fetch('/api/tap-interface/boards', { headers: getAuthHeaders() });
-            if (!res.ok) throw new Error('Failed to load boards');
-            const data = await res.json();
-            boards = Array.isArray(data.boards) ? data.boards : [];
-            renderBoardList();
+            const response = await fetch('/api/tap-interface/boards', { headers: getAuthHeaders() });
+            if (!response.ok) throw new Error('Failed to load boards');
+            const data = await response.json();
+            allBoards = Array.isArray(data.boards) ? data.boards : [];
+            boardSettings = data.board_settings || {};
+            populateBoardDropdown();
         }
 
-        function renderBoardList() {
-            const q = (document.getElementById('boardSearch').value || '').trim().toLowerCase();
-            const list = document.getElementById('boardList');
-            list.innerHTML = '';
-
-            const filtered = boards.filter(b => {
-                const label = String(b.label || '').toLowerCase();
-                const id = String(b.id || '').toLowerCase();
-                return !q || label.includes(q) || id.includes(q);
+        function populateBoardDropdown() {
+            const select = document.getElementById('selectBoard');
+            const currentValue = select.value;
+            select.innerHTML = '<option value="">-- Select Board --</option>';
+            const editableBoards = allBoards.filter(board => !isBoardReadOnly(board));
+            editableBoards.forEach(board => {
+                const option = document.createElement('option');
+                option.value = board.id;
+                const tags = [];
+                if (board.id === boardSettings.home_board_id) tags.push('home');
+                option.textContent = `${board.label || board.id} (${board.board_type || 'ai'})${tags.length ? ' [' + tags.join(', ') + ']' : ''}`;
+                select.appendChild(option);
             });
+            if (currentValue && editableBoards.some(b => b.id === currentValue)) select.value = currentValue;
+        }
 
-            if (!filtered.length) {
-                list.innerHTML = '<div class="text-sm text-gray-500">No boards found.</div>';
+        function isBoardReadOnly(board) {
+            if (!board) return false;
+            const source = String(board.source || '').toLowerCase();
+            const boardType = String(board.board_type || '').toLowerCase();
+            return source === 'legacy_category' || boardType === 'system';
+        }
+
+        function handleBoardSelected() {
+            const boardId = document.getElementById('selectBoard').value;
+            if (!boardId) { currentBoardData = null; clearBoardForm(); return; }
+            const board = allBoards.find(b => b.id === boardId);
+            if (!board) return;
+            currentBoardData = JSON.parse(JSON.stringify(board));
+            bindBoardToForm();
+            renderButtonGrid();
+            updateBoardModeUI();
+            applyReadOnlyState();
+        }
+
+        function clearBoardForm() {
+            currentBoardData = null;
+            document.getElementById('boardLabel').value = '';
+            document.getElementById('boardType').value = 'ai';
+            document.getElementById('llmPrompt').value = '';
+            document.getElementById('promptTopic').value = '';
+            document.getElementById('promptExamples').value = '';
+            document.getElementById('promptExclusions').value = '';
+            document.getElementById('setAsHomeBoard').checked = false;
+            document.getElementById('buttonGrid').innerHTML = '';
+            document.getElementById('readOnlyHint').classList.add('hidden');
+            document.getElementById('gridReadOnlyOverlay').classList.add('hidden');
+        }
+
+        function createNewBoardDraft() {
+            currentBoardData = { id: '', label: 'New Board', board_type: 'static', source: 'custom', owner_scope: 'user', hidden: false, llm_prompt: '', prompt_topic: '', prompt_examples: '', prompt_exclusions: '', static_options: null, buttons: [] };
+            document.getElementById('selectBoard').value = '';
+            bindBoardToForm();
+            renderButtonGrid();
+            updateBoardModeUI();
+            applyReadOnlyState();
+        }
+
+        function bindBoardToForm() {
+            if (!currentBoardData) return;
+            document.getElementById('boardLabel').value = currentBoardData.label || '';
+            const bt = String(currentBoardData.board_type || 'ai').toLowerCase();
+            if (bt === 'static') document.getElementById('boardType').value = 'static';
+            else if (bt === 'system') document.getElementById('boardType').value = 'system';
+            else document.getElementById('boardType').value = 'ai';
+            document.getElementById('llmPrompt').value = currentBoardData.llm_prompt || '';
+            document.getElementById('promptTopic').value = currentBoardData.prompt_topic || '';
+            document.getElementById('promptExamples').value = currentBoardData.prompt_examples || '';
+            document.getElementById('promptExclusions').value = currentBoardData.prompt_exclusions || '';
+            document.getElementById('setAsHomeBoard').checked = (currentBoardData.id && currentBoardData.id === boardSettings.home_board_id);
+        }
+
+        function updateBoardModeUI() {
+            const boardType = document.getElementById('boardType').value;
+            const aiSection = document.getElementById('aiSettingsSection');
+            const gridSection = document.getElementById('gridSection');
+            if (boardType === 'ai') { aiSection.classList.remove('hidden'); gridSection.classList.add('hidden'); }
+            else { aiSection.classList.add('hidden'); gridSection.classList.remove('hidden'); }
+            // Re-render so click/drag listeners match the current board type.
+            if (currentBoardData) renderButtonGrid();
+        }
+
+        function applyReadOnlyState() {
+            const isReadOnly = currentBoardData && isBoardReadOnly(currentBoardData);
+            document.getElementById('readOnlyHint').classList.toggle('hidden', !isReadOnly);
+            document.getElementById('gridReadOnlyOverlay').classList.toggle('hidden', !isReadOnly);
+            document.getElementById('saveBoardBtn').disabled = !!isReadOnly;
+            document.getElementById('deleteBoardBtn').disabled = !!isReadOnly;
+            ['boardLabel', 'boardType', 'llmPrompt', 'promptTopic', 'promptExamples', 'promptExclusions', 'setAsHomeBoard'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = !!isReadOnly;
+            });
+        }
+
+        function findButtonAtPosition(row, col) {
+            if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return null;
+            return currentBoardData.buttons.find(btn => Number(btn.row) === row && Number(btn.col) === col);
+        }
+
+        function renderButtonGrid() {
+            const grid = document.getElementById('buttonGrid');
+            grid.innerHTML = '';
+            if (!currentBoardData) return;
+            for (let row = 0; row < GRID_ROWS; row++) {
+                for (let col = 0; col < GRID_COLS; col++) {
+                    const buttonDiv = document.createElement('div');
+                    buttonDiv.className = 'visual-button';
+                    buttonDiv.dataset.row = String(row);
+                    buttonDiv.dataset.col = String(col);
+                    const buttonData = findButtonAtPosition(row, col);
+                    if (buttonData && buttonData.label) {
+                        buttonDiv.classList.add('has-content');
+                        if (buttonData.after_selection === 'navigate' || buttonData.action_type === 'navigate') buttonDiv.classList.add('has-navigation');
+                        if (buttonData.background_color && buttonData.background_color !== '#FFFFFF') { buttonDiv.style.backgroundColor = buttonData.background_color; }
+                        if (buttonData.text_color && buttonData.text_color !== '#000000') { buttonDiv.style.color = buttonData.text_color; }
+                        if (buttonData.image_url) {
+                            buttonDiv.style.backgroundImage = `url('${buttonData.image_url}')`;
+                            buttonDiv.style.backgroundSize = 'cover';
+                            buttonDiv.style.backgroundPosition = 'center';
+                            buttonDiv.style.color = 'white';
+                            buttonDiv.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)';
+                            buttonDiv.innerHTML = `<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.65);padding:4px;font-size:12px;">${escapeHtml(buttonData.label)}</div>`;
+                        } else buttonDiv.textContent = buttonData.label;
+                        if (buttonData.after_selection === 'navigate' || buttonData.action_type === 'navigate') { const i = document.createElement('div'); i.className = 'button-indicator indicator-nav'; i.textContent = '→'; i.title = 'Navigates to board'; buttonDiv.appendChild(i); }
+                        else if (buttonData.after_selection === 'use_ai') { const i = document.createElement('div'); i.className = 'button-indicator'; i.style.cssText = 'background:#7c3aed;color:white;'; i.textContent = '✦'; i.title = 'AI generates next options'; buttonDiv.appendChild(i); }
+                        else if (buttonData.action_type === 'audio') { const i = document.createElement('div'); i.className = 'button-indicator indicator-audio'; i.textContent = '♪'; i.title = 'Plays custom audio'; buttonDiv.appendChild(i); }
+                        else if (buttonData.speech_text) { const i = document.createElement('div'); i.className = 'button-indicator indicator-speech'; i.textContent = 'S'; i.title = 'Has speech text'; buttonDiv.appendChild(i); }
+                    } else { buttonDiv.textContent = 'Undefined'; buttonDiv.classList.add('undefined'); }
+                    if (!isBoardReadOnly(currentBoardData) && document.getElementById('boardType').value !== 'ai') {
+                        buttonDiv.addEventListener('click', () => openButtonEditor(row, col));
+                        buttonDiv.draggable = true;
+                        buttonDiv.addEventListener('dragstart', handleDragStart);
+                        buttonDiv.addEventListener('dragover', handleDragOver);
+                        buttonDiv.addEventListener('drop', handleDrop);
+                        buttonDiv.addEventListener('dragend', handleDragEnd);
+                    }
+                    grid.appendChild(buttonDiv);
+                }
+            }
+        }
+
+        function handleDragStart(e) { draggedButton = { row: parseInt(e.target.dataset.row, 10), col: parseInt(e.target.dataset.col, 10) }; e.target.classList.add('dragging'); }
+        function handleDragOver(e) { e.preventDefault(); e.target.classList.add('drop-target'); }
+        function handleDrop(e) { e.preventDefault(); e.target.classList.remove('drop-target'); if (!draggedButton) return; const targetRow = parseInt(e.target.dataset.row, 10); const targetCol = parseInt(e.target.dataset.col, 10); if (Number.isNaN(targetRow) || Number.isNaN(targetCol)) return; if (draggedButton.row === targetRow && draggedButton.col === targetCol) return; swapButtons(draggedButton.row, draggedButton.col, targetRow, targetCol); renderButtonGrid(); }
+        function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); draggedButton = null; }
+
+        function swapButtons(fromRow, fromCol, toRow, toCol) {
+            if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return;
+            const fromButton = findButtonAtPosition(fromRow, fromCol);
+            const toButton = findButtonAtPosition(toRow, toCol);
+            currentBoardData.buttons = currentBoardData.buttons.filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === fromRow && c === fromCol) && !(r === toRow && c === toCol); });
+            if (fromButton) { fromButton.row = toRow; fromButton.col = toCol; currentBoardData.buttons.push(fromButton); }
+            if (toButton) { toButton.row = fromRow; toButton.col = fromCol; currentBoardData.buttons.push(toButton); }
+        }
+
+        function populateTargetBoardDropdown(selectedValue = '') {
+            const select = document.getElementById('targetBoard');
+            select.innerHTML = '<option value="">No board navigation</option>';
+            allBoards.forEach(board => { const option = document.createElement('option'); option.value = board.id; option.textContent = board.label || board.id; if (board.id === selectedValue) option.selected = true; select.appendChild(option); });
+        }
+
+        function openButtonEditor(row, col) {
+            currentEditingButton = { row, col };
+            const buttonData = findButtonAtPosition(row, col) || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
+            document.getElementById('buttonText').value = buttonData.label || '';
+            document.getElementById('speechText').value = buttonData.speech_text || '';
+            document.getElementById('buttonHidden').checked = !!buttonData.hidden;
+            document.getElementById('assignedImageUrl').value = buttonData.image_url || '';
+            document.getElementById('customAudioFileUrl').value = buttonData.custom_audio_file || '';
+            document.getElementById('buttonBgColor').value = buttonData.background_color || '#FFFFFF';
+            // Derive after_selection from stored field or legacy action_type
+            let afterSel = buttonData.after_selection || (buttonData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
+            document.getElementById('afterSelection').value = afterSel;
+            document.getElementById('targetBoardWrapper').style.display = afterSel === 'navigate' ? '' : 'none';
+            populateTargetBoardDropdown(buttonData.target_board_id || '');
+            updateAssignedImagePreview(buttonData.image_url || '');
+            const audioStatus = document.getElementById('audioUploadStatus');
+            if (buttonData.custom_audio_file) { audioStatus.className = 'text-xs mt-1 text-green-600'; audioStatus.textContent = 'Audio file assigned'; audioStatus.classList.remove('hidden'); }
+            else audioStatus.classList.add('hidden');
+            document.getElementById('positionInfo').textContent = `Row ${row + 1}, Column ${col + 1}`;
+            updateButtonPreview();
+            document.getElementById('buttonEditorModal').classList.remove('hidden');
+        }
+
+        function closeButtonEditor() { document.getElementById('buttonEditorModal').classList.add('hidden'); currentEditingButton = null; }
+        function saveButtonEdit() {
+            if (!currentEditingButton || !currentBoardData) return;
+            const label = document.getElementById('buttonText').value.trim();
+            const speechText = document.getElementById('speechText').value.trim();
+            const afterSelection = document.getElementById('afterSelection').value;
+            const targetBoard = afterSelection === 'navigate' ? document.getElementById('targetBoard').value.trim() : '';
+            const customAudio = document.getElementById('customAudioFileUrl').value.trim();
+            const imageUrl = document.getElementById('assignedImageUrl').value.trim();
+            const bgColor = document.getElementById('buttonBgColor').value.trim() || '#FFFFFF';
+            const existingButton = findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
+            const textColor = (existingButton && existingButton.text_color) ? existingButton.text_color : '#000000';
+            const hidden = document.getElementById('buttonHidden').checked;
+            currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            if (label || speechText || targetBoard || customAudio || imageUrl) {
+                const actionType = customAudio ? 'audio' : 'announce';
+                currentBoardData.buttons.push({ id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`, label: label || `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`, row: currentEditingButton.row, col: currentEditingButton.col, speech_text: speechText || null, after_selection: afterSelection, action_type: actionType, target_board_id: targetBoard || null, custom_audio_file: customAudio || null, special_function: null, image_url: imageUrl || null, background_color: bgColor, text_color: textColor, hidden });
+            }
+            renderButtonGrid();
+            closeButtonEditor();
+        }
+
+        function clearCurrentButton() {
+            if (!currentEditingButton || !currentBoardData) return;
+            currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            renderButtonGrid();
+            closeButtonEditor();
+        }
+
+        function updateButtonPreview() {
+            const preview = document.getElementById('buttonPreview');
+            const text = document.getElementById('buttonText').value.trim();
+            const speechText = document.getElementById('speechText').value.trim();
+            const targetBoard = document.getElementById('targetBoard').value.trim();
+            const customAudio = document.getElementById('customAudioFileUrl').value.trim();
+            const imageUrl = document.getElementById('assignedImageUrl').value.trim();
+            const bgColor = document.getElementById('buttonBgColor').value || '#FFFFFF';
+            if (text) {
+                let html = `<div class="visual-button has-content" style="background-color:${bgColor};">`;
+                if (imageUrl) {
+                    html += `<div style="position: relative; width: 100%; height: 80px; background-image: url('${imageUrl}'); background-size: cover; background-position: center; border-radius: 6px;">`;
+                    html += `<div style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: white; padding: 4px; font-size: 12px; text-align: center;">${escapeHtml(text)}</div>`;
+                    html += '</div>';
+                } else html += escapeHtml(text);
+                html += '</div>';
+                preview.innerHTML = html;
+            } else preview.innerHTML = '<div class="visual-button undefined">Undefined</div>';
+            const afterSelection = document.getElementById('afterSelection').value;
+            const actionText = afterSelection === 'navigate' ? 'Navigate to Target Board' : afterSelection === 'use_ai' ? 'Use AI to generate next options' : 'Do nothing (stay on current board)';
+            document.getElementById('buttonTypeInfo').textContent = afterSelection;
+            document.getElementById('actionInfo').textContent = actionText;
+        }
+
+        function openAIBulkBuilderModal() {
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
+            if (document.getElementById('boardType').value === 'ai') { showNotification('Switch Board Mode to Static to build button options', 'error'); return; }
+            aiBulkPreviewOptions = [];
+            document.getElementById('aiBulkPreviewList').textContent = 'No preview generated yet.';
+            document.getElementById('aiBulkPreviewMeta').textContent = '';
+            document.getElementById('aiBulkApplyBtn').disabled = true;
+            populateAIBulkTargetBoardDropdown();
+            handleAIBulkAfterSelectionChange();
+            document.getElementById('aiBulkBuilderModal').classList.remove('hidden');
+        }
+
+        function closeAIBulkBuilderModal() {
+            document.getElementById('aiBulkBuilderModal').classList.add('hidden');
+        }
+
+        function handleAIBulkAfterSelectionChange() {
+            const afterSelection = document.getElementById('aiBulkAfterSelection').value;
+            document.getElementById('aiBulkTargetBoardWrapper').classList.toggle('hidden', afterSelection !== 'navigate');
+        }
+
+        function populateAIBulkTargetBoardDropdown(selectedValue = '') {
+            const select = document.getElementById('aiBulkTargetBoard');
+            select.innerHTML = '<option value="">-- Select board --</option>';
+            allBoards.forEach(board => {
+                const option = document.createElement('option');
+                option.value = board.id;
+                option.textContent = board.label || board.id;
+                if (board.id === selectedValue) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        function normalizeAIBulkGeneratedOptions(rawData, maxCount) {
+            let source = [];
+            
+            // Handle different response structures
+            if (Array.isArray(rawData)) {
+                source = rawData;
+            } else if (typeof rawData === 'object' && rawData !== null) {
+                // If it's an object, try to extract an array from it
+                // Look for common keys that might contain the array
+                const arrayKeys = ['options', 'data', 'response', 'items', 'choices'];
+                for (const key of arrayKeys) {
+                    if (Array.isArray(rawData[key])) {
+                        source = rawData[key];
+                        console.log(`Extracted array from key "${key}"`);
+                        break;
+                    }
+                }
+                // If still no array found, and there are values that are arrays, use the first one
+                if (source.length === 0) {
+                    for (const [key, value] of Object.entries(rawData)) {
+                        if (Array.isArray(value) && value.length > 0) {
+                            source = value;
+                            console.log(`Extracted array from dynamic key "${key}"`);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            const seen = new Set();
+            const normalized = [];
+            source.forEach((item, idx) => {
+                const text = (typeof item === 'string')
+                    ? item.trim()
+                    : String(item?.option || item?.text || item?.summary || '').trim();
+                if (!text) {
+                    console.warn(`Option ${idx} has no text:`, item);
+                    return;
+                }
+                const key = text.toLowerCase();
+                if (seen.has(key)) {
+                    console.warn(`Duplicate option skipped: ${text}`);
+                    return;
+                }
+                seen.add(key);
+                normalized.push(text);
+            });
+            
+            console.log(`Normalized ${source.length} raw items → ${normalized.length} unique options (max: ${maxCount})`);
+            return normalized.slice(0, maxCount);
+        }
+
+        async function previewAIBulkOptions() {
+            const prompt = document.getElementById('aiBulkPrompt').value.trim();
+            const totalOptions = Math.min(84, Math.max(1, Number(document.getElementById('aiBulkTotalOptions').value) || 0));
+            const perRow = Math.min(12, Math.max(1, Number(document.getElementById('aiBulkOptionsPerRow').value) || 0));
+            if (!prompt) { showNotification('Enter a prompt first', 'error'); return; }
+            if (!totalOptions || !perRow) { showNotification('Enter valid option counts', 'error'); return; }
+
+            const previewList = document.getElementById('aiBulkPreviewList');
+            const previewMeta = document.getElementById('aiBulkPreviewMeta');
+            const previewBtn = document.getElementById('aiBulkPreviewBtn');
+            const applyBtn = document.getElementById('aiBulkApplyBtn');
+            previewList.textContent = 'Generating preview...';
+            previewMeta.textContent = '';
+            previewBtn.disabled = true;
+            applyBtn.disabled = true;
+
+            try {
+                const enhancedPrompt = `CRITICAL: Generate EXACTLY ${totalOptions} UNIQUE board button labels for AAC communication: ${prompt}\n\nREQUIREMENTS:\n1. Generate at least ${totalOptions} distinct, practical, usable options (NOT fewer)\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with an "option" key\n5. Each object MUST have at least an "option" key with the label text\n\nBE VERY EXPLICIT: If asked for ${totalOptions} options, return ${totalOptions} different options. Do not skimp on the count.\nReturn ONLY the JSON array - nothing else.`;
+                const response = await fetch('/llm', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ count: totalOptions, prompt: enhancedPrompt, response_format: 'json' }),
+                });
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || `HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                console.log('Raw LLM response:', data, 'Type:', typeof data, 'Is Array:', Array.isArray(data));
+                aiBulkPreviewOptions = normalizeAIBulkGeneratedOptions(data, totalOptions);
+                console.log('Normalized options:', aiBulkPreviewOptions, 'Count:', aiBulkPreviewOptions.length);
+                if (!aiBulkPreviewOptions.length) {
+                    previewList.textContent = 'No options returned. Try a different prompt.';
+                    showNotification('No preview options returned', 'error');
+                    return;
+                }
+                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map(opt => `<li>${escapeHtml(opt)}</li>`).join('')}</ol>`;
+                previewMeta.textContent = `${aiBulkPreviewOptions.length} option(s), ${perRow} per row`;
+                applyBtn.disabled = false;
+            } catch (error) {
+                console.error(error);
+                previewList.textContent = 'Preview failed. Please try again.';
+                showNotification('Preview failed: ' + error.message, 'error');
+            } finally {
+                previewBtn.disabled = false;
+            }
+        }
+
+        function findFirstCompletelyEmptyRow(buttons) {
+            const list = Array.isArray(buttons) ? buttons : [];
+            for (let row = 0; row < GRID_ROWS; row++) {
+                const hasAny = list.some(btn => Number(btn.row) === row && !!String(btn.label || '').trim());
+                if (!hasAny) return row;
+            }
+            return -1;
+        }
+
+        function buildGeneratedButtonPayload(label, row, col, config) {
+            const actionType = config.afterSelection === 'navigate' ? 'navigate' : 'announce';
+            return {
+                id: `btn_${row}_${col}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                label,
+                row,
+                col,
+                speech_text: label,
+                after_selection: config.afterSelection,
+                action_type: actionType,
+                target_board_id: config.afterSelection === 'navigate' ? config.targetBoardId : null,
+                custom_audio_file: null,
+                special_function: null,
+                image_url: null,
+                background_color: config.backgroundColor,
+                text_color: '#000000',
+                hidden: false,
+            };
+        }
+
+        function applyAIBulkOptions() {
+            if (!currentBoardData || isBoardReadOnly(currentBoardData)) return;
+            if (!aiBulkPreviewOptions.length) { showNotification('Preview options first', 'error'); return; }
+
+            const perRow = Math.min(12, Math.max(1, Number(document.getElementById('aiBulkOptionsPerRow').value) || 1));
+            const afterSelection = document.getElementById('aiBulkAfterSelection').value;
+            const targetBoardId = document.getElementById('aiBulkTargetBoard').value.trim();
+            const backgroundColor = document.getElementById('aiBulkBgColor').value.trim() || '#FFFFFF';
+            if (afterSelection === 'navigate' && !targetBoardId) {
+                showNotification('Select a target board for Navigate', 'error');
                 return;
             }
 
-            filtered.forEach((board) => {
-                const div = document.createElement('div');
-                div.className = 'board-item' + (board.id === selectedBoardId ? ' selected' : '');
-                div.innerHTML = '<div class="font-medium text-sm">' + escapeHtml(board.label || board.id) + '</div>' +
-                    '<div class="text-xs text-gray-500">' + escapeHtml(board.id) + ' · ' + escapeHtml(board.board_type || 'ai') + '</div>';
-                div.addEventListener('click', () => selectBoard(board.id));
-                list.appendChild(div);
-            });
-        }
+            const existingButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            const hasExistingDefined = existingButtons.some(btn => !!String(btn.label || '').trim());
+            let mode = 'replace';
+            if (hasExistingDefined) {
+                const choice = window.prompt('Existing buttons found. Type "add" to add below existing rows, or "replace" to replace existing buttons.', 'add');
+                if (!choice) return;
+                const normalizedChoice = choice.trim().toLowerCase();
+                if (normalizedChoice !== 'add' && normalizedChoice !== 'replace') {
+                    showNotification('Please enter add or replace', 'error');
+                    return;
+                }
+                mode = normalizedChoice;
+            }
 
-        function selectBoard(boardId) {
-            const board = boards.find(b => b.id === boardId);
-            if (!board) return;
-            selectedBoardId = boardId;
-            isNewBoard = false;
-            renderBoardList();
-            bindBoardToEditor(board);
-        }
+            if (mode === 'replace') {
+                currentBoardData.buttons = [];
+            }
 
-        function createNewDraftBoard() {
-            selectedBoardId = '__new__';
-            isNewBoard = true;
-            renderBoardList();
-            bindBoardToEditor({
-                id: '',
-                label: 'New Board',
-                board_type: 'ai',
-                owner_scope: 'user',
-                hidden: false,
-                llm_prompt: '',
-                prompt_category: '',
-                special_function: '',
-                static_options: '',
-                default_columns: 12,
-                max_rows: 7,
-                buttons: []
-            });
-        }
+            const workingButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            const startRow = mode === 'add' ? findFirstCompletelyEmptyRow(workingButtons) : 0;
+            if (startRow < 0) {
+                showNotification('No empty row available to add options', 'error');
+                return;
+            }
 
-        function bindBoardToEditor(board) {
-            document.getElementById('emptyState').style.display = 'none';
-            document.getElementById('editor').style.display = '';
+            const slots = [];
+            for (let row = startRow; row < GRID_ROWS; row++) {
+                for (let col = 0; col < perRow; col++) {
+                    const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
+                    if (!occupied) slots.push({ row, col });
+                }
+            }
+            if (!slots.length) {
+                showNotification('No space available for generated options', 'error');
+                return;
+            }
 
-            document.getElementById('boardId').value = board.id || '(auto-generated on create)';
-            document.getElementById('boardLabel').value = board.label || '';
-            document.getElementById('boardType').value = board.board_type || 'ai';
-            document.getElementById('ownerScope').value = board.owner_scope || 'user';
-            document.getElementById('defaultColumns').value = Number(board.default_columns || 12);
-            document.getElementById('maxRows').value = Number(board.max_rows || 7);
-            document.getElementById('promptCategory').value = board.prompt_category || '';
-            document.getElementById('specialFunction').value = board.special_function || '';
-            document.getElementById('llmPrompt').value = board.llm_prompt || '';
-            document.getElementById('staticOptions').value = board.static_options || '';
+            const applyCount = Math.min(aiBulkPreviewOptions.length, slots.length);
+            const bulkConfig = { afterSelection, targetBoardId, backgroundColor };
+            for (let i = 0; i < applyCount; i++) {
+                const slot = slots[i];
+                const label = aiBulkPreviewOptions[i];
+                workingButtons.push(buildGeneratedButtonPayload(label, slot.row, slot.col, bulkConfig));
+            }
 
-            renderButtonsTable(Array.isArray(board.buttons) ? board.buttons : []);
-        }
-
-        function renderButtonsTable(buttons) {
-            const tbody = document.getElementById('buttonsTableBody');
-            tbody.innerHTML = '';
-            buttons.forEach((btn, index) => {
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><input class="field" data-k="label" value="${escapeHtml(btn.label || '')}"></td>
-                    <td>
-                        <select class="field" data-k="action_type">
-                            <option value="announce" ${btn.action_type === 'announce' ? 'selected' : ''}>announce</option>
-                            <option value="navigate" ${btn.action_type === 'navigate' ? 'selected' : ''}>navigate</option>
-                            <option value="audio" ${btn.action_type === 'audio' ? 'selected' : ''}>audio</option>
-                            <option value="special" ${btn.action_type === 'special' ? 'selected' : ''}>special</option>
-                        </select>
-                    </td>
-                    <td>${renderBoardTargetSelect(btn.target_board_id)}</td>
-                    <td><input class="field" data-k="speech_text" value="${escapeHtml(btn.speech_text || '')}"></td>
-                    <td><input class="field" data-k="custom_audio_file" value="${escapeHtml(btn.custom_audio_file || '')}"></td>
-                    <td><input class="field" data-k="image_url" value="${escapeHtml(btn.image_url || '')}"></td>
-                    <td><input class="field" data-k="background_color" value="${escapeHtml(btn.background_color || '#FFFFFF')}"></td>
-                    <td><input class="field" data-k="text_color" value="${escapeHtml(btn.text_color || '#000000')}"></td>
-                    <td><input type="checkbox" data-k="hidden" ${btn.hidden ? 'checked' : ''}></td>
-                    <td><button class="btn btn-danger" data-action="delete-row">X</button></td>
-                `;
-                tr.dataset.rowIndex = String(index);
-                tbody.appendChild(tr);
-            });
-
-            tbody.querySelectorAll('[data-action="delete-row"]').forEach((btn) => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const tr = e.currentTarget.closest('tr');
-                    if (tr) tr.remove();
-                });
-            });
-        }
-
-        function renderBoardTargetSelect(selectedValue) {
-            const opts = ['<option value="">-- none --</option>']
-                .concat(boards.map(b => {
-                    const selected = b.id === selectedValue ? 'selected' : '';
-                    return '<option value="' + escapeHtml(b.id) + '" ' + selected + '>' + escapeHtml(b.label || b.id) + '</option>';
-                }))
-                .join('');
-            return '<select class="field" data-k="target_board_id">' + opts + '</select>';
-        }
-
-        function addBoardButtonRow() {
-            const tbody = document.getElementById('buttonsTableBody');
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td><input class="field" data-k="label" value=""></td>
-                <td>
-                    <select class="field" data-k="action_type">
-                        <option value="announce" selected>announce</option>
-                        <option value="navigate">navigate</option>
-                        <option value="audio">audio</option>
-                        <option value="special">special</option>
-                    </select>
-                </td>
-                <td>${renderBoardTargetSelect('')}</td>
-                <td><input class="field" data-k="speech_text" value=""></td>
-                <td><input class="field" data-k="custom_audio_file" value=""></td>
-                <td><input class="field" data-k="image_url" value=""></td>
-                <td><input class="field" data-k="background_color" value="#FFFFFF"></td>
-                <td><input class="field" data-k="text_color" value="#000000"></td>
-                <td><input type="checkbox" data-k="hidden"></td>
-                <td><button class="btn btn-danger" data-action="delete-row">X</button></td>
-            `;
-            tbody.appendChild(tr);
-            tr.querySelector('[data-action="delete-row"]').addEventListener('click', (e) => {
-                e.preventDefault();
-                tr.remove();
-            });
-        }
-
-        function collectButtonsFromTable() {
-            const rows = Array.from(document.querySelectorAll('#buttonsTableBody tr'));
-            return rows.map((row, index) => {
-                const get = (k) => row.querySelector('[data-k="' + k + '"]');
-                return {
-                    id: 'btn_' + (index + 1),
-                    label: (get('label')?.value || '').trim() || ('Button ' + (index + 1)),
-                    speech_text: (get('speech_text')?.value || '').trim() || null,
-                    action_type: (get('action_type')?.value || 'announce'),
-                    target_board_id: (get('target_board_id')?.value || '').trim() || null,
-                    custom_audio_file: (get('custom_audio_file')?.value || '').trim() || null,
-                    image_url: (get('image_url')?.value || '').trim() || null,
-                    background_color: (get('background_color')?.value || '#FFFFFF').trim() || '#FFFFFF',
-                    text_color: (get('text_color')?.value || '#000000').trim() || '#000000',
-                    hidden: !!get('hidden')?.checked
-                };
-            });
+            currentBoardData.buttons = workingButtons;
+            renderButtonGrid();
+            closeAIBulkBuilderModal();
+            if (applyCount < aiBulkPreviewOptions.length) {
+                showNotification(`Applied ${applyCount} options (grid full)`, 'success');
+            } else {
+                showNotification(`Applied ${applyCount} options`, 'success');
+            }
         }
 
         async function saveBoard() {
-            if (!document.getElementById('editor').offsetParent) return;
-
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
+            const boardType = document.getElementById('boardType').value;
             const payload = {
                 label: document.getElementById('boardLabel').value.trim() || 'Untitled Board',
-                board_type: document.getElementById('boardType').value,
-                owner_scope: document.getElementById('ownerScope').value,
+                board_type: boardType,
+                owner_scope: 'user',
                 hidden: false,
-                llm_prompt: document.getElementById('llmPrompt').value || null,
-                prompt_category: document.getElementById('promptCategory').value || null,
-                special_function: document.getElementById('specialFunction').value || null,
-                static_options: document.getElementById('staticOptions').value || null,
-                default_columns: Number(document.getElementById('defaultColumns').value || 12),
-                max_rows: Number(document.getElementById('maxRows').value || 7),
-                buttons: collectButtonsFromTable()
+                llm_prompt: boardType === 'ai' ? (document.getElementById('llmPrompt').value.trim() || null) : null,
+                prompt_category: null,
+                prompt_topic: boardType === 'ai' ? (document.getElementById('promptTopic').value.trim() || null) : null,
+                prompt_examples: boardType === 'ai' ? (document.getElementById('promptExamples').value.trim() || null) : null,
+                prompt_exclusions: boardType === 'ai' ? (document.getElementById('promptExclusions').value.trim() || null) : null,
+                static_options: null,
+                special_function: null,
+                default_columns: 12,
+                max_rows: 7,
+                buttons: boardType === 'ai' ? [] : (currentBoardData.buttons || []),
+                set_as_home: !!document.getElementById('setAsHomeBoard').checked,
             };
-
             try {
-                let res;
-                if (isNewBoard) {
-                    res = await fetch('/api/tap-interface/boards', {
-                        method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload)
-                    });
-                } else {
-                    res = await fetch('/api/tap-interface/boards/' + encodeURIComponent(selectedBoardId), {
-                        method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(payload)
-                    });
-                }
-
-                if (!res.ok) {
-                    const error = await res.json().catch(() => ({}));
-                    throw new Error(error.detail || ('HTTP ' + res.status));
-                }
-
-                const body = await res.json();
+                let response;
+                if (currentBoardData.id) response = await fetch('/api/tap-interface/boards/' + encodeURIComponent(currentBoardData.id), { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(payload) });
+                else response = await fetch('/api/tap-interface/boards', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) });
+                if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${response.status}`); }
+                const body = await response.json();
+                boardSettings = body.board_settings || boardSettings;
                 await loadBoards();
-                if (body.board && body.board.id) {
-                    selectBoard(body.board.id);
-                    selectedBoardId = body.board.id;
-                    isNewBoard = false;
-                }
+                if (body.board && body.board.id) { document.getElementById('selectBoard').value = body.board.id; handleBoardSelected(); }
                 showNotification('Board saved', 'success');
-            } catch (err) {
-                console.error(err);
-                showNotification('Save failed: ' + err.message, 'error');
-            }
+            } catch (error) { console.error(error); showNotification('Save failed: ' + error.message, 'error'); }
         }
 
         async function deleteBoard() {
-            if (isNewBoard || !selectedBoardId) {
-                showNotification('Select an existing board first', 'error');
-                return;
-            }
-            if (!confirm('Delete this board? Board targets pointing to it will be cleared.')) return;
-
+            if (!currentBoardData || !currentBoardData.id) { showNotification('Select an existing board first', 'error'); return; }
+            if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
+            if (!confirm(`Delete board "${currentBoardData.label || currentBoardData.id}"?`)) return;
             try {
-                const res = await fetch('/api/tap-interface/boards/' + encodeURIComponent(selectedBoardId), {
-                    method: 'DELETE', headers: getAuthHeaders()
-                });
-                if (!res.ok) {
-                    const error = await res.json().catch(() => ({}));
-                    throw new Error(error.detail || ('HTTP ' + res.status));
-                }
-                selectedBoardId = null;
-                isNewBoard = false;
+                const response = await fetch('/api/tap-interface/boards/' + encodeURIComponent(currentBoardData.id), { method: 'DELETE', headers: getAuthHeaders(null) });
+                if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${response.status}`); }
+                currentBoardData = null;
                 await loadBoards();
-                document.getElementById('editor').style.display = 'none';
-                document.getElementById('emptyState').style.display = '';
+                clearBoardForm();
                 showNotification('Board deleted', 'success');
-            } catch (err) {
-                console.error(err);
-                showNotification('Delete failed: ' + err.message, 'error');
+            } catch (error) { console.error(error); showNotification('Delete failed: ' + error.message, 'error'); }
+        }
+
+        async function uploadButtonAudioFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const status = document.getElementById('audioUploadStatus');
+            status.className = 'text-xs mt-1 text-blue-600';
+            status.textContent = 'Uploading audio file...';
+            status.classList.remove('hidden');
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                const response = await fetch('/api/admin/upload-button-audio', { method: 'POST', headers: getAuthHeaders(null), body: formData });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                document.getElementById('customAudioFileUrl').value = result.audio_url;
+                status.className = 'text-xs mt-1 text-green-600';
+                status.textContent = `Audio uploaded: ${file.name}`;
+                updateButtonPreview();
+            } catch (error) {
+                console.error(error);
+                status.className = 'text-xs mt-1 text-red-600';
+                status.textContent = 'Audio upload failed';
+                document.getElementById('customAudioFileUrl').value = '';
             }
         }
 
-        function escapeHtml(value) {
-            return String(value || '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#039;');
+        function updateAssignedImagePreview(imageUrl) {
+            const preview = document.getElementById('assignedImagePreview');
+            const thumb = document.getElementById('assignedImageThumb');
+            const clearBtn = document.getElementById('clearImageBtn');
+            if (imageUrl) { preview.classList.remove('hidden'); clearBtn.classList.remove('hidden'); thumb.src = imageUrl; thumb.alt = 'Assigned image'; }
+            else { preview.classList.add('hidden'); clearBtn.classList.add('hidden'); thumb.src = ''; thumb.alt = ''; }
         }
+
+        function clearAssignedImage() { document.getElementById('assignedImageUrl').value = ''; updateAssignedImagePreview(''); updateButtonPreview(); }
+        function openImagePicker() { selectedImageUrl = null; document.getElementById('selectImageBtn').disabled = true; document.getElementById('imagePickerModal').classList.remove('hidden'); loadImages(); }
+        function closeImagePicker() { document.getElementById('imagePickerModal').classList.add('hidden'); document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; selectedImageUrl = null; }
+
+        async function loadImages(searchTerm = '', page = 0) {
+            const loadingIndicator = document.getElementById('imageLoadingIndicator');
+            const imageGrid = document.getElementById('imageGrid');
+            const resultsInfo = document.getElementById('imageResultsInfo');
+            const pageInfo = document.getElementById('imagePageInfo');
+            const prevBtn = document.getElementById('imagePrevPage');
+            const nextBtn = document.getElementById('imageNextPage');
+            try {
+                loadingIndicator.classList.remove('hidden');
+                imageGrid.innerHTML = '';
+                const params = new URLSearchParams({ page: String(page), limit: '48' });
+                if (searchTerm) params.append('search', searchTerm);
+                const response = await fetch('/api/admin/images/browse?' + params.toString(), { method: 'GET', headers: getAuthHeaders(null) });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                allImages = data.images || [];
+                currentImagePage = data.page || 0;
+                totalImagePages = data.total_pages || 0;
+                resultsInfo.textContent = `Showing ${allImages.length} of ${data.total_count || 0} images`;
+                pageInfo.textContent = `Page ${currentImagePage + 1} of ${Math.max(totalImagePages, 1)}`;
+                prevBtn.disabled = currentImagePage <= 0;
+                nextBtn.disabled = currentImagePage >= totalImagePages - 1;
+                renderImageGrid();
+            } catch (error) {
+                console.error(error);
+                resultsInfo.textContent = 'Error loading images';
+                imageGrid.innerHTML = '<div class="col-span-full text-center text-red-500 py-8">Failed to load images.</div>';
+            } finally {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        function renderImageGrid() {
+            const imageGrid = document.getElementById('imageGrid');
+            imageGrid.innerHTML = '';
+            allImages.forEach(image => {
+                const imageCard = document.createElement('div');
+                imageCard.className = 'relative cursor-pointer border-2 border-transparent hover:border-blue-500 rounded-md overflow-hidden bg-gray-100';
+                imageCard.onclick = () => selectImageInGrid(image.image_url, imageCard);
+                const displayName = image.subconcept || image.concept || 'Image';
+                imageCard.innerHTML = `<img src="${image.image_url}" alt="${escapeHtml(displayName)}" class="w-full h-20 object-cover" loading="lazy"><div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 truncate">${escapeHtml(displayName)}</div>`;
+                imageGrid.appendChild(imageCard);
+            });
+        }
+
+        function selectImageInGrid(imageUrl, cardElement) {
+            document.querySelectorAll('#imageGrid > div').forEach(card => { card.classList.remove('border-blue-500', 'bg-blue-50'); card.classList.add('border-transparent'); });
+            cardElement.classList.remove('border-transparent');
+            cardElement.classList.add('border-blue-500', 'bg-blue-50');
+            selectedImageUrl = imageUrl;
+            document.getElementById('selectImageBtn').disabled = false;
+        }
+
+        function selectAssignedImage() { if (!selectedImageUrl) return; document.getElementById('assignedImageUrl').value = selectedImageUrl; updateAssignedImagePreview(selectedImageUrl); updateButtonPreview(); closeImagePicker(); }
+        function searchImages() { currentImageSearch = document.getElementById('imageSearchInput').value.trim(); currentImagePage = 0; loadImages(currentImageSearch, 0); }
+        function clearImageSearch() { document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; loadImages('', 0); }
+        function navigateImagePage(direction) { const newPage = currentImagePage + direction; if (newPage >= 0 && newPage < totalImagePages) { currentImagePage = newPage; loadImages(currentImageSearch, newPage); } }
 
         function showNotification(message, type) {
-            const el = document.getElementById('notification');
-            el.textContent = message;
-            el.className = 'notification ' + type + ' show';
-            setTimeout(() => el.classList.remove('show'), 2500);
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type} show`;
+            setTimeout(() => notification.classList.remove('show'), 2500);
         }
+
+        function escapeHtml(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
     </script>
 </body>
 </html>
