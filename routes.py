@@ -28,6 +28,8 @@ STATIC_PAGES = [
     "threads.html",
     "tap_interface.html",
     "tap_interface_admin.html",
+    "tap_boards_menu_admin.html",
+    "tap_board_builder.html",
     "image_management.html",
     "help_admin.html",
     "avatar_admin.html",

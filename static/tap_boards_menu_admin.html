@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boards Menu Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f5; color: #333; }
+        .btn { padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; display: inline-block; transition: all 0.2s; }
+        .btn:hover { transform: translateY(-1px); }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-danger { background-color: #e74c3c; color: white; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .main-container { display: flex; height: calc(100vh - 56px); }
+        .sidebar { width: 350px; background-color: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow-y: auto; }
+        .tree-section { flex: 1; padding: 1rem; overflow-y: auto; }
+        .tree-section h3 { margin-bottom: 1rem; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
+        .tree-item { margin: 0.5rem 0; position: relative; }
+        .tree-button { display: flex; align-items: center; padding: 0.75rem; background-color: #f8f9fa; border: 2px solid #e9ecef; border-radius: 6px; cursor: pointer; transition: all 0.2s; word-wrap: break-word; min-height: 52px; margin-left: var(--depth, 0px); }
+        .drag-handle { width: 28px; min-width: 28px; height: 28px; border-radius: 6px; border: 1px solid #d6dce2; background: #ffffff; color: #6c7a89; display: inline-flex; align-items: center; justify-content: center; margin-right: 0.6rem; cursor: grab; user-select: none; -webkit-user-select: none; }
+        .drag-handle:hover { color: #2f3d4a; border-color: #b8c3ce; background: #f7f9fb; }
+        .drag-handle:active { cursor: grabbing; }
+        .tree-button:hover { border-color: #3498db; background-color: #e3f2fd; }
+        .tree-button.selected { border-color: #2ecc71; background-color: #d5f4e6; }
+        .tree-button.dragging { opacity: 0.5; transform: rotate(2deg); }
+        .tree-button.drag-over { border-color: #007bff; background-color: #e3f2fd; box-shadow: 0 0 0 2px rgba(0,123,255,0.25); position: relative; }
+        .tree-button.drag-over.child-mode { background-color: #e8f5e8; border-color: #4caf50; box-shadow: 0 0 0 2px rgba(76,175,80,0.25); }
+        .tree-button.drag-over::after { content: '↕️ Reorder'; position: absolute; top: 50%; right: 10px; transform: translateY(-50%); background: #ff9800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 12px; z-index: 1000; pointer-events: none; }
+        .tree-button.drag-over.child-mode::after { content: '➕ Add Child'; background: #4caf50; }
+        .button-label { flex: 1; font-weight: 500; font-size: 0.9rem; }
+        .add-button { margin: 1rem 0; text-align: center; }
+        .content-area { flex: 1; background-color: white; display: flex; flex-direction: column; overflow-y: auto; }
+        .content-header { padding: 1.5rem 2rem 1rem; border-bottom: 1px solid #eee; background-color: #f8f9fa; }
+        .content-header h2 { margin: 0; color: #2c3e50; }
+        .content-header p { margin: 0.5rem 0 0; color: #7f8c8d; font-size: 0.9rem; }
+        .form-container { padding: 2rem; flex: 1; }
+        .form-group { margin-bottom: 1.5rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 0.75rem; border: 2px solid #e9ecef; border-radius: 4px; font-size: 0.9rem; transition: border-color 0.2s; background-color: white; }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus { outline: none; border-color: #3498db; }
+        .color-input-container { display: flex; gap: 0.5rem; align-items: center; }
+        .color-input { width: 50px; height: 40px; padding: 0; border: 2px solid #e9ecef; border-radius: 4px; cursor: pointer; -webkit-appearance: none; appearance: none; }
+        .color-input::-webkit-color-swatch-wrapper { padding: 0; }
+        .color-input::-webkit-color-swatch { border: none; border-radius: 2px; }
+        .form-actions { display: flex; gap: 1rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #eee; }
+        .notification { position: fixed; top: 1rem; right: 1rem; padding: 1rem 1.5rem; border-radius: 6px; color: white; font-weight: 600; z-index: 1000; transform: translateX(400px); transition: transform 0.3s ease; }
+        .notification.show { transform: translateX(0); }
+        .notification.success { background-color: #27ae60; }
+        .notification.error { background-color: #e74c3c; }
+        .welcome-message { text-align: center; padding: 3rem 2rem; color: #7f8c8d; }
+        .welcome-message h3 { margin-bottom: 1rem; color: #2c3e50; }
+        .welcome-message ul { text-align: left; max-width: 480px; margin: 0 auto; line-height: 1.8; }
+        .root-drop-zone { min-height: 20px; margin-bottom: 1rem; padding: 10px; border: 2px dashed #ccc; border-radius: 4px; text-align: center; color: #999; transition: all 0.2s; opacity: 0; visibility: hidden; pointer-events: none; }
+        .root-drop-zone.show { opacity: 1; visibility: visible; pointer-events: auto; }
+        .root-drop-zone.drag-over { border-color: #3498db; background-color: rgba(52,152,219,0.1); color: #2980b9; }
+        .hidden-badge { font-size: 0.7rem; background: #fbbf24; color: #92400e; border-radius: 3px; padding: 1px 5px; margin-left: 6px; }
+    </style>
+</head>
+<body>
+    <div class="page-banner flex items-center justify-between bg-[#002244] text-[#FB4F14] px-4 py-2 shadow" style="min-height:56px;">
+        <div class="flex items-center gap-2">
+            <button onclick="window.location.href='tap_interface.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Return to Tap Interface">
+                <i class="fas fa-house mr-2"></i>Home
+            </button>
+            <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back to Board Builder">
+                <i class="fas fa-table-cells-large mr-2"></i>Board Builder
+            </button>
+            <h1 class="ml-2 text-xl font-semibold">Boards Menu Administration</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
+            <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
+                <i class="fas fa-save mr-1"></i>Save
+            </button>
+            <button class="h-10 px-4 flex items-center justify-center text-white bg-gray-500 rounded-full text-sm hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" id="cancelBtn" disabled>
+                <i class="fas fa-times mr-1"></i>Cancel
+            </button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="tree-section">
+                <h3>Menu Structure</h3>
+                <div class="root-drop-zone" id="rootDropZone">Drop here to move to root level</div>
+                <div id="treeContainer"></div>
+                <div class="add-button">
+                    <button class="btn btn-primary" id="addMenuItemBtn">+ Add Menu Item</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="content-area">
+            <div class="content-header">
+                <h2 id="contentTitle">Select a menu item to edit</h2>
+                <p id="contentDescription">Choose an item from the hierarchy on the left to modify its properties.</p>
+            </div>
+            <div class="form-container">
+                <div id="welcomeMessage" class="welcome-message">
+                    <h3>Welcome to Boards Menu Admin</h3>
+                    <p>Select a menu item from the tree on the left to start editing, or add a new item.</p>
+                    <br>
+                    <p><strong>Drag &amp; Drop:</strong></p>
+                    <ul>
+                        <li>Use the <strong>drag handle</strong> (<i class="fas fa-grip-vertical"></i>) to reorder items</li>
+                        <li>Drag onto another item to <strong>reorder</strong> (orange &ldquo;↕️ Reorder&rdquo;)</li>
+                        <li>Hold <strong>Shift</strong> while dropping to make it a <strong>child</strong> (green &ldquo;➕ Add Child&rdquo;)</li>
+                        <li>Drop on the root zone to move item to <strong>top level</strong></li>
+                    </ul>
+                </div>
+
+                <div id="itemForm" style="display:none;">
+                    <form id="editForm" onsubmit="return false;">
+                        <div class="form-group">
+                            <label for="itemLabel">Menu Label *</label>
+                            <input type="text" id="itemLabel" required placeholder="Label shown in the navigation menu">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="boardTarget">Board Target</label>
+                            <div style="display:flex; gap:0.5rem; align-items:center;">
+                                <select id="boardTarget" style="flex:1;">
+                                <option value="">— None / Category only —</option>
+                                </select>
+                                <button type="button" id="openBoardBuilderBtn" class="btn btn-primary" style="padding:0.7rem 0.9rem;">Open</button>
+                            </div>
+                            <small style="color:#7f8c8d;font-size:0.8rem;">The board displayed when the user taps this menu item.</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="speechText">Speech Text (Optional)</label>
+                            <input type="text" id="speechText" placeholder="Text to speak aloud (if different from label)">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="imageUrl">Image URL (Optional)</label>
+                            <input type="url" id="imageUrl" placeholder="https://example.com/icon.png">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="customAudioFile">Custom Audio File URL (Optional)</label>
+                            <input type="url" id="customAudioFile" placeholder="https://storage.googleapis.com/.../audio.mp3">
+                            <small style="color:#7f8c8d;font-size:0.8rem;">Direct URL to an MP3 or WAV file played when this item is activated.</small>
+                        </div>
+
+                        <div style="display:flex;gap:1rem;">
+                            <div class="form-group" style="flex:1;">
+                                <label for="backgroundColor">Background Color</label>
+                                <div class="color-input-container">
+                                    <input type="color" id="backgroundColorPicker" class="color-input" value="#FFFFFF">
+                                    <input type="text" id="backgroundColor" placeholder="#FFFFFF" style="flex:1;">
+                                </div>
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label for="textColor">Text Color</label>
+                                <div class="color-input-container">
+                                    <input type="color" id="textColorPicker" class="color-input" value="#000000">
+                                    <input type="text" id="textColor" placeholder="#000000" style="flex:1;">
+                                </div>
+                            </div>
+                            <div class="form-group" style="flex:0 0 auto;display:flex;flex-direction:column;justify-content:flex-end;">
+                                <div style="display:flex;align-items:center;height:42px;margin-bottom:2px;">
+                                    <input type="checkbox" id="hiddenCheck" style="width:auto;margin-right:0.5rem;">
+                                    <label for="hiddenCheck" style="margin-bottom:0;cursor:pointer;">Hidden</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-danger" id="deleteItemBtn">Delete Item</button>
+                            <button type="button" class="btn btn-primary" id="addChildBtn">Add Child Item</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+    <script>
+        let authToken = null, currentAacUserId = null;
+        let boards = [], menuTree = [], originalMenuTree = [];
+        let selectedPath = null, draggedPath = null, hasUnsavedChanges = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('saveBtn').addEventListener('click', saveChanges);
+            document.getElementById('cancelBtn').addEventListener('click', cancelChanges);
+            document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
+            setupColorInputs();
+            setupFormListeners();
+            setupDragAndDrop();
+            initAuth();
+        });
+
+        async function initAuth() {
+            try {
+                const res = await fetch('/api/frontend-config');
+                const data = await res.json();
+                const cfg = data.firebase_config || data;
+                if (!cfg || !cfg.apiKey) throw new Error('Missing firebase config');
+                if (!firebase.apps.length) firebase.initializeApp(cfg);
+                firebase.auth().onAuthStateChanged(async (user) => {
+                    if (!user) { window.location.href = '/auth.html?redirect=' + encodeURIComponent(window.location.pathname); return; }
+                    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+                    if (!currentAacUserId) { window.location.href = 'auth.html'; return; }
+                    authToken = await user.getIdToken();
+                    await loadBoardsMenu();
+                });
+            } catch (err) { console.error(err); showNotification('Failed to initialize authentication', 'error'); }
+        }
+
+        function getAuthHeaders() {
+            const h = { 'Content-Type': 'application/json' };
+            if (authToken) h['Authorization'] = 'Bearer ' + authToken;
+            if (currentAacUserId) h['X-User-ID'] = currentAacUserId;
+            const a = sessionStorage.getItem('adminTargetAccountId');
+            if (a) h['X-Admin-Target-Account'] = a;
+            return h;
+        }
+
+        async function loadBoardsMenu() {
+            try {
+                const res = await fetch('/api/tap-interface/boards-menu', { headers: getAuthHeaders() });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const payload = await res.json();
+                boards = Array.isArray(payload.boards) ? payload.boards : [];
+                menuTree = Array.isArray(payload.boards_menu) ? payload.boards_menu : [];
+                originalMenuTree = JSON.parse(JSON.stringify(menuTree));
+                markAsSaved();
+                renderTree();
+                showNotification('Loaded successfully', 'success');
+            } catch (err) { console.error(err); showNotification('Failed to load: ' + err.message, 'error'); }
+        }
+
+        async function saveChanges() {
+            if (!hasUnsavedChanges) return;
+            if (selectedPath) flushFormToNode(selectedPath);
+            try {
+                const res = await fetch('/api/tap-interface/boards-menu', {
+                    method: 'POST', headers: getAuthHeaders(),
+                    body: JSON.stringify({ boards_menu: serializeTree(menuTree) })
+                });
+                if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.detail || 'HTTP ' + res.status); }
+                originalMenuTree = JSON.parse(JSON.stringify(menuTree));
+                markAsSaved();
+                renderTree();
+                showNotification('Saved successfully', 'success');
+            } catch (err) { console.error(err); showNotification('Save failed: ' + err.message, 'error'); }
+        }
+
+        function cancelChanges() {
+            menuTree = JSON.parse(JSON.stringify(originalMenuTree));
+            selectedPath = null;
+            markAsSaved();
+            renderTree();
+            showWelcome();
+        }
+
+        function markAsChanged() {
+            hasUnsavedChanges = true;
+            document.getElementById('saveBtn').disabled = false;
+            document.getElementById('cancelBtn').disabled = false;
+            document.getElementById('changesIndicator').style.display = 'block';
+        }
+
+        function markAsSaved() {
+            hasUnsavedChanges = false;
+            document.getElementById('saveBtn').disabled = true;
+            document.getElementById('cancelBtn').disabled = true;
+            document.getElementById('changesIndicator').style.display = 'none';
+        }
+
+        // ── Tree rendering ────────────────────────────────────────────────────────
+        function renderTree() {
+            const container = document.getElementById('treeContainer');
+            container.innerHTML = '';
+            if (!menuTree.length) {
+                container.innerHTML = '<p style="color:#999;font-size:0.85rem;padding:0.5rem;">No items yet. Click &quot;+ Add Menu Item&quot;.</p>';
+                return;
+            }
+            menuTree.forEach((node, i) => renderNode(node, [i], 0, container));
+        }
+
+                function renderNode(node, path, depth, container) {
+                        const isSelected = selectedPath && JSON.stringify(selectedPath) === JSON.stringify(path);
+                        const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+
+                        const btn = document.createElement('div');
+                        btn.className = 'tree-button' + (isSelected ? ' selected' : '');
+                        btn.style.setProperty('--depth', (depth * 22) + 'px');
+                        btn.setAttribute('draggable', 'false');
+                        btn.dataset.path = JSON.stringify(path);
+
+                        const folderIcon = hasChildren ? 'fa-folder' : 'fa-file-alt';
+                        btn.innerHTML =
+                                '<div class="drag-handle" draggable="true" data-path=\'' + JSON.stringify(path) + '\' title="Drag to reorder"><i class="fas fa-grip-vertical"></i></div>' +
+                                '<i class="fas ' + folderIcon + '" style="color:#6b7280;margin-right:6px;font-size:0.85rem;"></i>' +
+                                '<span class="button-label">' + escapeHtml(node.label || '(unlabeled)') + '</span>' +
+                                (node.hidden ? ' <span class="hidden-badge">HIDDEN</span>' : '');
+
+                        container.appendChild(btn);
+                        btn.addEventListener('click', (e) => { if (e.target.closest('.drag-handle')) return; selectItem(path); });
+
+                        const children = Array.isArray(node.children) ? node.children : [];
+                        children.forEach((child, ci) => renderNode(child, [...path, ci], depth + 1, container));
+                }
+
+        // ── Selection / form ──────────────────────────────────────────────────────
+        function selectItem(path) {
+            if (selectedPath) flushFormToNode(selectedPath);
+            selectedPath = path;
+            const node = getNodeByPath(path);
+            if (!node) return;
+
+            document.getElementById('contentTitle').textContent = 'Editing: ' + (node.label || '(unlabeled)');
+            document.getElementById('contentDescription').textContent = 'Tree path: ' + path.join(' › ');
+
+            document.getElementById('itemLabel').value = node.label || '';
+            populateBoardSelect(node.board_id);
+            document.getElementById('speechText').value = node.speech_text || '';
+            document.getElementById('imageUrl').value = node.image_url || '';
+            document.getElementById('customAudioFile').value = node.custom_audio_file || '';
+            setColorField('backgroundColor', 'backgroundColorPicker', node.background_color || '#FFFFFF');
+            setColorField('textColor', 'textColorPicker', node.text_color || '#000000');
+            document.getElementById('hiddenCheck').checked = !!node.hidden;
+
+            document.getElementById('welcomeMessage').style.display = 'none';
+            document.getElementById('itemForm').style.display = 'block';
+            document.getElementById('deleteItemBtn').onclick = () => deleteItem(path);
+            document.getElementById('addChildBtn').onclick = () => addChildItem(path);
+
+            document.querySelectorAll('.tree-button.selected').forEach(el => el.classList.remove('selected'));
+            document.querySelectorAll('.tree-button[data-path=\'' + JSON.stringify(path) + '\']').forEach(el => el.classList.add('selected'));
+        }
+
+        function showWelcome() {
+            selectedPath = null;
+            document.getElementById('welcomeMessage').style.display = '';
+            document.getElementById('itemForm').style.display = 'none';
+            document.getElementById('contentTitle').textContent = 'Select a menu item to edit';
+            document.getElementById('contentDescription').textContent = 'Choose an item from the hierarchy on the left to modify its properties.';
+        }
+
+        function flushFormToNode(path) {
+            const node = getNodeByPath(path);
+            if (!node) return;
+            node.label = document.getElementById('itemLabel').value;
+            node.board_id = document.getElementById('boardTarget').value || null;
+            node.speech_text = document.getElementById('speechText').value || null;
+            node.image_url = document.getElementById('imageUrl').value || null;
+            node.custom_audio_file = document.getElementById('customAudioFile').value || null;
+            node.background_color = document.getElementById('backgroundColor').value || '#FFFFFF';
+            node.text_color = document.getElementById('textColor').value || '#000000';
+            node.hidden = document.getElementById('hiddenCheck').checked;
+        }
+
+        function setupFormListeners() {
+            ['itemLabel','boardTarget','speechText','imageUrl','customAudioFile','backgroundColor','textColor','hiddenCheck'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.addEventListener('change', markAsChanged); el.addEventListener('input', markAsChanged); }
+            });
+            const boardTargetSel = document.getElementById('boardTarget');
+            if (boardTargetSel) { boardTargetSel.addEventListener('change', updateOpenBoardBtnState); }
+
+            const openBoardBuilderBtn = document.getElementById('openBoardBuilderBtn');
+            if (openBoardBuilderBtn) {
+                openBoardBuilderBtn.addEventListener('click', () => {
+                    const targetBoardId = (document.getElementById('boardTarget').value || '').trim();
+                    if (targetBoardId) {
+                        window.location.href = 'tap_board_builder.html?board_id=' + encodeURIComponent(targetBoardId);
+                    } else {
+                        window.location.href = 'tap_board_builder.html';
+                    }
+                });
+            }
+        }
+
+        function updateOpenBoardBtnState() {
+            const sel = document.getElementById('boardTarget');
+            const btn = document.getElementById('openBoardBuilderBtn');
+            if (!btn) return;
+            const selected = sel && sel.options[sel.selectedIndex];
+            const boardType = selected ? (selected.dataset.boardType || '') : '';
+            const source = selected ? (selected.dataset.source || '') : '';
+            const isReadOnly = boardType === 'system' || source === 'legacy_category';
+            btn.disabled = isReadOnly;
+            btn.title = isReadOnly ? 'Cannot open built-in / standard boards in the Board Builder' : 'Open this board in the Board Builder';
+            btn.style.opacity = isReadOnly ? '0.45' : '';
+            btn.style.cursor = isReadOnly ? 'not-allowed' : '';
+        }
+
+        function populateBoardSelect(selectedId) {
+            const sel = document.getElementById('boardTarget');
+            sel.innerHTML = '<option value="">— None / Category only —</option>';
+            boards.forEach(b => {
+                const opt = document.createElement('option');
+                opt.value = b.id;
+                opt.dataset.boardType = b.board_type || '';
+                opt.dataset.source = b.source || '';
+                opt.textContent = (b.label || b.id) + (b.board_type ? ' (' + b.board_type + ')' : '');
+                if (b.id === selectedId) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            updateOpenBoardBtnState();
+        }
+
+        function setColorField(textId, pickerId, value) {
+            const hex = /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#FFFFFF';
+            document.getElementById(textId).value = hex;
+            document.getElementById(pickerId).value = hex;
+        }
+
+        function setupColorInputs() {
+            document.getElementById('backgroundColorPicker').addEventListener('input', (e) => { document.getElementById('backgroundColor').value = e.target.value; markAsChanged(); });
+            document.getElementById('backgroundColor').addEventListener('input', (e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('backgroundColorPicker').value = e.target.value; markAsChanged(); });
+            document.getElementById('textColorPicker').addEventListener('input', (e) => { document.getElementById('textColor').value = e.target.value; markAsChanged(); });
+            document.getElementById('textColor').addEventListener('input', (e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('textColorPicker').value = e.target.value; markAsChanged(); });
+        }
+
+        // ── Add / Delete ──────────────────────────────────────────────────────────
+        function addMenuItem() {
+            if (selectedPath) flushFormToNode(selectedPath);
+            menuTree.push(makeNewItem());
+            markAsChanged();
+            renderTree();
+            selectItem([menuTree.length - 1]);
+        }
+
+        function addChildItem(parentPath) {
+            if (selectedPath) flushFormToNode(selectedPath);
+            const parent = getNodeByPath(parentPath);
+            if (!parent) return;
+            if (!Array.isArray(parent.children)) parent.children = [];
+            parent.children.push(makeNewItem());
+            const childPath = [...parentPath, parent.children.length - 1];
+            markAsChanged();
+            renderTree();
+            selectItem(childPath);
+        }
+
+        function deleteItem(path) {
+            if (!confirm('Delete this menu item and all its children?')) return;
+            removeNodeFromPath(path);
+            selectedPath = null;
+            markAsChanged();
+            renderTree();
+            showWelcome();
+        }
+
+        function makeNewItem() {
+            return { id: 'menu_custom_' + Date.now(), label: 'New Menu Item', board_id: boards.length ? boards[0].id : null, source: 'custom', source_button_id: null, sort_order: 0, hidden: false, image_url: null, speech_text: null, custom_audio_file: null, background_color: '#FFFFFF', text_color: '#000000', children: [] };
+        }
+
+        // ── Drag & Drop ───────────────────────────────────────────────────────────
+        function setupDragAndDrop() {
+            const rootDropZone = document.getElementById('rootDropZone');
+
+            function cleanupDragState() {
+                draggedPath = null;
+                rootDropZone.classList.remove('show', 'drag-over');
+                document.querySelectorAll('.tree-button.dragging, .tree-button.drag-over, .tree-button.child-mode').forEach(el => el.classList.remove('dragging', 'drag-over', 'child-mode'));
+            }
+
+            document.addEventListener('dragstart', (e) => {
+                const handle = e.target.closest('.drag-handle');
+                if (!handle) return;
+                const pathStr = handle.dataset.path;
+                if (!pathStr) { e.preventDefault(); return; }
+                draggedPath = parsePath(pathStr);
+                if (!draggedPath) { e.preventDefault(); return; }
+                const btn = handle.closest('.tree-button');
+                if (btn) btn.classList.add('dragging');
+                rootDropZone.classList.add('show');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            document.addEventListener('dragend', cleanupDragState);
+
+            document.addEventListener('dragover', (e) => {
+                const btn = e.target.closest('.tree-button');
+                const onRoot = e.target === rootDropZone || rootDropZone.contains(e.target);
+                if (!btn && !onRoot) return;
+                e.preventDefault();
+                if (onRoot) { rootDropZone.classList.add('drag-over'); return; }
+                if (btn.classList.contains('dragging')) return;
+                document.querySelectorAll('.tree-button.drag-over, .tree-button.child-mode').forEach(el => { if (el !== btn) el.classList.remove('drag-over', 'child-mode'); });
+                btn.classList.add('drag-over');
+                e.shiftKey ? btn.classList.add('child-mode') : btn.classList.remove('child-mode');
+            });
+
+            document.addEventListener('dragleave', (e) => {
+                const btn = e.target.closest('.tree-button');
+                if (btn) btn.classList.remove('drag-over', 'child-mode');
+                if (e.target === rootDropZone || rootDropZone.contains(e.target)) rootDropZone.classList.remove('drag-over');
+            });
+
+            document.addEventListener('drop', (e) => {
+                if (!draggedPath) return;
+                e.preventDefault();
+                try {
+                    const onRoot = e.target === rootDropZone || rootDropZone.contains(e.target);
+                    if (onRoot) { moveNodeToRoot(draggedPath); }
+                    else {
+                        const targetBtn = e.target.closest('.tree-button');
+                        if (!targetBtn) return;
+                        const targetPath = parsePath(targetBtn.dataset.path);
+                        if (!targetPath) return;
+                        if (e.shiftKey) moveNodeAsChild(draggedPath, targetPath);
+                        else moveNodeAfter(draggedPath, targetPath);
+                    }
+                    if (selectedPath) showWelcome();
+                    markAsChanged();
+                    renderTree();
+                } finally { cleanupDragState(); }
+            });
+        }
+
+        // ── Tree mutation helpers ─────────────────────────────────────────────────
+        function getNodeByPath(path) {
+            if (!Array.isArray(path) || !path.length) return null;
+            let list = menuTree, node = null;
+            for (let i = 0; i < path.length; i++) {
+                const idx = path[i];
+                if (!Array.isArray(list) || idx < 0 || idx >= list.length) return null;
+                node = list[idx]; list = node.children || [];
+            }
+            return node;
+        }
+
+        function getSiblingList(path) {
+            if (!path.length || path.length === 1) return menuTree;
+            const parent = getNodeByPath(path.slice(0, -1));
+            if (!parent) return null;
+            if (!Array.isArray(parent.children)) parent.children = [];
+            return parent.children;
+        }
+
+        function removeNodeFromPath(path) {
+            const siblings = getSiblingList(path);
+            if (!siblings) return null;
+            const idx = path[path.length - 1];
+            if (idx < 0 || idx >= siblings.length) return null;
+            return siblings.splice(idx, 1)[0];
+        }
+
+        function moveNodeToRoot(srcPath) {
+            const node = removeNodeFromPath(srcPath);
+            if (node) menuTree.push(node);
+        }
+
+        function moveNodeAfter(srcPath, targetPath) {
+            if (JSON.stringify(srcPath) === JSON.stringify(targetPath)) return;
+            const node = removeNodeFromPath(srcPath);
+            if (!node) return;
+            const adj = adjustPath(targetPath, srcPath);
+            const siblings = getSiblingList(adj);
+            if (!siblings) { menuTree.push(node); return; }
+            const at = (adj[adj.length - 1] || 0) + 1;
+            siblings.splice(Math.min(at, siblings.length), 0, node);
+        }
+
+        function moveNodeAsChild(srcPath, targetPath) {
+            if (JSON.stringify(srcPath) === JSON.stringify(targetPath)) return;
+            const node = removeNodeFromPath(srcPath);
+            if (!node) return;
+            const adj = adjustPath(targetPath, srcPath);
+            const parent = getNodeByPath(adj);
+            if (!parent) { menuTree.push(node); return; }
+            if (!Array.isArray(parent.children)) parent.children = [];
+            parent.children.push(node);
+        }
+
+        function adjustPath(targetPath, removedPath) {
+            const adjusted = [...targetPath];
+            let same = true;
+            for (let i = 0; i < removedPath.length - 1; i++) { if (removedPath[i] !== targetPath[i]) { same = false; break; } }
+            if (same) {
+                const ri = removedPath[removedPath.length - 1];
+                const ti = targetPath[removedPath.length - 1];
+                if (ti !== undefined && ti > ri) adjusted[removedPath.length - 1]--;
+            }
+            return adjusted;
+        }
+
+        // ── Serialization ─────────────────────────────────────────────────────────
+        function serializeTree(items) {
+            if (!Array.isArray(items)) return [];
+            return items.map((item, i) => ({
+                id: item.id || ('menu_custom_' + Date.now() + '_' + i),
+                label: item.label || ('Menu Item ' + (i + 1)),
+                board_id: item.board_id || null,
+                source: item.source || 'custom',
+                source_button_id: item.source_button_id || null,
+                sort_order: i,
+                hidden: !!item.hidden,
+                image_url: item.image_url || null,
+                speech_text: item.speech_text || null,
+                custom_audio_file: item.custom_audio_file || null,
+                background_color: item.background_color || '#FFFFFF',
+                text_color: item.text_color || '#000000',
+                children: serializeTree(item.children)
+            }));
+        }
+
+        function parsePath(str) { try { const p = JSON.parse(str || '[]'); return Array.isArray(p) ? p : null; } catch { return null; } }
+
+        function escapeHtml(v) {
+            return String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        function showNotification(msg, type) {
+            const el = document.getElementById('notification');
+            el.textContent = msg; el.className = 'notification ' + type + ' show';
+            setTimeout(() => el.classList.remove('show'), 2500);
+        }
+    </script>
+</body>
+</html>

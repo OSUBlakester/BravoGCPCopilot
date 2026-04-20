@@ -4497,6 +4497,7 @@ def log_token_usage(response, request_type: str, account_id: str, aac_user_id: s
 
 class LLMRequest(BaseModel):
     prompt: str
+    count: Optional[int] = None          # Override max options returned (e.g., for bulk board builder)
     compose_mode: bool = False          # True when the user is in an active compose session
     compose_body: str = ""               # Current composition text (sent for context when compose_mode is True)
 
@@ -4949,18 +4950,27 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             logging.error(f"Logic Error: After processing, extracted LLM options were not a list: {type(extracted_options_list)} - Content: {llm_response_json_str}")
             raise HTTPException(status_code=500, detail="Internal server error: Failed to extract LLM options as a list.")
 
-        enforced_options = enforce_ai_option_overrides(extracted_options_list, ai_option_overrides, llm_options_value)
+        logging.info(f"📊 1. Extracted options count: {len(extracted_options_list)}")
+        effective_max_options = request_data.count if request_data.count and request_data.count > 0 else llm_options_value
+        logging.info(f"📊 Using max_options={effective_max_options} (request.count={request_data.count}, llm_options_value={llm_options_value})")
+        enforced_options = enforce_ai_option_overrides(extracted_options_list, ai_option_overrides, effective_max_options)
+        logging.info(f"📊 2. After enforce_ai_option_overrides: {len(enforced_options)}")
+        
         sentiment_aligned_options = apply_prompt_sentiment_alignment(
             enforced_options,
             user_prompt_content,
-            llm_options_value
+            effective_max_options
         )
+        logging.info(f"📊 3. After apply_prompt_sentiment_alignment: {len(sentiment_aligned_options)}")
+        
         biased_options = apply_inclusion_preference_bias(
             sentiment_aligned_options,
             ai_option_overrides,
             user_prompt_content,
-            llm_options_value
+            effective_max_options
         )
+        logging.info(f"📊 4. After apply_inclusion_preference_bias: {len(biased_options)}")
+        logging.info(f"📊 5. FINAL OPTIONS BEING RETURNED: {biased_options[:2] if biased_options else 'empty'}")
         return JSONResponse(content=biased_options)
 
     except HTTPException:
@@ -19490,6 +19500,71 @@ class TapNavigationButton(BaseModel):
     hidden: bool = Field(default=False, description="Whether button is hidden")
     children: List["TapNavigationButton"] = Field(default_factory=list, description="Child buttons for submenus")
 
+
+class TapBoardButton(BaseModel):
+    """Static board button definition for board-oriented AAC mode."""
+    id: str = Field(..., description="Unique button ID")
+    label: str = Field(..., description="Display label")
+    row: int = Field(0, ge=0, description="Zero-based row in board grid")
+    col: int = Field(0, ge=0, description="Zero-based column in board grid")
+    speech_text: Optional[str] = Field(None, description="Speech output text")
+    action_type: str = Field("announce", description="announce|navigate|audio|special")
+    after_selection: Optional[str] = Field(None, description="do_nothing|navigate|use_ai")
+    target_board_id: Optional[str] = Field(None, description="Board ID for navigate action")
+    custom_audio_file: Optional[str] = Field(None, description="Audio URL for audio action")
+    special_function: Optional[str] = Field(None, description="Special function for special action")
+    image_url: Optional[str] = Field(None, description="Button image URL")
+    background_color: Optional[str] = Field("#FFFFFF", description="Button background color")
+    text_color: Optional[str] = Field("#000000", description="Button text color")
+    hidden: bool = Field(default=False, description="Whether button is hidden")
+
+
+class TapBoard(BaseModel):
+    """Board definition for tap interface (AI or static)."""
+    id: str = Field(..., description="Unique board ID")
+    label: str = Field(..., description="Board display name")
+    board_type: str = Field("ai", description="ai|static|system")
+    source: str = Field("legacy_category", description="legacy_category|custom")
+    source_button_id: Optional[str] = Field(None, description="Legacy category button ID")
+    owner_scope: str = Field("user", description="global|user")
+    hidden: bool = Field(default=False, description="Whether board is hidden")
+    llm_prompt: Optional[str] = Field(None, description="AI prompt for dynamic options")
+    prompt_category: Optional[str] = Field(None, description="AI prompt category")
+    prompt_topic: Optional[str] = Field(None, description="Custom prompt topic")
+    prompt_examples: Optional[str] = Field(None, description="Custom prompt examples")
+    prompt_exclusions: Optional[str] = Field(None, description="Custom prompt exclusions")
+    static_options: Optional[str] = Field(None, description="Delimited static options")
+    special_function: Optional[str] = Field(None, description="System function for board")
+    default_columns: int = Field(12, description="Board editor columns")
+    max_rows: int = Field(7, description="Board editor max rows")
+    buttons: List[TapBoardButton] = Field(default_factory=list, description="Static board buttons")
+
+
+class TapBoardsMenuItem(BaseModel):
+    """Menu item that places a board into the Boards menu."""
+    id: str = Field(..., description="Unique menu item ID")
+    label: str = Field(..., description="Menu label")
+    board_id: Optional[str] = Field(None, description="Target board ID (None for category-only nodes)")
+    source: str = Field("legacy_category", description="legacy_category|custom")
+    source_button_id: Optional[str] = Field(None, description="Legacy source button ID")
+    sort_order: int = Field(0, description="Display order")
+    hidden: bool = Field(default=False, description="Whether menu item is hidden")
+    image_url: Optional[str] = Field(None, description="Menu image URL")
+    speech_text: Optional[str] = Field(None, description="Speech text when selected")
+    custom_audio_file: Optional[str] = Field(None, description="URL to custom audio file played on activation")
+    background_color: Optional[str] = Field("#FFFFFF", description="Menu tile background")
+    text_color: Optional[str] = Field("#000000", description="Menu tile text color")
+    children: List["TapBoardsMenuItem"] = Field(default_factory=list, description="Nested menu items")
+
+
+class TapBoardSettings(BaseModel):
+    """Shared board system settings."""
+    max_columns: int = Field(12, ge=1, le=24, description="Default board columns")
+    max_rows: int = Field(7, ge=1, le=24, description="Default max rows")
+    allow_user_boards: bool = Field(True, description="Allow per-user custom boards")
+    default_ai_boards_global: bool = Field(True, description="Treat legacy/default AI boards as global")
+    home_board_id: Optional[str] = Field(None, description="Board ID loaded as the default home board")
+
 class TapNavigationConfig(BaseModel):
     """Complete tap interface navigation configuration for a user"""
     id: str = Field(..., description="Configuration ID - always 'user_config'")
@@ -19499,9 +19574,653 @@ class TapNavigationConfig(BaseModel):
     created_at: str = Field(..., description="ISO timestamp of creation")
     updated_at: str = Field(..., description="ISO timestamp of last update")
     buttons: List[TapNavigationButton] = Field(default_factory=list, description="Top-level navigation buttons")
+    boards_schema_version: Optional[int] = Field(None, description="Parallel board schema version")
+    board_settings: Optional[TapBoardSettings] = Field(None, description="Board system settings")
+    boards_menu: Optional[List[TapBoardsMenuItem]] = Field(None, description="Boards menu configuration")
+    boards: Optional[List[TapBoard]] = Field(None, description="Board definitions")
+
+
+class TapBoardsMenuUpdateRequest(BaseModel):
+    """Payload for updating only the Boards Menu portion of tap configuration."""
+    boards_menu: List[TapBoardsMenuItem] = Field(default_factory=list, description="Ordered menu items")
+    board_settings: Optional[TapBoardSettings] = Field(None, description="Optional board settings update")
+
+
+class TapBoardCreateRequest(BaseModel):
+    """Payload for creating a custom board."""
+    id: Optional[str] = Field(None, description="Optional board ID; autogenerated if omitted")
+    label: str = Field(..., description="Board display name")
+    board_type: str = Field("ai", description="ai|static|system")
+    owner_scope: str = Field("user", description="global|user")
+    hidden: bool = Field(False, description="Whether board is hidden")
+    llm_prompt: Optional[str] = Field(None, description="AI prompt")
+    prompt_category: Optional[str] = Field(None, description="Prompt category")
+    prompt_topic: Optional[str] = Field(None, description="Prompt topic")
+    prompt_examples: Optional[str] = Field(None, description="Prompt examples")
+    prompt_exclusions: Optional[str] = Field(None, description="Prompt exclusions")
+    static_options: Optional[str] = Field(None, description="Static options")
+    special_function: Optional[str] = Field(None, description="Special function")
+    default_columns: int = Field(12, ge=1, le=24, description="Board columns")
+    max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
+    buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
+    set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+
+
+class TapBoardUpdateRequest(BaseModel):
+    """Payload for updating an existing board."""
+    label: str = Field(..., description="Board display name")
+    board_type: str = Field("ai", description="ai|static|system")
+    owner_scope: str = Field("user", description="global|user")
+    hidden: bool = Field(False, description="Whether board is hidden")
+    llm_prompt: Optional[str] = Field(None, description="AI prompt")
+    prompt_category: Optional[str] = Field(None, description="Prompt category")
+    prompt_topic: Optional[str] = Field(None, description="Prompt topic")
+    prompt_examples: Optional[str] = Field(None, description="Prompt examples")
+    prompt_exclusions: Optional[str] = Field(None, description="Prompt exclusions")
+    static_options: Optional[str] = Field(None, description="Static options")
+    special_function: Optional[str] = Field(None, description="Special function")
+    default_columns: int = Field(12, ge=1, le=24, description="Board columns")
+    max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
+    buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
+    set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
 
 # Update forward references
 TapNavigationButton.model_rebuild()
+TapBoardsMenuItem.model_rebuild()
+
+
+def _normalize_board_type(value: Any) -> str:
+    normalized = str(value or 'ai').strip().lower()
+    if normalized not in {'ai', 'static', 'system'}:
+        return 'ai'
+    return normalized
+
+
+def _normalize_owner_scope(value: Any) -> str:
+    normalized = str(value or 'user').strip().lower()
+    if normalized not in {'global', 'user'}:
+        return 'user'
+    return normalized
+
+
+def _normalize_action_type(value: Any) -> str:
+    normalized = str(value or 'announce').strip().lower()
+    if normalized not in {'announce', 'navigate', 'audio', 'special'}:
+        return 'announce'
+    return normalized
+
+
+def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[str, Any]:
+    return {
+        'id': str(button.get('id') or f'btn_{index + 1}'),
+        'label': str(button.get('label') or f'Button {index + 1}'),
+        'row': int(button.get('row', index // 12) or 0),
+        'col': int(button.get('col', index % 12) or 0),
+        'speech_text': button.get('speech_text'),
+        'action_type': _normalize_action_type(button.get('action_type')),
+        'after_selection': str(button.get('after_selection') or '').strip() or None,
+        'target_board_id': button.get('target_board_id'),
+        'custom_audio_file': button.get('custom_audio_file'),
+        'special_function': button.get('special_function'),
+        'image_url': button.get('image_url'),
+        'background_color': button.get('background_color') or '#FFFFFF',
+        'text_color': button.get('text_color') or '#000000',
+        'hidden': bool(button.get('hidden', False)),
+    }
+
+
+def _normalize_board_payload(
+    board_data: Dict[str, Any],
+    board_id: str,
+    source: str = 'custom',
+    source_button_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    raw_buttons = board_data.get('buttons')
+    buttons = raw_buttons if isinstance(raw_buttons, list) else []
+    normalized_buttons = [
+        _normalize_board_button_payload(button, index)
+        for index, button in enumerate(buttons)
+        if isinstance(button, dict)
+    ]
+
+    return {
+        'id': board_id,
+        'label': str(board_data.get('label') or board_id),
+        'board_type': _normalize_board_type(board_data.get('board_type')),
+        'source': str(source or 'custom'),
+        'source_button_id': source_button_id,
+        'owner_scope': _normalize_owner_scope(board_data.get('owner_scope')),
+        'hidden': bool(board_data.get('hidden', False)),
+        'llm_prompt': board_data.get('llm_prompt'),
+        'prompt_category': board_data.get('prompt_category'),
+        'prompt_topic': board_data.get('prompt_topic'),
+        'prompt_examples': board_data.get('prompt_examples'),
+        'prompt_exclusions': board_data.get('prompt_exclusions'),
+        'static_options': board_data.get('static_options'),
+        'special_function': board_data.get('special_function'),
+        'default_columns': int(board_data.get('default_columns', 12) or 12),
+        'max_rows': int(board_data.get('max_rows', 7) or 7),
+        'buttons': normalized_buttons,
+    }
+
+
+def _sanitize_board_slug(raw_value: Any) -> str:
+    raw = str(raw_value or "").strip().lower()
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in raw)
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_")
+    return cleaned or "board"
+
+
+def _derive_action_type(button: Dict[str, Any]) -> str:
+    if button.get('custom_audio_file'):
+        return 'audio'
+    if button.get('special_function'):
+        return 'special'
+    return 'announce'
+
+
+def _convert_children_to_board_buttons(children: Any) -> List[Dict[str, Any]]:
+    if not isinstance(children, list):
+        return []
+
+    board_buttons: List[Dict[str, Any]] = []
+    for index, child in enumerate(children):
+        if not isinstance(child, dict):
+            continue
+        board_buttons.append({
+            'id': str(child.get('id') or _sanitize_board_slug(child.get('label') or 'button')),
+            'label': str(child.get('label') or 'Untitled Button'),
+            'row': index // 12,
+            'col': index % 12,
+            'speech_text': child.get('speech_text'),
+            'action_type': _derive_action_type(child),
+            'target_board_id': None,
+            'custom_audio_file': child.get('custom_audio_file'),
+            'special_function': child.get('special_function'),
+            'image_url': child.get('image_url'),
+            'background_color': child.get('background_color', '#FFFFFF'),
+            'text_color': child.get('text_color', '#000000'),
+            'hidden': bool(child.get('hidden', False)),
+        })
+    return board_buttons
+
+
+def ensure_tap_boards_structure(
+    config_data: Optional[Dict[str, Any]],
+    existing_config: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """Ensure parallel board-oriented structure exists while preserving legacy config compatibility."""
+    if not isinstance(config_data, dict):
+        return config_data, False
+
+    buttons = config_data.get('buttons')
+    if not isinstance(buttons, list):
+        return config_data, False
+
+    previous_boards = config_data.get('boards')
+    previous_menu = config_data.get('boards_menu')
+    previous_settings = config_data.get('board_settings')
+    previous_version = config_data.get('boards_schema_version')
+
+    existing_boards = previous_boards
+    if not isinstance(existing_boards, list) and isinstance(existing_config, dict):
+        candidate = existing_config.get('boards')
+        if isinstance(candidate, list):
+            existing_boards = candidate
+
+    existing_menu = previous_menu
+    if not isinstance(existing_menu, list) and isinstance(existing_config, dict):
+        candidate = existing_config.get('boards_menu')
+        if isinstance(candidate, list):
+            existing_menu = candidate
+
+    custom_boards = [
+        b for b in (existing_boards or [])
+        if isinstance(b, dict) and b.get('source') != 'legacy_category'
+    ]
+    custom_menu_items = [
+        m for m in (existing_menu or [])
+        if isinstance(m, dict) and m.get('source') != 'legacy_category'
+    ]
+    legacy_menu_items = [
+        m for m in (existing_menu or [])
+        if isinstance(m, dict) and m.get('source') == 'legacy_category'
+    ]
+
+    legacy_menu_by_source_button: Dict[str, Dict[str, Any]] = {}
+    def _collect_legacy_menu_items(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for legacy_item in items:
+            if not isinstance(legacy_item, dict):
+                continue
+            key = str(legacy_item.get('source_button_id') or '').strip()
+            if key:
+                legacy_menu_by_source_button[key] = legacy_item
+            _collect_legacy_menu_items(legacy_item.get('children'))
+
+    _collect_legacy_menu_items(legacy_menu_items)
+
+    derived_boards: List[Dict[str, Any]] = []
+    derived_menu_items: List[Dict[str, Any]] = []
+
+    existing_legacy_boards = [
+        b for b in (existing_boards or [])
+        if isinstance(b, dict) and b.get('source') == 'legacy_category'
+    ]
+    legacy_board_by_source_button: Dict[str, Dict[str, Any]] = {}
+    for legacy_board in existing_legacy_boards:
+        key = str(legacy_board.get('source_button_id') or '').strip()
+        if key:
+            legacy_board_by_source_button[key] = legacy_board
+
+    # map source_button_id -> board_id for all derived legacy boards
+    legacy_board_id_by_source_button: Dict[str, str] = {}
+    used_board_ids: set[str] = {str(b.get('id')) for b in custom_boards if isinstance(b.get('id'), str)}
+
+    def _should_create_legacy_board(button_node: Dict[str, Any], depth: int) -> bool:
+        if depth == 0:
+            return True
+        if str(button_node.get('special_function') or '').strip():
+            return True
+        if str(button_node.get('static_options') or '').strip():
+            return True
+        if str(button_node.get('llm_prompt') or '').strip():
+            return True
+        if str(button_node.get('prompt_category') or '').strip():
+            return True
+        if str(button_node.get('prompt_topic') or '').strip():
+            return True
+        if str(button_node.get('prompt_examples') or '').strip():
+            return True
+        if str(button_node.get('prompt_exclusions') or '').strip():
+            return True
+        return False
+
+    def _next_legacy_board_id(button_node: Dict[str, Any], fallback_index: int) -> str:
+        base_slug = _sanitize_board_slug(button_node.get('id') or button_node.get('label') or f'board_{fallback_index}')
+        board_id = f"board_{base_slug}"
+        suffix = 2
+        while board_id in used_board_ids:
+            board_id = f"board_{base_slug}_{suffix}"
+            suffix += 1
+        return board_id
+
+    def _collect_derived_legacy_boards(button_nodes: Any, depth: int) -> None:
+        if not isinstance(button_nodes, list):
+            return
+
+        for index, button_node in enumerate(button_nodes):
+            if not isinstance(button_node, dict):
+                continue
+
+            source_button_id = button_node.get('id')
+            source_button_key = str(source_button_id or '').strip()
+
+            create_board = _should_create_legacy_board(button_node, depth)
+            board_id: Optional[str] = None
+
+            existing_legacy_board = legacy_board_by_source_button.get(source_button_key) if source_button_key else None
+            if create_board:
+                existing_id = str(existing_legacy_board.get('id') or '').strip() if isinstance(existing_legacy_board, dict) else ''
+                if existing_id and existing_id not in used_board_ids:
+                    board_id = existing_id
+                else:
+                    board_id = _next_legacy_board_id(button_node, index)
+
+                used_board_ids.add(board_id)
+                if source_button_key:
+                    legacy_board_id_by_source_button[source_button_key] = board_id
+
+                special_function = button_node.get('special_function')
+                has_static_options = bool(str(button_node.get('static_options') or '').strip())
+                if special_function:
+                    board_type = 'system'
+                elif has_static_options:
+                    board_type = 'static'
+                else:
+                    board_type = 'ai'
+
+                owner_scope_default = 'global' if str(button_node.get('id') or '').endswith('_btn') else 'user'
+                owner_scope = owner_scope_default
+                if isinstance(existing_legacy_board, dict):
+                    owner_scope = str(existing_legacy_board.get('owner_scope') or owner_scope_default)
+
+                board = {
+                    'id': board_id,
+                    'label': str(button_node.get('label') or f'Board {index + 1}'),
+                    'board_type': board_type,
+                    'source': 'legacy_category',
+                    'source_button_id': source_button_id,
+                    'owner_scope': owner_scope,
+                    'hidden': bool(button_node.get('hidden', False)),
+                    'llm_prompt': button_node.get('llm_prompt'),
+                    'prompt_category': button_node.get('prompt_category'),
+                    'prompt_topic': button_node.get('prompt_topic'),
+                    'prompt_examples': button_node.get('prompt_examples'),
+                    'prompt_exclusions': button_node.get('prompt_exclusions'),
+                    'static_options': button_node.get('static_options'),
+                    'special_function': special_function,
+                    'default_columns': 12,
+                    'max_rows': 7,
+                    'buttons': _convert_children_to_board_buttons(button_node.get('children')),
+                }
+                derived_boards.append(board)
+
+            _collect_derived_legacy_boards(button_node.get('children'), depth + 1)
+
+    _collect_derived_legacy_boards(buttons, 0)
+
+    def _build_legacy_menu_node(
+        button_node: Dict[str, Any],
+        sort_order: int,
+    ) -> Dict[str, Any]:
+        source_button_id = button_node.get('id')
+        source_button_key = str(source_button_id or '').strip()
+        existing_legacy_menu_item = legacy_menu_by_source_button.get(source_button_key) if source_button_key else None
+        derived_board_id = legacy_board_id_by_source_button.get(source_button_key) if source_button_key else None
+
+        menu_node = {
+            'id': f"menu_{_sanitize_board_slug(button_node.get('id') or button_node.get('label') or sort_order)}",
+            'label': str(button_node.get('label') or f'Board {sort_order + 1}'),
+            'board_id': derived_board_id,
+            'source': 'legacy_category',
+            'source_button_id': source_button_id,
+            'sort_order': sort_order,
+            'hidden': bool(button_node.get('hidden', False)),
+            'image_url': button_node.get('image_url'),
+            'speech_text': button_node.get('speech_text'),
+            'custom_audio_file': button_node.get('custom_audio_file'),
+            'background_color': button_node.get('background_color', '#FFFFFF'),
+            'text_color': button_node.get('text_color', '#000000'),
+            'children': [],
+        }
+
+        if isinstance(existing_legacy_menu_item, dict):
+            if existing_legacy_menu_item.get('id'):
+                menu_node['id'] = existing_legacy_menu_item.get('id')
+            menu_node['label'] = str(existing_legacy_menu_item.get('label') or menu_node['label'])
+            menu_node['hidden'] = bool(existing_legacy_menu_item.get('hidden', menu_node['hidden']))
+            menu_node['image_url'] = existing_legacy_menu_item.get('image_url')
+            menu_node['speech_text'] = existing_legacy_menu_item.get('speech_text')
+            menu_node['custom_audio_file'] = existing_legacy_menu_item.get('custom_audio_file')
+            menu_node['background_color'] = existing_legacy_menu_item.get('background_color') or menu_node['background_color']
+            menu_node['text_color'] = existing_legacy_menu_item.get('text_color') or menu_node['text_color']
+            # If a node has a board target, keep that target; otherwise preserve any existing target.
+            if derived_board_id:
+                menu_node['board_id'] = derived_board_id
+            else:
+                menu_node['board_id'] = existing_legacy_menu_item.get('board_id')
+
+        raw_children = button_node.get('children')
+        if isinstance(raw_children, list):
+            built_children: List[Dict[str, Any]] = []
+            for child_index, child_node in enumerate(raw_children):
+                if not isinstance(child_node, dict):
+                    continue
+                built_children.append(_build_legacy_menu_node(child_node, child_index))
+            menu_node['children'] = built_children
+
+        # Enforce leaf-only board target assignment.
+        if isinstance(menu_node.get('children'), list) and len(menu_node['children']) > 0:
+            menu_node['board_id'] = None
+
+        return menu_node
+
+    for index, button in enumerate(buttons):
+        if not isinstance(button, dict):
+            continue
+        menu_item = _build_legacy_menu_node(button, index)
+        derived_menu_items.append(menu_item)
+
+    merged_boards = custom_boards + derived_boards
+    merged_menu = custom_menu_items + derived_menu_items
+
+    settings = previous_settings
+    if not isinstance(settings, dict) and isinstance(existing_config, dict):
+        candidate = existing_config.get('board_settings')
+        if isinstance(candidate, dict):
+            settings = candidate
+    if not isinstance(settings, dict):
+        settings = {}
+
+    existing_home_board_id = str(settings.get('home_board_id') or '').strip()
+    merged_board_ids = {
+        str(board.get('id')).strip()
+        for board in merged_boards
+        if isinstance(board, dict) and str(board.get('id') or '').strip()
+    }
+
+    home_board_id = existing_home_board_id if existing_home_board_id in merged_board_ids else ''
+    if not home_board_id:
+        existing_home_board = next(
+            (
+                board for board in merged_boards
+                if isinstance(board, dict) and str(board.get('source') or '') == 'default_home'
+            ),
+            None,
+        )
+        if isinstance(existing_home_board, dict) and str(existing_home_board.get('id') or '').strip():
+            home_board_id = str(existing_home_board.get('id')).strip()
+        else:
+            home_board_id = 'board_home'
+            suffix = 2
+            while home_board_id in merged_board_ids:
+                home_board_id = f'board_home_{suffix}'
+                suffix += 1
+
+            merged_boards.append({
+                'id': home_board_id,
+                'label': 'Home',
+                'board_type': 'ai',
+                'source': 'default_home',
+                'source_button_id': None,
+                'owner_scope': 'user',
+                'hidden': False,
+                'llm_prompt': None,
+                'prompt_category': None,
+                'prompt_topic': None,
+                'prompt_examples': None,
+                'prompt_exclusions': None,
+                'static_options': None,
+                'special_function': None,
+                'default_columns': 12,
+                'max_rows': 7,
+                'buttons': [],
+            })
+            merged_board_ids.add(home_board_id)
+
+    merged_settings = {
+        'max_columns': int(settings.get('max_columns', 12) or 12),
+        'max_rows': int(settings.get('max_rows', 7) or 7),
+        'allow_user_boards': bool(settings.get('allow_user_boards', True)),
+        'default_ai_boards_global': bool(settings.get('default_ai_boards_global', True)),
+        'home_board_id': home_board_id,
+    }
+
+    changed = False
+    if previous_boards != merged_boards:
+        config_data['boards'] = merged_boards
+        changed = True
+    if previous_menu != merged_menu:
+        config_data['boards_menu'] = merged_menu
+        changed = True
+    if previous_settings != merged_settings:
+        config_data['board_settings'] = merged_settings
+        changed = True
+    if previous_version != 1:
+        config_data['boards_schema_version'] = 1
+        changed = True
+
+    return config_data, changed
+
+
+def normalize_boards_menu_items(
+    menu_items: Any,
+    valid_board_ids: set[str],
+) -> List[Dict[str, Any]]:
+    """Normalize and validate boards menu items for persistence (tree-aware).
+    board_id is optional — a node may be a category-only parent with no associated board.
+    """
+    def _normalize_level(items: Any, level: int) -> List[Dict[str, Any]]:
+        normalized_level: List[Dict[str, Any]] = []
+        if not isinstance(items, list):
+            return normalized_level
+
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+
+            raw_board_id = str(item.get('board_id') or '').strip()
+            # board_id is optional; only validate if provided
+            board_id: Optional[str] = raw_board_id if raw_board_id and raw_board_id in valid_board_ids else None
+
+            label = str(item.get('label') or board_id or f'Menu Item {index + 1}')
+            item_id = str(item.get('id') or '').strip()
+            if not item_id:
+                item_id = f"menu_{_sanitize_board_slug(label)}_{level}_{index + 1}"
+
+            normalized_children = _normalize_level(item.get('children'), level + 1)
+
+            normalized_item = {
+                'id': item_id,
+                'label': label,
+                'board_id': board_id,
+                'source': str(item.get('source') or 'custom'),
+                'source_button_id': item.get('source_button_id'),
+                'sort_order': index,
+                'hidden': bool(item.get('hidden', False)),
+                'image_url': item.get('image_url'),
+                'speech_text': item.get('speech_text'),
+                'custom_audio_file': item.get('custom_audio_file'),
+                'background_color': item.get('background_color') or '#FFFFFF',
+                'text_color': item.get('text_color') or '#000000',
+                'children': normalized_children,
+            }
+
+            # Enforce leaf-only board target assignment.
+            if len(normalized_children) > 0:
+                normalized_item['board_id'] = None
+
+            normalized_level.append(normalized_item)
+
+        return normalized_level
+
+    return _normalize_level(menu_items, 0)
+
+
+def sort_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
+    """Sort boards menu recursively by sort_order while preserving hierarchy."""
+    if not isinstance(menu_items, list):
+        return []
+
+    sorted_items = sorted(
+        [item for item in menu_items if isinstance(item, dict)],
+        key=lambda item: int(item.get('sort_order', 0)),
+    )
+
+    output: List[Dict[str, Any]] = []
+    for index, item in enumerate(sorted_items):
+        cloned = dict(item)
+        cloned['sort_order'] = index
+        cloned['children'] = sort_boards_menu_tree(item.get('children'))
+        output.append(cloned)
+
+    return output
+
+
+def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build legacy tap-interface buttons from boards_menu/boards so existing UI can render board menu changes."""
+    if not isinstance(config_data, dict):
+        return []
+
+    boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+    boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+    existing_buttons = config_data.get('buttons') if isinstance(config_data.get('buttons'), list) else []
+
+    if not boards_menu:
+        return existing_buttons
+
+    boards_by_id: Dict[str, Dict[str, Any]] = {
+        str(board.get('id')): board
+        for board in boards
+        if isinstance(board, dict) and str(board.get('id') or '').strip()
+    }
+
+    def _build_word_options_from_board(board: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw_buttons = board.get('buttons') if isinstance(board.get('buttons'), list) else []
+        sorted_buttons = sorted(
+            [b for b in raw_buttons if isinstance(b, dict)],
+            key=lambda b: (int(b.get('row', 0) or 0), int(b.get('col', 0) or 0), str(b.get('id') or '')),
+        )
+        word_options: List[Dict[str, Any]] = []
+        for index, btn in enumerate(sorted_buttons):
+            if bool(btn.get('hidden', False)):
+                continue
+            label = str(btn.get('label') or f"Button {index + 1}").strip()
+            if label:
+                word_options.append({
+                    'text': label,
+                    'row': int(btn.get('row', 0) or 0),
+                    'col': int(btn.get('col', 0) or 0),
+                    'speech_text': str(btn.get('speech_text') or '').strip() or label,
+                    'image_url': btn.get('image_url'),
+                    'custom_audio_file': btn.get('custom_audio_file'),
+                    'action_type': btn.get('action_type'),
+                    'after_selection': btn.get('after_selection') or 'do_nothing',
+                    'target_board_id': btn.get('target_board_id'),
+                    'background_color': btn.get('background_color') or '#FFFFFF',
+                    'text_color': btn.get('text_color') or '#000000',
+                })
+        return word_options
+
+    def _build_menu_node(menu_item: Dict[str, Any], path_index: str) -> Dict[str, Any]:
+        board_id = str(menu_item.get('board_id') or '').strip()
+        board = boards_by_id.get(board_id) if board_id else None
+        menu_children = menu_item.get('children') if isinstance(menu_item.get('children'), list) else []
+
+        built_children: List[Dict[str, Any]] = []
+        if menu_children:
+            for idx, child in enumerate(menu_children):
+                if isinstance(child, dict):
+                    built_children.append(_build_menu_node(child, f"{path_index}_{idx}"))
+
+        board_word_options = _build_word_options_from_board(board) if isinstance(board, dict) else []
+        board_static_options = ', '.join(
+            option.get('text', '') for option in board_word_options if isinstance(option, dict) and option.get('text')
+        ) or None
+
+        return {
+            'id': str(menu_item.get('id') or f"menu_{path_index}"),
+            'board_id': board_id or None,
+            'label': str(menu_item.get('label') or (board.get('label') if isinstance(board, dict) else f"Menu {path_index}")),
+            'speech_text': menu_item.get('speech_text'),
+            'image_url': menu_item.get('image_url') if menu_item.get('image_url') else (board.get('image_url') if isinstance(board, dict) else None),
+            'background_color': menu_item.get('background_color') or '#FFFFFF',
+            'text_color': menu_item.get('text_color') or '#000000',
+            'llm_prompt': board.get('llm_prompt') if isinstance(board, dict) else None,
+            'words_prompt': None,
+            'prompt_category': board.get('prompt_category') if isinstance(board, dict) else None,
+            'prompt_topic': board.get('prompt_topic') if isinstance(board, dict) else None,
+            'prompt_examples': board.get('prompt_examples') if isinstance(board, dict) else None,
+            'prompt_exclusions': board.get('prompt_exclusions') if isinstance(board, dict) else None,
+            'static_options': board.get('static_options') if isinstance(board, dict) and board.get('static_options') else board_static_options,
+            'board_word_options': board_word_options,
+            'custom_audio_file': menu_item.get('custom_audio_file') if menu_item.get('custom_audio_file') else (board.get('custom_audio_file') if isinstance(board, dict) else None),
+            'special_function': board.get('special_function') if isinstance(board, dict) else None,
+            'hidden': bool(menu_item.get('hidden', False) or (bool(board.get('hidden', False)) if isinstance(board, dict) else False)),
+            'children': built_children,
+        }
+
+    sorted_menu = sort_boards_menu_tree(boards_menu)
+    legacy_buttons: List[Dict[str, Any]] = []
+    for index, item in enumerate(sorted_menu):
+        if isinstance(item, dict):
+            legacy_buttons.append(_build_menu_node(item, str(index)))
+
+    return legacy_buttons
 
 # --- Helper Functions ---
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
@@ -20993,6 +21712,7 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     config['updated_at'] = datetime.now().isoformat()
 
     config, _ = normalize_compose_tap_config(config)
+    config, _ = ensure_tap_boards_structure(config)
     
     return config
 
@@ -21016,7 +21736,8 @@ async def get_tap_interface_config(
             await save_tap_nav_config(account_id, aac_user_id, config_data)
         else:
             config_data, was_normalized = normalize_compose_tap_config(config_data)
-            if was_normalized:
+            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            if was_normalized or boards_changed:
                 await save_tap_nav_config(account_id, aac_user_id, config_data)
         
         # DEBUG: Log words_prompt presence
@@ -21029,7 +21750,9 @@ async def get_tap_interface_config(
                         if c.get('words_prompt'):
                             logging.info(f"DEBUG: Loaded child '{c.get('label')}' with words_prompt: {c.get('words_prompt')[:20]}...")
 
-        return JSONResponse(content=config_data)
+        config_response = dict(config_data)
+        config_response['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+        return JSONResponse(content=config_response)
     except Exception as e:
         logging.error(f"Error getting tap interface config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -21044,6 +21767,8 @@ async def save_tap_interface_config(
     account_id = current_ids["account_id"]
     
     try:
+        existing_config = await load_tap_nav_config(account_id, aac_user_id)
+
         # DEBUG: Log words_prompt presence in received config
         for b in config_data.buttons:
             if b.words_prompt:
@@ -21057,6 +21782,8 @@ async def save_tap_interface_config(
         # Always use 'user_config' as ID for single configuration per user
         config_dict['id'] = 'user_config'
         config_dict['updated_at'] = dt.now().isoformat()
+        config_dict, _ = normalize_compose_tap_config(config_dict)
+        config_dict, _ = ensure_tap_boards_structure(config_dict, existing_config=existing_config)
         
         success = await save_tap_nav_config(account_id, aac_user_id, config_dict)
         
@@ -21066,6 +21793,364 @@ async def save_tap_interface_config(
             raise HTTPException(status_code=500, detail="Failed to save configuration")
     except Exception as e:
         logging.error(f"Error saving tap interface config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tap-interface/boards-menu")
+async def get_tap_boards_menu_config(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get board-oriented menu config (parallel structure) for tap interface."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id)
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            if was_normalized or boards_changed:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+
+        boards_menu_sorted = sort_boards_menu_tree(boards_menu)
+
+        return JSONResponse(content={
+            'boards_schema_version': int(config_data.get('boards_schema_version') or 1),
+            'board_settings': {
+                'max_columns': int(board_settings.get('max_columns', 12) or 12),
+                'max_rows': int(board_settings.get('max_rows', 7) or 7),
+                'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
+                'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+                'home_board_id': board_settings.get('home_board_id'),
+            },
+            'boards_menu': boards_menu_sorted,
+            'boards': [
+                {
+                    'id': b.get('id'),
+                    'label': b.get('label'),
+                    'board_type': b.get('board_type'),
+                    'owner_scope': b.get('owner_scope'),
+                    'hidden': bool(b.get('hidden', False)),
+                    'source': b.get('source'),
+                    'source_button_id': b.get('source_button_id'),
+                }
+                for b in boards
+                if isinstance(b, dict)
+            ],
+        })
+    except Exception as e:
+        logging.error(f"Error getting tap boards menu config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/boards-menu")
+async def save_tap_boards_menu_config(
+    payload: TapBoardsMenuUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save board-oriented menu config (parallel structure) for tap interface."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id)
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        valid_board_ids = {
+            str(b.get('id')).strip()
+            for b in boards
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+
+        requested_menu = [item.model_dump() for item in payload.boards_menu]
+        normalized_menu = normalize_boards_menu_items(requested_menu, valid_board_ids)
+        config_data['boards_menu'] = normalized_menu
+
+        if payload.board_settings is not None:
+            config_data['board_settings'] = payload.board_settings.model_dump()
+
+        config_data['boards_schema_version'] = 1
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to save boards menu config')
+
+        return JSONResponse(content={
+            'success': True,
+            'message': 'Boards menu saved successfully',
+            'boards_menu_count': len(normalized_menu),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error saving tap boards menu config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _clear_board_references_in_menu(menu_items: Any, removed_board_id: str) -> Any:
+    if not isinstance(menu_items, list):
+        return menu_items
+
+    updated_items: List[Dict[str, Any]] = []
+    for item in menu_items:
+        if not isinstance(item, dict):
+            continue
+
+        cloned = dict(item)
+        if str(cloned.get('board_id') or '').strip() == removed_board_id:
+            cloned['board_id'] = None
+        cloned['children'] = _clear_board_references_in_menu(cloned.get('children'), removed_board_id)
+        updated_items.append(cloned)
+
+    return updated_items
+
+
+@app.get("/api/tap-interface/boards")
+async def list_tap_boards(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """List all board definitions for board builder/admin tooling."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id)
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            if was_normalized or boards_changed:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        return JSONResponse(content={
+            'boards': [b for b in boards if isinstance(b, dict)],
+            'count': len(boards),
+            'board_settings': {
+                'max_columns': int(board_settings.get('max_columns', 12) or 12),
+                'max_rows': int(board_settings.get('max_rows', 7) or 7),
+                'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
+                'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+                'home_board_id': board_settings.get('home_board_id'),
+            },
+        })
+    except Exception as e:
+        logging.error(f"Error listing tap boards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tap-interface/boards/{board_id}")
+async def get_tap_board(
+    board_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get a single board definition by id."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+
+        board = next((b for b in boards if isinstance(b, dict) and b.get('id') == board_id), None)
+        if not board:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        return JSONResponse(content={'board': board, 'board_settings': board_settings})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting tap board {board_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/boards")
+async def create_tap_board(
+    payload: TapBoardCreateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Create a custom board definition."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id)
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        existing_ids = {
+            str(b.get('id')).strip()
+            for b in boards
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+
+        requested_id = str(payload.id or '').strip()
+        if requested_id:
+            board_id = requested_id
+            if board_id in existing_ids:
+                raise HTTPException(status_code=409, detail='Board ID already exists')
+        else:
+            base_slug = _sanitize_board_slug(payload.label)
+            board_id = f'board_{base_slug}'
+            suffix = 2
+            while board_id in existing_ids:
+                board_id = f'board_{base_slug}_{suffix}'
+                suffix += 1
+
+        board = _normalize_board_payload(payload.model_dump(), board_id=board_id, source='custom', source_button_id=None)
+        boards.append(board)
+        config_data['boards'] = boards
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if payload.set_as_home:
+            board_settings['home_board_id'] = board_id
+        config_data['board_settings'] = board_settings
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to create board')
+
+        return JSONResponse(content={'success': True, 'board': board, 'board_settings': config_data.get('board_settings', {})})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error creating tap board: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/tap-interface/boards/{board_id}")
+async def update_tap_board(
+    board_id: str,
+    payload: TapBoardUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Update an existing board definition."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_index = next(
+            (i for i, b in enumerate(boards) if isinstance(b, dict) and str(b.get('id') or '') == board_id),
+            None,
+        )
+        if board_index is None:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        existing_board = boards[board_index]
+        if str(existing_board.get('source') or '') == 'legacy_category' or str(existing_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='Legacy and system boards are read-only')
+
+        updated_board = _normalize_board_payload(
+            payload.model_dump(),
+            board_id=board_id,
+            source=str(existing_board.get('source') or 'custom'),
+            source_button_id=existing_board.get('source_button_id'),
+        )
+        boards[board_index] = updated_board
+
+        config_data['boards'] = boards
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if payload.set_as_home:
+            board_settings['home_board_id'] = board_id
+        config_data['board_settings'] = board_settings
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to update board')
+
+        return JSONResponse(content={'success': True, 'board': updated_board, 'board_settings': config_data.get('board_settings', {})})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating tap board {board_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/tap-interface/boards/{board_id}")
+async def delete_tap_board(
+    board_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Delete a board and clear any menu references to it."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_index = next(
+            (i for i, b in enumerate(boards) if isinstance(b, dict) and str(b.get('id') or '') == board_id),
+            None,
+        )
+        if board_index is None:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        removed_board = boards[board_index]
+        if str(removed_board.get('source') or '') == 'legacy_category' or str(removed_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='Legacy and system boards cannot be deleted')
+
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if str(board_settings.get('home_board_id') or '').strip() == board_id:
+            raise HTTPException(status_code=400, detail='Cannot delete the current home board')
+
+        removed_board = boards.pop(board_index)
+        config_data['boards'] = boards
+
+        existing_menu = config_data.get('boards_menu')
+        if isinstance(existing_menu, list):
+            config_data['boards_menu'] = _clear_board_references_in_menu(existing_menu, board_id)
+
+        config_data['updated_at'] = dt.now().isoformat()
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to delete board')
+
+        return JSONResponse(content={'success': True, 'deleted_board_id': board_id, 'deleted_label': removed_board.get('label')})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting tap board {board_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Note: Single configuration per user - no need for list, activate, or delete endpoints
