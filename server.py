@@ -16932,8 +16932,8 @@ async def browse_images_for_admin(
                     continue
         else:
             # No search term, get all matching images up to limit
-            if limit > 5000:  # Cap at reasonable limit for performance
-                limit = 5000
+            if limit > 20000:  # Cap at reasonable limit for performance
+                limit = 20000
             query = base_query.limit(limit)
             all_docs = await asyncio.to_thread(query.get)
         
@@ -16961,7 +16961,7 @@ async def browse_images_for_admin(
                 "concept": data.get("concept", ""),
                 "tags": data.get("tags", []),
                 "keywords": data.get("keywords", []),
-                "created_at": data.get("created_at"),
+                "created_at": data.get("created_at") or data.get("updated_at"),
                 "preview_url": data.get("image_url", "")
             }
             images.append(admin_data)

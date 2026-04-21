@@ -14,12 +14,12 @@ Usage: python bulk_import_bravo_images.py [--test] [--batch-size 10]
 import os
 import asyncio
 import logging
+import random
 from pathlib import Path
 import argparse
 from datetime import datetime, timezone
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import base64
-import requests
 from tqdm import tqdm
 
 # Import configuration and dependencies from server.py
@@ -53,6 +53,18 @@ class BravoImageImporter:
         self.error_count = 0
         self.skipped_count = 0
         self.use_ai_tags = use_ai_tags
+        self.ai_tags_requested = use_ai_tags
+        self.tag_retry_attempts = 2
+        self.inter_image_delay_seconds = 2.0
+        self.ai_tag_success_count = 0
+        self.ai_tag_fallback_count = 0
+        self.ai_tag_rate_limit_streak = 0
+        self.disable_ai_after_rate_limit = True
+        self.rate_limit_streak_threshold = 3
+        self.gemini_model_name = 'gemini-2.0-flash-001'
+        self.gemini_key_source = 'unknown'
+        self.gemini_key_fingerprint: Optional[str] = None
+        self.force_retag = False
         
     def setup_clients(self):
         """Initialize Firebase, Firestore, and Storage clients"""
@@ -231,31 +243,91 @@ class BravoImageImporter:
             logger.error(f"❌ Error uploading {image_path}: {e}")
             raise
     
+    @staticmethod
+    def _fingerprint_key(api_key: str) -> str:
+        import hashlib
+        return hashlib.sha256(api_key.encode('utf-8')).hexdigest()[:12]
+
     async def get_gemini_api_key(self) -> str:
-        """Get Gemini API key from Secret Manager or environment"""
+        """Get Gemini API key from Secret Manager or environment, with source diagnostics."""
+        secret_key = None
         try:
             secret_name = f"projects/{self.project_id}/secrets/bravo-google-api-key/versions/latest"
             response = await asyncio.to_thread(
-                self.secret_client.access_secret_version, 
+                self.secret_client.access_secret_version,
                 request={"name": secret_name}
             )
-            return response.payload.data.decode("UTF-8")
+            secret_key = response.payload.data.decode("UTF-8")
         except Exception as e:
             logger.warning(f"Could not access Secret Manager for Gemini API key: {e}")
-            # Fallback to environment variable
-            api_key = os.environ.get('GEMINI_API_KEY')
-            if api_key:
-                return api_key
-            else:
-                raise Exception("Gemini API key not configured")
+
+        google_api_key = os.environ.get('GOOGLE_API_KEY')
+        gemini_api_key = os.environ.get('GEMINI_API_KEY')
+
+        selected_key = None
+        selected_source = None
+
+        if secret_key:
+            selected_key = secret_key
+            selected_source = 'secret:bravo-google-api-key'
+        elif google_api_key:
+            selected_key = google_api_key
+            selected_source = 'env:GOOGLE_API_KEY'
+        elif gemini_api_key:
+            selected_key = gemini_api_key
+            selected_source = 'env:GEMINI_API_KEY'
+
+        if not selected_key:
+            raise Exception("Gemini API key not configured")
+
+        # Helpful warning if secret and env values diverge.
+        if secret_key and google_api_key and secret_key != google_api_key:
+            logger.warning(
+                "⚠️ Secret key and GOOGLE_API_KEY differ. "
+                "Importer will use the Secret Manager key."
+            )
+
+        self.gemini_key_source = selected_source
+        self.gemini_key_fingerprint = self._fingerprint_key(selected_key)
+
+        logger.info(
+            f"🔐 Gemini key source: {self.gemini_key_source}; "
+            f"fingerprint: {self.gemini_key_fingerprint}"
+        )
+
+        return selected_key
     
-    async def generate_image_tags(self, image_url: str, concept: str, subconcept: str) -> List[str]:
+    def _basic_fallback_tags(self, concept: str, subconcept: str) -> List[str]:
+        """Generate deterministic fallback tags from concept/subconcept tokens."""
+        searchable_subconcept = subconcept.replace('_', ' ').strip()
+        searchable_concept = concept.replace('_', ' ').strip()
+
+        fallback_tags: List[str] = []
+        for candidate in [searchable_subconcept, searchable_concept]:
+            if candidate and candidate.lower() not in [t.lower() for t in fallback_tags]:
+                fallback_tags.append(candidate)
+
+        token_source = searchable_subconcept.replace('-', ' ')
+        for token in token_source.split():
+            cleaned = token.strip().lower()
+            if len(cleaned) < 3:
+                continue
+            if cleaned in {'and', 'the', 'for', 'with', 'from'}:
+                continue
+            if cleaned not in [t.lower() for t in fallback_tags]:
+                fallback_tags.append(cleaned)
+
+        return fallback_tags[:15]
+
+    async def generate_image_tags(self, image_path: str, concept: str, subconcept: str) -> List[str]:
         """Use Gemini to analyze image and generate relevant tags"""
+        fallback_tags = self._basic_fallback_tags(concept, subconcept)
+
         try:
             api_key = await self.get_gemini_api_key()
             genai.configure(api_key=api_key)
             
-            model = genai.GenerativeModel('gemini-2.0-flash-001')
+            model = genai.GenerativeModel(self.gemini_model_name)
             
             prompt = f"""
             Analyze this image that represents "{subconcept}" from the category "{concept}".
@@ -275,41 +347,75 @@ class BravoImageImporter:
             
             Example format: brown, furry, sitting, friendly, companion, pet, animal
             """
-            
-            # Download image for analysis
-            response = requests.get(image_url, timeout=30)
-            if response.status_code == 200:
-                # Convert to base64 for Gemini
-                image_data = base64.b64encode(response.content).decode()
-                
-                response = await asyncio.to_thread(
-                    model.generate_content,
-                    [prompt, {"mime_type": "image/png", "data": image_data}]
-                )
-                
-                tags_text = response.text.strip()
-                ai_tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
-                
-                # Build final tag list with subconcept-first priority
-                # Convert underscores to spaces for better searchability
-                searchable_subconcept = subconcept.replace('_', ' ')
-                searchable_concept = concept.replace('_', ' ')
-                final_tags = [searchable_subconcept, searchable_concept]  # Subconcept first, concept second
-                
-                # Add AI-generated descriptive tags (avoid duplicates)
-                for tag in ai_tags:
-                    if tag not in final_tags and tag.lower() not in [searchable_subconcept.lower(), searchable_concept.lower()]:
-                        final_tags.append(tag)
-                
-                return final_tags[:15]  # Limit to 15 tags max
-            else:
-                logger.warning(f"⚠️ Failed to download image for analysis: {image_url}")
-                return [subconcept.replace('_', ' '), concept.replace('_', ' ')]  # Subconcept first for better matching
+
+            with open(image_path, 'rb') as f:
+                image_bytes = f.read()
+
+            image_data = base64.b64encode(image_bytes).decode()
+
+            last_error = None
+            for attempt in range(1, self.tag_retry_attempts + 1):
+                try:
+                    response = await asyncio.to_thread(
+                        model.generate_content,
+                        [prompt, {"mime_type": "image/png", "data": image_data}]
+                    )
+
+                    tags_text = (response.text or '').strip()
+                    ai_tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
+
+                    searchable_subconcept = subconcept.replace('_', ' ')
+                    searchable_concept = concept.replace('_', ' ')
+                    final_tags = [searchable_subconcept, searchable_concept]
+
+                    for tag in ai_tags:
+                        if tag not in final_tags and tag.lower() not in [searchable_subconcept.lower(), searchable_concept.lower()]:
+                            final_tags.append(tag)
+
+                    self.ai_tag_rate_limit_streak = 0
+                    self.ai_tag_success_count += 1
+                    return final_tags[:15]
+                except Exception as retry_err:
+                    last_error = retry_err
+                    err_text = str(retry_err)
+                    is_retryable = (
+                        '429' in err_text
+                        or 'Resource exhausted' in err_text
+                        or 'quota' in err_text.lower()
+                    )
+                    if attempt < self.tag_retry_attempts and is_retryable:
+                        backoff_seconds = min(45.0, (2 ** attempt) + random.uniform(0.25, 1.5))
+                        logger.warning(
+                            f"⚠️ Gemini tagging rate-limited for {concept}/{subconcept} "
+                            f"(attempt {attempt}/{self.tag_retry_attempts}). Retrying in {backoff_seconds:.1f}s"
+                        )
+                        await asyncio.sleep(backoff_seconds)
+                        continue
+                    raise last_error
                 
         except Exception as e:
-            logger.warning(f"⚠️ Error generating image tags: {e}")
-            # Return only meaningful tags as fallback, subconcept first (with spaces)
-            return [subconcept.replace('_', ' '), concept.replace('_', ' ')]
+            err_text = str(e)
+            is_rate_limit = (
+                '429' in err_text
+                or 'Resource exhausted' in err_text
+                or 'quota' in err_text.lower()
+            )
+            if is_rate_limit:
+                self.ai_tag_rate_limit_streak += 1
+                logger.warning(
+                    f"⚠️ AI tag generation rate-limited for {concept}/{subconcept}; "
+                    f"using fallback tags (streak {self.ai_tag_rate_limit_streak})."
+                )
+                if self.disable_ai_after_rate_limit and self.ai_tag_rate_limit_streak >= self.rate_limit_streak_threshold:
+                    self.use_ai_tags = False
+                    logger.warning(
+                        "🚦 Disabling AI tagging for the remainder of this import due to repeated rate limits. "
+                        "Uploads will continue with fallback tags."
+                    )
+            else:
+                logger.warning(f"⚠️ Error generating image tags: {e}")
+            self.ai_tag_fallback_count += 1
+            return fallback_tags
     
     async def store_image_in_firestore(self, image_url: str, concept: str, subconcept: str, tags: List[str]) -> str:
         """Store image metadata in Firestore"""
@@ -339,7 +445,30 @@ class BravoImageImporter:
         except Exception as e:
             logger.error(f"❌ Error storing image in Firestore: {e}")
             raise
-    
+
+    async def update_image_in_firestore(self, doc_ref, image_url: str, concept: str, subconcept: str, tags: List[str], created_at=None) -> str:
+        """Update an existing Firestore document in-place, preserving its document ID."""
+        try:
+            now = datetime.now(timezone.utc)
+            doc_data = {
+                "concept": concept,
+                "subconcept": subconcept,
+                "tags": tags,
+                "image_url": image_url,
+                "image_type": "global",
+                "user_id": None,
+                "created_at": created_at if created_at is not None else now,
+                "updated_at": now,
+                "created_by": "bulk_import_bravo",
+                "approved": True,
+                "source": "bravo_images"
+            }
+            await asyncio.to_thread(doc_ref.set, doc_data)
+            return doc_ref.id
+        except Exception as e:
+            logger.error(f"❌ Error updating image in Firestore: {e}")
+            raise
+
     async def process_image_batch(self, images_batch: List[Tuple[str, str, str]]) -> Dict:
         """Process a batch of images"""
         results = {
@@ -359,31 +488,56 @@ class BravoImageImporter:
                     .limit(1)
                     .get
                 )
-                
+
+                preserved_tags: Optional[List[str]] = None
+                existing_doc_ref = None  # reference to update in-place if replacing
+
                 if existing and not getattr(self, 'replace_existing', False):
                     logger.info(f"⏭️ Skipping {concept}/{subconcept} - already exists")
                     results["skipped"] += 1
                     continue
                 elif existing and getattr(self, 'replace_existing', False):
-                    # Delete existing entries so new one replaces them
-                    for doc in existing:
-                        logger.info(f"🔄 Replacing existing {concept}/{subconcept} (doc: {doc.id})")
-                        await asyncio.to_thread(doc.reference.delete)
-                
+                    existing_doc_ref = existing[0].reference
+                    existing_doc_data_raw = existing[0].to_dict() or {}
+                    existing_created_at = existing_doc_data_raw.get('created_at')
+                    if not self.force_retag:
+                        try:
+                            existing_doc_data = existing_doc_data_raw
+                            existing_tags = existing_doc_data.get('tags') if isinstance(existing_doc_data, dict) else None
+                            if isinstance(existing_tags, list) and existing_tags:
+                                preserved_tags = [str(t).strip() for t in existing_tags if str(t).strip()]
+                                logger.info(
+                                    f"♻️ Reusing {len(preserved_tags)} existing tags for {concept}/{subconcept} "
+                                    f"(use --force-retag to regenerate)"
+                                )
+                        except Exception as preserve_err:
+                            logger.warning(f"⚠️ Could not preserve existing tags for {concept}/{subconcept}: {preserve_err}")
+
+                    # Delete any duplicate entries beyond the first
+                    for extra_doc in existing[1:]:
+                        logger.info(f"🗑️ Removing duplicate {concept}/{subconcept} (doc: {extra_doc.id})")
+                        await asyncio.to_thread(extra_doc.reference.delete)
+
                 # Upload image to storage
                 logger.info(f"📤 Uploading {concept}/{subconcept}")
                 image_url = await self.upload_image_to_storage(image_path, concept, subconcept)
-                
-                if self.use_ai_tags:
+
+                if preserved_tags:
+                    tags = preserved_tags[:15]
+                elif self.use_ai_tags:
                     logger.info(f"🏷️ Generating tags for {concept}/{subconcept}")
-                    tags = await self.generate_image_tags(image_url, concept, subconcept)
+                    tags = await self.generate_image_tags(image_path, concept, subconcept)
                 else:
                     logger.info(f"🏷️ AI tagging disabled for {concept}/{subconcept}; using fallback tags")
-                    tags = [subconcept.replace('_', ' '), concept.replace('_', ' ')]
-                
-                # Store in Firestore
+                    tags = self._basic_fallback_tags(concept, subconcept)
+
+                # Store in Firestore — update existing doc in-place (preserves doc ID) or create new
                 logger.info(f"💾 Storing {concept}/{subconcept} in database")
-                doc_id = await self.store_image_in_firestore(image_url, concept, subconcept, tags)
+                if existing_doc_ref is not None:
+                    logger.info(f"🔄 Updating existing {concept}/{subconcept} (doc: {existing_doc_ref.id})")
+                    doc_id = await self.update_image_in_firestore(existing_doc_ref, image_url, concept, subconcept, tags, created_at=existing_created_at)
+                else:
+                    doc_id = await self.store_image_in_firestore(image_url, concept, subconcept, tags)
                 
                 logger.info(f"✅ Successfully processed {concept}/{subconcept} -> {doc_id}")
                 logger.info(f"🏷️ Tags: {', '.join(tags)}")
@@ -391,7 +545,7 @@ class BravoImageImporter:
                 results["processed"] += 1
                 
                 # Longer delay to avoid rate limits (especially for AI tagging)
-                await asyncio.sleep(2)
+                await asyncio.sleep(self.inter_image_delay_seconds)
                 
             except Exception as e:
                 logger.error(f"❌ Error processing {image_path}: {e}")
@@ -400,23 +554,51 @@ class BravoImageImporter:
         
         return results
     
-    async def run_import(self, base_path: str, test_mode: bool = False, batch_size: int = 10, replace: bool = False):
+    async def run_import(
+        self,
+        base_path: str,
+        test_mode: bool = False,
+        batch_size: int = 10,
+        replace: bool = False,
+        inter_image_delay: float = 2.0,
+        tag_retry_attempts: int = 2,
+        disable_ai_after_rate_limit: bool = True,
+        rate_limit_streak_threshold: int = 3,
+        gemini_model: str = 'gemini-2.0-flash-001',
+        force_retag: bool = False,
+    ) -> Dict[str, int]:
         """Run the bulk import process"""
         self.batch_size = batch_size
         self.replace_existing = replace
+        self.inter_image_delay_seconds = max(0.0, inter_image_delay)
+        self.tag_retry_attempts = max(1, int(tag_retry_attempts))
+        self.disable_ai_after_rate_limit = bool(disable_ai_after_rate_limit)
+        self.rate_limit_streak_threshold = max(1, int(rate_limit_streak_threshold))
+        self.gemini_model_name = (gemini_model or 'gemini-2.0-flash-001').strip()
+        self.force_retag = bool(force_retag)
         
         logger.info("🚀 Starting BravoImages bulk import")
         logger.info(f"📁 Source path: {base_path}")
         logger.info(f"📦 Batch size: {batch_size}")
         logger.info(f"🧪 Test mode: {test_mode}")
         logger.info(f"🔄 Replace existing: {replace}")
+        logger.info(f"⏱️ Inter-image delay: {self.inter_image_delay_seconds:.1f}s")
+        logger.info(f"🔁 Tag retry attempts: {self.tag_retry_attempts}")
+        logger.info(f"🚦 Disable AI after rate limits: {self.disable_ai_after_rate_limit}")
+        logger.info(f"📉 Rate-limit streak threshold: {self.rate_limit_streak_threshold}")
+        logger.info(f"🤖 Gemini model for tagging: {self.gemini_model_name}")
+        logger.info(f"♻️ Force retag on replace: {self.force_retag}")
+
+        if self.use_ai_tags:
+            # Prime key resolution once so logs clearly show source/fingerprint before processing.
+            await self.get_gemini_api_key()
         
         # Find all images
         all_images = self.find_all_images(base_path)
         
         if not all_images:
             logger.error("❌ No images found to process")
-            return
+            return {"processed": 0, "errors": 0, "skipped": 0}
         
         # In test mode, only process first 5 images
         if test_mode:
@@ -455,6 +637,17 @@ class BravoImageImporter:
         logger.info(f"   ⏭️ Skipped: {total_results['skipped']}")
         logger.info(f"   ❌ Errors: {total_results['errors']}")
         logger.info(f"   📁 Total: {len(all_images)}")
+        if self.ai_tags_requested:
+            logger.info(f"   🏷️ AI tags success: {self.ai_tag_success_count}")
+            logger.info(f"   🛟 AI tag fallbacks: {self.ai_tag_fallback_count}")
+            logger.info(f"   🚦 AI tagging still enabled at end: {self.use_ai_tags}")
+            if self.gemini_key_source and self.gemini_key_fingerprint:
+                logger.info(
+                    f"   🔐 Gemini key used: {self.gemini_key_source} "
+                    f"(fp={self.gemini_key_fingerprint})"
+                )
+
+        return total_results
 
 async def main():
     parser = argparse.ArgumentParser(description='Bulk import BravoImages to Firestore')
@@ -469,12 +662,40 @@ async def main():
                        help='Replace existing images instead of skipping')
     parser.add_argument('--no-ai-tags', action='store_true',
                        help='Disable Gemini tagging and use fallback tags only')
+    parser.add_argument('--inter-image-delay', type=float, default=2.0,
+                       help='Seconds to wait between images to reduce API rate limits (default: 2.0)')
+    parser.add_argument('--tag-retries', type=int, default=2,
+                       help='How many attempts to make for AI tag generation per image (default: 2)')
+    parser.add_argument('--disable-ai-after-rate-limit', action='store_true', default=True,
+                       help='Disable AI tagging for the rest of the run after repeated 429s (default: enabled)')
+    parser.add_argument('--keep-ai-after-rate-limit', action='store_true',
+                       help='Do not disable AI tagging after repeated 429s')
+    parser.add_argument('--rate-limit-streak-threshold', type=int, default=3,
+                       help='Consecutive 429 fallback count before AI tagging is disabled (default: 3)')
+    parser.add_argument('--gemini-model', type=str, default='gemini-2.0-flash-001',
+                       help='Gemini model used for image tagging (default: gemini-2.0-flash-001)')
+    parser.add_argument('--force-retag', action='store_true',
+                       help='When replacing existing documents, regenerate tags instead of reusing existing tags')
     
     args = parser.parse_args()
     
     try:
         importer = BravoImageImporter(use_ai_tags=not args.no_ai_tags)
-        await importer.run_import(args.path, args.test, args.batch_size, args.replace)
+        results = await importer.run_import(
+            args.path,
+            args.test,
+            args.batch_size,
+            args.replace,
+            args.inter_image_delay,
+            args.tag_retries,
+            (False if args.keep_ai_after_rate_limit else args.disable_ai_after_rate_limit),
+            args.rate_limit_streak_threshold,
+            args.gemini_model,
+            args.force_retag,
+        )
+
+        if results.get('errors', 0) > 0:
+            raise SystemExit(1)
         
     except KeyboardInterrupt:
         logger.info("🛑 Import interrupted by user")

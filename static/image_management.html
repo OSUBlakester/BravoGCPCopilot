@@ -366,7 +366,7 @@
                 showLoading(true);
                 updateStatus("Loading images...");
                 
-                const response = await authenticatedFetch('/api/admin/images/browse?limit=5000&source=all');
+                const response = await authenticatedFetch('/api/admin/images/browse?limit=20000&source=all');
                 if (!response.ok) {
                     throw new Error(`Failed to load images: ${response.status}`);
                 }

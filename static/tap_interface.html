@@ -3325,6 +3325,30 @@
             };
         }
 
+        function resolveNavigationTargetCategory(targetBoardId) {
+            if (!targetBoardId) {
+                return null;
+            }
+
+            const normalizedTargetBoardId = String(targetBoardId).trim();
+            if (!normalizedTargetBoardId) {
+                return null;
+            }
+
+            const menuCategory = findCategoryByBoardId(normalizedTargetBoardId, tapConfig?.buttons || []);
+            if (menuCategory) {
+                return menuCategory;
+            }
+
+            const boards = Array.isArray(tapConfig?.boards) ? tapConfig.boards : [];
+            const targetBoard = boards.find(board => String(board?.id || '').trim() === normalizedTargetBoardId);
+            if (targetBoard) {
+                return buildStartupCategoryFromBoard(targetBoard);
+            }
+
+            return null;
+        }
+
         function hasExplicitWordOptions(category) {
             if (!category || typeof category !== 'object') {
                 return false;
@@ -6222,11 +6246,13 @@ VARIETY RULES:
                                     await announce(phraseToAnnounce, 'system', true);
                                 }
 
-                                const effectiveAfterSel = afterSelection || 'use_ai';
+                                const effectiveAfterSel = afterSelection || (option.action_type === 'navigate' ? 'navigate' : 'use_ai');
                                 if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
-                                    const targetCategoryBtn = tapConfig && tapConfig.buttons && tapConfig.buttons.find(b => b.board_id === optionTargetBoardId || b.id === optionTargetBoardId);
-                                    if (targetCategoryBtn) {
-                                        await selectCategory(targetCategoryBtn, null);
+                                    const targetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
+                                    if (targetCategory) {
+                                        await selectCategory(targetCategory, null);
+                                    } else {
+                                        console.warn('Could not resolve navigate target board:', optionTargetBoardId, option);
                                     }
                                 } else if (effectiveAfterSel === 'use_ai') {
                                     await updateFreestyleOptionsWithSelectedWord(text);
@@ -6458,12 +6484,14 @@ VARIETY RULES:
                             
                             // Determine post-selection board behavior.
                             // afterSelection is null for legacy/AI-board options → treat as 'use_ai' (backward compat).
-                            const effectiveAfterSel = afterSelection || 'use_ai';
+                            const effectiveAfterSel = afterSelection || (option.action_type === 'navigate' ? 'navigate' : 'use_ai');
                             if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
-                                const targetCategoryBtn = tapConfig && tapConfig.buttons && tapConfig.buttons.find(b => b.board_id === optionTargetBoardId || b.id === optionTargetBoardId);
-                                if (targetCategoryBtn) {
+                                const targetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
+                                if (targetCategory) {
                                     console.log('🎯 Navigating to board:', optionTargetBoardId);
-                                    await selectCategory(targetCategoryBtn, null);
+                                    await selectCategory(targetCategory, null);
+                                } else {
+                                    console.warn('Could not resolve navigate target board:', optionTargetBoardId, option);
                                 }
                             } else if (effectiveAfterSel === 'use_ai') {
                                 console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
