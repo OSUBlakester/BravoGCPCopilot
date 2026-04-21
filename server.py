@@ -19477,7 +19477,7 @@ async def export_missing_images(
 # TAP INTERFACE NAVIGATION SYSTEM API
 # =============================================================================
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 
 class TapNavigationButton(BaseModel):
@@ -22287,6 +22287,37 @@ except ImportError as e:
 # Store parsed MTI data temporarily (in production, use Redis or database)
 migration_sessions = {}  # Format: {session_id: {parsed_data, mapper, timestamp}}
 
+try:
+    from touchchat_ce_parser import parse_touchchat_ce_upload
+    TOUCHCHAT_MIGRATION_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"TouchChat migration utilities not available: {e}")
+    TOUCHCHAT_MIGRATION_AVAILABLE = False
+
+touchchat_migration_sessions = {}  # Format: {session_id: {parsed_data, temp_dir, c4s_path, timestamp, account_id, aac_user_id}}
+
+
+def _normalize_board_label(value: Any) -> str:
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
+def _touchchat_cleanup_old_sessions() -> None:
+    cleanup_time = dt.now(timezone.utc) - timedelta(hours=1)
+    stale_sessions = [
+        sid for sid, data in touchchat_migration_sessions.items()
+        if data.get("timestamp") and data["timestamp"] < cleanup_time
+    ]
+
+    import shutil
+
+    for sid in stale_sessions:
+        session = touchchat_migration_sessions.pop(sid, None)
+        if not session:
+            continue
+        temp_dir = session.get("temp_dir")
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 def load_existing_json(json_data: Dict) -> Dict:
     """
@@ -23063,6 +23094,362 @@ async def delete_migration_session(
             raise HTTPException(status_code=403, detail="Not authorized")
     
     raise HTTPException(status_code=404, detail="Session not found")
+
+
+# ===================================
+# TOUCHCHAT TO BRAVO BOARD MIGRATION
+# ===================================
+
+@app.post("/api/touchchat-migration/upload-ce")
+async def upload_touchchat_ce_file(
+    file: UploadFile = File(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    if not TOUCHCHAT_MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="TouchChat migration functionality not available")
+
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    filename = str(file.filename or "")
+    normalized_name = filename.lower()
+    if not (normalized_name.endswith(".ce") or normalized_name.endswith(".ce.zip") or normalized_name.endswith(".zip")):
+        raise HTTPException(status_code=400, detail="Please upload a TouchChat .ce export file")
+
+    try:
+        content = await file.read()
+        extracted = parse_touchchat_ce_upload(content, filename)
+
+        session_id = str(uuid.uuid4())
+        touchchat_migration_sessions[session_id] = {
+            "parsed_data": extracted.parsed_data,
+            "temp_dir": extracted.temp_dir,
+            "c4s_path": extracted.c4s_path,
+            "timestamp": dt.now(timezone.utc),
+            "account_id": account_id,
+            "aac_user_id": aac_user_id,
+        }
+
+        _touchchat_cleanup_old_sessions()
+
+        return JSONResponse(content={
+            "session_id": session_id,
+            "summary": {
+                "file": extracted.parsed_data.get("file"),
+                "total_boards": extracted.parsed_data.get("total_boards", 0),
+                "total_buttons": extracted.parsed_data.get("total_buttons", 0),
+            },
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error parsing TouchChat CE file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse TouchChat CE file: {str(e)}")
+
+
+@app.get("/api/touchchat-migration/boards/{session_id}")
+async def get_touchchat_migration_boards(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to access this TouchChat migration session")
+
+    return JSONResponse(content=session["parsed_data"])
+
+
+@app.post("/api/touchchat-migration/import-board")
+async def import_touchchat_board(
+    request_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    session_id = str(request_data.get("session_id") or "").strip()
+    source_board_id = str(request_data.get("source_board_id") or "").strip()
+    selected_indices = request_data.get("selected_button_indices") or []
+    destination_type = str(request_data.get("destination_type") or "new").strip().lower()
+    destination_board_id = str(request_data.get("destination_board_id") or "").strip()
+    destination_board_name = str(request_data.get("destination_board_name") or "").strip()
+    merge_mode = str(request_data.get("merge_mode") or "update").strip().lower()
+    nav_resolutions = request_data.get("navigation_resolutions") or {}
+
+    if not session_id or not source_board_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != account_id or session["aac_user_id"] != aac_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this TouchChat migration session")
+
+    parsed_data = session.get("parsed_data") or {}
+    boards_from_file = parsed_data.get("boards") if isinstance(parsed_data.get("boards"), dict) else {}
+    source_board = boards_from_file.get(source_board_id)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Source board not found in parsed TouchChat data")
+
+    sorted_buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
+    selected_buttons = [
+        sorted_buttons[int(i)]
+        for i in selected_indices
+        if isinstance(i, int) and 0 <= int(i) < len(sorted_buttons)
+    ]
+    if not selected_buttons:
+        raise HTTPException(status_code=400, detail="No valid buttons selected for import")
+
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        config_data = create_default_tap_config(account_id, aac_user_id)
+    config_data, _ = normalize_compose_tap_config(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data)
+
+    boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
+    existing_by_id = {
+        str(board.get("id") or "").strip(): board
+        for board in boards
+        if isinstance(board, dict) and str(board.get("id") or "").strip()
+    }
+    existing_by_label = {
+        _normalize_board_label(board.get("label")): str(board.get("id") or "").strip()
+        for board in boards
+        if isinstance(board, dict)
+    }
+
+    if destination_type not in {"new", "existing"}:
+        raise HTTPException(status_code=400, detail="destination_type must be 'new' or 'existing'")
+    if merge_mode not in {"replace", "update"}:
+        raise HTTPException(status_code=400, detail="merge_mode must be 'replace' or 'update'")
+
+    target_board: Optional[Dict[str, Any]] = None
+    target_board_id: Optional[str] = None
+    created_board = False
+
+    if destination_type == "existing":
+        if not destination_board_id:
+            raise HTTPException(status_code=400, detail="destination_board_id is required for existing board import")
+        target_board = existing_by_id.get(destination_board_id)
+        if not target_board:
+            raise HTTPException(status_code=404, detail="Destination board not found")
+        if str(target_board.get("source") or "") == "legacy_category" or str(target_board.get("board_type") or "") == "system":
+            raise HTTPException(status_code=403, detail="Cannot import into legacy/system read-only boards")
+        target_board_id = destination_board_id
+    else:
+        if not destination_board_name:
+            raise HTTPException(status_code=400, detail="destination_board_name is required for new board import")
+
+        base_slug = _sanitize_board_slug(destination_board_name)
+        candidate_id = f"board_{base_slug}"
+        suffix = 2
+        while candidate_id in existing_by_id:
+            candidate_id = f"board_{base_slug}_{suffix}"
+            suffix += 1
+
+        target_board_id = candidate_id
+        target_board = _normalize_board_payload(
+            {
+                "label": destination_board_name,
+                "board_type": "static",
+                "owner_scope": "user",
+                "hidden": False,
+                "default_columns": int(source_board.get("layout_cols") or 12),
+                "max_rows": max(7, int(source_board.get("layout_rows") or 7)),
+                "buttons": [],
+            },
+            board_id=target_board_id,
+            source="custom",
+            source_button_id=None,
+        )
+        boards.append(target_board)
+        existing_by_id[target_board_id] = target_board
+        existing_by_label[_normalize_board_label(destination_board_name)] = target_board_id
+        created_board = True
+
+    source_page_rid = str(source_board.get("page_rid") or "").strip()
+    source_page_name = str(source_board.get("name") or "").strip()
+
+    missing_nav_targets: List[Dict[str, Any]] = []
+    resolved_nav_map: Dict[str, str] = {}
+    created_nav_boards: List[Dict[str, str]] = []
+
+    for button in selected_buttons:
+        target_rid = str(button.get("navigation_target_page_rid") or "").strip()
+        if not target_rid:
+            continue
+        if target_rid == source_page_rid:
+            resolved_nav_map[target_rid] = target_board_id
+            continue
+
+        target_name = str(button.get("navigation_target_page_name") or "").strip() or target_rid
+        existing_match = existing_by_label.get(_normalize_board_label(target_name))
+        if existing_match:
+            resolved_nav_map[target_rid] = existing_match
+            continue
+
+        resolution = nav_resolutions.get(target_rid) if isinstance(nav_resolutions, dict) else None
+        action = str((resolution or {}).get("action") or "").strip().lower() if isinstance(resolution, dict) else ""
+
+        if action == "existing":
+            selected_existing_id = str((resolution or {}).get("board_id") or "").strip()
+            if selected_existing_id and selected_existing_id in existing_by_id:
+                resolved_nav_map[target_rid] = selected_existing_id
+                continue
+        elif action == "create":
+            requested_name = str((resolution or {}).get("board_name") or target_name).strip() or target_name
+            requested_key = _normalize_board_label(requested_name)
+            existing_id_for_name = existing_by_label.get(requested_key)
+            if existing_id_for_name:
+                resolved_nav_map[target_rid] = existing_id_for_name
+                continue
+
+            nav_slug = _sanitize_board_slug(requested_name)
+            nav_candidate_id = f"board_{nav_slug}"
+            nav_suffix = 2
+            while nav_candidate_id in existing_by_id:
+                nav_candidate_id = f"board_{nav_slug}_{nav_suffix}"
+                nav_suffix += 1
+
+            nav_board = _normalize_board_payload(
+                {
+                    "label": requested_name,
+                    "board_type": "static",
+                    "owner_scope": "user",
+                    "hidden": False,
+                    "default_columns": 12,
+                    "max_rows": 7,
+                    "buttons": [],
+                },
+                board_id=nav_candidate_id,
+                source="custom",
+                source_button_id=None,
+            )
+            boards.append(nav_board)
+            existing_by_id[nav_candidate_id] = nav_board
+            existing_by_label[requested_key] = nav_candidate_id
+            resolved_nav_map[target_rid] = nav_candidate_id
+            created_nav_boards.append({"id": nav_candidate_id, "label": requested_name})
+            continue
+
+        missing_nav_targets.append({
+            "target_page_rid": target_rid,
+            "target_page_name": target_name,
+            "button_label": str(button.get("label") or ""),
+            "source_board_name": source_page_name,
+        })
+
+    if missing_nav_targets:
+        return JSONResponse(content={
+            "requires_confirmation": True,
+            "missing_navigation_targets": missing_nav_targets,
+            "available_destination_boards": [
+                {"id": b_id, "label": (existing_by_id[b_id].get("label") or b_id)}
+                for b_id in sorted(existing_by_id.keys())
+            ],
+        })
+
+    existing_buttons = target_board.get("buttons") if isinstance(target_board.get("buttons"), list) else []
+    existing_buttons_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for existing_btn in existing_buttons:
+        if not isinstance(existing_btn, dict):
+            continue
+        existing_buttons_by_position[(int(existing_btn.get("row", 0) or 0), int(existing_btn.get("col", 0) or 0))] = existing_btn
+
+    imported_buttons: List[Dict[str, Any]] = []
+    for idx, src_btn in enumerate(selected_buttons):
+        label = str(src_btn.get("label") or "").strip() or f"Button {idx + 1}"
+        speech_text = str(src_btn.get("speech_text") or "").strip() or label
+        row = int(src_btn.get("row") or 0)
+        col = int(src_btn.get("col") or 0)
+        existing_target_btn = existing_buttons_by_position.get((row, col))
+        image_url = None
+
+        nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
+        target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
+
+        imported_buttons.append({
+            "id": f"btn_{row}_{col}_{int(time.time() * 1000)}_{idx}",
+            "label": label,
+            "row": row,
+            "col": col,
+            "speech_text": speech_text,
+            "action_type": "navigate" if target_nav_board_id else "announce",
+            "after_selection": "navigate" if target_nav_board_id else "do_nothing",
+            "target_board_id": target_nav_board_id,
+            "custom_audio_file": None,
+            "special_function": None,
+            "image_url": image_url,
+            "background_color": (
+                existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"
+            ),
+            "text_color": src_btn.get("text_color") or "#000000",
+            "hidden": False,
+        })
+
+    if merge_mode == "replace":
+        target_board["buttons"] = imported_buttons
+    else:
+        merged_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        for btn in existing_buttons:
+            if not isinstance(btn, dict):
+                continue
+            merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+        for btn in imported_buttons:
+            merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+        target_board["buttons"] = sorted(
+            list(merged_by_position.values()),
+            key=lambda b: (int(b.get("row", 0) or 0), int(b.get("col", 0) or 0), str(b.get("id") or "")),
+        )
+
+    target_board["board_type"] = "static"
+    target_board["label"] = str(target_board.get("label") or destination_board_name or "Imported Board")
+    config_data["boards"] = boards
+    config_data["updated_at"] = dt.now().isoformat()
+
+    success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save TouchChat migration import")
+
+    logging.info(
+        "TouchChat import complete: board=%s buttons=%d",
+        str(target_board.get("label") or target_board_id or ""),
+        len(imported_buttons),
+    )
+
+    return JSONResponse(content={
+        "success": True,
+        "created_board": created_board,
+        "target_board_id": target_board_id,
+        "target_board_label": target_board.get("label"),
+        "buttons_imported": len(imported_buttons),
+        "created_navigation_boards": created_nav_boards,
+    })
+
+
+@app.delete("/api/touchchat-migration/session/{session_id}")
+async def delete_touchchat_migration_session(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    session = touchchat_migration_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found")
+
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    import shutil
+
+    touchchat_migration_sessions.pop(session_id, None)
+    temp_dir = session.get("temp_dir")
+    if temp_dir:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return JSONResponse(content={"success": True})
 
 
 # --- Guess Games Endpoints (Who/Where/What) ---
