@@ -23544,7 +23544,7 @@ async def import_touchchat_board(
                 nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
                 target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
                 temporary_navigation = bool(src_btn.get("temporary_navigation", False))
-                speech_text = None if target_nav_board_id else (str(src_btn.get("speech_text") or "").strip() or None)
+                speech_text = str(src_btn.get("speech_text") or "").strip() or None
                 modifier_trigger_id = src_btn.get("modifier_trigger_id")
 
                 raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
@@ -23556,7 +23556,7 @@ async def import_touchchat_board(
                     variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
                     converted_modifier_variants[str(modifier_id)] = {
                         "label": str(raw_variant.get("label") or "").strip(),
-                        "speech_text": None if variant_target_board_id else (str(raw_variant.get("speech_text") or "").strip() or None),
+                        "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
                         "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
                         "action_type": "navigate" if variant_target_board_id else "announce",
                         "after_selection": "navigate" if variant_target_board_id else "do_nothing",
@@ -23734,7 +23734,7 @@ async def import_touchchat_board(
         nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
         target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
         temporary_navigation = bool(src_btn.get("temporary_navigation", False))
-        speech_text = None if target_nav_board_id else (str(src_btn.get("speech_text") or "").strip() or None)
+        speech_text = str(src_btn.get("speech_text") or "").strip() or None
         modifier_trigger_id = src_btn.get("modifier_trigger_id")
 
         raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
@@ -23746,7 +23746,7 @@ async def import_touchchat_board(
             variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
             converted_modifier_variants[str(modifier_id)] = {
                 "label": str(raw_variant.get("label") or "").strip(),
-                "speech_text": None if variant_target_board_id else (str(raw_variant.get("speech_text") or "").strip() or None),
+                "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
                 "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
                 "action_type": "navigate" if variant_target_board_id else "announce",
                 "after_selection": "navigate" if variant_target_board_id else "do_nothing",
