@@ -64,9 +64,84 @@ function prepareForAnotherBoardImport() {
   document.getElementById('buttonList').innerHTML = '';
   document.getElementById('sourceBoardSelect').value = '';
   selectedSourceBoardId = null;
+  updateExecuteSourceBoardContext();
   resetNavResolutionUI();
   showTab('boards');
   setStatus('Select another source board to continue migration.');
+}
+
+function getSelectedSourceBoard() {
+  if (!selectedSourceBoardId || !touchchatData || !touchchatData.boards) return null;
+  return touchchatData.boards[selectedSourceBoardId] || null;
+}
+
+function updateExecuteSourceBoardContext() {
+  const sourceNameEl = document.getElementById('executeSourceBoardName');
+  const sourceBoard = getSelectedSourceBoard();
+  if (sourceNameEl) {
+    sourceNameEl.textContent = sourceBoard ? String(sourceBoard.name || sourceBoard.page_id || 'Unknown board') : 'Not selected';
+  }
+}
+
+function normalizeBoardNameForMatch(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function findExistingDestinationBoardByName(boardName) {
+  const target = normalizeBoardNameForMatch(boardName);
+  if (!target) return null;
+  return availableDestinationBoards.find((board) =>
+    normalizeBoardNameForMatch(board.label || board.id) === target
+  ) || null;
+}
+
+function findSourceBoardPageIdByName(boardName) {
+  const target = normalizeBoardNameForMatch(boardName);
+  if (!target || !touchchatData || !touchchatData.boards) return null;
+  const sourceBoards = Object.values(touchchatData.boards);
+  const match = sourceBoards.find((board) =>
+    normalizeBoardNameForMatch(board.name || board.page_id) === target
+  );
+  return match ? String(match.page_id || '') : null;
+}
+
+function selectSourceBoardByName(boardName) {
+  const sourceSelect = document.getElementById('sourceBoardSelect');
+  if (!sourceSelect || !touchchatData || !touchchatData.boards) {
+    setStatus('Upload a TouchChat file first, then select a board from the list.');
+    return false;
+  }
+
+  const sourceBoardId = findSourceBoardPageIdByName(boardName);
+  if (!sourceBoardId) {
+    setStatus(`No source board named "${boardName}" was found in the uploaded TouchChat file.`);
+    return false;
+  }
+
+  sourceSelect.value = sourceBoardId;
+  sourceSelect.dispatchEvent(new Event('change'));
+  return true;
+}
+
+function applySourceBoardNameToDestination() {
+  const sourceBoard = getSelectedSourceBoard();
+  if (!sourceBoard) {
+    setStatus('Choose a source board first.');
+    return;
+  }
+  const name = String(sourceBoard.name || '').trim();
+  if (!name) {
+    setStatus('Selected source board has no name to copy.');
+    return;
+  }
+  const destinationInput = document.getElementById('newDestinationName');
+  if (destinationInput) {
+    destinationInput.value = name;
+  }
+  setStatus(`Destination board name filled with source board name: ${name}`);
 }
 
 function escapeHtml(v) {
@@ -206,6 +281,7 @@ function setupBoardAndButtonHandlers() {
   document.getElementById('sourceBoardSelect').addEventListener('change', (e) => {
     const value = String(e.target.value || '');
     selectedSourceBoardId = value || null;
+    updateExecuteSourceBoardContext();
     selectedButtonIndices.clear();
     resetNavResolutionUI();
     hideMigrationResultModal();
@@ -217,13 +293,21 @@ function setupBoardAndButtonHandlers() {
     }
 
     const board = touchchatData.boards[selectedSourceBoardId];
+    const matchedDestination = findExistingDestinationBoardByName(board.name || board.page_id || '');
+    if (matchedDestination) {
+      selectExistingDestinationBoard(matchedDestination.id, matchedDestination.label || matchedDestination.id);
+    }
     document.getElementById('boardMeta').textContent = `Grid ${board.layout_cols}x${board.layout_rows}`;
     renderButtonList(board);
     updateSelectedButtonCount();
     enableTab('buttons');
     enableTab('execute');
     showTab('buttons');
-    setStatus('Select buttons you want to import.');
+    if (matchedDestination) {
+      setStatus(`Select buttons you want to import. Destination is preselected to existing board "${matchedDestination.label || matchedDestination.id}".`);
+    } else {
+      setStatus('Select buttons you want to import.');
+    }
   });
 
   document.getElementById('selectAllButtonsBtn').addEventListener('click', () => {
@@ -306,6 +390,18 @@ async function loadAvailableDestinationBoards() {
   }
 }
 
+function selectExistingDestinationBoard(boardId, boardLabel) {
+  const existingRadio = document.querySelector('input[name="destinationType"][value="existing"]');
+  const newWrap = document.getElementById('newDestinationWrap');
+  const existingWrap = document.getElementById('existingDestinationWrap');
+  const existingSelect = document.getElementById('existingDestinationBoard');
+
+  if (existingRadio) existingRadio.checked = true;
+  if (newWrap) newWrap.classList.add('hidden');
+  if (existingWrap) existingWrap.classList.remove('hidden');
+  if (existingSelect) existingSelect.value = String(boardId || '');
+}
+
 function renderUnconfiguredBoardsReport(loadError = null) {
   const summaryEl = document.getElementById('unconfiguredBoardsSummary');
   const listEl = document.getElementById('unconfiguredBoardsList');
@@ -335,7 +431,20 @@ function renderUnconfiguredBoardsReport(loadError = null) {
     const li = document.createElement('li');
     const boardName = String(board.label || board.id || 'Untitled board');
     const hint = board.created_during_migration ? ' (created during migration)' : '';
-    li.textContent = `${boardName}${hint}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'text-left text-blue-700 hover:text-blue-900 hover:underline';
+    button.textContent = `${boardName}${hint}`;
+    button.addEventListener('click', () => {
+      const sourceFound = selectSourceBoardByName(boardName);
+      selectExistingDestinationBoard(board.id, boardName);
+      if (sourceFound) {
+        setStatus(`Selected source board "${boardName}" and mapped destination to existing board "${boardName}".`);
+      } else {
+        setStatus(`Selected destination board "${boardName}". Choose a source board in Boards step and select buttons.`);
+      }
+    });
+    li.appendChild(button);
     listEl.appendChild(li);
   });
 }
@@ -363,6 +472,8 @@ function setupExecuteHandlers() {
       hideMigrationResultModal();
     });
   });
+
+  document.getElementById('useSourceBoardNameBtn').addEventListener('click', applySourceBoardNameToDestination);
 
   document.getElementById('executeImportBtn').addEventListener('click', executeTouchChatImport);
   document.getElementById('resetMigrationBtn').addEventListener('click', resetTouchChatMigration);
@@ -564,6 +675,7 @@ async function resetTouchChatMigration() {
   touchchatSessionId = null;
   touchchatData = null;
   selectedSourceBoardId = null;
+  updateExecuteSourceBoardContext();
   selectedButtonIndices.clear();
   resetNavResolutionUI();
   hideMigrationResultModal();
