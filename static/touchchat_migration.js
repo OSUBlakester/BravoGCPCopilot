@@ -57,6 +57,24 @@ function showMigrationResultModal(title, message, options = {}) {
   if (modal) modal.classList.add('show');
 }
 
+function showImportProcessingOverlay(message = 'Please wait while TouchChat boards and buttons are being imported.') {
+  const overlay = document.getElementById('importProcessingOverlay');
+  const msg = document.getElementById('importProcessingMessage');
+  if (msg) msg.textContent = String(message || 'Import in progress...');
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+  }
+}
+
+function hideImportProcessingOverlay() {
+  const overlay = document.getElementById('importProcessingOverlay');
+  if (overlay) {
+    overlay.classList.remove('flex');
+    overlay.classList.add('hidden');
+  }
+}
+
 function prepareForAnotherBoardImport() {
   hideMigrationResultModal();
   selectedButtonIndices.clear();
@@ -293,9 +311,13 @@ function setupBoardAndButtonHandlers() {
     }
 
     const board = touchchatData.boards[selectedSourceBoardId];
+    const fullCascadeEnabled = !!document.getElementById('importFullCascade')?.checked;
     const matchedDestination = findExistingDestinationBoardByName(board.name || board.page_id || '');
     if (matchedDestination) {
       selectExistingDestinationBoard(matchedDestination.id, matchedDestination.label || matchedDestination.id);
+    }
+    if (fullCascadeEnabled) {
+      selectedButtonIndices = new Set(board.buttons.map((btn) => Number(btn.index)));
     }
     document.getElementById('boardMeta').textContent = `Grid ${board.layout_cols}x${board.layout_rows}`;
     renderButtonList(board);
@@ -307,6 +329,20 @@ function setupBoardAndButtonHandlers() {
       setStatus(`Select buttons you want to import. Destination is preselected to existing board "${matchedDestination.label || matchedDestination.id}".`);
     } else {
       setStatus('Select buttons you want to import.');
+    }
+  });
+
+  document.getElementById('importFullCascade').addEventListener('change', () => {
+    const fullCascadeEnabled = !!document.getElementById('importFullCascade')?.checked;
+    if (!selectedSourceBoardId || !touchchatData || !touchchatData.boards || !touchchatData.boards[selectedSourceBoardId]) {
+      return;
+    }
+    const board = touchchatData.boards[selectedSourceBoardId];
+    if (fullCascadeEnabled) {
+      selectedButtonIndices = new Set(board.buttons.map((btn) => Number(btn.index)));
+      renderButtonList(board);
+      updateSelectedButtonCount();
+      setStatus('Full cascade import enabled. This will import this board and all linked boards recursively.');
     }
   });
 
@@ -574,11 +610,13 @@ async function executeTouchChatImport() {
     return;
   }
 
+  const importFullCascade = !!document.getElementById('importFullCascade')?.checked;
+
   if (!touchchatSessionId || !selectedSourceBoardId) {
     setStatus('Upload a file and choose a source board first.');
     return;
   }
-  if (!selectedButtonIndices.size) {
+  if (!importFullCascade && !selectedButtonIndices.size) {
     setStatus('Select at least one button to import.');
     return;
   }
@@ -605,12 +643,16 @@ async function executeTouchChatImport() {
     destination_board_name: destinationType === 'new' ? newDestinationName : null,
     merge_mode: document.getElementById('mergeMode').value,
     navigation_resolutions: buildNavigationResolutionsFromUI(),
+    import_full_cascade: importFullCascade,
   };
 
   const executeBtn = document.getElementById('executeImportBtn');
   isImportInProgress = true;
   executeBtn.disabled = true;
   setStatus('Importing board...');
+  showImportProcessingOverlay(importFullCascade
+    ? 'Importing selected board and all cascading linked boards. This may take a minute...'
+    : 'Importing selected TouchChat buttons...');
 
   try {
     const response = await authenticatedFetch('/api/touchchat-migration/import-board', {
@@ -638,7 +680,11 @@ async function executeTouchChatImport() {
       window.parent.postMessage({ type: 'touchchat-migration-complete' }, '*');
     }
     const createdNavBoards = result.created_navigation_boards || [];
+    const importedBoards = result.imported_boards || [];
     let resultHtml = `<p class="mb-2">${escapeHtml(`Migration complete: ${result.buttons_imported} buttons imported to ${result.target_board_label}.`)}</p>`;
+    if (importedBoards.length > 1) {
+      resultHtml += `<p class="text-sm text-slate-700 mb-2">Imported across ${importedBoards.length} boards in full cascade mode.</p>`;
+    }
     if (createdNavBoards.length > 0) {
       resultHtml += `<div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded">`;
       resultHtml += `<p class="text-sm font-semibold text-amber-800 mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>${createdNavBoards.length} navigation board${createdNavBoards.length > 1 ? 's were' : ' was'} created but still need${createdNavBoards.length === 1 ? 's' : ''} buttons configured:</p>`;
@@ -660,6 +706,7 @@ async function executeTouchChatImport() {
   } finally {
     isImportInProgress = false;
     executeBtn.disabled = false;
+    hideImportProcessingOverlay();
   }
 }
 

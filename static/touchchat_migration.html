@@ -109,6 +109,12 @@
             <div class="font-medium text-slate-700">Select Buttons to Import</div>
             <div class="text-sm text-slate-600"><span id="selectedButtonCount">0</span> selected</div>
           </div>
+          <label class="flex items-start gap-2 mb-3 text-sm text-slate-700">
+            <input type="checkbox" id="importFullCascade" class="mt-1">
+            <span>
+              Import full cascade from this board (all buttons on this board and all linked boards, recursively).
+            </span>
+          </label>
           <div class="mb-2 flex gap-2">
             <button id="selectAllButtonsBtn" class="px-3 py-1 bg-slate-200 rounded text-sm">Select All</button>
             <button id="clearAllButtonsBtn" class="px-3 py-1 bg-slate-200 rounded text-sm">Clear All</button>
@@ -177,6 +183,18 @@
       <div class="px-5 py-4 border-t border-slate-200 flex justify-end gap-2">
         <button id="modalMigrateAnotherBoardBtn" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700">Import Another Board</button>
         <button id="modalMigrationDoneBtn" class="px-3 py-1.5 bg-slate-200 rounded text-sm hover:bg-slate-300">All Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="importProcessingOverlay" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center z-[1100]" role="status" aria-live="polite" aria-label="Import in progress">
+    <div class="bg-white rounded-lg shadow-xl border border-slate-200 px-6 py-5 w-full max-w-md mx-4">
+      <div class="flex items-center gap-3">
+        <i class="fas fa-spinner fa-spin text-blue-600 text-xl"></i>
+        <div>
+          <div class="text-sm font-semibold text-slate-900">Import In Progress</div>
+          <div id="importProcessingMessage" class="text-sm text-slate-600 mt-0.5">Please wait while TouchChat boards and buttons are being imported.</div>
+        </div>
       </div>
     </div>
   </div>
