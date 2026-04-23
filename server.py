@@ -19508,9 +19508,12 @@ class TapBoardButton(BaseModel):
     row: int = Field(0, ge=0, description="Zero-based row in board grid")
     col: int = Field(0, ge=0, description="Zero-based column in board grid")
     speech_text: Optional[str] = Field(None, description="Speech output text")
+    modifier_trigger_id: Optional[int] = Field(None, description="TouchChat modifier id triggered after tapping this button")
+    modifier_variants: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Alternate button states keyed by modifier id")
     action_type: str = Field("announce", description="announce|navigate|audio|special")
     after_selection: Optional[str] = Field(None, description="do_nothing|navigate|use_ai")
     target_board_id: Optional[str] = Field(None, description="Board ID for navigate action")
+    temporary_navigation: bool = Field(False, description="If true, navigate target is temporary and selection should return to previous board")
     custom_audio_file: Optional[str] = Field(None, description="Audio URL for audio action")
     special_function: Optional[str] = Field(None, description="Special function for special action")
     image_url: Optional[str] = Field(None, description="Button image URL")
@@ -19604,6 +19607,7 @@ class TapBoardCreateRequest(BaseModel):
     max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+    created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
 
 
 class TapBoardUpdateRequest(BaseModel):
@@ -19623,6 +19627,7 @@ class TapBoardUpdateRequest(BaseModel):
     max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+    created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
 
 # Update forward references
 TapNavigationButton.model_rebuild()
@@ -19653,13 +19658,16 @@ def _normalize_action_type(value: Any) -> str:
 def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[str, Any]:
     return {
         'id': str(button.get('id') or f'btn_{index + 1}'),
-        'label': str(button.get('label') or f'Button {index + 1}'),
+        'label': str(button.get('label') or ''),
         'row': int(button.get('row', index // 12) or 0),
         'col': int(button.get('col', index % 12) or 0),
         'speech_text': button.get('speech_text'),
+        'modifier_trigger_id': button.get('modifier_trigger_id'),
+        'modifier_variants': button.get('modifier_variants') if isinstance(button.get('modifier_variants'), dict) else {},
         'action_type': _normalize_action_type(button.get('action_type')),
         'after_selection': str(button.get('after_selection') or '').strip() or None,
         'target_board_id': button.get('target_board_id'),
+        'temporary_navigation': bool(button.get('temporary_navigation', False)),
         'custom_audio_file': button.get('custom_audio_file'),
         'special_function': button.get('special_function'),
         'image_url': button.get('image_url'),
@@ -19701,6 +19709,7 @@ def _normalize_board_payload(
         'default_columns': int(board_data.get('default_columns', 12) or 12),
         'max_rows': int(board_data.get('max_rows', 7) or 7),
         'buttons': normalized_buttons,
+        'created_during_migration': bool(board_data.get('created_during_migration', False)),
     }
 
 
@@ -19737,6 +19746,7 @@ def _convert_children_to_board_buttons(children: Any) -> List[Dict[str, Any]]:
             'speech_text': child.get('speech_text'),
             'action_type': _derive_action_type(child),
             'target_board_id': None,
+            'temporary_navigation': False,
             'custom_audio_file': child.get('custom_audio_file'),
             'special_function': child.get('special_function'),
             'image_url': child.get('image_url'),
@@ -20159,18 +20169,21 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
         for index, btn in enumerate(sorted_buttons):
             if bool(btn.get('hidden', False)):
                 continue
-            label = str(btn.get('label') or f"Button {index + 1}").strip()
+            label = str(btn.get('label') or '').strip()
             if label:
                 word_options.append({
                     'text': label,
                     'row': int(btn.get('row', 0) or 0),
                     'col': int(btn.get('col', 0) or 0),
-                    'speech_text': str(btn.get('speech_text') or '').strip() or label,
+                    'speech_text': (str(btn.get('speech_text') or '').strip() or None),
+                    'modifier_trigger_id': btn.get('modifier_trigger_id'),
+                    'modifier_variants': btn.get('modifier_variants') if isinstance(btn.get('modifier_variants'), dict) else {},
                     'image_url': btn.get('image_url'),
                     'custom_audio_file': btn.get('custom_audio_file'),
                     'action_type': btn.get('action_type'),
                     'after_selection': btn.get('after_selection') or 'do_nothing',
                     'target_board_id': btn.get('target_board_id'),
+                    'temporary_navigation': bool(btn.get('temporary_navigation', False)),
                     'background_color': btn.get('background_color') or '#FFFFFF',
                     'text_color': btn.get('text_color') or '#000000',
                 })
@@ -22080,6 +22093,9 @@ async def update_tap_board(
             source=str(existing_board.get('source') or 'custom'),
             source_button_id=existing_board.get('source_button_id'),
         )
+        # Preserve created_during_migration flag unless the incoming payload explicitly clears it
+        if not payload.created_during_migration:
+            updated_board['created_during_migration'] = False
         boards[board_index] = updated_board
 
         config_data['boards'] = boards
@@ -23260,6 +23276,7 @@ async def import_touchchat_board(
                 "default_columns": int(source_board.get("layout_cols") or 12),
                 "max_rows": max(7, int(source_board.get("layout_rows") or 7)),
                 "buttons": [],
+                "created_during_migration": True,
             },
             board_id=target_board_id,
             source="custom",
@@ -23323,6 +23340,7 @@ async def import_touchchat_board(
                     "default_columns": 12,
                     "max_rows": 7,
                     "buttons": [],
+                    "created_during_migration": True,
                 },
                 board_id=nav_candidate_id,
                 source="custom",
@@ -23361,8 +23379,7 @@ async def import_touchchat_board(
 
     imported_buttons: List[Dict[str, Any]] = []
     for idx, src_btn in enumerate(selected_buttons):
-        label = str(src_btn.get("label") or "").strip() or f"Button {idx + 1}"
-        speech_text = str(src_btn.get("speech_text") or "").strip() or label
+        label = str(src_btn.get("label") or "").strip()
         row = int(src_btn.get("row") or 0)
         col = int(src_btn.get("col") or 0)
         existing_target_btn = existing_buttons_by_position.get((row, col))
@@ -23370,6 +23387,28 @@ async def import_touchchat_board(
 
         nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
         target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
+        temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+        speech_text = None if target_nav_board_id else (str(src_btn.get("speech_text") or "").strip() or None)
+        modifier_trigger_id = src_btn.get("modifier_trigger_id")
+
+        raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
+        converted_modifier_variants: Dict[str, Dict[str, Any]] = {}
+        for modifier_id, raw_variant in raw_modifier_variants.items():
+            if not isinstance(raw_variant, dict):
+                continue
+            variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
+            variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+            converted_modifier_variants[str(modifier_id)] = {
+                "label": str(raw_variant.get("label") or "").strip(),
+                "speech_text": None if variant_target_board_id else (str(raw_variant.get("speech_text") or "").strip() or None),
+                "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
+                "action_type": "navigate" if variant_target_board_id else "announce",
+                "after_selection": "navigate" if variant_target_board_id else "do_nothing",
+                "target_board_id": variant_target_board_id,
+                "temporary_navigation": (bool(raw_variant.get("temporary_navigation", False)) if variant_target_board_id else False),
+                "background_color": raw_variant.get("background_color") or (existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"),
+                "text_color": raw_variant.get("text_color") or src_btn.get("text_color") or "#000000",
+            }
 
         imported_buttons.append({
             "id": f"btn_{row}_{col}_{int(time.time() * 1000)}_{idx}",
@@ -23377,9 +23416,12 @@ async def import_touchchat_board(
             "row": row,
             "col": col,
             "speech_text": speech_text,
+            "modifier_trigger_id": modifier_trigger_id,
+            "modifier_variants": converted_modifier_variants,
             "action_type": "navigate" if target_nav_board_id else "announce",
             "after_selection": "navigate" if target_nav_board_id else "do_nothing",
             "target_board_id": target_nav_board_id,
+            "temporary_navigation": (temporary_navigation if target_nav_board_id else False),
             "custom_audio_file": None,
             "special_function": None,
             "image_url": image_url,

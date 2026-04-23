@@ -51,11 +51,17 @@
         <div class="bg-white p-4 border rounded-md mb-4">
             <div class="flex flex-wrap gap-3 items-end">
                 <div class="min-w-[360px] flex-1">
-                    <label for="selectBoard" class="block text-sm font-medium text-gray-700">Select Board</label>
+                    <div class="flex items-center gap-2 mb-1">
+                        <label for="selectBoard" class="block text-sm font-medium text-gray-700">Select Board</label>
+                        <button id="showMigrationOnlyBtn" type="button" class="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 hidden" title="Show only boards created during migration that need configuration">Show Migration Boards</button>
+                    </div>
                     <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
                 </div>
                 <div>
                     <button id="createNewBoardBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Create New Board</button>
+                </div>
+                <div>
+                    <button id="openTouchChatMigrationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-file-import mr-1"></i>Migrate User Data</button>
                 </div>
                 <div class="flex items-center gap-2">
                     <input type="checkbox" id="setAsHomeBoard">
@@ -155,6 +161,15 @@
                         </select>
                     </div>
                     <div class="mb-4" id="targetBoardWrapper" style="display:none;"><label for="targetBoard" class="block text-sm font-medium text-gray-700 mb-2">Target Board</label><select id="targetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">-- Select board --</option></select></div>
+                    <div class="mb-4 hidden" id="temporaryNavigationWrapper">
+                        <label class="flex items-start">
+                            <input type="checkbox" id="temporaryNavigation" class="mr-2 mt-1">
+                            <span class="text-sm text-gray-700">
+                                <span class="font-medium">Temporary navigation (TouchChat visit)</span><br>
+                                <span class="text-xs text-gray-500">After selecting one option on the target board, return to this board.</span>
+                            </span>
+                        </label>
+                    </div>
                     <div class="mb-4">
                         <div><label for="buttonBgColor" class="block text-sm font-medium text-gray-700 mb-2">Background Color</label><select id="buttonBgColor" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="#FFFFFF">Default</option><option value="#F9FAFB">Light Gray</option><option value="#FEF3C7">Light Yellow</option><option value="#D1FAE5">Light Green</option><option value="#DBEAFE">Light Blue</option><option value="#EDE9FE">Light Purple</option><option value="#FCE7F3">Light Pink</option><option value="#FEE2E2">Light Red</option><option value="#FFF7ED">Light Orange</option><option value="#059669">Green</option><option value="#2563EB">Blue</option><option value="#7C3AED">Purple</option><option value="#DB2777">Pink</option><option value="#DC2626">Red</option><option value="#D97706">Orange/Amber</option><option value="#1F2937">Dark Gray</option><option value="#000000">Black</option></select></div>
                     </div>
@@ -163,7 +178,7 @@
                 <div>
                     <h4 class="text-sm font-medium text-gray-700 mb-2">Button Preview</h4>
                     <div id="buttonPreview" class="border-2 border-dashed border-gray-300 rounded-md p-4 text-center min-h-[100px] flex items-center justify-center"><span class="text-gray-500">Button preview will appear here</span></div>
-                    <div class="mt-4"><h4 class="text-sm font-medium text-gray-700 mb-2">Configuration Summary</h4><div id="configSummary" class="bg-gray-50 p-3 rounded-md text-sm"><div><strong>Position:</strong> <span id="positionInfo">-</span></div><div><strong>Type:</strong> <span id="buttonTypeInfo">-</span></div><div><strong>Action:</strong> <span id="actionInfo">-</span></div></div></div>
+                    <div class="mt-4"><h4 class="text-sm font-medium text-gray-700 mb-2">Configuration Summary</h4><div id="configSummary" class="bg-gray-50 p-3 rounded-md text-sm"><div><strong>Position:</strong> <span id="positionInfo">-</span></div><div><strong>Type:</strong> <span id="buttonTypeInfo">-</span></div><div><strong>Action:</strong> <span id="actionInfo">-</span></div><div id="modifierInfoRow" class="hidden mt-2 pt-2 border-t border-gray-200"><div class="text-xs font-semibold text-purple-700 mb-1">Modifier State (TouchChat)</div><div><strong>Triggers modifier:</strong> <span id="modifierTriggerInfo">-</span></div><div id="modifierVariantsWrapper"><strong>Alternate states:</strong><ul id="modifierVariantsList" class="ml-4 mt-1 list-disc text-xs text-gray-600"></ul></div></div></div></div>
                 </div>
             </div>
             <div class="flex justify-end space-x-3 mt-6"><button id="clearButtonBtn" class="px-4 py-2 bg-gray-500 text-white rounded-md hover:bg-gray-600">Clear Button</button><button id="cancelButtonEdit" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancel</button><button id="saveButtonEdit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Save Button</button></div>
@@ -234,6 +249,16 @@
         </div>
     </div>
 
+    <div id="touchchatMigrationModal" class="fixed inset-0 bg-gray-900 bg-opacity-60 overflow-y-auto h-full w-full hidden" style="z-index: 5300;">
+        <div class="relative top-5 mx-auto border w-11/12 max-w-7xl shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center border-b px-4 py-3">
+                <h3 class="text-lg font-bold text-gray-900">TouchChat Migration</h3>
+                <button id="closeTouchChatMigrationModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <iframe id="touchchatMigrationFrame" src="about:blank" class="w-full" style="height: 78vh; border: 0;" title="TouchChat Migration"></iframe>
+        </div>
+    </div>
+
     <div id="notification" class="notification"></div>
 
     <script>
@@ -242,6 +267,7 @@
         let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
         let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
         let aiBulkPreviewOptions = [];
+        let showMigrationBoardsOnly = false;
 
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
@@ -251,6 +277,8 @@
         function setupEventListeners() {
             document.getElementById('selectBoard').addEventListener('change', handleBoardSelected);
             document.getElementById('createNewBoardBtn').addEventListener('click', createNewBoardDraft);
+            document.getElementById('openTouchChatMigrationBtn').addEventListener('click', openTouchChatMigrationModal);
+            document.getElementById('closeTouchChatMigrationModal').addEventListener('click', closeTouchChatMigrationModal);
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
             document.getElementById('boardType').addEventListener('change', updateBoardModeUI);
@@ -259,13 +287,18 @@
             document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
             document.getElementById('saveButtonEdit').addEventListener('click', saveButtonEdit);
             document.getElementById('clearButtonBtn').addEventListener('click', clearCurrentButton);
-            ['buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor'].forEach(id => {
+            document.getElementById('showMigrationOnlyBtn').addEventListener('click', toggleMigrationBoardsFilter);
+            ['buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor', 'temporaryNavigation'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) { el.addEventListener('input', updateButtonPreview); el.addEventListener('change', updateButtonPreview); }
             });
             document.getElementById('afterSelection').addEventListener('change', () => {
                 const val = document.getElementById('afterSelection').value;
                 document.getElementById('targetBoardWrapper').style.display = val === 'navigate' ? '' : 'none';
+                document.getElementById('temporaryNavigationWrapper').classList.toggle('hidden', val !== 'navigate');
+                if (val !== 'navigate') {
+                    document.getElementById('temporaryNavigation').checked = false;
+                }
                 updateButtonPreview();
             });
             document.getElementById('customAudioFile').addEventListener('change', uploadButtonAudioFile);
@@ -284,6 +317,21 @@
             document.getElementById('aiBulkPreviewBtn').addEventListener('click', previewAIBulkOptions);
             document.getElementById('aiBulkApplyBtn').addEventListener('click', applyAIBulkOptions);
             document.getElementById('aiBulkAfterSelection').addEventListener('change', handleAIBulkAfterSelectionChange);
+
+            window.addEventListener('message', (event) => {
+                if (!event || !event.data || typeof event.data !== 'object') return;
+                if (event.data.type === 'touchchat-migration-complete') {
+                    loadBoards().then(() => {
+                        if (currentBoardData && currentBoardData.id) {
+                            const boardStillExists = allBoards.some(b => b.id === currentBoardData.id);
+                            if (boardStillExists) {
+                                document.getElementById('selectBoard').value = currentBoardData.id;
+                                handleBoardSelected();
+                            }
+                        }
+                    }).catch((err) => console.warn('Reload boards after migration failed', err));
+                }
+            });
         }
 
         async function initializeFirebaseAndAuth() {
@@ -333,15 +381,36 @@
             const currentValue = select.value;
             select.innerHTML = '<option value="">-- Select Board --</option>';
             const editableBoards = allBoards.filter(board => !isBoardReadOnly(board));
-            editableBoards.forEach(board => {
+            const migrationBoards = editableBoards.filter(board => board.created_during_migration);
+            const filterBtn = document.getElementById('showMigrationOnlyBtn');
+            filterBtn.classList.toggle('hidden', migrationBoards.length === 0);
+            const boardsToShow = showMigrationBoardsOnly ? migrationBoards : editableBoards;
+            boardsToShow.forEach(board => {
                 const option = document.createElement('option');
                 option.value = board.id;
                 const tags = [];
                 if (board.id === boardSettings.home_board_id) tags.push('home');
+                if (board.created_during_migration) tags.push('migration - needs config');
                 option.textContent = `${board.label || board.id} (${board.board_type || 'ai'})${tags.length ? ' [' + tags.join(', ') + ']' : ''}`;
                 select.appendChild(option);
             });
-            if (currentValue && editableBoards.some(b => b.id === currentValue)) select.value = currentValue;
+            if (currentValue && boardsToShow.some(b => b.id === currentValue)) {
+                select.value = currentValue;
+            } else if (boardsToShow.length > 0) {
+                select.value = boardsToShow[0].id;
+            }
+        }
+
+        function toggleMigrationBoardsFilter() {
+            showMigrationBoardsOnly = !showMigrationBoardsOnly;
+            const btn = document.getElementById('showMigrationOnlyBtn');
+            btn.textContent = showMigrationBoardsOnly ? 'Show All Boards' : 'Show Migration Boards';
+            btn.classList.toggle('bg-purple-200', showMigrationBoardsOnly);
+            btn.classList.toggle('bg-purple-100', !showMigrationBoardsOnly);
+            btn.classList.toggle('text-purple-900', showMigrationBoardsOnly);
+            btn.classList.toggle('text-purple-700', !showMigrationBoardsOnly);
+            populateBoardDropdown();
+            handleBoardSelected();
         }
 
         function isBoardReadOnly(board) {
@@ -451,7 +520,18 @@
                             buttonDiv.style.textShadow = '1px 1px 2px rgba(0,0,0,0.8)';
                             buttonDiv.innerHTML = `<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.65);padding:4px;font-size:12px;">${escapeHtml(buttonData.label)}</div>`;
                         } else buttonDiv.textContent = buttonData.label;
-                        if (buttonData.after_selection === 'navigate' || buttonData.action_type === 'navigate') { const i = document.createElement('div'); i.className = 'button-indicator indicator-nav'; i.textContent = '→'; i.title = 'Navigates to board'; buttonDiv.appendChild(i); }
+                        if (buttonData.after_selection === 'navigate' || buttonData.action_type === 'navigate') {
+                            const i = document.createElement('div');
+                            i.className = 'button-indicator indicator-nav';
+                            if (buttonData.temporary_navigation) {
+                                i.textContent = '↩';
+                                i.title = 'Temporary navigation (return after one selection)';
+                            } else {
+                                i.textContent = '→';
+                                i.title = 'Navigates to board';
+                            }
+                            buttonDiv.appendChild(i);
+                        }
                         else if (buttonData.after_selection === 'use_ai') { const i = document.createElement('div'); i.className = 'button-indicator'; i.style.cssText = 'background:#7c3aed;color:white;'; i.textContent = '✦'; i.title = 'AI generates next options'; buttonDiv.appendChild(i); }
                         else if (buttonData.action_type === 'audio') { const i = document.createElement('div'); i.className = 'button-indicator indicator-audio'; i.textContent = '♪'; i.title = 'Plays custom audio'; buttonDiv.appendChild(i); }
                         else if (buttonData.speech_text) { const i = document.createElement('div'); i.className = 'button-indicator indicator-speech'; i.textContent = 'S'; i.title = 'Has speech text'; buttonDiv.appendChild(i); }
@@ -491,7 +571,7 @@
 
         function openButtonEditor(row, col) {
             currentEditingButton = { row, col };
-            const buttonData = findButtonAtPosition(row, col) || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
+            const buttonData = findButtonAtPosition(row, col) || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, temporary_navigation: false, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
             document.getElementById('buttonText').value = buttonData.label || '';
             document.getElementById('speechText').value = buttonData.speech_text || '';
             document.getElementById('buttonHidden').checked = !!buttonData.hidden;
@@ -502,12 +582,33 @@
             let afterSel = buttonData.after_selection || (buttonData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
             document.getElementById('afterSelection').value = afterSel;
             document.getElementById('targetBoardWrapper').style.display = afterSel === 'navigate' ? '' : 'none';
+            document.getElementById('temporaryNavigationWrapper').classList.toggle('hidden', afterSel !== 'navigate');
+            document.getElementById('temporaryNavigation').checked = (afterSel === 'navigate') && !!buttonData.temporary_navigation;
             populateTargetBoardDropdown(buttonData.target_board_id || '');
             updateAssignedImagePreview(buttonData.image_url || '');
             const audioStatus = document.getElementById('audioUploadStatus');
             if (buttonData.custom_audio_file) { audioStatus.className = 'text-xs mt-1 text-green-600'; audioStatus.textContent = 'Audio file assigned'; audioStatus.classList.remove('hidden'); }
             else audioStatus.classList.add('hidden');
             document.getElementById('positionInfo').textContent = `Row ${row + 1}, Column ${col + 1}`;
+            // Modifier state info (read-only, from TouchChat import)
+            const modifierInfoRow = document.getElementById('modifierInfoRow');
+            const hasModifier = buttonData.modifier_trigger_id || (buttonData.modifier_variants && Object.keys(buttonData.modifier_variants).length > 0);
+            if (hasModifier) {
+                modifierInfoRow.classList.remove('hidden');
+                document.getElementById('modifierTriggerInfo').textContent = buttonData.modifier_trigger_id ? `modifier ${buttonData.modifier_trigger_id}` : 'No';
+                const variantsList = document.getElementById('modifierVariantsList');
+                variantsList.innerHTML = '';
+                const variants = buttonData.modifier_variants || {};
+                Object.entries(variants).forEach(([modId, v]) => {
+                    const li = document.createElement('li');
+                    const triggerText = v.modifier_trigger_id ? ` → triggers modifier ${v.modifier_trigger_id}` : '';
+                    li.textContent = `Modifier ${modId}: "${v.label || ''}"`  + (v.speech_text && v.speech_text !== v.label ? ` (says "${v.speech_text}")` : '') + triggerText;
+                    variantsList.appendChild(li);
+                });
+                document.getElementById('modifierVariantsWrapper').classList.toggle('hidden', Object.keys(variants).length === 0);
+            } else {
+                modifierInfoRow.classList.add('hidden');
+            }
             updateButtonPreview();
             document.getElementById('buttonEditorModal').classList.remove('hidden');
         }
@@ -519,16 +620,21 @@
             const speechText = document.getElementById('speechText').value.trim();
             const afterSelection = document.getElementById('afterSelection').value;
             const targetBoard = afterSelection === 'navigate' ? document.getElementById('targetBoard').value.trim() : '';
+            const temporaryNavigation = (afterSelection === 'navigate') && document.getElementById('temporaryNavigation').checked;
             const customAudio = document.getElementById('customAudioFileUrl').value.trim();
             const imageUrl = document.getElementById('assignedImageUrl').value.trim();
             const bgColor = document.getElementById('buttonBgColor').value.trim() || '#FFFFFF';
             const existingButton = findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
             const textColor = (existingButton && existingButton.text_color) ? existingButton.text_color : '#000000';
+            const modifierTriggerId = existingButton ? (existingButton.modifier_trigger_id ?? null) : null;
+            const modifierVariants = (existingButton && existingButton.modifier_variants && typeof existingButton.modifier_variants === 'object')
+                ? existingButton.modifier_variants
+                : {};
             const hidden = document.getElementById('buttonHidden').checked;
             currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
             if (label || speechText || targetBoard || customAudio || imageUrl) {
                 const actionType = customAudio ? 'audio' : 'announce';
-                currentBoardData.buttons.push({ id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`, label: label || `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`, row: currentEditingButton.row, col: currentEditingButton.col, speech_text: speechText || null, after_selection: afterSelection, action_type: actionType, target_board_id: targetBoard || null, custom_audio_file: customAudio || null, special_function: null, image_url: imageUrl || null, background_color: bgColor, text_color: textColor, hidden });
+                currentBoardData.buttons.push({ id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`, label: label || `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`, row: currentEditingButton.row, col: currentEditingButton.col, speech_text: speechText || null, modifier_trigger_id: modifierTriggerId, modifier_variants: modifierVariants, after_selection: afterSelection, action_type: actionType, target_board_id: targetBoard || null, temporary_navigation: temporaryNavigation, custom_audio_file: customAudio || null, special_function: null, image_url: imageUrl || null, background_color: bgColor, text_color: textColor, hidden });
             }
             renderButtonGrid();
             closeButtonEditor();
@@ -560,7 +666,12 @@
                 preview.innerHTML = html;
             } else preview.innerHTML = '<div class="visual-button undefined">Undefined</div>';
             const afterSelection = document.getElementById('afterSelection').value;
-            const actionText = afterSelection === 'navigate' ? 'Navigate to Target Board' : afterSelection === 'use_ai' ? 'Use AI to generate next options' : 'Do nothing (stay on current board)';
+            const temporaryNavigation = document.getElementById('temporaryNavigation').checked;
+            const actionText = afterSelection === 'navigate'
+                ? (temporaryNavigation ? 'Navigate to Target Board, then return after one selection' : 'Navigate to Target Board')
+                : afterSelection === 'use_ai'
+                    ? 'Use AI to generate next options'
+                    : 'Do nothing (stay on current board)';
             document.getElementById('buttonTypeInfo').textContent = afterSelection;
             document.getElementById('actionInfo').textContent = actionText;
         }
@@ -580,6 +691,20 @@
 
         function closeAIBulkBuilderModal() {
             document.getElementById('aiBulkBuilderModal').classList.add('hidden');
+        }
+
+        function openTouchChatMigrationModal() {
+            const modal = document.getElementById('touchchatMigrationModal');
+            const iframe = document.getElementById('touchchatMigrationFrame');
+            iframe.src = 'touchchat_migration.html';
+            modal.classList.remove('hidden');
+        }
+
+        function closeTouchChatMigrationModal() {
+            const modal = document.getElementById('touchchatMigrationModal');
+            const iframe = document.getElementById('touchchatMigrationFrame');
+            iframe.src = 'about:blank';
+            modal.classList.add('hidden');
         }
 
         function handleAIBulkAfterSelectionChange() {
@@ -719,6 +844,7 @@
                 after_selection: config.afterSelection,
                 action_type: actionType,
                 target_board_id: config.afterSelection === 'navigate' ? config.targetBoardId : null,
+                temporary_navigation: false,
                 custom_audio_file: null,
                 special_function: null,
                 image_url: null,
@@ -800,6 +926,7 @@
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
             const boardType = document.getElementById('boardType').value;
+            const buttons = boardType === 'ai' ? [] : (currentBoardData.buttons || []);
             const payload = {
                 label: document.getElementById('boardLabel').value.trim() || 'Untitled Board',
                 board_type: boardType,
@@ -814,8 +941,9 @@
                 special_function: null,
                 default_columns: 12,
                 max_rows: 7,
-                buttons: boardType === 'ai' ? [] : (currentBoardData.buttons || []),
+                buttons: buttons,
                 set_as_home: !!document.getElementById('setAsHomeBoard').checked,
+                created_during_migration: (currentBoardData.created_during_migration && buttons.length === 0) ? true : false,
             };
             try {
                 let response;

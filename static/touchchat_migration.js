@@ -33,18 +33,40 @@ function resetNavResolutionUI() {
   if (list) list.innerHTML = '';
 }
 
-function hideImportResultPanel() {
-  const panel = document.getElementById('importResultPanel');
-  const msg = document.getElementById('importResultMessage');
-  if (panel) panel.classList.add('hidden');
+function hideMigrationResultModal() {
+  const modal = document.getElementById('migrationResultModal');
+  const msg = document.getElementById('migrationResultMessage');
+  const title = document.getElementById('migrationResultTitle');
+  if (modal) modal.classList.remove('show');
   if (msg) msg.textContent = '';
+  if (title) title.textContent = 'Migration Complete';
 }
 
-function showImportResultPanel(message) {
-  const panel = document.getElementById('importResultPanel');
-  const msg = document.getElementById('importResultMessage');
-  if (msg) msg.textContent = message;
-  if (panel) panel.classList.remove('hidden');
+function showMigrationResultModal(title, message, options = {}) {
+  const modal = document.getElementById('migrationResultModal');
+  const msg = document.getElementById('migrationResultMessage');
+  const titleEl = document.getElementById('migrationResultTitle');
+  if (titleEl) titleEl.textContent = String(title || 'Migration Complete');
+  if (msg) {
+    if (options.html) {
+      msg.innerHTML = options.html;
+    } else {
+      msg.textContent = String(message || '');
+    }
+  }
+  if (modal) modal.classList.add('show');
+}
+
+function prepareForAnotherBoardImport() {
+  hideMigrationResultModal();
+  selectedButtonIndices.clear();
+  updateSelectedButtonCount();
+  document.getElementById('buttonList').innerHTML = '';
+  document.getElementById('sourceBoardSelect').value = '';
+  selectedSourceBoardId = null;
+  resetNavResolutionUI();
+  showTab('boards');
+  setStatus('Select another source board to continue migration.');
 }
 
 function escapeHtml(v) {
@@ -63,8 +85,18 @@ function initializeTouchChatMigration() {
   setupUploadHandlers();
   setupBoardAndButtonHandlers();
   setupExecuteHandlers();
+  setupUnconfiguredBoardsReportHandlers();
   loadAvailableDestinationBoards();
-  hideImportResultPanel();
+  hideMigrationResultModal();
+}
+
+function setupUnconfiguredBoardsReportHandlers() {
+  const refreshBtn = document.getElementById('refreshUnconfiguredBoardsBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      loadAvailableDestinationBoards();
+    });
+  }
 }
 
 function setupTabButtons() {
@@ -108,7 +140,7 @@ async function handleTouchChatFile(file) {
   }
 
   resetNavResolutionUI();
-  hideImportResultPanel();
+  hideMigrationResultModal();
   setStatus('Uploading and analyzing TouchChat export...');
 
   const formData = new FormData();
@@ -176,7 +208,7 @@ function setupBoardAndButtonHandlers() {
     selectedSourceBoardId = value || null;
     selectedButtonIndices.clear();
     resetNavResolutionUI();
-    hideImportResultPanel();
+    hideMigrationResultModal();
 
     if (!selectedSourceBoardId || !touchchatData || !touchchatData.boards || !touchchatData.boards[selectedSourceBoardId]) {
       document.getElementById('buttonList').innerHTML = '';
@@ -266,10 +298,46 @@ async function loadAvailableDestinationBoards() {
       return !(source === 'legacy_category' || type === 'system');
     });
     populateExistingDestinationBoards();
+    renderUnconfiguredBoardsReport();
   } catch (error) {
     console.error(error);
     setStatus(`Failed to load destination boards: ${error.message}`);
+    renderUnconfiguredBoardsReport(error);
   }
+}
+
+function renderUnconfiguredBoardsReport(loadError = null) {
+  const summaryEl = document.getElementById('unconfiguredBoardsSummary');
+  const listEl = document.getElementById('unconfiguredBoardsList');
+  if (!summaryEl || !listEl) return;
+
+  if (loadError) {
+    summaryEl.textContent = `Unable to load report: ${loadError.message || loadError}`;
+    listEl.innerHTML = '';
+    return;
+  }
+
+  const unconfiguredBoards = availableDestinationBoards
+    .filter((board) => Array.isArray(board.buttons) && board.buttons.length === 0)
+    .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+
+  summaryEl.textContent = `${unconfiguredBoards.length} board${unconfiguredBoards.length === 1 ? '' : 's'} currently have no buttons defined.`;
+  listEl.innerHTML = '';
+
+  if (!unconfiguredBoards.length) {
+    const li = document.createElement('li');
+    li.textContent = 'None. All editable boards currently have at least one button.';
+    listEl.appendChild(li);
+    return;
+  }
+
+  unconfiguredBoards.forEach((board) => {
+    const li = document.createElement('li');
+    const boardName = String(board.label || board.id || 'Untitled board');
+    const hint = board.created_during_migration ? ' (created during migration)' : '';
+    li.textContent = `${boardName}${hint}`;
+    listEl.appendChild(li);
+  });
 }
 
 function populateExistingDestinationBoards() {
@@ -292,25 +360,17 @@ function setupExecuteHandlers() {
       document.getElementById('newDestinationWrap').classList.toggle('hidden', type !== 'new');
       document.getElementById('existingDestinationWrap').classList.toggle('hidden', type !== 'existing');
       resetNavResolutionUI();
-      hideImportResultPanel();
+      hideMigrationResultModal();
     });
   });
 
   document.getElementById('executeImportBtn').addEventListener('click', executeTouchChatImport);
   document.getElementById('resetMigrationBtn').addEventListener('click', resetTouchChatMigration);
-  document.getElementById('migrateAnotherBoardBtn').addEventListener('click', () => {
-    hideImportResultPanel();
-    selectedButtonIndices.clear();
-    updateSelectedButtonCount();
-    document.getElementById('buttonList').innerHTML = '';
-    document.getElementById('sourceBoardSelect').value = '';
-    selectedSourceBoardId = null;
-    resetNavResolutionUI();
-    showTab('boards');
-    setStatus('Select another source board to continue migration.');
+  document.getElementById('modalMigrateAnotherBoardBtn').addEventListener('click', () => {
+    prepareForAnotherBoardImport();
   });
-  document.getElementById('migrationDoneBtn').addEventListener('click', () => {
-    hideImportResultPanel();
+  document.getElementById('modalMigrationDoneBtn').addEventListener('click', () => {
+    hideMigrationResultModal();
     setStatus('Migration complete. You can close this window or migrate another board.');
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'touchchat-migration-finished' }, '*');
@@ -466,12 +526,26 @@ async function executeTouchChatImport() {
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'touchchat-migration-complete' }, '*');
     }
-    const resultMsg = `Migration complete: ${result.buttons_imported} buttons imported to ${result.target_board_label}.`;
-    showImportResultPanel(resultMsg);
+    const createdNavBoards = result.created_navigation_boards || [];
+    let resultHtml = `<p class="mb-2">${escapeHtml(`Migration complete: ${result.buttons_imported} buttons imported to ${result.target_board_label}.`)}</p>`;
+    if (createdNavBoards.length > 0) {
+      resultHtml += `<div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded">`;
+      resultHtml += `<p class="text-sm font-semibold text-amber-800 mb-1"><i class="fas fa-exclamation-triangle mr-1"></i>${createdNavBoards.length} navigation board${createdNavBoards.length > 1 ? 's were' : ' was'} created but still need${createdNavBoards.length === 1 ? 's' : ''} buttons configured:</p>`;
+      resultHtml += `<ul class="text-sm text-amber-900 list-disc ml-5 space-y-0.5">`;
+      createdNavBoards.forEach(b => {
+        resultHtml += `<li>${escapeHtml(b.label)}</li>`;
+      });
+      resultHtml += `</ul>`;
+      resultHtml += `<p class="text-xs text-amber-700 mt-2">Open the <strong>Board Builder</strong> and click <strong>"Show Migration Boards"</strong> to find and configure these boards.</p>`;
+      resultHtml += `</div>`;
+    }
+    showMigrationResultModal('Migration Complete', '', { html: resultHtml });
     setStatus('Migration complete. Choose an option below.');
   } catch (error) {
     console.error(error);
-    setStatus(`Import failed: ${error.message}`);
+    const failMsg = `Import failed: ${error.message}`;
+    setStatus(failMsg);
+    showMigrationResultModal('Migration Failed', failMsg);
   } finally {
     isImportInProgress = false;
     executeBtn.disabled = false;
@@ -492,7 +566,7 @@ async function resetTouchChatMigration() {
   selectedSourceBoardId = null;
   selectedButtonIndices.clear();
   resetNavResolutionUI();
-  hideImportResultPanel();
+  hideMigrationResultModal();
 
   document.getElementById('ceFileInput').value = '';
   document.getElementById('uploadSummary').classList.add('hidden');

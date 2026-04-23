@@ -41,7 +41,8 @@ STATIC_PAGES = [
     "spelling.html",
     "numbers.html",
     "symbol_admin.html",
-    "accent_migration.html"
+    "accent_migration.html",
+    "touchchat_migration.html"
 ]
 
 for page in STATIC_PAGES:
