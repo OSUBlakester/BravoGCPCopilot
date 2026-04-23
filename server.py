@@ -20236,6 +20236,101 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
     return legacy_buttons
 
 # --- Helper Functions ---
+TAP_CONFIG_DOC_SOFT_LIMIT_BYTES = 900_000
+TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES = 300_000
+
+
+def _tap_config_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config"
+    )
+
+
+def _estimate_json_size_bytes(value: Any) -> int:
+    try:
+        return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:
+        return len(str(value).encode("utf-8"))
+
+
+def _split_boards_into_chunks(boards: List[Dict[str, Any]], target_bytes: int = TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES) -> List[List[Dict[str, Any]]]:
+    if not boards:
+        return []
+
+    chunks: List[List[Dict[str, Any]]] = []
+    current_chunk: List[Dict[str, Any]] = []
+    current_size = 2  # []
+
+    for board in boards:
+        board_size = _estimate_json_size_bytes(board) + 1
+        if current_chunk and (current_size + board_size) > target_bytes:
+            chunks.append(current_chunk)
+            current_chunk = [board]
+            current_size = 2 + board_size
+        else:
+            current_chunk.append(board)
+            current_size += board_size
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+async def _load_chunked_tap_boards(doc_ref) -> List[Dict[str, Any]]:
+    try:
+        chunks_collection = doc_ref.collection("boards_chunks")
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_collection.stream()))
+        ordered_chunks: List[Tuple[int, List[Dict[str, Any]]]] = []
+        for chunk_doc in chunk_docs:
+            chunk_payload = chunk_doc.to_dict() or {}
+            chunk_index = int(chunk_payload.get("index", 10**9))
+            chunk_boards = chunk_payload.get("boards") if isinstance(chunk_payload.get("boards"), list) else []
+            ordered_chunks.append((chunk_index, chunk_boards))
+
+        ordered_chunks.sort(key=lambda item: item[0])
+        boards: List[Dict[str, Any]] = []
+        for _, chunk_boards in ordered_chunks:
+            boards.extend([b for b in chunk_boards if isinstance(b, dict)])
+        return boards
+    except Exception as e:
+        logging.error(f"Error loading chunked tap boards: {e}")
+        return []
+
+
+async def _clear_chunked_tap_boards(doc_ref) -> None:
+    try:
+        chunks_collection = doc_ref.collection("boards_chunks")
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_collection.stream()))
+        for chunk_doc in chunk_docs:
+            await asyncio.to_thread(chunk_doc.reference.delete)
+    except Exception as e:
+        logging.warning(f"Could not clear chunked tap boards: {e}")
+
+
+async def _save_chunked_tap_boards(doc_ref, boards: List[Dict[str, Any]]) -> int:
+    chunks = _split_boards_into_chunks(boards)
+    for idx, chunk in enumerate(chunks):
+        chunk_ref = doc_ref.collection("boards_chunks").document(f"chunk_{idx:04d}")
+        await asyncio.to_thread(
+            chunk_ref.set,
+            {
+                "index": idx,
+                "boards": chunk,
+                "updated_at": dt.now().isoformat(),
+            },
+        )
+
+    # Remove stale chunk documents from previous larger saves.
+    existing_docs = await asyncio.to_thread(lambda: list(doc_ref.collection("boards_chunks").stream()))
+    valid_ids = {f"chunk_{i:04d}" for i in range(len(chunks))}
+    for existing in existing_docs:
+        if existing.id not in valid_ids:
+            await asyncio.to_thread(existing.reference.delete)
+
+    return len(chunks)
+
+
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
     """Load tap navigation configuration from Firestore"""
     global firestore_db
@@ -20244,10 +20339,15 @@ async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dic
     
     try:
         # Always load the single user configuration
-        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
+        doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         doc = await asyncio.to_thread(doc_ref.get)
         if doc.exists:
-            return doc.to_dict()
+            config_data = doc.to_dict() or {}
+            if str(config_data.get('boards_storage') or '').lower() == 'chunked':
+                config_data['boards'] = await _load_chunked_tap_boards(doc_ref)
+            elif not isinstance(config_data.get('boards'), list):
+                config_data['boards'] = []
+            return config_data
         
         return None
     except Exception as e:
@@ -20262,12 +20362,31 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
     
     try:
         # Always save to the single user configuration document
-        config_data['updated_at'] = dt.now().isoformat()
-        if 'created_at' not in config_data:
-            config_data['created_at'] = config_data['updated_at']
-        
-        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
-        await asyncio.to_thread(doc_ref.set, config_data)
+        working_config = copy.deepcopy(config_data) if isinstance(config_data, dict) else {}
+        working_config['updated_at'] = dt.now().isoformat()
+        if 'created_at' not in working_config:
+            working_config['created_at'] = working_config['updated_at']
+
+        doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
+        boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
+
+        estimated_size = _estimate_json_size_bytes(working_config)
+        if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            working_config.pop('boards_storage', None)
+            working_config.pop('boards_chunk_count', None)
+            working_config.pop('boards_count', None)
+            await asyncio.to_thread(doc_ref.set, working_config)
+            await _clear_chunked_tap_boards(doc_ref)
+            return True
+
+        # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
+        base_config = copy.deepcopy(working_config)
+        base_config.pop('boards', None)
+        chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
+        base_config['boards_storage'] = 'chunked'
+        base_config['boards_chunk_count'] = chunk_count
+        base_config['boards_count'] = len(boards)
+        await asyncio.to_thread(doc_ref.set, base_config)
         return True
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
