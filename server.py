@@ -22473,7 +22473,16 @@ def _touchchat_source_board_is_speech_only(source_board: Dict[str, Any]) -> bool
     # Treat as speech-dominant when only a small minority are utility nav buttons.
     speech_buttons = total_buttons - nav_buttons
     nav_ratio = nav_buttons / float(total_buttons)
-    return nav_buttons <= 2 and speech_buttons >= 8 and nav_ratio <= 0.20
+    if nav_buttons <= 2 and speech_buttons >= 8 and nav_ratio <= 0.20:
+        return True
+
+    board_name = str(source_board.get("name") or "").strip().lower()
+    # Word Power 60 stores this page with utility nav buttons, but it should still
+    # behave as a temporary-return target for pronoun+verb phrase construction.
+    if board_name == ".basic60 i you" and speech_buttons >= 30 and nav_ratio <= 0.35:
+        return True
+
+    return False
 
 
 def _touchchat_cleanup_old_sessions() -> None:
