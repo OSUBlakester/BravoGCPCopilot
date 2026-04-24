@@ -1561,6 +1561,7 @@
         let startupHomeBoardLabel = null; // Home board label from /api/tap-interface/boards
         let startupHomeBoard = null; // Full home board object from /api/tap-interface/boards
         let temporaryNavigationReturnStack = []; // One-shot return targets for temporary navigation
+        let temporaryNavigationPending = false; // True only after taking a temporary-navigation button
         let activeBoardModifierState = { boardId: null, modifierId: null }; // TouchChat-style one-shot modifier state
 
         // Follow-up conversation tracking (like gridpage)
@@ -3403,15 +3404,19 @@
                 return option;
             }
 
+            const hasVariantModifierTrigger = Object.prototype.hasOwnProperty.call(variant, 'modifier_trigger_id');
+            const hasVariantTargetBoard = Object.prototype.hasOwnProperty.call(variant, 'target_board_id');
+            const hasVariantTemporaryNavigation = Object.prototype.hasOwnProperty.call(variant, 'temporary_navigation');
+
             return {
                 ...option,
                 text: String(variant.label || option.text || '').trim(),
                 speech_text: typeof variant.speech_text === 'string' ? variant.speech_text : option.speech_text,
-                modifier_trigger_id: variant.modifier_trigger_id ?? null,
+                modifier_trigger_id: hasVariantModifierTrigger ? (variant.modifier_trigger_id ?? null) : (option.modifier_trigger_id ?? null),
                 action_type: variant.action_type || option.action_type,
                 after_selection: variant.after_selection || option.after_selection,
-                target_board_id: variant.target_board_id || null,
-                temporary_navigation: !!variant.temporary_navigation,
+                target_board_id: hasVariantTargetBoard ? (variant.target_board_id || null) : (option.target_board_id || null),
+                temporary_navigation: hasVariantTemporaryNavigation ? !!variant.temporary_navigation : !!option.temporary_navigation,
                 background_color: variant.background_color || option.background_color,
                 text_color: variant.text_color || option.text_color,
             };
@@ -3439,6 +3444,7 @@
                 return;
             }
             temporaryNavigationReturnStack.push(normalized);
+            temporaryNavigationPending = true;
             console.log('Temporary navigation push:', normalized, 'stack depth=', temporaryNavigationReturnStack.length);
         }
 
@@ -3449,6 +3455,20 @@
             const boardId = temporaryNavigationReturnStack.pop();
             console.log('Temporary navigation pop:', boardId, 'stack depth=', temporaryNavigationReturnStack.length);
             return boardId || null;
+        }
+
+        function peekTemporaryReturnBoard() {
+            if (!Array.isArray(temporaryNavigationReturnStack) || temporaryNavigationReturnStack.length === 0) {
+                return null;
+            }
+            const boardId = temporaryNavigationReturnStack[temporaryNavigationReturnStack.length - 1];
+            return boardId ? String(boardId) : null;
+        }
+
+        function clearTemporaryNavigationState(reason = 'unspecified') {
+            temporaryNavigationReturnStack = [];
+            temporaryNavigationPending = false;
+            console.log('Temporary navigation state cleared:', reason);
         }
 
         function hasExplicitWordOptions(category) {
@@ -4571,6 +4591,9 @@ VARIETY RULES:
 
         async function selectCategory(category, event) {
             console.log('Selecting category:', category);
+            if (event && event.target && !temporaryNavigationPending) {
+                clearTemporaryNavigationState('manual category selection');
+            }
             const previousBoardId = getCategoryBoardId(currentCategory);
             const nextBoardId = getCategoryBoardId(category);
             if (previousBoardId && previousBoardId !== nextBoardId) {
@@ -5341,6 +5364,13 @@ VARIETY RULES:
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
                         await runTapActionOnce(btn, async () => {
+                            console.log('[TAP DEBUG] Phrase option click start', {
+                                speechText,
+                                currentBoardId: getCategoryBoardId(currentCategory),
+                                temporaryNavigationPending,
+                                temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                            });
+
                             const previewDecision = await handlePreviewInteraction(btn, speechText, 'phrase');
                             if (!previewDecision.proceed) {
                                 return;
@@ -5354,6 +5384,29 @@ VARIETY RULES:
                             addToSpeech(speechText);
                             if (!previewDecision.alreadyAnnounced) {
                                 await announce(speechText, "system", true);
+                            }
+
+                            // If a temporary navigation was taken previously, the very next selection
+                            // should return to the original board instead of generating follow-up options.
+                            if (temporaryNavigationPending) {
+                                const temporaryReturnBoardId = popTemporaryReturnBoard();
+                                temporaryNavigationPending = false;
+                                if (temporaryReturnBoardId) {
+                                    const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
+                                    if (returnCategory) {
+                                        await selectCategory(returnCategory, null);
+                                        console.log('[TAP DEBUG] Temporary return executed (phrase)', {
+                                            returnBoardId: temporaryReturnBoardId,
+                                            currentBoardIdAfterReturn: getCategoryBoardId(currentCategory),
+                                            temporaryNavigationPending,
+                                            temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                        });
+                                        return;
+                                    }
+                                    console.warn('Could not resolve temporary return board from phrase option:', temporaryReturnBoardId, speechText);
+                                }
+                                clearTemporaryNavigationState('pending return board missing after phrase selection');
+                                return;
                             }
                             
                             console.log('💬 Tap phrase selected, generating follow-up options:', speechText);
@@ -6321,6 +6374,17 @@ VARIETY RULES:
 
                         btn.addEventListener('click', async () => {
                             await runTapActionOnce(btn, async () => {
+                                console.log('[TAP DEBUG] Board option click start', {
+                                    text,
+                                    currentBoardId: getCategoryBoardId(currentCategory),
+                                    optionTargetBoardId,
+                                    optionTemporaryNavigation,
+                                    actionType: option.action_type || null,
+                                    afterSelection,
+                                    temporaryNavigationPending,
+                                    temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                });
+
                                 let phraseToAdd;
                                 let phraseToAnnounce;
 
@@ -6354,7 +6418,8 @@ VARIETY RULES:
                                     await announce(phraseToAnnounce, 'system', true);
                                 }
 
-                                const boardIdForModifiers = getCategoryBoardId(currentCategory);
+                                const pendingReturnBoardId = temporaryNavigationPending ? peekTemporaryReturnBoard() : null;
+                                const boardIdForModifiers = pendingReturnBoardId || getCategoryBoardId(currentCategory);
                                 const hadActiveModifier = !!getActiveBoardModifierId(boardIdForModifiers);
                                 const nextModifierId = (optionModifierTriggerId !== null && optionModifierTriggerId !== undefined && optionModifierTriggerId !== '')
                                     ? String(optionModifierTriggerId)
@@ -6364,6 +6429,13 @@ VARIETY RULES:
                                 } else if (hadActiveModifier) {
                                     clearActiveBoardModifier(boardIdForModifiers);
                                 }
+                                console.log('[TAP DEBUG] Modifier update', {
+                                    optionText: text,
+                                    optionModifierTriggerId,
+                                    boardIdForModifiers,
+                                    pendingReturnBoardId,
+                                    temporaryNavigationPending,
+                                });
 
                                 // TouchChat-style temporary navigation (navigate, then return after next selection).
                                 if (optionTemporaryNavigation && optionTargetBoardId) {
@@ -6375,21 +6447,37 @@ VARIETY RULES:
                                     const temporaryTargetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
                                     if (temporaryTargetCategory) {
                                         await selectCategory(temporaryTargetCategory, null);
+                                        console.log('[TAP DEBUG] Temporary nav executed', {
+                                            fromBoardId: returnBoardId,
+                                            toBoardId: optionTargetBoardId,
+                                            temporaryNavigationPending,
+                                            temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                        });
                                     } else {
                                         console.warn('Could not resolve temporary navigation target board:', optionTargetBoardId, option);
                                     }
                                     return;
                                 }
 
-                                const temporaryReturnBoardId = popTemporaryReturnBoard();
-                                if (temporaryReturnBoardId) {
-                                    const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
-                                    if (returnCategory) {
-                                        await selectCategory(returnCategory, null);
-                                    } else {
-                                        console.warn('Could not resolve temporary return board:', temporaryReturnBoardId, option);
+                                if (temporaryNavigationPending) {
+                                    const temporaryReturnBoardId = popTemporaryReturnBoard();
+                                    temporaryNavigationPending = false;
+                                    if (temporaryReturnBoardId) {
+                                        const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
+                                        if (returnCategory) {
+                                            await selectCategory(returnCategory, null);
+                                            console.log('[TAP DEBUG] Temporary return executed', {
+                                                returnBoardId: temporaryReturnBoardId,
+                                                currentBoardIdAfterReturn: getCategoryBoardId(currentCategory),
+                                                temporaryNavigationPending,
+                                                temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                            });
+                                        } else {
+                                            console.warn('Could not resolve temporary return board:', temporaryReturnBoardId, option);
+                                        }
+                                        return;
                                     }
-                                    return;
+                                    clearTemporaryNavigationState('pending return board missing');
                                 }
 
                                 if ((nextModifierId || hadActiveModifier) && !optionTargetBoardId) {
@@ -6398,6 +6486,7 @@ VARIETY RULES:
 
                                 const effectiveAfterSel = afterSelection || (option.action_type === 'navigate' ? 'navigate' : 'use_ai');
                                 if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
+                                    clearTemporaryNavigationState('normal navigate selection');
                                     const targetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
                                     if (targetCategory) {
                                         await selectCategory(targetCategory, null);
@@ -6607,6 +6696,17 @@ VARIETY RULES:
                     
                     btn.addEventListener('click', async () => {
                         await runTapActionOnce(btn, async () => {
+                            console.log('[TAP DEBUG] Word option click start', {
+                                text,
+                                currentBoardId: getCategoryBoardId(currentCategory),
+                                optionTargetBoardId,
+                                optionTemporaryNavigation,
+                                actionType: (typeof option === 'object' ? option.action_type : null),
+                                afterSelection,
+                                temporaryNavigationPending,
+                                temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                            });
+
                             let phraseToAdd;
                             let phraseToAnnounce;
 
@@ -6652,27 +6752,44 @@ VARIETY RULES:
                                 const temporaryTargetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
                                 if (temporaryTargetCategory) {
                                     await selectCategory(temporaryTargetCategory, null);
+                                    console.log('[TAP DEBUG] Temporary nav executed', {
+                                        fromBoardId: returnBoardId,
+                                        toBoardId: optionTargetBoardId,
+                                        temporaryNavigationPending,
+                                        temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                    });
                                 } else {
                                     console.warn('Could not resolve temporary navigation target board:', optionTargetBoardId, option);
                                 }
                                 return;
                             }
 
-                            const temporaryReturnBoardId = popTemporaryReturnBoard();
-                            if (temporaryReturnBoardId) {
-                                const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
-                                if (returnCategory) {
-                                    await selectCategory(returnCategory, null);
-                                } else {
-                                    console.warn('Could not resolve temporary return board:', temporaryReturnBoardId, option);
+                            if (temporaryNavigationPending) {
+                                const temporaryReturnBoardId = popTemporaryReturnBoard();
+                                temporaryNavigationPending = false;
+                                if (temporaryReturnBoardId) {
+                                    const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
+                                    if (returnCategory) {
+                                        await selectCategory(returnCategory, null);
+                                        console.log('[TAP DEBUG] Temporary return executed', {
+                                            returnBoardId: temporaryReturnBoardId,
+                                            currentBoardIdAfterReturn: getCategoryBoardId(currentCategory),
+                                            temporaryNavigationPending,
+                                            temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                        });
+                                    } else {
+                                        console.warn('Could not resolve temporary return board:', temporaryReturnBoardId, option);
+                                    }
+                                    return;
                                 }
-                                return;
+                                clearTemporaryNavigationState('pending return board missing');
                             }
                             
                             // Determine post-selection board behavior.
                             // afterSelection is null for legacy/AI-board options → treat as 'use_ai' (backward compat).
                             const effectiveAfterSel = afterSelection || (option.action_type === 'navigate' ? 'navigate' : 'use_ai');
                             if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
+                                clearTemporaryNavigationState('normal navigate selection');
                                 const targetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
                                 if (targetCategory) {
                                     console.log('🎯 Navigating to board:', optionTargetBoardId);
