@@ -22436,6 +22436,26 @@ def _normalize_board_label(value: Any) -> str:
     return str(value or "").strip().lower().replace(" ", "_")
 
 
+def _touchchat_source_board_is_speech_only(source_board: Dict[str, Any]) -> bool:
+    """Return True if every button on the source board has no navigation target (speech-only board).
+
+    TouchChat Word Power sub-vocabulary boards (e.g. '.Basic60 I you') are pure speech boards —
+    every button speaks a word and none navigate further.  When a button navigates to such a board
+    we can infer the intended behaviour is temporary navigation (navigate there, return after one
+    selection) even when the source .ce file encodes the action as code 9 (permanent nav) instead
+    of code 73 (explicit temporary nav).
+    """
+    buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
+    if not buttons:
+        return False
+    for btn in buttons:
+        if not isinstance(btn, dict):
+            continue
+        if str(btn.get("navigation_target_page_rid") or "").strip():
+            return False
+    return True
+
+
 def _touchchat_cleanup_old_sessions() -> None:
     cleanup_time = dt.now(timezone.utc) - timedelta(hours=1)
     stale_sessions = [
@@ -23544,6 +23564,10 @@ async def import_touchchat_board(
                 nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
                 target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
                 temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+                if not temporary_navigation and nav_target_rid:
+                    _nav_src_board = source_boards_by_rid.get(nav_target_rid)
+                    if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
+                        temporary_navigation = True
                 speech_text = str(src_btn.get("speech_text") or "").strip() or None
                 modifier_trigger_id = src_btn.get("modifier_trigger_id")
 
@@ -23723,6 +23747,12 @@ async def import_touchchat_board(
             continue
         existing_buttons_by_position[(int(existing_btn.get("row", 0) or 0), int(existing_btn.get("col", 0) or 0))] = existing_btn
 
+    _noncascade_boards_by_rid = {
+        str(b.get("page_rid") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_rid") or "").strip()
+    }
+
     imported_buttons: List[Dict[str, Any]] = []
     for idx, src_btn in enumerate(selected_buttons):
         label = str(src_btn.get("label") or "").strip()
@@ -23734,6 +23764,10 @@ async def import_touchchat_board(
         nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
         target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
         temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+        if not temporary_navigation and nav_target_rid:
+            _nav_src_board = _noncascade_boards_by_rid.get(nav_target_rid)
+            if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
+                temporary_navigation = True
         speech_text = str(src_btn.get("speech_text") or "").strip() or None
         modifier_trigger_id = src_btn.get("modifier_trigger_id")
 
