@@ -22437,23 +22437,43 @@ def _normalize_board_label(value: Any) -> str:
 
 
 def _touchchat_source_board_is_speech_only(source_board: Dict[str, Any]) -> bool:
-    """Return True if every button on the source board has no navigation target (speech-only board).
+    """Return True for speech-dominant boards that should behave like temporary nav targets.
 
-    TouchChat Word Power sub-vocabulary boards (e.g. '.Basic60 I you') are pure speech boards —
-    every button speaks a word and none navigate further.  When a button navigates to such a board
-    we can infer the intended behaviour is temporary navigation (navigate there, return after one
-    selection) even when the source .ce file encodes the action as code 9 (permanent nav) instead
-    of code 73 (explicit temporary nav).
+    Some TouchChat Word Power sub-vocabulary pages are almost entirely speech buttons but include
+    a couple utility nav buttons (for example ABC/123).  Those still need temporary return behavior.
     """
     buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
     if not buttons:
         return False
+
+    total_buttons = 0
+    nav_buttons = 0
     for btn in buttons:
         if not isinstance(btn, dict):
             continue
-        if str(btn.get("navigation_target_page_rid") or "").strip():
-            return False
-    return True
+        label = str(btn.get("label") or "").strip()
+        speech = str(btn.get("speech_text") or "").strip()
+        nav_target = str(btn.get("navigation_target_page_rid") or "").strip()
+
+        # Skip empty placeholders from sparse layouts.
+        if not label and not speech and not nav_target:
+            continue
+
+        total_buttons += 1
+        if nav_target:
+            nav_buttons += 1
+
+    if total_buttons == 0:
+        return False
+
+    # Strict speech-only still qualifies.
+    if nav_buttons == 0:
+        return True
+
+    # Treat as speech-dominant when only a small minority are utility nav buttons.
+    speech_buttons = total_buttons - nav_buttons
+    nav_ratio = nav_buttons / float(total_buttons)
+    return nav_buttons <= 2 and speech_buttons >= 8 and nav_ratio <= 0.20
 
 
 def _touchchat_cleanup_old_sessions() -> None:
