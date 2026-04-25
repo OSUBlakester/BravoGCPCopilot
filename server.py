@@ -16932,8 +16932,8 @@ async def browse_images_for_admin(
                     continue
         else:
             # No search term, get all matching images up to limit
-            if limit > 5000:  # Cap at reasonable limit for performance
-                limit = 5000
+            if limit > 20000:  # Cap at reasonable limit for performance
+                limit = 20000
             query = base_query.limit(limit)
             all_docs = await asyncio.to_thread(query.get)
         
@@ -16961,7 +16961,7 @@ async def browse_images_for_admin(
                 "concept": data.get("concept", ""),
                 "tags": data.get("tags", []),
                 "keywords": data.get("keywords", []),
-                "created_at": data.get("created_at"),
+                "created_at": data.get("created_at") or data.get("updated_at"),
                 "preview_url": data.get("image_url", "")
             }
             images.append(admin_data)
@@ -19477,7 +19477,7 @@ async def export_missing_images(
 # TAP INTERFACE NAVIGATION SYSTEM API
 # =============================================================================
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 
 class TapNavigationButton(BaseModel):
@@ -19508,9 +19508,12 @@ class TapBoardButton(BaseModel):
     row: int = Field(0, ge=0, description="Zero-based row in board grid")
     col: int = Field(0, ge=0, description="Zero-based column in board grid")
     speech_text: Optional[str] = Field(None, description="Speech output text")
+    modifier_trigger_id: Optional[int] = Field(None, description="TouchChat modifier id triggered after tapping this button")
+    modifier_variants: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Alternate button states keyed by modifier id")
     action_type: str = Field("announce", description="announce|navigate|audio|special")
     after_selection: Optional[str] = Field(None, description="do_nothing|navigate|use_ai")
     target_board_id: Optional[str] = Field(None, description="Board ID for navigate action")
+    temporary_navigation: bool = Field(False, description="If true, navigate target is temporary and selection should return to previous board")
     custom_audio_file: Optional[str] = Field(None, description="Audio URL for audio action")
     special_function: Optional[str] = Field(None, description="Special function for special action")
     image_url: Optional[str] = Field(None, description="Button image URL")
@@ -19604,6 +19607,7 @@ class TapBoardCreateRequest(BaseModel):
     max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+    created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
 
 
 class TapBoardUpdateRequest(BaseModel):
@@ -19623,6 +19627,7 @@ class TapBoardUpdateRequest(BaseModel):
     max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+    created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
 
 # Update forward references
 TapNavigationButton.model_rebuild()
@@ -19653,13 +19658,16 @@ def _normalize_action_type(value: Any) -> str:
 def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[str, Any]:
     return {
         'id': str(button.get('id') or f'btn_{index + 1}'),
-        'label': str(button.get('label') or f'Button {index + 1}'),
+        'label': str(button.get('label') or ''),
         'row': int(button.get('row', index // 12) or 0),
         'col': int(button.get('col', index % 12) or 0),
         'speech_text': button.get('speech_text'),
+        'modifier_trigger_id': button.get('modifier_trigger_id'),
+        'modifier_variants': button.get('modifier_variants') if isinstance(button.get('modifier_variants'), dict) else {},
         'action_type': _normalize_action_type(button.get('action_type')),
         'after_selection': str(button.get('after_selection') or '').strip() or None,
         'target_board_id': button.get('target_board_id'),
+        'temporary_navigation': bool(button.get('temporary_navigation', False)),
         'custom_audio_file': button.get('custom_audio_file'),
         'special_function': button.get('special_function'),
         'image_url': button.get('image_url'),
@@ -19701,6 +19709,7 @@ def _normalize_board_payload(
         'default_columns': int(board_data.get('default_columns', 12) or 12),
         'max_rows': int(board_data.get('max_rows', 7) or 7),
         'buttons': normalized_buttons,
+        'created_during_migration': bool(board_data.get('created_during_migration', False)) and len(normalized_buttons) == 0,
     }
 
 
@@ -19737,6 +19746,7 @@ def _convert_children_to_board_buttons(children: Any) -> List[Dict[str, Any]]:
             'speech_text': child.get('speech_text'),
             'action_type': _derive_action_type(child),
             'target_board_id': None,
+            'temporary_navigation': False,
             'custom_audio_file': child.get('custom_audio_file'),
             'special_function': child.get('special_function'),
             'image_url': child.get('image_url'),
@@ -20159,18 +20169,21 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
         for index, btn in enumerate(sorted_buttons):
             if bool(btn.get('hidden', False)):
                 continue
-            label = str(btn.get('label') or f"Button {index + 1}").strip()
+            label = str(btn.get('label') or '').strip()
             if label:
                 word_options.append({
                     'text': label,
                     'row': int(btn.get('row', 0) or 0),
                     'col': int(btn.get('col', 0) or 0),
-                    'speech_text': str(btn.get('speech_text') or '').strip() or label,
+                    'speech_text': (str(btn.get('speech_text') or '').strip() or None),
+                    'modifier_trigger_id': btn.get('modifier_trigger_id'),
+                    'modifier_variants': btn.get('modifier_variants') if isinstance(btn.get('modifier_variants'), dict) else {},
                     'image_url': btn.get('image_url'),
                     'custom_audio_file': btn.get('custom_audio_file'),
                     'action_type': btn.get('action_type'),
                     'after_selection': btn.get('after_selection') or 'do_nothing',
                     'target_board_id': btn.get('target_board_id'),
+                    'temporary_navigation': bool(btn.get('temporary_navigation', False)),
                     'background_color': btn.get('background_color') or '#FFFFFF',
                     'text_color': btn.get('text_color') or '#000000',
                 })
@@ -20223,6 +20236,101 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
     return legacy_buttons
 
 # --- Helper Functions ---
+TAP_CONFIG_DOC_SOFT_LIMIT_BYTES = 900_000
+TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES = 300_000
+
+
+def _tap_config_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config"
+    )
+
+
+def _estimate_json_size_bytes(value: Any) -> int:
+    try:
+        return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:
+        return len(str(value).encode("utf-8"))
+
+
+def _split_boards_into_chunks(boards: List[Dict[str, Any]], target_bytes: int = TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES) -> List[List[Dict[str, Any]]]:
+    if not boards:
+        return []
+
+    chunks: List[List[Dict[str, Any]]] = []
+    current_chunk: List[Dict[str, Any]] = []
+    current_size = 2  # []
+
+    for board in boards:
+        board_size = _estimate_json_size_bytes(board) + 1
+        if current_chunk and (current_size + board_size) > target_bytes:
+            chunks.append(current_chunk)
+            current_chunk = [board]
+            current_size = 2 + board_size
+        else:
+            current_chunk.append(board)
+            current_size += board_size
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+async def _load_chunked_tap_boards(doc_ref) -> List[Dict[str, Any]]:
+    try:
+        chunks_collection = doc_ref.collection("boards_chunks")
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_collection.stream()))
+        ordered_chunks: List[Tuple[int, List[Dict[str, Any]]]] = []
+        for chunk_doc in chunk_docs:
+            chunk_payload = chunk_doc.to_dict() or {}
+            chunk_index = int(chunk_payload.get("index", 10**9))
+            chunk_boards = chunk_payload.get("boards") if isinstance(chunk_payload.get("boards"), list) else []
+            ordered_chunks.append((chunk_index, chunk_boards))
+
+        ordered_chunks.sort(key=lambda item: item[0])
+        boards: List[Dict[str, Any]] = []
+        for _, chunk_boards in ordered_chunks:
+            boards.extend([b for b in chunk_boards if isinstance(b, dict)])
+        return boards
+    except Exception as e:
+        logging.error(f"Error loading chunked tap boards: {e}")
+        return []
+
+
+async def _clear_chunked_tap_boards(doc_ref) -> None:
+    try:
+        chunks_collection = doc_ref.collection("boards_chunks")
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_collection.stream()))
+        for chunk_doc in chunk_docs:
+            await asyncio.to_thread(chunk_doc.reference.delete)
+    except Exception as e:
+        logging.warning(f"Could not clear chunked tap boards: {e}")
+
+
+async def _save_chunked_tap_boards(doc_ref, boards: List[Dict[str, Any]]) -> int:
+    chunks = _split_boards_into_chunks(boards)
+    for idx, chunk in enumerate(chunks):
+        chunk_ref = doc_ref.collection("boards_chunks").document(f"chunk_{idx:04d}")
+        await asyncio.to_thread(
+            chunk_ref.set,
+            {
+                "index": idx,
+                "boards": chunk,
+                "updated_at": dt.now().isoformat(),
+            },
+        )
+
+    # Remove stale chunk documents from previous larger saves.
+    existing_docs = await asyncio.to_thread(lambda: list(doc_ref.collection("boards_chunks").stream()))
+    valid_ids = {f"chunk_{i:04d}" for i in range(len(chunks))}
+    for existing in existing_docs:
+        if existing.id not in valid_ids:
+            await asyncio.to_thread(existing.reference.delete)
+
+    return len(chunks)
+
+
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
     """Load tap navigation configuration from Firestore"""
     global firestore_db
@@ -20231,10 +20339,15 @@ async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dic
     
     try:
         # Always load the single user configuration
-        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
+        doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         doc = await asyncio.to_thread(doc_ref.get)
         if doc.exists:
-            return doc.to_dict()
+            config_data = doc.to_dict() or {}
+            if str(config_data.get('boards_storage') or '').lower() == 'chunked':
+                config_data['boards'] = await _load_chunked_tap_boards(doc_ref)
+            elif not isinstance(config_data.get('boards'), list):
+                config_data['boards'] = []
+            return config_data
         
         return None
     except Exception as e:
@@ -20249,12 +20362,31 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
     
     try:
         # Always save to the single user configuration document
-        config_data['updated_at'] = dt.now().isoformat()
-        if 'created_at' not in config_data:
-            config_data['created_at'] = config_data['updated_at']
-        
-        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
-        await asyncio.to_thread(doc_ref.set, config_data)
+        working_config = copy.deepcopy(config_data) if isinstance(config_data, dict) else {}
+        working_config['updated_at'] = dt.now().isoformat()
+        if 'created_at' not in working_config:
+            working_config['created_at'] = working_config['updated_at']
+
+        doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
+        boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
+
+        estimated_size = _estimate_json_size_bytes(working_config)
+        if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            working_config.pop('boards_storage', None)
+            working_config.pop('boards_chunk_count', None)
+            working_config.pop('boards_count', None)
+            await asyncio.to_thread(doc_ref.set, working_config)
+            await _clear_chunked_tap_boards(doc_ref)
+            return True
+
+        # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
+        base_config = copy.deepcopy(working_config)
+        base_config.pop('boards', None)
+        chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
+        base_config['boards_storage'] = 'chunked'
+        base_config['boards_chunk_count'] = chunk_count
+        base_config['boards_count'] = len(boards)
+        await asyncio.to_thread(doc_ref.set, base_config)
         return True
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
@@ -22080,6 +22212,9 @@ async def update_tap_board(
             source=str(existing_board.get('source') or 'custom'),
             source_button_id=existing_board.get('source_button_id'),
         )
+        # Preserve created_during_migration flag unless the incoming payload explicitly clears it
+        if not payload.created_during_migration:
+            updated_board['created_during_migration'] = False
         boards[board_index] = updated_board
 
         config_data['boards'] = boards
@@ -22286,6 +22421,86 @@ except ImportError as e:
 
 # Store parsed MTI data temporarily (in production, use Redis or database)
 migration_sessions = {}  # Format: {session_id: {parsed_data, mapper, timestamp}}
+
+try:
+    from touchchat_ce_parser import parse_touchchat_ce_upload
+    TOUCHCHAT_MIGRATION_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"TouchChat migration utilities not available: {e}")
+    TOUCHCHAT_MIGRATION_AVAILABLE = False
+
+touchchat_migration_sessions = {}  # Format: {session_id: {parsed_data, temp_dir, c4s_path, timestamp, account_id, aac_user_id}}
+
+
+def _normalize_board_label(value: Any) -> str:
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
+def _touchchat_source_board_is_speech_only(source_board: Dict[str, Any]) -> bool:
+    """Return True for speech-dominant boards that should behave like temporary nav targets.
+
+    Some TouchChat Word Power sub-vocabulary pages are almost entirely speech buttons but include
+    a couple utility nav buttons (for example ABC/123).  Those still need temporary return behavior.
+    """
+    buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
+    if not buttons:
+        return False
+
+    total_buttons = 0
+    nav_buttons = 0
+    for btn in buttons:
+        if not isinstance(btn, dict):
+            continue
+        label = str(btn.get("label") or "").strip()
+        speech = str(btn.get("speech_text") or "").strip()
+        nav_target = str(btn.get("navigation_target_page_rid") or "").strip()
+
+        # Skip empty placeholders from sparse layouts.
+        if not label and not speech and not nav_target:
+            continue
+
+        total_buttons += 1
+        if nav_target:
+            nav_buttons += 1
+
+    if total_buttons == 0:
+        return False
+
+    # Strict speech-only still qualifies.
+    if nav_buttons == 0:
+        return True
+
+    # Treat as speech-dominant when only a small minority are utility nav buttons.
+    speech_buttons = total_buttons - nav_buttons
+    nav_ratio = nav_buttons / float(total_buttons)
+    if nav_buttons <= 2 and speech_buttons >= 8 and nav_ratio <= 0.20:
+        return True
+
+    board_name = str(source_board.get("name") or "").strip().lower()
+    # Word Power 60 stores this page with utility nav buttons, but it should still
+    # behave as a temporary-return target for pronoun+verb phrase construction.
+    if board_name == ".basic60 i you" and speech_buttons >= 30 and nav_ratio <= 0.35:
+        return True
+
+    return False
+
+
+def _touchchat_cleanup_old_sessions() -> None:
+    cleanup_time = dt.now(timezone.utc) - timedelta(hours=1)
+    stale_sessions = [
+        sid for sid, data in touchchat_migration_sessions.items()
+        if data.get("timestamp") and data["timestamp"] < cleanup_time
+    ]
+
+    import shutil
+
+    for sid in stale_sessions:
+        session = touchchat_migration_sessions.pop(sid, None)
+        if not session:
+            continue
+        temp_dir = session.get("temp_dir")
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def load_existing_json(json_data: Dict) -> Dict:
@@ -23063,6 +23278,635 @@ async def delete_migration_session(
             raise HTTPException(status_code=403, detail="Not authorized")
     
     raise HTTPException(status_code=404, detail="Session not found")
+
+
+# ===================================
+# TOUCHCHAT TO BRAVO BOARD MIGRATION
+# ===================================
+
+@app.post("/api/touchchat-migration/upload-ce")
+async def upload_touchchat_ce_file(
+    file: UploadFile = File(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    if not TOUCHCHAT_MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="TouchChat migration functionality not available")
+
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    filename = str(file.filename or "")
+    normalized_name = filename.lower()
+    if not (normalized_name.endswith(".ce") or normalized_name.endswith(".ce.zip") or normalized_name.endswith(".zip")):
+        raise HTTPException(status_code=400, detail="Please upload a TouchChat .ce export file")
+
+    try:
+        content = await file.read()
+        extracted = parse_touchchat_ce_upload(content, filename)
+
+        session_id = str(uuid.uuid4())
+        touchchat_migration_sessions[session_id] = {
+            "parsed_data": extracted.parsed_data,
+            "temp_dir": extracted.temp_dir,
+            "c4s_path": extracted.c4s_path,
+            "timestamp": dt.now(timezone.utc),
+            "account_id": account_id,
+            "aac_user_id": aac_user_id,
+        }
+
+        _touchchat_cleanup_old_sessions()
+
+        return JSONResponse(content={
+            "session_id": session_id,
+            "summary": {
+                "file": extracted.parsed_data.get("file"),
+                "total_boards": extracted.parsed_data.get("total_boards", 0),
+                "total_buttons": extracted.parsed_data.get("total_buttons", 0),
+            },
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error parsing TouchChat CE file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse TouchChat CE file: {str(e)}")
+
+
+@app.get("/api/touchchat-migration/boards/{session_id}")
+async def get_touchchat_migration_boards(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to access this TouchChat migration session")
+
+    return JSONResponse(content=session["parsed_data"])
+
+
+@app.post("/api/touchchat-migration/import-board")
+async def import_touchchat_board(
+    request_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    session_id = str(request_data.get("session_id") or "").strip()
+    source_board_id = str(request_data.get("source_board_id") or "").strip()
+    selected_indices = request_data.get("selected_button_indices") or []
+    destination_type = str(request_data.get("destination_type") or "new").strip().lower()
+    destination_board_id = str(request_data.get("destination_board_id") or "").strip()
+    destination_board_name = str(request_data.get("destination_board_name") or "").strip()
+    merge_mode = str(request_data.get("merge_mode") or "update").strip().lower()
+    nav_resolutions = request_data.get("navigation_resolutions") or {}
+    import_full_cascade = bool(request_data.get("import_full_cascade", False))
+
+    if not session_id or not source_board_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != account_id or session["aac_user_id"] != aac_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this TouchChat migration session")
+
+    parsed_data = session.get("parsed_data") or {}
+    boards_from_file = parsed_data.get("boards") if isinstance(parsed_data.get("boards"), dict) else {}
+    source_board = boards_from_file.get(source_board_id)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Source board not found in parsed TouchChat data")
+
+    sorted_buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
+    selected_buttons = [
+        sorted_buttons[int(i)]
+        for i in selected_indices
+        if isinstance(i, int) and 0 <= int(i) < len(sorted_buttons)
+    ]
+    if import_full_cascade:
+        selected_buttons = sorted_buttons
+    if not selected_buttons:
+        raise HTTPException(status_code=400, detail="No valid buttons selected for import")
+
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        config_data = create_default_tap_config(account_id, aac_user_id)
+    config_data, _ = normalize_compose_tap_config(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data)
+
+    boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
+    existing_by_id = {
+        str(board.get("id") or "").strip(): board
+        for board in boards
+        if isinstance(board, dict) and str(board.get("id") or "").strip()
+    }
+    existing_by_label = {
+        _normalize_board_label(board.get("label")): str(board.get("id") or "").strip()
+        for board in boards
+        if isinstance(board, dict)
+    }
+
+    if destination_type not in {"new", "existing"}:
+        raise HTTPException(status_code=400, detail="destination_type must be 'new' or 'existing'")
+    if merge_mode not in {"replace", "update"}:
+        raise HTTPException(status_code=400, detail="merge_mode must be 'replace' or 'update'")
+
+    target_board: Optional[Dict[str, Any]] = None
+    target_board_id: Optional[str] = None
+    created_board = False
+
+    if destination_type == "existing":
+        if not destination_board_id:
+            raise HTTPException(status_code=400, detail="destination_board_id is required for existing board import")
+        target_board = existing_by_id.get(destination_board_id)
+        if not target_board:
+            raise HTTPException(status_code=404, detail="Destination board not found")
+        if str(target_board.get("source") or "") == "legacy_category" or str(target_board.get("board_type") or "") == "system":
+            raise HTTPException(status_code=403, detail="Cannot import into legacy/system read-only boards")
+        target_board_id = destination_board_id
+    else:
+        if not destination_board_name:
+            raise HTTPException(status_code=400, detail="destination_board_name is required for new board import")
+
+        base_slug = _sanitize_board_slug(destination_board_name)
+        candidate_id = f"board_{base_slug}"
+        suffix = 2
+        while candidate_id in existing_by_id:
+            candidate_id = f"board_{base_slug}_{suffix}"
+            suffix += 1
+
+        target_board_id = candidate_id
+        target_board = _normalize_board_payload(
+            {
+                "label": destination_board_name,
+                "board_type": "static",
+                "owner_scope": "user",
+                "hidden": False,
+                "default_columns": int(source_board.get("layout_cols") or 12),
+                "max_rows": max(7, int(source_board.get("layout_rows") or 7)),
+                "buttons": [],
+                "created_during_migration": True,
+            },
+            board_id=target_board_id,
+            source="custom",
+            source_button_id=None,
+        )
+        boards.append(target_board)
+        existing_by_id[target_board_id] = target_board
+        existing_by_label[_normalize_board_label(destination_board_name)] = target_board_id
+        created_board = True
+
+    source_page_rid = str(source_board.get("page_rid") or "").strip()
+    source_page_name = str(source_board.get("name") or "").strip()
+    missing_nav_targets: List[Dict[str, Any]] = []
+    resolved_nav_map: Dict[str, str] = {}
+    created_nav_boards: List[Dict[str, str]] = []
+
+    if import_full_cascade:
+        source_boards_by_page_id = {
+            str(board.get("page_id") or "").strip(): board
+            for board in boards_from_file.values()
+            if isinstance(board, dict) and str(board.get("page_id") or "").strip()
+        }
+        source_boards_by_rid = {
+            str(board.get("page_rid") or "").strip(): board
+            for board in boards_from_file.values()
+            if isinstance(board, dict) and str(board.get("page_rid") or "").strip()
+        }
+
+        def ensure_target_board_for_source(src_board: Dict[str, Any]) -> str:
+            src_name = str(src_board.get("name") or src_board.get("page_id") or "Imported Board").strip() or "Imported Board"
+            src_key = _normalize_board_label(src_name)
+            existing_id = existing_by_label.get(src_key)
+            if existing_id:
+                return existing_id
+
+            src_slug = _sanitize_board_slug(src_name)
+            candidate_id = f"board_{src_slug}"
+            suffix = 2
+            while candidate_id in existing_by_id:
+                candidate_id = f"board_{src_slug}_{suffix}"
+                suffix += 1
+
+            new_board = _normalize_board_payload(
+                {
+                    "label": src_name,
+                    "board_type": "static",
+                    "owner_scope": "user",
+                    "hidden": False,
+                    "default_columns": int(src_board.get("layout_cols") or 12),
+                    "max_rows": max(7, int(src_board.get("layout_rows") or 7)),
+                    "buttons": [],
+                    "created_during_migration": True,
+                },
+                board_id=candidate_id,
+                source="custom",
+                source_button_id=None,
+            )
+            boards.append(new_board)
+            existing_by_id[candidate_id] = new_board
+            existing_by_label[src_key] = candidate_id
+            created_nav_boards.append({"id": candidate_id, "label": src_name})
+            return candidate_id
+
+        source_to_target_board_id: Dict[str, str] = {source_board_id: target_board_id}
+        queue: List[str] = [source_board_id]
+        processed: Set[str] = set()
+        total_imported_buttons = 0
+        imported_board_summaries: List[Dict[str, Any]] = []
+
+        while queue:
+            current_source_id = queue.pop(0)
+            if current_source_id in processed:
+                continue
+
+            current_source_board = source_boards_by_page_id.get(current_source_id)
+            if not current_source_board:
+                processed.add(current_source_id)
+                continue
+
+            current_target_id = source_to_target_board_id.get(current_source_id)
+            if not current_target_id:
+                current_target_id = ensure_target_board_for_source(current_source_board)
+                source_to_target_board_id[current_source_id] = current_target_id
+
+            current_target_board = existing_by_id.get(current_target_id)
+            if not current_target_board:
+                processed.add(current_source_id)
+                continue
+
+            current_buttons = current_source_board.get("buttons") if isinstance(current_source_board.get("buttons"), list) else []
+            current_source_rid = str(current_source_board.get("page_rid") or "").strip()
+            resolved_nav_map: Dict[str, str] = {}
+
+            for button in current_buttons:
+                target_rid = str(button.get("navigation_target_page_rid") or "").strip()
+                if not target_rid:
+                    continue
+                if target_rid == current_source_rid:
+                    resolved_nav_map[target_rid] = current_target_id
+                    continue
+
+                linked_source_board = source_boards_by_rid.get(target_rid)
+                if linked_source_board:
+                    linked_source_id = str(linked_source_board.get("page_id") or "").strip()
+                    if linked_source_id:
+                        linked_target_id = source_to_target_board_id.get(linked_source_id)
+                        if not linked_target_id:
+                            linked_target_id = ensure_target_board_for_source(linked_source_board)
+                            source_to_target_board_id[linked_source_id] = linked_target_id
+                        resolved_nav_map[target_rid] = linked_target_id
+                        if linked_source_id not in processed:
+                            queue.append(linked_source_id)
+                        continue
+
+                target_name = str(button.get("navigation_target_page_name") or "").strip() or target_rid
+                existing_match = existing_by_label.get(_normalize_board_label(target_name))
+                if existing_match:
+                    resolved_nav_map[target_rid] = existing_match
+                    continue
+
+                fallback_id = ensure_target_board_for_source({
+                    "name": target_name,
+                    "layout_cols": 12,
+                    "layout_rows": 7,
+                })
+                resolved_nav_map[target_rid] = fallback_id
+
+            existing_buttons = current_target_board.get("buttons") if isinstance(current_target_board.get("buttons"), list) else []
+            existing_buttons_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+            for existing_btn in existing_buttons:
+                if not isinstance(existing_btn, dict):
+                    continue
+                existing_buttons_by_position[(int(existing_btn.get("row", 0) or 0), int(existing_btn.get("col", 0) or 0))] = existing_btn
+
+            imported_buttons: List[Dict[str, Any]] = []
+            for idx, src_btn in enumerate(current_buttons):
+                label = str(src_btn.get("label") or "").strip()
+                row = int(src_btn.get("row") or 0)
+                col = int(src_btn.get("col") or 0)
+                existing_target_btn = existing_buttons_by_position.get((row, col))
+                image_url = None
+
+                nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
+                target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
+                temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+                if not temporary_navigation and nav_target_rid:
+                    _nav_src_board = source_boards_by_rid.get(nav_target_rid)
+                    if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
+                        temporary_navigation = True
+                speech_text = str(src_btn.get("speech_text") or "").strip() or None
+                modifier_trigger_id = src_btn.get("modifier_trigger_id")
+
+                raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
+                converted_modifier_variants: Dict[str, Dict[str, Any]] = {}
+                for modifier_id, raw_variant in raw_modifier_variants.items():
+                    if not isinstance(raw_variant, dict):
+                        continue
+                    variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
+                    variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+                    converted_modifier_variants[str(modifier_id)] = {
+                        "label": str(raw_variant.get("label") or "").strip(),
+                        "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
+                        "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
+                        "action_type": "navigate" if variant_target_board_id else "announce",
+                        "after_selection": "navigate" if variant_target_board_id else "do_nothing",
+                        "target_board_id": variant_target_board_id,
+                        "temporary_navigation": (bool(raw_variant.get("temporary_navigation", False)) if variant_target_board_id else False),
+                        "background_color": raw_variant.get("background_color") or (existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"),
+                        "text_color": raw_variant.get("text_color") or src_btn.get("text_color") or "#000000",
+                    }
+
+                imported_buttons.append({
+                    "id": f"btn_{row}_{col}_{int(time.time() * 1000)}_{idx}",
+                    "label": label,
+                    "row": row,
+                    "col": col,
+                    "speech_text": speech_text,
+                    "modifier_trigger_id": modifier_trigger_id,
+                    "modifier_variants": converted_modifier_variants,
+                    "action_type": "navigate" if target_nav_board_id else "announce",
+                    "after_selection": "navigate" if target_nav_board_id else "do_nothing",
+                    "target_board_id": target_nav_board_id,
+                    "temporary_navigation": (temporary_navigation if target_nav_board_id else False),
+                    "custom_audio_file": None,
+                    "special_function": None,
+                    "image_url": image_url,
+                    "background_color": (
+                        existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"
+                    ),
+                    "text_color": src_btn.get("text_color") or "#000000",
+                    "hidden": False,
+                })
+
+            board_merge_mode = merge_mode if current_source_id == source_board_id else "update"
+            if board_merge_mode == "replace":
+                current_target_board["buttons"] = imported_buttons
+            else:
+                merged_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+                for btn in existing_buttons:
+                    if not isinstance(btn, dict):
+                        continue
+                    merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+                for btn in imported_buttons:
+                    merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+                current_target_board["buttons"] = sorted(
+                    list(merged_by_position.values()),
+                    key=lambda b: (int(b.get("row", 0) or 0), int(b.get("col", 0) or 0), str(b.get("id") or "")),
+                )
+
+            current_target_board["board_type"] = "static"
+            current_target_board["label"] = str(current_target_board.get("label") or current_source_board.get("name") or "Imported Board")
+            current_target_board["created_during_migration"] = len(current_target_board.get("buttons") or []) == 0
+
+            total_imported_buttons += len(imported_buttons)
+            imported_board_summaries.append({
+                "source_board_name": str(current_source_board.get("name") or current_source_id),
+                "target_board_label": str(current_target_board.get("label") or current_target_id),
+                "buttons_imported": len(imported_buttons),
+            })
+            processed.add(current_source_id)
+
+        config_data["boards"] = boards
+        config_data["updated_at"] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save TouchChat migration import")
+
+        unconfigured_created_nav_boards = [
+            b for b in created_nav_boards
+            if str(b.get("id") or "") in existing_by_id
+            and len(existing_by_id[str(b.get("id") or "")].get("buttons") or []) == 0
+        ]
+
+        return JSONResponse(content={
+            "success": True,
+            "created_board": created_board,
+            "target_board_id": target_board_id,
+            "target_board_label": target_board.get("label"),
+            "buttons_imported": total_imported_buttons,
+            "imported_boards": imported_board_summaries,
+            "created_navigation_boards": unconfigured_created_nav_boards,
+            "import_mode": "full_cascade",
+        })
+
+    for button in selected_buttons:
+        target_rid = str(button.get("navigation_target_page_rid") or "").strip()
+        if not target_rid:
+            continue
+        if target_rid == source_page_rid:
+            resolved_nav_map[target_rid] = target_board_id
+            continue
+
+        target_name = str(button.get("navigation_target_page_name") or "").strip() or target_rid
+        existing_match = existing_by_label.get(_normalize_board_label(target_name))
+        if existing_match:
+            resolved_nav_map[target_rid] = existing_match
+            continue
+
+        resolution = nav_resolutions.get(target_rid) if isinstance(nav_resolutions, dict) else None
+        action = str((resolution or {}).get("action") or "").strip().lower() if isinstance(resolution, dict) else ""
+
+        if action == "existing":
+            selected_existing_id = str((resolution or {}).get("board_id") or "").strip()
+            if selected_existing_id and selected_existing_id in existing_by_id:
+                resolved_nav_map[target_rid] = selected_existing_id
+                continue
+        elif action == "create":
+            requested_name = str((resolution or {}).get("board_name") or target_name).strip() or target_name
+            requested_key = _normalize_board_label(requested_name)
+            existing_id_for_name = existing_by_label.get(requested_key)
+            if existing_id_for_name:
+                resolved_nav_map[target_rid] = existing_id_for_name
+                continue
+
+            nav_slug = _sanitize_board_slug(requested_name)
+            nav_candidate_id = f"board_{nav_slug}"
+            nav_suffix = 2
+            while nav_candidate_id in existing_by_id:
+                nav_candidate_id = f"board_{nav_slug}_{nav_suffix}"
+                nav_suffix += 1
+
+            nav_board = _normalize_board_payload(
+                {
+                    "label": requested_name,
+                    "board_type": "static",
+                    "owner_scope": "user",
+                    "hidden": False,
+                    "default_columns": 12,
+                    "max_rows": 7,
+                    "buttons": [],
+                    "created_during_migration": True,
+                },
+                board_id=nav_candidate_id,
+                source="custom",
+                source_button_id=None,
+            )
+            boards.append(nav_board)
+            existing_by_id[nav_candidate_id] = nav_board
+            existing_by_label[requested_key] = nav_candidate_id
+            resolved_nav_map[target_rid] = nav_candidate_id
+            created_nav_boards.append({"id": nav_candidate_id, "label": requested_name})
+            continue
+
+        missing_nav_targets.append({
+            "target_page_rid": target_rid,
+            "target_page_name": target_name,
+            "button_label": str(button.get("label") or ""),
+            "source_board_name": source_page_name,
+        })
+
+    if missing_nav_targets:
+        return JSONResponse(content={
+            "requires_confirmation": True,
+            "missing_navigation_targets": missing_nav_targets,
+            "available_destination_boards": [
+                {"id": b_id, "label": (existing_by_id[b_id].get("label") or b_id)}
+                for b_id in sorted(existing_by_id.keys())
+            ],
+        })
+
+    existing_buttons = target_board.get("buttons") if isinstance(target_board.get("buttons"), list) else []
+    existing_buttons_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for existing_btn in existing_buttons:
+        if not isinstance(existing_btn, dict):
+            continue
+        existing_buttons_by_position[(int(existing_btn.get("row", 0) or 0), int(existing_btn.get("col", 0) or 0))] = existing_btn
+
+    _noncascade_boards_by_rid = {
+        str(b.get("page_rid") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_rid") or "").strip()
+    }
+
+    imported_buttons: List[Dict[str, Any]] = []
+    for idx, src_btn in enumerate(selected_buttons):
+        label = str(src_btn.get("label") or "").strip()
+        row = int(src_btn.get("row") or 0)
+        col = int(src_btn.get("col") or 0)
+        existing_target_btn = existing_buttons_by_position.get((row, col))
+        image_url = None
+
+        nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
+        target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
+        temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+        if not temporary_navigation and nav_target_rid:
+            _nav_src_board = _noncascade_boards_by_rid.get(nav_target_rid)
+            if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
+                temporary_navigation = True
+        speech_text = str(src_btn.get("speech_text") or "").strip() or None
+        modifier_trigger_id = src_btn.get("modifier_trigger_id")
+
+        raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
+        converted_modifier_variants: Dict[str, Dict[str, Any]] = {}
+        for modifier_id, raw_variant in raw_modifier_variants.items():
+            if not isinstance(raw_variant, dict):
+                continue
+            variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
+            variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+            converted_modifier_variants[str(modifier_id)] = {
+                "label": str(raw_variant.get("label") or "").strip(),
+                "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
+                "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
+                "action_type": "navigate" if variant_target_board_id else "announce",
+                "after_selection": "navigate" if variant_target_board_id else "do_nothing",
+                "target_board_id": variant_target_board_id,
+                "temporary_navigation": (bool(raw_variant.get("temporary_navigation", False)) if variant_target_board_id else False),
+                "background_color": raw_variant.get("background_color") or (existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"),
+                "text_color": raw_variant.get("text_color") or src_btn.get("text_color") or "#000000",
+            }
+
+        imported_buttons.append({
+            "id": f"btn_{row}_{col}_{int(time.time() * 1000)}_{idx}",
+            "label": label,
+            "row": row,
+            "col": col,
+            "speech_text": speech_text,
+            "modifier_trigger_id": modifier_trigger_id,
+            "modifier_variants": converted_modifier_variants,
+            "action_type": "navigate" if target_nav_board_id else "announce",
+            "after_selection": "navigate" if target_nav_board_id else "do_nothing",
+            "target_board_id": target_nav_board_id,
+            "temporary_navigation": (temporary_navigation if target_nav_board_id else False),
+            "custom_audio_file": None,
+            "special_function": None,
+            "image_url": image_url,
+            "background_color": (
+                existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"
+            ),
+            "text_color": src_btn.get("text_color") or "#000000",
+            "hidden": False,
+        })
+
+    if merge_mode == "replace":
+        target_board["buttons"] = imported_buttons
+    else:
+        merged_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        for btn in existing_buttons:
+            if not isinstance(btn, dict):
+                continue
+            merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+        for btn in imported_buttons:
+            merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+        target_board["buttons"] = sorted(
+            list(merged_by_position.values()),
+            key=lambda b: (int(b.get("row", 0) or 0), int(b.get("col", 0) or 0), str(b.get("id") or "")),
+        )
+
+    target_board["board_type"] = "static"
+    target_board["label"] = str(target_board.get("label") or destination_board_name or "Imported Board")
+    config_data["boards"] = boards
+    config_data["updated_at"] = dt.now().isoformat()
+
+    success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save TouchChat migration import")
+
+    logging.info(
+        "TouchChat import complete: board=%s buttons=%d",
+        str(target_board.get("label") or target_board_id or ""),
+        len(imported_buttons),
+    )
+
+    unconfigured_created_nav_boards = [
+        b for b in created_nav_boards
+        if str(b.get("id") or "") in existing_by_id
+        and len(existing_by_id[str(b.get("id") or "")].get("buttons") or []) == 0
+    ]
+
+    return JSONResponse(content={
+        "success": True,
+        "created_board": created_board,
+        "target_board_id": target_board_id,
+        "target_board_label": target_board.get("label"),
+        "buttons_imported": len(imported_buttons),
+        "created_navigation_boards": unconfigured_created_nav_boards,
+    })
+
+
+@app.delete("/api/touchchat-migration/session/{session_id}")
+async def delete_touchchat_migration_session(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    session = touchchat_migration_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found")
+
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    import shutil
+
+    touchchat_migration_sessions.pop(session_id, None)
+    temp_dir = session.get("temp_dir")
+    if temp_dir:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return JSONResponse(content={"success": True})
 
 
 # --- Guess Games Endpoints (Who/Where/What) ---

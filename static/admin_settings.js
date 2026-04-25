@@ -215,7 +215,11 @@ async function loadSettings() {
             volumeDisplay.textContent = `${volume}/10`;
             console.log('Application volume set to:', volume);
         }
-        if (LLMOptionsInput) { LLMOptionsInput.value = currentSettings.LLMOptions || ''; }
+        if (LLMOptionsInput) {
+            LLMOptionsInput.value = currentSettings.LLMOptions !== null && currentSettings.LLMOptions !== undefined
+                ? currentSettings.LLMOptions
+                : '';
+        }
         if (FreestyleOptionsInput) { 
             console.log('DEBUG FreestyleOptions - Element found:', !!FreestyleOptionsInput);
             console.log('DEBUG FreestyleOptions - currentSettings.FreestyleOptions:', currentSettings.FreestyleOptions);
@@ -675,7 +679,11 @@ async function saveSettings() {
             applicationVolumeSlider.value = volume;
             volumeDisplay.textContent = `${volume}/10`;
         }
-        if (LLMOptionsInput) LLMOptionsInput.value = currentSettings.LLMOptions || '';
+        if (LLMOptionsInput) {
+            LLMOptionsInput.value = currentSettings.LLMOptions !== null && currentSettings.LLMOptions !== undefined
+                ? currentSettings.LLMOptions
+                : '';
+        }
         if (FreestyleOptionsInput) {
             console.log('DEBUG FreestyleOptions - Reload value:', currentSettings.FreestyleOptions);
             FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : '';

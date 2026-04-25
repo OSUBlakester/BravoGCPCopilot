@@ -254,7 +254,7 @@ def process_directory(directory_path, create_backup=True):
     return processed_count
 
 
-def upload_to_firestore(directory_path, project_id, replace=False):
+def upload_to_firestore(directory_path, project_id, replace=False, inter_image_delay=3.5, force_retag=False):
     """
     Upload processed images to Firestore using bulk_import_bravo_images.py
     
@@ -262,6 +262,8 @@ def upload_to_firestore(directory_path, project_id, replace=False):
         directory_path: Path to directory containing processed images
         project_id: GCP project ID
         replace: Whether to replace existing images
+        inter_image_delay: Delay between image imports to reduce AI tag rate limiting
+        force_retag: Regenerate tags even when replacing docs with existing tags
     """
     print("\n" + "=" * 60)
     print("UPLOADING TO FIRESTORE")
@@ -276,10 +278,13 @@ def upload_to_firestore(directory_path, project_id, replace=False):
         "python3",
         "bulk_import_bravo_images.py",
         "--path", str(directory),
+        "--inter-image-delay", str(inter_image_delay),
     ]
     
     if replace:
         cmd.append("--replace")
+    if force_retag:
+        cmd.append("--force-retag")
     
     print(f"Running: {' '.join(cmd)}\n")
     
@@ -338,6 +343,19 @@ Examples:
         action="store_true",
         help="Replace existing images in Firestore (use with --upload)"
     )
+
+    parser.add_argument(
+        "--inter-image-delay",
+        type=float,
+        default=3.5,
+        help="Seconds to wait between image imports to reduce AI tag rate limiting (default: 3.5)"
+    )
+
+    parser.add_argument(
+        "--force-retag",
+        action="store_true",
+        help="When replacing existing docs, regenerate tags instead of reusing existing tags"
+    )
     
     parser.add_argument(
         "--no-backup",
@@ -359,6 +377,8 @@ Examples:
     if args.upload:
         print(f"Project: {args.project}")
         print(f"Replace existing: {args.replace}")
+        print(f"Inter-image delay: {args.inter_image_delay}s")
+        print(f"Force retag: {args.force_retag}")
     print("=" * 60)
     
     # Process images
@@ -370,7 +390,13 @@ Examples:
     
     # Upload if requested
     if args.upload:
-        return upload_to_firestore(directory_path, args.project, args.replace)
+        return upload_to_firestore(
+            directory_path,
+            args.project,
+            args.replace,
+            args.inter_image_delay,
+            args.force_retag,
+        )
     else:
         print("\n✅ Processing complete (use --upload to upload to Firestore)")
         return 0

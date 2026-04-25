@@ -1560,6 +1560,9 @@
         let startupHomeBoardId = null; // Home board id from /api/tap-interface/boards
         let startupHomeBoardLabel = null; // Home board label from /api/tap-interface/boards
         let startupHomeBoard = null; // Full home board object from /api/tap-interface/boards
+        let temporaryNavigationReturnStack = []; // One-shot return targets for temporary navigation
+        let temporaryNavigationPending = false; // True only after taking a temporary-navigation button
+        let activeBoardModifierState = { boardId: null, modifierId: null }; // TouchChat-style one-shot modifier state
 
         // Follow-up conversation tracking (like gridpage)
         let tapFollowUpConversation = {
@@ -3268,8 +3271,8 @@
                 });
 
             return sortedButtons
-                .map((btn, index) => {
-                    const text = String(btn.label || `Button ${index + 1}`).trim();
+                .map((btn) => {
+                    const text = String(btn.label || '').trim();
                     if (!text) {
                         return null;
                     }
@@ -3278,12 +3281,15 @@
                         text,
                         row: Number(btn.row || 0),
                         col: Number(btn.col || 0),
-                        speech_text: String(btn.speech_text || '').trim() || text,
+                        speech_text: (String(btn.speech_text || '').trim() || null),
+                        modifier_trigger_id: btn.modifier_trigger_id ?? null,
+                        modifier_variants: (btn.modifier_variants && typeof btn.modifier_variants === 'object') ? btn.modifier_variants : {},
                         image_url: btn.image_url || null,
                         custom_audio_file: btn.custom_audio_file || null,
                         action_type: btn.action_type || null,
                         after_selection: btn.after_selection || 'do_nothing',
                         target_board_id: btn.target_board_id || null,
+                        temporary_navigation: !!btn.temporary_navigation,
                         background_color: btn.background_color || null,
                         text_color: btn.text_color || null,
                     };
@@ -3323,6 +3329,146 @@
                 hidden: !!board.hidden,
                 children: [],
             };
+        }
+
+        function resolveNavigationTargetCategory(targetBoardId) {
+            if (!targetBoardId) {
+                return null;
+            }
+
+            const normalizedTargetBoardId = String(targetBoardId).trim();
+            if (!normalizedTargetBoardId) {
+                return null;
+            }
+
+            const menuCategory = findCategoryByBoardId(normalizedTargetBoardId, tapConfig?.buttons || []);
+            if (menuCategory) {
+                return menuCategory;
+            }
+
+            const boards = Array.isArray(tapConfig?.boards) ? tapConfig.boards : [];
+            const targetBoard = boards.find(board => String(board?.id || '').trim() === normalizedTargetBoardId);
+            if (targetBoard) {
+                return buildStartupCategoryFromBoard(targetBoard);
+            }
+
+            return null;
+        }
+
+        function getCurrentBoardIdForTemporaryNavigation() {
+            const currentBoardId = String(currentCategory?.board_id || currentCategory?.id || '').trim();
+            if (currentBoardId) {
+                return currentBoardId;
+            }
+            const configuredHomeId = String(startupHomeBoardId || tapConfig?.board_settings?.home_board_id || '').trim();
+            return configuredHomeId || null;
+        }
+
+        function getCategoryBoardId(category = currentCategory) {
+            return String(category?.board_id || category?.id || '').trim() || null;
+        }
+
+        function getActiveBoardModifierId(boardId) {
+            if (!boardId) {
+                return null;
+            }
+            return activeBoardModifierState.boardId === String(boardId)
+                ? activeBoardModifierState.modifierId
+                : null;
+        }
+
+        function setActiveBoardModifier(boardId, modifierId) {
+            if (!boardId || modifierId === null || modifierId === undefined || modifierId === '') {
+                activeBoardModifierState = { boardId: null, modifierId: null };
+                return;
+            }
+            activeBoardModifierState = { boardId: String(boardId), modifierId: String(modifierId) };
+        }
+
+        function clearActiveBoardModifier(boardId = null) {
+            if (!boardId || activeBoardModifierState.boardId === String(boardId)) {
+                activeBoardModifierState = { boardId: null, modifierId: null };
+            }
+        }
+
+        function applyActiveBoardModifierToOption(option, boardId) {
+            if (!option || typeof option !== 'object') {
+                return option;
+            }
+            const modifierId = getActiveBoardModifierId(boardId);
+            if (!modifierId || !option.modifier_variants || typeof option.modifier_variants !== 'object') {
+                return option;
+            }
+            const variant = option.modifier_variants[String(modifierId)];
+            if (!variant || typeof variant !== 'object') {
+                return option;
+            }
+
+            const hasVariantModifierTrigger = Object.prototype.hasOwnProperty.call(variant, 'modifier_trigger_id');
+            const hasVariantTargetBoard = Object.prototype.hasOwnProperty.call(variant, 'target_board_id');
+            const hasVariantTemporaryNavigation = Object.prototype.hasOwnProperty.call(variant, 'temporary_navigation');
+
+            return {
+                ...option,
+                text: String(variant.label || option.text || '').trim(),
+                speech_text: typeof variant.speech_text === 'string' ? variant.speech_text : option.speech_text,
+                modifier_trigger_id: hasVariantModifierTrigger ? (variant.modifier_trigger_id ?? null) : (option.modifier_trigger_id ?? null),
+                action_type: variant.action_type || option.action_type,
+                after_selection: variant.after_selection || option.after_selection,
+                target_board_id: hasVariantTargetBoard ? (variant.target_board_id || null) : (option.target_board_id || null),
+                temporary_navigation: hasVariantTemporaryNavigation ? !!variant.temporary_navigation : !!option.temporary_navigation,
+                background_color: variant.background_color || option.background_color,
+                text_color: variant.text_color || option.text_color,
+            };
+        }
+
+        function rerenderCurrentBoardWordOptions() {
+            if (!currentCategory || !Array.isArray(currentCategory.board_word_options) || currentCategory.board_word_options.length === 0) {
+                return;
+            }
+
+            const boardId = getCategoryBoardId(currentCategory);
+            const renderedOptions = currentCategory.board_word_options.map(option =>
+                applyActiveBoardModifierToOption(option, boardId)
+            );
+
+            renderFreestyleOptions(renderedOptions, true);
+            setTimeout(() => {
+                loadImagesForWords(renderedOptions);
+            }, 50);
+        }
+
+        function pushTemporaryReturnBoard(boardId) {
+            const normalized = String(boardId || '').trim();
+            if (!normalized) {
+                return;
+            }
+            temporaryNavigationReturnStack.push(normalized);
+            temporaryNavigationPending = true;
+            console.log('Temporary navigation push:', normalized, 'stack depth=', temporaryNavigationReturnStack.length);
+        }
+
+        function popTemporaryReturnBoard() {
+            if (!Array.isArray(temporaryNavigationReturnStack) || temporaryNavigationReturnStack.length === 0) {
+                return null;
+            }
+            const boardId = temporaryNavigationReturnStack.pop();
+            console.log('Temporary navigation pop:', boardId, 'stack depth=', temporaryNavigationReturnStack.length);
+            return boardId || null;
+        }
+
+        function peekTemporaryReturnBoard() {
+            if (!Array.isArray(temporaryNavigationReturnStack) || temporaryNavigationReturnStack.length === 0) {
+                return null;
+            }
+            const boardId = temporaryNavigationReturnStack[temporaryNavigationReturnStack.length - 1];
+            return boardId ? String(boardId) : null;
+        }
+
+        function clearTemporaryNavigationState(reason = 'unspecified') {
+            temporaryNavigationReturnStack = [];
+            temporaryNavigationPending = false;
+            console.log('Temporary navigation state cleared:', reason);
         }
 
         function hasExplicitWordOptions(category) {
@@ -4445,6 +4591,14 @@ VARIETY RULES:
 
         async function selectCategory(category, event) {
             console.log('Selecting category:', category);
+            if (event && event.target && !temporaryNavigationPending) {
+                clearTemporaryNavigationState('manual category selection');
+            }
+            const previousBoardId = getCategoryBoardId(currentCategory);
+            const nextBoardId = getCategoryBoardId(category);
+            if (previousBoardId && previousBoardId !== nextBoardId) {
+                clearActiveBoardModifier(previousBoardId);
+            }
             
             // Check for special function
             if (category.special_function === 'spell') {
@@ -5210,6 +5364,13 @@ VARIETY RULES:
                     btn.title = fullOption; // Show full text on hover
                     btn.addEventListener('click', async () => {
                         await runTapActionOnce(btn, async () => {
+                            console.log('[TAP DEBUG] Phrase option click start', {
+                                speechText,
+                                currentBoardId: getCategoryBoardId(currentCategory),
+                                temporaryNavigationPending,
+                                temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                            });
+
                             const previewDecision = await handlePreviewInteraction(btn, speechText, 'phrase');
                             if (!previewDecision.proceed) {
                                 return;
@@ -5223,6 +5384,29 @@ VARIETY RULES:
                             addToSpeech(speechText);
                             if (!previewDecision.alreadyAnnounced) {
                                 await announce(speechText, "system", true);
+                            }
+
+                            // If a temporary navigation was taken previously, the very next selection
+                            // should return to the original board instead of generating follow-up options.
+                            if (temporaryNavigationPending) {
+                                const temporaryReturnBoardId = popTemporaryReturnBoard();
+                                temporaryNavigationPending = false;
+                                if (temporaryReturnBoardId) {
+                                    const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
+                                    if (returnCategory) {
+                                        await selectCategory(returnCategory, null);
+                                        console.log('[TAP DEBUG] Temporary return executed (phrase)', {
+                                            returnBoardId: temporaryReturnBoardId,
+                                            currentBoardIdAfterReturn: getCategoryBoardId(currentCategory),
+                                            temporaryNavigationPending,
+                                            temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                        });
+                                        return;
+                                    }
+                                    console.warn('Could not resolve temporary return board from phrase option:', temporaryReturnBoardId, speechText);
+                                }
+                                clearTemporaryNavigationState('pending return board missing after phrase selection');
+                                return;
                             }
                             
                             console.log('💬 Tap phrase selected, generating follow-up options:', speechText);
@@ -6046,11 +6230,14 @@ VARIETY RULES:
             if (hasBoardCoordinates) {
                 freestyleOptions.dataset.boardLayout = 'true';
                 const boardCols = Math.max(1, Number(gridColumns) || 1);
+                const currentBoardId = getCategoryBoardId(currentCategory);
                 freestyleOptions.style.gridTemplateColumns = `repeat(${boardCols}, 1fr)`;
                 freestyleOptions.dataset.boardLayoutCols = String(boardCols);
                 freestyleOptions.style.alignContent = 'start';
 
-                const optionsBySourceRow = new Map();
+                const optionsByPosition = new Map();
+                let maxSourceRow = -1;
+                let maxSourceCol = -1;
                 options.forEach(opt => {
                     if (!opt || typeof opt !== 'object') {
                         return;
@@ -6064,55 +6251,46 @@ VARIETY RULES:
                         return;
                     }
 
-                    const rowList = optionsBySourceRow.get(row) || [];
-                    rowList.push(opt);
-                    optionsBySourceRow.set(row, rowList);
+                    optionsByPosition.set(`${row}:${col}`, opt);
+                    maxSourceRow = Math.max(maxSourceRow, row);
+                    maxSourceCol = Math.max(maxSourceCol, col);
                 });
 
-                // Render only rows that actually contain defined buttons; if a row has more buttons
-                // than configured columns, spill into additional display rows.
-                const displayRows = [];
-                const sortedSourceRows = [...optionsBySourceRow.keys()].sort((a, b) => a - b);
-                sortedSourceRows.forEach(sourceRow => {
-                    const rowOptions = (optionsBySourceRow.get(sourceRow) || []).sort((a, b) => {
-                        const colA = Number(a.col || 0);
-                        const colB = Number(b.col || 0);
-                        return colA - colB;
-                    });
-
-                    for (let i = 0; i < rowOptions.length; i += boardCols) {
-                        displayRows.push(rowOptions.slice(i, i + boardCols));
-                    }
-                });
-
-                const effectiveDisplayRows = Math.max(1, displayRows.length);
+                const effectiveBoardCols = Math.max(boardCols, maxSourceCol + 1);
+                const effectiveDisplayRows = Math.max(1, maxSourceRow + 1);
                 // Leave rows as auto-sized tracks so spacing remains standard and rows do not stretch.
                 freestyleOptions.style.gridTemplateRows = '';
+                freestyleOptions.style.gridTemplateColumns = `repeat(${effectiveBoardCols}, 1fr)`;
+                freestyleOptions.dataset.boardLayoutCols = String(effectiveBoardCols);
 
                 const boardFragment = document.createDocumentFragment();
 
                 for (let row = 0; row < effectiveDisplayRows; row++) {
-                    const rowOptions = displayRows[row] || [];
-                    for (let col = 0; col < boardCols; col++) {
-                        const option = rowOptions[col] || null;
+                    for (let col = 0; col < effectiveBoardCols; col++) {
+                        const rawOption = optionsByPosition.get(`${row}:${col}`) || null;
+                        const option = rawOption ? applyActiveBoardModifierToOption(rawOption, currentBoardId) : null;
                         const btn = document.createElement('button');
                         btn.className = 'option-button freestyle-button';
 
                         if (!option) {
                             btn.classList.add('empty-state');
-                            btn.textContent = '—';
+                            btn.textContent = '';
                             btn.disabled = true;
                             boardFragment.appendChild(btn);
                             continue;
                         }
 
                         const text = option.text || '';
-                        const announcementText = option.speech_text || text;
+                        const hasExplicitSpeech = typeof option.speech_text === 'string' && option.speech_text.trim() !== '';
+                        const isNavigationButton = option.action_type === 'navigate' && !!option.target_board_id;
+                        const announcementText = hasExplicitSpeech ? option.speech_text : (isNavigationButton ? '' : text);
                         const afterSelection = option.after_selection || null;
                         const optionTargetBoardId = option.target_board_id || null;
+                        const optionTemporaryNavigation = !!option.temporary_navigation;
+                        const optionModifierTriggerId = option.modifier_trigger_id;
                         const configuredImageUrl = option.image_url || null;
                         const isSightWord = isTapSightWord(text);
-                        const optionIndex = options.findIndex(candidate => candidate === option);
+                        const optionIndex = options.findIndex(candidate => candidate === rawOption);
                         if (optionIndex >= 0) {
                             btn.dataset.optionIndex = String(optionIndex);
                         }
@@ -6196,10 +6374,24 @@ VARIETY RULES:
 
                         btn.addEventListener('click', async () => {
                             await runTapActionOnce(btn, async () => {
+                                console.log('[TAP DEBUG] Board option click start', {
+                                    text,
+                                    currentBoardId: getCategoryBoardId(currentCategory),
+                                    optionTargetBoardId,
+                                    optionTemporaryNavigation,
+                                    actionType: option.action_type || null,
+                                    afterSelection,
+                                    temporaryNavigationPending,
+                                    temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                });
+
                                 let phraseToAdd;
                                 let phraseToAnnounce;
 
-                                if (currentWordsPrompt) {
+                                if (!announcementText && isNavigationButton) {
+                                    phraseToAdd = '';
+                                    phraseToAnnounce = '';
+                                } else if (currentWordsPrompt) {
                                     phraseToAdd = `${currentWordsPrompt} ${text}`;
                                     phraseToAnnounce = phraseToAdd;
                                 } else {
@@ -6207,7 +6399,9 @@ VARIETY RULES:
                                     phraseToAnnounce = announcementText;
                                 }
 
-                                const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
+                                const previewDecision = phraseToAnnounce
+                                    ? await handlePreviewInteraction(btn, phraseToAnnounce, 'word')
+                                    : { proceed: true, alreadyAnnounced: false };
                                 if (!previewDecision.proceed) {
                                     return;
                                 }
@@ -6217,16 +6411,87 @@ VARIETY RULES:
                                     updateStatusMessage(getReadyMessage());
                                 }
 
-                                addToSpeech(phraseToAdd);
-                                if (!previewDecision.alreadyAnnounced) {
+                                if (phraseToAdd) {
+                                    addToSpeech(phraseToAdd);
+                                }
+                                if (phraseToAnnounce && !previewDecision.alreadyAnnounced) {
                                     await announce(phraseToAnnounce, 'system', true);
                                 }
 
-                                const effectiveAfterSel = afterSelection || 'use_ai';
+                                const pendingReturnBoardId = temporaryNavigationPending ? peekTemporaryReturnBoard() : null;
+                                const boardIdForModifiers = pendingReturnBoardId || getCategoryBoardId(currentCategory);
+                                const hadActiveModifier = !!getActiveBoardModifierId(boardIdForModifiers);
+                                const nextModifierId = (optionModifierTriggerId !== null && optionModifierTriggerId !== undefined && optionModifierTriggerId !== '')
+                                    ? String(optionModifierTriggerId)
+                                    : null;
+                                if (nextModifierId) {
+                                    setActiveBoardModifier(boardIdForModifiers, nextModifierId);
+                                } else if (hadActiveModifier) {
+                                    clearActiveBoardModifier(boardIdForModifiers);
+                                }
+                                console.log('[TAP DEBUG] Modifier update', {
+                                    optionText: text,
+                                    optionModifierTriggerId,
+                                    boardIdForModifiers,
+                                    pendingReturnBoardId,
+                                    temporaryNavigationPending,
+                                });
+
+                                // TouchChat-style temporary navigation (navigate, then return after next selection).
+                                if (optionTemporaryNavigation && optionTargetBoardId) {
+                                    const returnBoardId = getCurrentBoardIdForTemporaryNavigation();
+                                    if (returnBoardId) {
+                                        pushTemporaryReturnBoard(returnBoardId);
+                                    }
+
+                                    const temporaryTargetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
+                                    if (temporaryTargetCategory) {
+                                        await selectCategory(temporaryTargetCategory, null);
+                                        console.log('[TAP DEBUG] Temporary nav executed', {
+                                            fromBoardId: returnBoardId,
+                                            toBoardId: optionTargetBoardId,
+                                            temporaryNavigationPending,
+                                            temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                        });
+                                    } else {
+                                        console.warn('Could not resolve temporary navigation target board:', optionTargetBoardId, option);
+                                    }
+                                    return;
+                                }
+
+                                if (temporaryNavigationPending) {
+                                    const temporaryReturnBoardId = popTemporaryReturnBoard();
+                                    temporaryNavigationPending = false;
+                                    if (temporaryReturnBoardId) {
+                                        const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
+                                        if (returnCategory) {
+                                            await selectCategory(returnCategory, null);
+                                            console.log('[TAP DEBUG] Temporary return executed', {
+                                                returnBoardId: temporaryReturnBoardId,
+                                                currentBoardIdAfterReturn: getCategoryBoardId(currentCategory),
+                                                temporaryNavigationPending,
+                                                temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                            });
+                                        } else {
+                                            console.warn('Could not resolve temporary return board:', temporaryReturnBoardId, option);
+                                        }
+                                        return;
+                                    }
+                                    clearTemporaryNavigationState('pending return board missing');
+                                }
+
+                                if ((nextModifierId || hadActiveModifier) && !optionTargetBoardId) {
+                                    rerenderCurrentBoardWordOptions();
+                                }
+
+                                const effectiveAfterSel = afterSelection || (option.action_type === 'navigate' ? 'navigate' : 'use_ai');
                                 if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
-                                    const targetCategoryBtn = tapConfig && tapConfig.buttons && tapConfig.buttons.find(b => b.board_id === optionTargetBoardId || b.id === optionTargetBoardId);
-                                    if (targetCategoryBtn) {
-                                        await selectCategory(targetCategoryBtn, null);
+                                    clearTemporaryNavigationState('normal navigate selection');
+                                    const targetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
+                                    if (targetCategory) {
+                                        await selectCategory(targetCategory, null);
+                                    } else {
+                                        console.warn('Could not resolve navigate target board:', optionTargetBoardId, option);
                                     }
                                 } else if (effectiveAfterSel === 'use_ai') {
                                     await updateFreestyleOptionsWithSelectedWord(text);
@@ -6337,9 +6602,12 @@ VARIETY RULES:
                     const option = options[i];
                     // Handle freestyle word format {text: "word", speech_text?: "announcement", keywords: []}
                     const text = option.text || option;
-                    const announcementText = (typeof option === 'object' && option.speech_text) ? option.speech_text : text;
+                    const hasExplicitSpeech = (typeof option === 'object' && typeof option.speech_text === 'string' && option.speech_text.trim() !== '');
+                    const isNavigationButton = (typeof option === 'object' && option.action_type === 'navigate' && !!option.target_board_id);
+                    const announcementText = hasExplicitSpeech ? option.speech_text : (isNavigationButton ? '' : text);
                     const afterSelection = (typeof option === 'object' && option.after_selection) ? option.after_selection : null;
                     const optionTargetBoardId = (typeof option === 'object' && option.target_board_id) ? option.target_board_id : null;
+                    const optionTemporaryNavigation = !!(typeof option === 'object' && option.temporary_navigation);
                     const configuredImageUrl = (typeof option === 'object' && option.image_url) ? option.image_url : null;
                     btn.dataset.optionIndex = String(i);
                     
@@ -6428,10 +6696,24 @@ VARIETY RULES:
                     
                     btn.addEventListener('click', async () => {
                         await runTapActionOnce(btn, async () => {
+                            console.log('[TAP DEBUG] Word option click start', {
+                                text,
+                                currentBoardId: getCategoryBoardId(currentCategory),
+                                optionTargetBoardId,
+                                optionTemporaryNavigation,
+                                actionType: (typeof option === 'object' ? option.action_type : null),
+                                afterSelection,
+                                temporaryNavigationPending,
+                                temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                            });
+
                             let phraseToAdd;
                             let phraseToAnnounce;
 
-                            if (currentWordsPrompt) {
+                            if (!announcementText && isNavigationButton) {
+                                phraseToAdd = '';
+                                phraseToAnnounce = '';
+                            } else if (currentWordsPrompt) {
                                 phraseToAdd = `${currentWordsPrompt} ${text}`;
                                 phraseToAnnounce = phraseToAdd;
                                 console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
@@ -6441,7 +6723,9 @@ VARIETY RULES:
                                 console.log('🎯 Using selection with announcement:', text, '=>', announcementText);
                             }
 
-                            const previewDecision = await handlePreviewInteraction(btn, phraseToAnnounce, 'word');
+                            const previewDecision = phraseToAnnounce
+                                ? await handlePreviewInteraction(btn, phraseToAnnounce, 'word')
+                                : { proceed: true, alreadyAnnounced: false };
                             if (!previewDecision.proceed) {
                                 return;
                             }
@@ -6451,19 +6735,67 @@ VARIETY RULES:
                                 updateStatusMessage(getReadyMessage());
                             }
                             
-                            addToSpeech(phraseToAdd);
-                            if (!previewDecision.alreadyAnnounced) {
+                            if (phraseToAdd) {
+                                addToSpeech(phraseToAdd);
+                            }
+                            if (phraseToAnnounce && !previewDecision.alreadyAnnounced) {
                                 await announce(phraseToAnnounce, "system", true);
+                            }
+
+                            // TouchChat-style temporary navigation (navigate, then return after next selection).
+                            if (optionTemporaryNavigation && optionTargetBoardId) {
+                                const returnBoardId = getCurrentBoardIdForTemporaryNavigation();
+                                if (returnBoardId) {
+                                    pushTemporaryReturnBoard(returnBoardId);
+                                }
+
+                                const temporaryTargetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
+                                if (temporaryTargetCategory) {
+                                    await selectCategory(temporaryTargetCategory, null);
+                                    console.log('[TAP DEBUG] Temporary nav executed', {
+                                        fromBoardId: returnBoardId,
+                                        toBoardId: optionTargetBoardId,
+                                        temporaryNavigationPending,
+                                        temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                    });
+                                } else {
+                                    console.warn('Could not resolve temporary navigation target board:', optionTargetBoardId, option);
+                                }
+                                return;
+                            }
+
+                            if (temporaryNavigationPending) {
+                                const temporaryReturnBoardId = popTemporaryReturnBoard();
+                                temporaryNavigationPending = false;
+                                if (temporaryReturnBoardId) {
+                                    const returnCategory = resolveNavigationTargetCategory(temporaryReturnBoardId);
+                                    if (returnCategory) {
+                                        await selectCategory(returnCategory, null);
+                                        console.log('[TAP DEBUG] Temporary return executed', {
+                                            returnBoardId: temporaryReturnBoardId,
+                                            currentBoardIdAfterReturn: getCategoryBoardId(currentCategory),
+                                            temporaryNavigationPending,
+                                            temporaryStackDepth: Array.isArray(temporaryNavigationReturnStack) ? temporaryNavigationReturnStack.length : 0,
+                                        });
+                                    } else {
+                                        console.warn('Could not resolve temporary return board:', temporaryReturnBoardId, option);
+                                    }
+                                    return;
+                                }
+                                clearTemporaryNavigationState('pending return board missing');
                             }
                             
                             // Determine post-selection board behavior.
                             // afterSelection is null for legacy/AI-board options → treat as 'use_ai' (backward compat).
-                            const effectiveAfterSel = afterSelection || 'use_ai';
+                            const effectiveAfterSel = afterSelection || (option.action_type === 'navigate' ? 'navigate' : 'use_ai');
                             if (effectiveAfterSel === 'navigate' && optionTargetBoardId) {
-                                const targetCategoryBtn = tapConfig && tapConfig.buttons && tapConfig.buttons.find(b => b.board_id === optionTargetBoardId || b.id === optionTargetBoardId);
-                                if (targetCategoryBtn) {
+                                clearTemporaryNavigationState('normal navigate selection');
+                                const targetCategory = resolveNavigationTargetCategory(optionTargetBoardId);
+                                if (targetCategory) {
                                     console.log('🎯 Navigating to board:', optionTargetBoardId);
-                                    await selectCategory(targetCategoryBtn, null);
+                                    await selectCategory(targetCategory, null);
+                                } else {
+                                    console.warn('Could not resolve navigate target board:', optionTargetBoardId, option);
                                 }
                             } else if (effectiveAfterSel === 'use_ai') {
                                 console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
@@ -6781,6 +7113,32 @@ VARIETY RULES:
             }
         }
 
+        function addIntelligentPunctuation(text) {
+            // Remove any trailing punctuation first
+            text = text.replace(/[.!?]+$/, '');
+            const lowerText = text.toLowerCase().trim();
+            
+            // Check if it's a question
+            const questionStarters = ['who', 'what', 'where', 'when', 'why', 'how', 'is ', 'are ', 'do ', 'does ', 'did ', 'can ', 'could ', 'will ', 'would ', 'should ', 'have ', 'has ', 'don\'t ', 'doesn\'t ', 'didn\'t ', 'won\'t ', 'wouldn\'t ', 'shouldn\'t '];
+            const startsWithQuestion = questionStarters.some(starter => lowerText.startsWith(starter));
+            
+            // Check for exclamatory words/phrases
+            const exclamatoryWords = ['yes', 'no', 'wow', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic', 'awesome', 'hurray', 'yay', 'thank', 'help', 'watch out', 'look out', 'stop'];
+            const hasExclamatory = exclamatoryWords.some(word => {
+                const pattern = new RegExp(`\\b${word}\\b`, 'i');
+                return pattern.test(lowerText);
+            });
+            
+            // Add appropriate punctuation
+            if (startsWithQuestion) {
+                return text + '?';
+            } else if (hasExclamatory) {
+                return text + '!';
+            } else {
+                return text + '.'; // Default to period
+            }
+        }
+
         async function speakBuildSpace(forceAutoClean = false) {
             let text = buildSpace.value.trim();
             if (text) {
@@ -6791,8 +7149,11 @@ VARIETY RULES:
                     buildSpace.value = text;
                 }
                 
+                // Add intelligent punctuation before announcing
+                const textWithPunctuation = addIntelligentPunctuation(text);
+                
                 // Use backend TTS with raw or cleaned text based on selected speak button
-                await announce(text, "system", true);
+                await announce(textWithPunctuation, "system", true);
             }
         }
 
