@@ -558,6 +558,68 @@ function setupExecuteHandlers() {
   });
 }
 
+/**
+ * Show a dialog for a single child-board cascade conflict.
+ * returns Promise<{ action: 'cancel' | 'use_existing' | 'new', board_name?: string }>
+ */
+function showCascadeChildConflictModal({ sourceBoardName, existingBoardLabel, conflictIndex, conflictTotal }) {
+  const modal = document.getElementById('cascadeChildConflictModal');
+  const sourceNameEl = document.getElementById('cascadeChildSourceName');
+  const existingEl = document.getElementById('cascadeChildExistingLabel');
+  const counterEl = document.getElementById('cascadeChildConflictCounter');
+  const renameWrap = document.getElementById('cascadeChildRenameWrap');
+  const renameInput = document.getElementById('cascadeChildNewNameInput');
+  const cancelBtn = document.getElementById('cascadeChildCancelBtn');
+  const useExistingBtn = document.getElementById('cascadeChildUseExistingBtn');
+  const importAsNewBtn = document.getElementById('cascadeChildImportAsNewBtn');
+  const confirmNewBtn = document.getElementById('cascadeChildConfirmNewBtn');
+
+  sourceNameEl.textContent = String(sourceBoardName || 'Board');
+  existingEl.textContent = String(existingBoardLabel || 'existing board');
+  counterEl.textContent = conflictTotal > 1 ? `${conflictIndex + 1} of ${conflictTotal}` : '';
+  renameWrap.classList.add('hidden');
+  renameInput.value = '';
+  importAsNewBtn.classList.remove('hidden');
+  confirmNewBtn.classList.add('hidden');
+  modal.classList.remove('hidden');
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      modal.classList.add('hidden');
+      cancelBtn.removeEventListener('click', onCancel);
+      useExistingBtn.removeEventListener('click', onUseExisting);
+      importAsNewBtn.removeEventListener('click', onImportAsNew);
+      confirmNewBtn.removeEventListener('click', onConfirmNew);
+    };
+
+    const onCancel = () => { cleanup(); resolve({ action: 'cancel' }); };
+    const onUseExisting = () => { cleanup(); resolve({ action: 'use_existing' }); };
+    const onImportAsNew = () => {
+      renameWrap.classList.remove('hidden');
+      importAsNewBtn.classList.add('hidden');
+      confirmNewBtn.classList.remove('hidden');
+      renameInput.value = sourceBoardName || '';
+      renameInput.focus();
+      renameInput.select();
+    };
+    const onConfirmNew = () => {
+      const newName = String(renameInput.value || '').trim();
+      if (!newName) {
+        setStatus('Enter a new board name to continue.');
+        renameInput.focus();
+        return;
+      }
+      cleanup();
+      resolve({ action: 'new', board_name: newName });
+    };
+
+    cancelBtn.addEventListener('click', onCancel);
+    useExistingBtn.addEventListener('click', onUseExisting);
+    importAsNewBtn.addEventListener('click', onImportAsNew);
+    confirmNewBtn.addEventListener('click', onConfirmNew);
+  });
+}
+
 function showDestinationConflictModal({ requestedName, existingBoardLabel, importFullCascade }) {
   const modal = document.getElementById('destinationConflictModal');
   const requestedEl = document.getElementById('conflictRequestedName');
@@ -747,6 +809,7 @@ async function executeTouchChatImport() {
   let effectiveDestinationBoardName = destinationType === 'new' ? newDestinationName : null;
   let effectiveMergeMode = document.getElementById('mergeMode').value;
   let cascadeRootBoardRename = null;
+  let cascadeChildResolutions = {};
 
   if (effectiveDestinationType === 'new') {
     while (true) {
@@ -809,6 +872,49 @@ async function executeTouchChatImport() {
     }
   }
 
+  // Pre-flight: if full cascade, check for child board name conflicts and prompt admin to resolve each
+  if (importFullCascade) {
+    setStatus('Checking for board conflicts in cascade...');
+    try {
+      const conflictResp = await authenticatedFetch('/api/touchchat-migration/check-cascade-conflicts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: touchchatSessionId, source_board_id: selectedSourceBoardId }),
+      });
+      if (conflictResp.ok) {
+        const conflictData = await conflictResp.json();
+        const conflicts = Array.isArray(conflictData.conflicts) ? conflictData.conflicts : [];
+        for (let i = 0; i < conflicts.length; i++) {
+          const conflict = conflicts[i];
+          const childResolution = await showCascadeChildConflictModal({
+            sourceBoardName: conflict.source_board_name,
+            existingBoardLabel: conflict.existing_board_label,
+            conflictIndex: i,
+            conflictTotal: conflicts.length,
+          });
+          if (!childResolution || childResolution.action === 'cancel') {
+            setStatus('Import cancelled. Resolve board conflicts to continue.');
+            return;
+          }
+          if (childResolution.action === 'use_existing') {
+            cascadeChildResolutions[conflict.source_board_id] = {
+              action: 'use_existing',
+              existing_board_id: conflict.existing_board_id,
+            };
+          } else if (childResolution.action === 'new') {
+            cascadeChildResolutions[conflict.source_board_id] = {
+              action: 'new',
+              board_name: childResolution.board_name,
+            };
+          }
+        }
+      }
+    } catch (conflictErr) {
+      console.warn('Cascade conflict pre-check failed (proceeding without it):', conflictErr);
+    }
+    setStatus('Building import payload...');
+  }
+
   const payload = {
     session_id: touchchatSessionId,
     source_board_id: selectedSourceBoardId,
@@ -820,6 +926,7 @@ async function executeTouchChatImport() {
     navigation_resolutions: buildNavigationResolutionsFromUI(),
     import_full_cascade: importFullCascade,
     cascade_root_board_rename: cascadeRootBoardRename,
+    cascade_child_resolutions: cascadeChildResolutions,
   };
 
   const executeBtn = document.getElementById('executeImportBtn');
