@@ -23363,6 +23363,19 @@ async def import_touchchat_board(
     merge_mode = str(request_data.get("merge_mode") or "update").strip().lower()
     nav_resolutions = request_data.get("navigation_resolutions") or {}
     import_full_cascade = bool(request_data.get("import_full_cascade", False))
+    cascade_root_board_rename = request_data.get("cascade_root_board_rename") if isinstance(request_data.get("cascade_root_board_rename"), dict) else {}
+    cascade_root_old_name = str(cascade_root_board_rename.get("old_name") or "").strip()
+    cascade_root_new_name = str(cascade_root_board_rename.get("new_name") or "").strip()
+
+    def _normalize_touchchat_name_for_compare(value: Any) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    root_rename_enabled = bool(
+        import_full_cascade
+        and cascade_root_old_name
+        and cascade_root_new_name
+        and (_normalize_touchchat_name_for_compare(cascade_root_old_name) != _normalize_touchchat_name_for_compare(cascade_root_new_name))
+    )
 
     if not session_id or not source_board_id:
         raise HTTPException(status_code=400, detail="Missing required parameters")
@@ -23598,6 +23611,15 @@ async def import_touchchat_board(
                     if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
                         temporary_navigation = True
                 speech_text = str(src_btn.get("speech_text") or "").strip() or None
+
+                # If the admin chose a different destination name for the root board during full
+                # cascade import, rewrite matching text on buttons that navigate to that root board.
+                if root_rename_enabled and target_nav_board_id and target_nav_board_id == target_board_id:
+                    if _normalize_touchchat_name_for_compare(label) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                        label = cascade_root_new_name
+                    if speech_text and _normalize_touchchat_name_for_compare(speech_text) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                        speech_text = cascade_root_new_name
+
                 modifier_trigger_id = src_btn.get("modifier_trigger_id")
 
                 raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
@@ -23607,9 +23629,18 @@ async def import_touchchat_board(
                         continue
                     variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
                     variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+                    variant_label = str(raw_variant.get("label") or "").strip()
+                    variant_speech_text = str(raw_variant.get("speech_text") or "").strip() or None
+
+                    if root_rename_enabled and variant_target_board_id and variant_target_board_id == target_board_id:
+                        if _normalize_touchchat_name_for_compare(variant_label) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                            variant_label = cascade_root_new_name
+                        if variant_speech_text and _normalize_touchchat_name_for_compare(variant_speech_text) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                            variant_speech_text = cascade_root_new_name
+
                     converted_modifier_variants[str(modifier_id)] = {
-                        "label": str(raw_variant.get("label") or "").strip(),
-                        "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
+                        "label": variant_label,
+                        "speech_text": variant_speech_text,
                         "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
                         "action_type": "navigate" if variant_target_board_id else "announce",
                         "after_selection": "navigate" if variant_target_board_id else "do_nothing",

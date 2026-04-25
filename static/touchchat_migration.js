@@ -5,6 +5,7 @@ let selectedButtonIndices = new Set();
 let availableDestinationBoards = [];
 let pendingMissingTargets = [];
 let isImportInProgress = false;
+let selectedSourceAacApp = null;
 
 function setStatus(message) {
   const el = document.getElementById('statusBar');
@@ -174,6 +175,7 @@ function escapeHtml(v) {
 document.addEventListener('migrationAuthReady', initializeTouchChatMigration);
 
 function initializeTouchChatMigration() {
+  setupSourceAacSelectionHandlers();
   setupTabButtons();
   setupUploadHandlers();
   setupBoardAndButtonHandlers();
@@ -181,6 +183,32 @@ function initializeTouchChatMigration() {
   setupUnconfiguredBoardsReportHandlers();
   loadAvailableDestinationBoards();
   hideMigrationResultModal();
+}
+
+function setupSourceAacSelectionHandlers() {
+  const continueBtn = document.getElementById('continueSourceAacBtn');
+  const sourceSelect = document.getElementById('sourceAacAppSelect');
+  if (!continueBtn || !sourceSelect) {
+    return;
+  }
+
+  continueBtn.addEventListener('click', () => {
+    const selected = String(sourceSelect.value || '').trim();
+    if (!selected) {
+      setStatus('Select a source AAC application to continue.');
+      return;
+    }
+
+    if (selected !== 'touchchat') {
+      setStatus('That migration source is not available yet. Please select TouchChat for now.');
+      return;
+    }
+
+    selectedSourceAacApp = selected;
+    enableTab('upload');
+    showTab('upload');
+    setStatus('Ready to upload a TouchChat .ce file.');
+  });
 }
 
 function setupUnconfiguredBoardsReportHandlers() {
@@ -226,6 +254,11 @@ function setupUploadHandlers() {
 }
 
 async function handleTouchChatFile(file) {
+  if (selectedSourceAacApp !== 'touchchat') {
+    setStatus('Select TouchChat in the Source step before uploading a file.');
+    return;
+  }
+
   const name = (file.name || '').toLowerCase();
   if (!(name.endsWith('.ce') || name.endsWith('.ce.zip') || name.endsWith('.zip'))) {
     setStatus('Please upload a TouchChat .ce file.');
@@ -525,6 +558,81 @@ function setupExecuteHandlers() {
   });
 }
 
+function showDestinationConflictModal({ requestedName, existingBoardLabel, importFullCascade }) {
+  const modal = document.getElementById('destinationConflictModal');
+  const requestedEl = document.getElementById('conflictRequestedName');
+  const existingEl = document.getElementById('conflictExistingBoardLabel');
+  const cascadeHint = document.getElementById('conflictCascadeHint');
+  const renameWrap = document.getElementById('conflictRenameWrap');
+  const renameInput = document.getElementById('conflictNewNameInput');
+
+  const cancelBtn = document.getElementById('conflictCancelBtn');
+  const useExistingBtn = document.getElementById('conflictUseExistingBtn');
+  const replaceBtn = document.getElementById('conflictReplaceExistingBtn');
+  const useDifferentBtn = document.getElementById('conflictUseDifferentNameBtn');
+  const confirmDifferentBtn = document.getElementById('conflictConfirmDifferentNameBtn');
+
+  requestedEl.textContent = String(requestedName || '');
+  existingEl.textContent = String(existingBoardLabel || existingBoardLabel || 'existing board');
+  cascadeHint.classList.toggle('hidden', !importFullCascade);
+  renameWrap.classList.add('hidden');
+  useDifferentBtn.classList.remove('hidden');
+  confirmDifferentBtn.classList.add('hidden');
+  renameInput.value = '';
+
+  modal.classList.add('show');
+
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      cancelBtn.removeEventListener('click', onCancel);
+      useExistingBtn.removeEventListener('click', onUseExisting);
+      replaceBtn.removeEventListener('click', onReplaceExisting);
+      useDifferentBtn.removeEventListener('click', onUseDifferent);
+      confirmDifferentBtn.removeEventListener('click', onConfirmDifferent);
+      modal.classList.remove('show');
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve({ action: 'cancel' });
+    };
+
+    const onUseExisting = () => {
+      cleanup();
+      resolve({ action: 'use_existing' });
+    };
+
+    const onReplaceExisting = () => {
+      cleanup();
+      resolve({ action: 'replace_existing' });
+    };
+
+    const onUseDifferent = () => {
+      renameWrap.classList.remove('hidden');
+      useDifferentBtn.classList.add('hidden');
+      confirmDifferentBtn.classList.remove('hidden');
+      renameInput.focus();
+    };
+
+    const onConfirmDifferent = () => {
+      const newName = String(renameInput.value || '').trim();
+      if (!newName) {
+        setStatus('Enter a new board name to continue.');
+        renameInput.focus();
+        return;
+      }
+      cleanup();
+      resolve({ action: 'different_name', new_name: newName });
+    };
+
+    cancelBtn.addEventListener('click', onCancel);
+    useExistingBtn.addEventListener('click', onUseExisting);
+    replaceBtn.addEventListener('click', onReplaceExisting);
+    useDifferentBtn.addEventListener('click', onUseDifferent);
+    confirmDifferentBtn.addEventListener('click', onConfirmDifferent);
+  });
+}
+
 function buildNavigationResolutionsFromUI() {
   const resolutions = {};
   pendingMissingTargets.forEach((target) => {
@@ -622,7 +730,7 @@ async function executeTouchChatImport() {
   }
 
   const destinationType = document.querySelector('input[name="destinationType"]:checked').value;
-  const newDestinationName = document.getElementById('newDestinationName').value.trim();
+  let newDestinationName = document.getElementById('newDestinationName').value.trim();
   const existingDestinationBoard = document.getElementById('existingDestinationBoard').value;
 
   if (destinationType === 'new' && !newDestinationName) {
@@ -634,16 +742,84 @@ async function executeTouchChatImport() {
     return;
   }
 
+  let effectiveDestinationType = destinationType;
+  let effectiveDestinationBoardId = destinationType === 'existing' ? existingDestinationBoard : null;
+  let effectiveDestinationBoardName = destinationType === 'new' ? newDestinationName : null;
+  let effectiveMergeMode = document.getElementById('mergeMode').value;
+  let cascadeRootBoardRename = null;
+
+  if (effectiveDestinationType === 'new') {
+    while (true) {
+      const matchedDestination = findExistingDestinationBoardByName(effectiveDestinationBoardName);
+      if (!matchedDestination) {
+        break;
+      }
+
+      const resolution = await showDestinationConflictModal({
+        requestedName: effectiveDestinationBoardName,
+        existingBoardLabel: matchedDestination.label || matchedDestination.id,
+        importFullCascade,
+      });
+
+      if (!resolution || resolution.action === 'cancel') {
+        setStatus('Import cancelled. Resolve destination board naming to continue.');
+        return;
+      }
+
+      if (resolution.action === 'use_existing') {
+        effectiveDestinationType = 'existing';
+        effectiveDestinationBoardId = String(matchedDestination.id);
+        effectiveDestinationBoardName = null;
+        selectExistingDestinationBoard(matchedDestination.id, matchedDestination.label || matchedDestination.id);
+        break;
+      }
+
+      if (resolution.action === 'replace_existing') {
+        effectiveDestinationType = 'existing';
+        effectiveDestinationBoardId = String(matchedDestination.id);
+        effectiveDestinationBoardName = null;
+        effectiveMergeMode = 'replace';
+        selectExistingDestinationBoard(matchedDestination.id, matchedDestination.label || matchedDestination.id);
+        const mergeModeSelect = document.getElementById('mergeMode');
+        if (mergeModeSelect) {
+          mergeModeSelect.value = 'replace';
+        }
+        break;
+      }
+
+      if (resolution.action === 'different_name') {
+        const previousName = String(effectiveDestinationBoardName || '').trim();
+        effectiveDestinationBoardName = String(resolution.new_name || '').trim();
+        const newNameInput = document.getElementById('newDestinationName');
+        if (newNameInput) {
+          newNameInput.value = effectiveDestinationBoardName;
+        }
+        if (!effectiveDestinationBoardName) {
+          setStatus('Enter a valid destination board name.');
+          return;
+        }
+        if (importFullCascade && previousName && effectiveDestinationBoardName && previousName !== effectiveDestinationBoardName) {
+          cascadeRootBoardRename = {
+            old_name: previousName,
+            new_name: effectiveDestinationBoardName,
+          };
+        }
+        continue;
+      }
+    }
+  }
+
   const payload = {
     session_id: touchchatSessionId,
     source_board_id: selectedSourceBoardId,
     selected_button_indices: Array.from(selectedButtonIndices).sort((a, b) => a - b),
-    destination_type: destinationType,
-    destination_board_id: destinationType === 'existing' ? existingDestinationBoard : null,
-    destination_board_name: destinationType === 'new' ? newDestinationName : null,
-    merge_mode: document.getElementById('mergeMode').value,
+    destination_type: effectiveDestinationType,
+    destination_board_id: effectiveDestinationType === 'existing' ? effectiveDestinationBoardId : null,
+    destination_board_name: effectiveDestinationType === 'new' ? effectiveDestinationBoardName : null,
+    merge_mode: effectiveMergeMode,
     navigation_resolutions: buildNavigationResolutionsFromUI(),
     import_full_cascade: importFullCascade,
+    cascade_root_board_rename: cascadeRootBoardRename,
   };
 
   const executeBtn = document.getElementById('executeImportBtn');
@@ -721,6 +897,7 @@ async function resetTouchChatMigration() {
 
   touchchatSessionId = null;
   touchchatData = null;
+  selectedSourceAacApp = null;
   selectedSourceBoardId = null;
   updateExecuteSourceBoardContext();
   selectedButtonIndices.clear();
@@ -733,11 +910,15 @@ async function resetTouchChatMigration() {
   document.getElementById('sourceBoardSelect').innerHTML = '<option value="">-- Select source board --</option>';
   document.getElementById('buttonList').innerHTML = '';
   document.getElementById('selectedButtonCount').textContent = '0';
+  const sourceAacSelect = document.getElementById('sourceAacAppSelect');
+  if (sourceAacSelect) {
+    sourceAacSelect.value = '';
+  }
 
   document.querySelectorAll('.tab-button').forEach((btn) => {
     const tab = btn.getAttribute('data-tab');
-    btn.disabled = !(tab === 'upload');
+    btn.disabled = !(tab === 'source');
   });
-  showTab('upload');
-  setStatus('Ready to upload a TouchChat .ce file.');
+  showTab('source');
+  setStatus('Select a source AAC application to begin migration.');
 }
