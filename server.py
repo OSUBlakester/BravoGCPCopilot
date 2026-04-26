@@ -23363,6 +23363,26 @@ async def import_touchchat_board(
     merge_mode = str(request_data.get("merge_mode") or "update").strip().lower()
     nav_resolutions = request_data.get("navigation_resolutions") or {}
     import_full_cascade = bool(request_data.get("import_full_cascade", False))
+    cascade_root_board_rename = request_data.get("cascade_root_board_rename") if isinstance(request_data.get("cascade_root_board_rename"), dict) else {}
+    cascade_root_old_name = str(cascade_root_board_rename.get("old_name") or "").strip()
+    cascade_root_new_name = str(cascade_root_board_rename.get("new_name") or "").strip()
+    cascade_child_resolutions: Dict[str, Any] = (
+        request_data.get("cascade_child_resolutions")
+        if isinstance(request_data.get("cascade_child_resolutions"), dict)
+        else {}
+    )
+    # format: { source_board_id: { "action": "use_existing", "existing_board_id": "..." }
+    #                            | { "action": "new", "board_name": "..." } }
+
+    def _normalize_touchchat_name_for_compare(value: Any) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    root_rename_enabled = bool(
+        import_full_cascade
+        and cascade_root_old_name
+        and cascade_root_new_name
+        and (_normalize_touchchat_name_for_compare(cascade_root_old_name) != _normalize_touchchat_name_for_compare(cascade_root_new_name))
+    )
 
     if not session_id or not source_board_id:
         raise HTTPException(status_code=400, detail="Missing required parameters")
@@ -23477,6 +23497,51 @@ async def import_touchchat_board(
         }
 
         def ensure_target_board_for_source(src_board: Dict[str, Any]) -> str:
+            src_page_id = str(src_board.get("page_id") or "").strip()
+
+            # Check for an explicit admin resolution first (from pre-flight conflict dialog)
+            if src_page_id and src_page_id in cascade_child_resolutions:
+                res = cascade_child_resolutions[src_page_id]
+                if isinstance(res, dict):
+                    if res.get("action") == "use_existing":
+                        resolved_existing_id = str(res.get("existing_board_id") or "").strip()
+                        if resolved_existing_id and resolved_existing_id in existing_by_id:
+                            return resolved_existing_id
+                    elif res.get("action") == "new":
+                        custom_name = str(res.get("board_name") or "").strip()
+                        if custom_name:
+                            custom_key = _normalize_board_label(custom_name)
+                            existing_for_custom = existing_by_label.get(custom_key)
+                            if existing_for_custom:
+                                return existing_for_custom
+                            # Create under custom name
+                            custom_slug = _sanitize_board_slug(custom_name)
+                            custom_cid = f"board_{custom_slug}"
+                            custom_suffix = 2
+                            while custom_cid in existing_by_id:
+                                custom_cid = f"board_{custom_slug}_{custom_suffix}"
+                                custom_suffix += 1
+                            new_board = _normalize_board_payload(
+                                {
+                                    "label": custom_name,
+                                    "board_type": "static",
+                                    "owner_scope": "user",
+                                    "hidden": False,
+                                    "default_columns": int(src_board.get("layout_cols") or 12),
+                                    "max_rows": max(7, int(src_board.get("layout_rows") or 7)),
+                                    "buttons": [],
+                                    "created_during_migration": True,
+                                },
+                                board_id=custom_cid,
+                                source="custom",
+                                source_button_id=None,
+                            )
+                            boards.append(new_board)
+                            existing_by_id[custom_cid] = new_board
+                            existing_by_label[custom_key] = custom_cid
+                            created_nav_boards.append({"id": custom_cid, "label": custom_name})
+                            return custom_cid
+
             src_name = str(src_board.get("name") or src_board.get("page_id") or "Imported Board").strip() or "Imported Board"
             src_key = _normalize_board_label(src_name)
             existing_id = existing_by_label.get(src_key)
@@ -23598,6 +23663,15 @@ async def import_touchchat_board(
                     if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
                         temporary_navigation = True
                 speech_text = str(src_btn.get("speech_text") or "").strip() or None
+
+                # If the admin chose a different destination name for the root board during full
+                # cascade import, rewrite matching text on buttons that navigate to that root board.
+                if root_rename_enabled and target_nav_board_id and target_nav_board_id == target_board_id:
+                    if _normalize_touchchat_name_for_compare(label) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                        label = cascade_root_new_name
+                    if speech_text and _normalize_touchchat_name_for_compare(speech_text) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                        speech_text = cascade_root_new_name
+
                 modifier_trigger_id = src_btn.get("modifier_trigger_id")
 
                 raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
@@ -23607,9 +23681,18 @@ async def import_touchchat_board(
                         continue
                     variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
                     variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+                    variant_label = str(raw_variant.get("label") or "").strip()
+                    variant_speech_text = str(raw_variant.get("speech_text") or "").strip() or None
+
+                    if root_rename_enabled and variant_target_board_id and variant_target_board_id == target_board_id:
+                        if _normalize_touchchat_name_for_compare(variant_label) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                            variant_label = cascade_root_new_name
+                        if variant_speech_text and _normalize_touchchat_name_for_compare(variant_speech_text) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                            variant_speech_text = cascade_root_new_name
+
                     converted_modifier_variants[str(modifier_id)] = {
-                        "label": str(raw_variant.get("label") or "").strip(),
-                        "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
+                        "label": variant_label,
+                        "speech_text": variant_speech_text,
                         "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
                         "action_type": "navigate" if variant_target_board_id else "announce",
                         "after_selection": "navigate" if variant_target_board_id else "do_nothing",
@@ -23885,6 +23968,107 @@ async def import_touchchat_board(
         "buttons_imported": len(imported_buttons),
         "created_navigation_boards": unconfigured_created_nav_boards,
     })
+
+
+@app.post("/api/touchchat-migration/check-cascade-conflicts")
+async def check_touchchat_cascade_conflicts(
+    request_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    """Pre-flight check: return child boards in the cascade that already exist in the
+    user's Tap config, so the frontend can prompt the admin to resolve each conflict
+    before the actual import is executed."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    session_id = str(request_data.get("session_id") or "").strip()
+    source_board_id = str(request_data.get("source_board_id") or "").strip()
+
+    if not session_id or not source_board_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != account_id or session["aac_user_id"] != aac_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    parsed_data = session.get("parsed_data") or {}
+    boards_from_file = parsed_data.get("boards") if isinstance(parsed_data.get("boards"), dict) else {}
+    source_board = boards_from_file.get(source_board_id)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Source board not found")
+
+    # Build lookups keyed by page_id and page_rid for traversal
+    src_by_page_id: Dict[str, Any] = {
+        str(b.get("page_id") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_id") or "").strip()
+    }
+    src_by_page_rid: Dict[str, Any] = {
+        str(b.get("page_rid") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_rid") or "").strip()
+    }
+
+    # Load the user's existing Tap boards to detect name collisions
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        config_data = create_default_tap_config(account_id, aac_user_id)
+    config_data, _ = normalize_compose_tap_config(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data)
+    tap_boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
+    tap_by_label: Dict[str, Dict[str, Any]] = {
+        _normalize_board_label(b.get("label")): b
+        for b in tap_boards
+        if isinstance(b, dict)
+    }
+
+    # BFS through the cascade; skip the root (already handled by the root conflict dialog)
+    visited: Set[str] = {source_board_id}
+    queue_ids: List[str] = [source_board_id]
+    conflicts: List[Dict[str, Any]] = []
+    seen_conflict_names: Set[str] = set()
+
+    while queue_ids:
+        current_id = queue_ids.pop(0)
+        current_src = src_by_page_id.get(current_id)
+        if not current_src:
+            continue
+        for btn in (current_src.get("buttons") or []):
+            if not isinstance(btn, dict):
+                continue
+            target_rid = str(btn.get("navigation_target_page_rid") or "").strip()
+            if not target_rid:
+                continue
+            linked = src_by_page_rid.get(target_rid)
+            if not linked:
+                continue
+            linked_id = str(linked.get("page_id") or "").strip()
+            if not linked_id or linked_id in visited:
+                continue
+            visited.add(linked_id)
+            queue_ids.append(linked_id)
+
+            # Skip root board — already handled separately
+            if linked_id == source_board_id:
+                continue
+
+            child_name = str(linked.get("name") or linked.get("page_id") or "").strip()
+            child_key = _normalize_board_label(child_name)
+            if not child_name or child_key in seen_conflict_names:
+                continue
+            existing_tap_board = tap_by_label.get(child_key)
+            if existing_tap_board:
+                seen_conflict_names.add(child_key)
+                conflicts.append({
+                    "source_board_id": linked_id,
+                    "source_board_name": child_name,
+                    "existing_board_id": str(existing_tap_board.get("id") or ""),
+                    "existing_board_label": str(existing_tap_board.get("label") or child_name),
+                })
+
+    return JSONResponse(content={"conflicts": conflicts})
 
 
 @app.delete("/api/touchchat-migration/session/{session_id}")

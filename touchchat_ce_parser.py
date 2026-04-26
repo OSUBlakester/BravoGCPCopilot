@@ -37,6 +37,10 @@ def _safe_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _normalize_helper_button_text(value: Any) -> str:
+    return " ".join(_safe_text(value).lower().split())
+
+
 def _normalize_filename(filename: str) -> str:
     base = os.path.basename(filename)
     return base if base else "touchchat_export.ce.zip"
@@ -207,6 +211,17 @@ def _load_named_helper_buttons(conn: sqlite3.Connection) -> set[int]:
         helper_buttons.add(int(resource_id))
 
     return helper_buttons
+
+
+HELPER_BUTTON_TEXT_EXCLUSIONS = {
+    "find a word",
+    "home",
+    "wordpower60_basic ss [one finger swipe down]",
+    ".",
+    "delete wd",
+    "delete word",
+    "delete wprd",
+}
 
 
 def _load_modifier_triggers(conn: sqlite3.Connection) -> Dict[int, int]:
@@ -469,6 +484,11 @@ def parse_touchchat_ce_upload(file_bytes: bytes, filename: str) -> TouchChatExtr
             # Skip TouchChat helper controls already handled elsewhere in Bravo.
             if int(action_resource_id or 0) in special_function_buttons_to_skip or int(action_resource_id or 0) in named_helper_buttons_to_skip:
                 continue
+            if (
+                _normalize_helper_button_text(label) in HELPER_BUTTON_TEXT_EXCLUSIONS
+                or _normalize_helper_button_text(speech_text) in HELPER_BUTTON_TEXT_EXCLUSIONS
+            ):
+                continue
 
             location = int(row["location"])
             parsed_button = {
@@ -515,6 +535,11 @@ def parse_touchchat_ce_upload(file_bytes: bytes, filename: str) -> TouchChatExtr
                 for modifier_id, variant in raw_modifier_variants.items():
                     variant_action_resource_id = int(variant.get("button_resource_id") or 0)
                     if variant_action_resource_id in special_function_buttons_to_skip or variant_action_resource_id in named_helper_buttons_to_skip:
+                        continue
+                    if (
+                        _normalize_helper_button_text(variant.get("label")) in HELPER_BUTTON_TEXT_EXCLUSIONS
+                        or _normalize_helper_button_text(variant.get("speech_text")) in HELPER_BUTTON_TEXT_EXCLUSIONS
+                    ):
                         continue
 
                     variant_target_page_rid = nav_targets_by_resource.get(variant_action_resource_id)

@@ -69,16 +69,37 @@
   <div class="max-w-6xl mx-auto p-4">
     <div class="bg-white border rounded-lg shadow-sm">
       <div class="border-b px-4 pt-2 flex gap-2 overflow-x-auto">
-        <button class="tab-button active" data-tab="upload"><i class="fas fa-upload mr-2"></i>Upload</button>
+        <button class="tab-button active" data-tab="source"><i class="fas fa-route mr-2"></i>Source</button>
+        <button class="tab-button" data-tab="upload" disabled><i class="fas fa-upload mr-2"></i>Upload</button>
         <button class="tab-button" data-tab="boards" disabled><i class="fas fa-table mr-2"></i>Boards</button>
         <button class="tab-button" data-tab="buttons" disabled><i class="fas fa-hand-pointer mr-2"></i>Buttons</button>
         <button class="tab-button" data-tab="execute" disabled><i class="fas fa-play mr-2"></i>Execute</button>
       </div>
 
       <div class="p-4">
-        <div id="statusBar" class="text-sm text-slate-600 mb-4">Ready to upload a TouchChat .ce file.</div>
+        <div id="statusBar" class="text-sm text-slate-600 mb-4">Select a source AAC application to begin migration.</div>
 
-        <section class="tab-content active" data-tab="upload">
+        <section class="tab-content active" data-tab="source">
+          <div class="border rounded-lg p-4 bg-slate-50">
+            <h3 class="text-sm font-semibold text-slate-800 mb-2">Source AAC Application</h3>
+            <p class="text-sm text-slate-600 mb-3">Choose which AAC system you are importing from. This controls file type, parsing rules, and migration flow.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+              <div>
+                <label for="sourceAacAppSelect" class="block text-sm font-medium text-slate-700 mb-1">Application</label>
+                <select id="sourceAacAppSelect" class="w-full border rounded px-3 py-2">
+                  <option value="">-- Select Source AAC Application --</option>
+                  <option value="touchchat">TouchChat (.ce / .ce.zip)</option>
+                  <option value="accent" disabled>Accent (coming soon)</option>
+                </select>
+              </div>
+              <div>
+                <button id="continueSourceAacBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Continue</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-content" data-tab="upload">
           <div id="uploadZone" class="upload-zone">
             <div class="text-2xl text-slate-400 mb-2"><i class="fas fa-file-archive"></i></div>
             <div class="font-semibold text-slate-700">Drop TouchChat .ce file here or click to browse</div>
@@ -195,6 +216,64 @@
           <div class="text-sm font-semibold text-slate-900">Import In Progress</div>
           <div id="importProcessingMessage" class="text-sm text-slate-600 mt-0.5">Please wait while TouchChat boards and buttons are being imported.</div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Child board cascade conflict modal -->
+    <div id="cascadeChildConflictModal" class="result-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cascadeChildConflictTitle">
+    <div class="result-modal-card w-full max-w-xl mx-4 rounded-lg bg-white shadow-xl border border-slate-200">
+      <div class="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <h3 id="cascadeChildConflictTitle" class="text-lg font-semibold text-slate-900">Child Board Already Exists</h3>
+        <span id="cascadeChildConflictCounter" class="text-xs text-slate-500"></span>
+      </div>
+      <div class="result-modal-body px-5 py-4 text-sm text-slate-700 space-y-3">
+        <p>
+          The cascade includes a board named <strong id="cascadeChildSourceName">(name)</strong>,
+          but a board called <strong id="cascadeChildExistingLabel">(existing board)</strong> already exists in this AAC user's boards.
+        </p>
+        <p class="text-xs text-slate-500">
+          Choose whether to link buttons to the <em>existing</em> board or import the source board under a different name.
+        </p>
+        <div id="cascadeChildRenameWrap" class="hidden border rounded p-3 bg-slate-50">
+          <label for="cascadeChildNewNameInput" class="block text-xs font-medium text-slate-700 mb-1">New board name for imported board</label>
+          <input id="cascadeChildNewNameInput" class="w-full border rounded px-3 py-2" placeholder="Enter a different board name">
+        </div>
+      </div>
+      <div class="px-5 py-4 border-t border-slate-200 flex flex-wrap justify-end gap-2">
+        <button id="cascadeChildCancelBtn" class="px-3 py-1.5 bg-slate-200 rounded text-sm hover:bg-slate-300">Cancel Import</button>
+        <button id="cascadeChildUseExistingBtn" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Use Existing Board</button>
+        <button id="cascadeChildImportAsNewBtn" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700">Import from Source As…</button>
+        <button id="cascadeChildConfirmNewBtn" class="px-3 py-1.5 bg-emerald-700 text-white rounded text-sm hover:bg-emerald-800 hidden">Confirm Name</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="destinationConflictModal" class="result-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="destinationConflictTitle">
+    <div class="result-modal-card w-full max-w-xl mx-4 rounded-lg bg-white shadow-xl border border-slate-200">
+      <div class="px-5 py-4 border-b border-slate-200">
+        <h3 id="destinationConflictTitle" class="text-lg font-semibold text-slate-900">Destination Board Name Already Exists</h3>
+      </div>
+      <div class="result-modal-body px-5 py-4 text-sm text-slate-700 space-y-3">
+        <p>
+          A board named <strong id="conflictRequestedName">(name)</strong> already exists as
+          <strong id="conflictExistingBoardLabel">(existing board)</strong>.
+        </p>
+        <p id="conflictCascadeHint" class="text-xs text-amber-700 hidden">
+          Full cascade import is enabled. If you choose a different name, migration will update matching target button text values that reference this board name.
+        </p>
+        <div id="conflictRenameWrap" class="hidden border rounded p-3 bg-slate-50">
+          <label for="conflictNewNameInput" class="block text-xs font-medium text-slate-700 mb-1">New board name</label>
+          <input id="conflictNewNameInput" class="w-full border rounded px-3 py-2" placeholder="Enter a different board name">
+          <div class="mt-2 text-xs text-slate-500">Use this if you want to keep the existing board and create a brand new one with a different name.</div>
+        </div>
+      </div>
+      <div class="px-5 py-4 border-t border-slate-200 flex flex-wrap justify-end gap-2">
+        <button id="conflictCancelBtn" class="px-3 py-1.5 bg-slate-200 rounded text-sm hover:bg-slate-300">Cancel</button>
+        <button id="conflictUseExistingBtn" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Use Existing Board</button>
+        <button id="conflictReplaceExistingBtn" class="px-3 py-1.5 bg-amber-600 text-white rounded text-sm hover:bg-amber-700">Replace Existing Board</button>
+        <button id="conflictUseDifferentNameBtn" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm hover:bg-emerald-700">Use Different Name</button>
+        <button id="conflictConfirmDifferentNameBtn" class="px-3 py-1.5 bg-emerald-700 text-white rounded text-sm hover:bg-emerald-800 hidden">Confirm New Name</button>
       </div>
     </div>
   </div>
