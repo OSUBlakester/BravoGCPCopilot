@@ -581,11 +581,11 @@ function showCascadeChildConflictModal({ sourceBoardName, existingBoardLabel, co
   renameInput.value = '';
   importAsNewBtn.classList.remove('hidden');
   confirmNewBtn.classList.add('hidden');
-  modal.classList.remove('hidden');
+  modal.classList.add('show');
 
   return new Promise((resolve) => {
     const cleanup = () => {
-      modal.classList.add('hidden');
+      modal.classList.remove('show');
       cancelBtn.removeEventListener('click', onCancel);
       useExistingBtn.removeEventListener('click', onUseExisting);
       importAsNewBtn.removeEventListener('click', onImportAsNew);

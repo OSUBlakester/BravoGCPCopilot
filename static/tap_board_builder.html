@@ -699,7 +699,7 @@
         function openTouchChatMigrationModal() {
             const modal = document.getElementById('touchchatMigrationModal');
             const iframe = document.getElementById('touchchatMigrationFrame');
-            iframe.src = 'touchchat_migration.html';
+            iframe.src = 'touchchat_migration.html?v=' + Date.now();
             modal.classList.remove('hidden');
         }
 
