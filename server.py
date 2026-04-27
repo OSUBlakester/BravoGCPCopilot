@@ -15172,7 +15172,7 @@ async def generate_category_words(
         # These categories need specific vocabulary even at emergent level
         category_lower = request.category.lower()
         noun_categories = [
-            'animals', 'pets', 'insects', 'reptiles', 'birds', 'fish', 'wild',
+            'animals', 'pets', 'insects', 'reptiles', 'birds', 'fish', 'wild', 'dinosaur', 'dinosaurs',
             'food', 'drink', 'fruit', 'vegetable', 'snack', 'meal',
             'people', 'family', 'friends', 'person',
             'places', 'location', 'room', 'building',
@@ -15193,6 +15193,8 @@ While maintaining a {vocabulary_level} level approach, prioritize SPECIFIC NOUNS
 - It's better to use a specific noun (e.g., "butterfly", "grasshopper") than a vague description (e.g., "pretty bug", "jumping bug")
 - Images will help users understand specific nouns even if the word is advanced
 - Focus on commonly known items within this category
+- Return members of the category itself, not related objects, body parts, habitats, materials, or concepts
+- Example: for dinosaurs, prefer "T-rex" or "triceratops" instead of "fossil", "dinosaur egg", or "big teeth"
 """
         else:
             # For non-noun categories (adjectives, actions, etc.), use full vocabulary constraints
@@ -15278,6 +15280,16 @@ CRITICAL CONSTRAINT - ADJECTIVES ONLY:
 - Examples of CORRECT responses: "good", "bad", "happy", "soft", "bright", "hot", "large"
 - Examples of INCORRECT responses: "good time", "bad day", "happy person", "soft pillow"
 """
+
+        noun_constraint = ""
+        if is_noun_category:
+            noun_constraint = """
+CRITICAL CONSTRAINT - CATEGORY MEMBERS ONLY:
+- Return specific members of the requested category itself
+- Do NOT include related objects, parts, materials, tracks, habitats, sounds, or accessories
+- Prefer concrete names over descriptive phrases
+- Example for dinosaurs: "T-rex", "triceratops", "stegosaurus" are correct; "fossil", "dinosaur egg", and "sharp teeth" are incorrect
+"""
         
         # Add mood context only if semantically relevant to the category
         mood_context = ""
@@ -15309,6 +15321,7 @@ TASK: Generate words based on the following specific instructions.
 INSTRUCTIONS:
 {request.custom_prompt}
 {adjective_constraint}
+{noun_constraint}
 
 AVAILABLE CONTEXT:
 - User context: {user_context}
@@ -15339,6 +15352,7 @@ You are helping someone communicate by providing words that fit the category '{r
 
 User context: {user_context}
 {adjective_constraint}
+{noun_constraint}
 
 DECISION FRAMEWORK for using personal context:
 - For SEMANTIC categories (adjectives, emotions, actions, descriptions): Use personal context to choose which appropriate words to prioritize, but don't include personal nouns that don't fit the semantic type
@@ -15486,6 +15500,11 @@ def get_generic_category_words(category: str) -> List[str]:
     if any(keyword in category_lower for keyword in ['wild', 'jungle', 'safari', 'zoo']):
         logging.info(f"DEBUG: Matched wild animals category for '{category}'")
         return ["lion", "tiger", "elephant", "giraffe", "zebra", "monkey", "bear", "deer"]
+
+    # Dinosaurs
+    if any(keyword in category_lower for keyword in ['dinosaur', 'dino', 'jurassic', 'prehistoric']):
+        logging.info(f"DEBUG: Matched dinosaurs category for '{category}'")
+        return ["t-rex", "triceratops", "stegosaurus", "raptor", "brontosaurus", "pterodactyl", "ankylosaurus", "brachiosaurus"]
     
     # Exact match fallback for common categories
     generic_words = {
@@ -15494,6 +15513,7 @@ def get_generic_category_words(category: str) -> List[str]:
         "Animals": ["dog", "cat", "bird", "fish", "horse", "rabbit"],
         "Insects": ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper"],
         "Reptiles": ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon"],
+        "Dinosaurs": ["t-rex", "triceratops", "stegosaurus", "raptor", "brontosaurus", "pterodactyl"],
         "Around the House": ["kitchen", "bedroom", "bathroom", "living", "garage", "yard"],
         "In the Room": ["chair", "table", "bed", "lamp", "window", "door"],
         "General things": ["book", "phone", "keys", "bag", "water", "food"],
@@ -21728,6 +21748,25 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                     "speech_text": None,
                     "static_options": None,
                     "label": "Wild Animals",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "button_1769550096759_dinosaurs",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of dinosaurs or phrases that could be used to discuss dinosaurs",
+                    "prompt_category": "dinosaurs",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Dinosaurs",
                     "image_url": None,
                     "prompt_examples": None,
                     "children": [],

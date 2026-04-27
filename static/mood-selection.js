@@ -36,6 +36,7 @@ class MoodSelection {
         this.onComplete = null;
         this.moodOverlay = null;
         this.settings = settings; // Store provided settings
+        this.useTapInterface = false;
         
         // Scanning variables (similar to gridpage.js)
         this.scanningInterval = null;
@@ -229,10 +230,7 @@ class MoodSelection {
             // Use provided settings if available (from constructor)
             if (this.settings) {
                 console.log('Using provided settings for mood selection');
-                this.ScanningOff = this.settings.ScanningOff === true;
-                this.scanMode = this.settings.scanMode === 'step' ? 'step' : 'auto';
-                this.waitForSwitchToScan = this.settings.waitForSwitchToScan === true;
-                this.defaultDelay = this.settings.scanDelay || 3500;
+                this.applyInteractionSettings(this.settings);
                 return this.settings.enableMoodSelection === true;
             }
             
@@ -247,12 +245,7 @@ class MoodSelection {
             
             if (response.ok) {
                 const settings = await response.json();
-                
-                // Load scanning settings
-                this.ScanningOff = settings.ScanningOff === true;
-                this.scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
-                this.waitForSwitchToScan = settings.waitForSwitchToScan === true;
-                this.defaultDelay = settings.scanDelay || 3500;
+                this.applyInteractionSettings(settings);
                 
                 return settings.enableMoodSelection === true;
             }
@@ -260,6 +253,23 @@ class MoodSelection {
             console.error('Failed to check mood selection setting:', error);
         }
         return false; // Default to disabled if we can't check
+    }
+
+    applyInteractionSettings(settings = {}) {
+        this.useTapInterface = settings.useTapInterface === true;
+
+        if (this.useTapInterface) {
+            this.ScanningOff = true;
+            this.scanMode = 'auto';
+            this.waitForSwitchToScan = false;
+            this.defaultDelay = settings.scanDelay || 3500;
+            return;
+        }
+
+        this.ScanningOff = settings.ScanningOff === true;
+        this.scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
+        this.waitForSwitchToScan = settings.waitForSwitchToScan === true;
+        this.defaultDelay = settings.scanDelay || 3500;
     }
 
     /**

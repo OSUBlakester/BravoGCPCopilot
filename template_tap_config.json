@@ -972,6 +972,24 @@
           "special_function": null,
           "hidden": false,
           "children": []
+        },
+        {
+          "id": "button_1769550096759_dinosaurs",
+          "label": "Dinosaurs",
+          "speech_text": null,
+          "image_url": null,
+          "background_color": "#ffffff",
+          "text_color": "#000000",
+          "llm_prompt": "Generate a list of dinosaurs or phrases that could be used to discuss dinosaurs",
+          "prompt_category": "dinosaurs",
+          "prompt_topic": null,
+          "prompt_examples": null,
+          "prompt_exclusions": null,
+          "static_options": null,
+          "custom_audio_file": null,
+          "special_function": null,
+          "hidden": false,
+          "children": []
         }
       ]
     },
