@@ -6,6 +6,7 @@
     <title>Tap Board Builder</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="/static/admin_interface_navigation.js" defer></script>
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #111827; }
         #buttonGrid { display: grid; grid-template-columns: repeat(12, minmax(100px, 1fr)); gap: 8px; width: 100%; border: 1px solid #d1d5db; margin-top: 1rem; margin-bottom: 1rem; background-color: #f9fafb; overflow-x: auto; padding: 8px; }
@@ -31,22 +32,38 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
 
-    <div class="page-banner flex items-center justify-between bg-[#002244] text-[#FB4F14] px-4 py-2 shadow">
+    <div class="page-banner flex flex-wrap items-center justify-between gap-3 bg-[#002244] text-[#FB4F14] px-4 py-2 shadow">
         <div class="flex items-center gap-2">
-            <button onclick="window.location.href='tap_interface.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Return to Tap Interface">
-                <i class="fas fa-house mr-2"></i>Home
-            </button>
-            <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Open Boards Menu Admin">
-                <i class="fas fa-sitemap mr-2"></i>Boards Menu
+            <button onclick="window.navigateToHome ? window.navigateToHome() : window.location.href='tap_interface.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500" title="Home">
+                <i class="fas fa-home"></i>
             </button>
             <h1 class="ml-2 text-xl font-semibold">Board Builder</h1>
         </div>
-        <div class="flex items-center gap-2">
-            <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
-            <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
+        <div class="admin-toolbar flex flex-wrap items-center gap-2">
+            <a href="admin_pages.html" title="Pages &amp; Buttons" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-th-large"></i></a>
+            <a href="admin_settings.html" title="Global Settings" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-cog"></i></a>
+            <a href="user_current_admin.html" title="User Current Location" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-map-marker-alt"></i></a>
+            <a href="user_info_admin.html" title="User Info &amp; Birthdays" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-info-circle"></i></a>
+            <a href="user_diary_admin.html" title="User Diary" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-book-open"></i></a>
+            <a href="audio_admin.html" title="Audio Devices" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-volume-up"></i></a>
+            <a href="favorites_admin.html" title="Event Sources" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-star"></i></a>
+            <a href="admin_audit_report.html" title="Activity Reports" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-clipboard-list"></i></a>
+            <span class="border-l border-white h-6 mx-1"></span>
+            <button id="switch-user-button" title="Switch User Profile" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-users"></i></button>
+            <button id="logout-button" title="Logout" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-sign-out-alt"></i></button>
             <button id="help-icon" title="Help" aria-label="Help" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full ml-2 transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
                 <i class="fas fa-question-circle"></i>
             </button>
+        </div>
+    </div>
+
+    <div class="border-b border-gray-200 bg-white shadow-sm">
+        <div class="max-w-[1700px] mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+            <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Open Boards Menu Admin">
+                <i class="fas fa-sitemap mr-2"></i>Boards Menu
+            </button>
+            <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
+            <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
         </div>
     </div>
 
@@ -282,6 +299,17 @@
             document.getElementById('createNewBoardBtn').addEventListener('click', createNewBoardDraft);
             document.getElementById('openTouchChatMigrationBtn').addEventListener('click', openTouchChatMigrationModal);
             document.getElementById('closeTouchChatMigrationModal').addEventListener('click', closeTouchChatMigrationModal);
+            document.getElementById('switch-user-button').addEventListener('click', () => {
+                window.location.href = 'auth.html';
+            });
+            document.getElementById('logout-button').addEventListener('click', async () => {
+                try {
+                    await firebase.auth().signOut();
+                } catch (error) {
+                    console.error('Logout failed:', error);
+                }
+                window.location.href = 'auth.html';
+            });
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
             document.getElementById('boardType').addEventListener('change', updateBoardModeUI);
@@ -379,6 +407,15 @@
             populateBoardDropdown();
         }
 
+        function getBoardsSortedByLabel(boards) {
+            if (!Array.isArray(boards)) return [];
+            return [...boards].sort((a, b) => {
+                const aLabel = String((a && (a.label || a.id)) || '').trim().toLowerCase();
+                const bLabel = String((b && (b.label || b.id)) || '').trim().toLowerCase();
+                return aLabel.localeCompare(bLabel);
+            });
+        }
+
         function populateBoardDropdown() {
             const select = document.getElementById('selectBoard');
             const currentValue = select.value;
@@ -387,7 +424,7 @@
             const migrationBoards = editableBoards.filter(board => board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0);
             const filterBtn = document.getElementById('showMigrationOnlyBtn');
             filterBtn.classList.toggle('hidden', migrationBoards.length === 0);
-            const boardsToShow = showMigrationBoardsOnly ? migrationBoards : editableBoards;
+            const boardsToShow = getBoardsSortedByLabel(showMigrationBoardsOnly ? migrationBoards : editableBoards);
             boardsToShow.forEach(board => {
                 const option = document.createElement('option');
                 option.value = board.id;
@@ -569,7 +606,8 @@
         function populateTargetBoardDropdown(selectedValue = '') {
             const select = document.getElementById('targetBoard');
             select.innerHTML = '<option value="">No board navigation</option>';
-            allBoards.forEach(board => { const option = document.createElement('option'); option.value = board.id; option.textContent = board.label || board.id; if (board.id === selectedValue) option.selected = true; select.appendChild(option); });
+            const sortedBoards = getBoardsSortedByLabel(allBoards);
+            sortedBoards.forEach(board => { const option = document.createElement('option'); option.value = board.id; option.textContent = board.label || board.id; if (board.id === selectedValue) option.selected = true; select.appendChild(option); });
         }
 
         function openButtonEditor(row, col) {
@@ -718,7 +756,8 @@
         function populateAIBulkTargetBoardDropdown(selectedValue = '') {
             const select = document.getElementById('aiBulkTargetBoard');
             select.innerHTML = '<option value="">-- Select board --</option>';
-            allBoards.forEach(board => {
+            const sortedBoards = getBoardsSortedByLabel(allBoards);
+            sortedBoards.forEach(board => {
                 const option = document.createElement('option');
                 option.value = board.id;
                 option.textContent = board.label || board.id;

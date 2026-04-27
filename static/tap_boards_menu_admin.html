@@ -6,6 +6,7 @@
     <title>Boards Menu Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="/static/admin_interface_navigation.js" defer></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f5; color: #333; }
@@ -58,31 +59,46 @@
         .root-drop-zone.show { opacity: 1; visibility: visible; pointer-events: auto; }
         .root-drop-zone.drag-over { border-color: #3498db; background-color: rgba(52,152,219,0.1); color: #2980b9; }
         .hidden-badge { font-size: 0.7rem; background: #fbbf24; color: #92400e; border-radius: 3px; padding: 1px 5px; margin-left: 6px; }
+        .page-actions { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: white; border-bottom: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); flex-wrap: wrap; }
     </style>
 </head>
 <body>
-    <div class="page-banner flex items-center justify-between bg-[#002244] text-[#FB4F14] px-4 py-2 shadow" style="min-height:56px;">
+    <div class="page-banner flex flex-wrap items-center justify-between gap-3 bg-[#002244] text-[#FB4F14] px-4 py-2 shadow" style="min-height:56px;">
         <div class="flex items-center gap-2">
-            <button onclick="window.location.href='tap_interface.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Return to Tap Interface">
-                <i class="fas fa-house mr-2"></i>Home
-            </button>
-            <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white rounded-full hover:bg-orange-100" title="Back to Board Builder">
-                <i class="fas fa-table-cells-large mr-2"></i>Board Builder
+            <button onclick="window.navigateToHome ? window.navigateToHome() : window.location.href='tap_interface.html'" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500" title="Home">
+                <i class="fas fa-home"></i>
             </button>
             <h1 class="ml-2 text-xl font-semibold">Boards Menu Administration</h1>
         </div>
-        <div class="flex items-center gap-2">
-            <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
-            <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
-                <i class="fas fa-save mr-1"></i>Save
-            </button>
-            <button class="h-10 px-4 flex items-center justify-center text-white bg-gray-500 rounded-full text-sm hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" id="cancelBtn" disabled>
-                <i class="fas fa-times mr-1"></i>Cancel
-            </button>
+        <div class="admin-toolbar flex flex-wrap items-center gap-2">
+            <a href="admin_pages.html" title="Pages &amp; Buttons" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-th-large"></i></a>
+            <a href="admin_settings.html" title="Global Settings" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-cog"></i></a>
+            <a href="user_current_admin.html" title="User Current Location" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-map-marker-alt"></i></a>
+            <a href="user_info_admin.html" title="User Info &amp; Birthdays" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-info-circle"></i></a>
+            <a href="user_diary_admin.html" title="User Diary" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-book-open"></i></a>
+            <a href="audio_admin.html" title="Audio Devices" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-volume-up"></i></a>
+            <a href="favorites_admin.html" title="Event Sources" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-star"></i></a>
+            <a href="admin_audit_report.html" title="Activity Reports" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-clipboard-list"></i></a>
+            <span class="border-l border-white h-6 mx-1"></span>
+            <button id="switch-user-button" title="Switch User Profile" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-users"></i></button>
+            <button id="logout-button" title="Logout" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full transition-colors duration-200 text-base hover:bg-orange-100"><i class="fas fa-sign-out-alt"></i></button>
             <button id="help-icon" title="Help" aria-label="Help" class="h-10 w-10 flex items-center justify-center text-[#FB4F14] bg-white rounded-full ml-2 transition-colors duration-200 text-base hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-500">
                 <i class="fas fa-question-circle"></i>
             </button>
         </div>
+    </div>
+
+    <div class="page-actions">
+        <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full hover:bg-orange-100" title="Back to Board Builder">
+            <i class="fas fa-table-cells-large mr-2"></i>Board Builder
+        </button>
+        <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
+        <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
+            <i class="fas fa-save mr-1"></i>Save
+        </button>
+        <button class="h-10 px-4 flex items-center justify-center text-white bg-gray-500 rounded-full text-sm hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" id="cancelBtn" disabled>
+            <i class="fas fa-times mr-1"></i>Cancel
+        </button>
     </div>
 
     <div class="main-container">
@@ -196,6 +212,17 @@
             document.getElementById('saveBtn').addEventListener('click', saveChanges);
             document.getElementById('cancelBtn').addEventListener('click', cancelChanges);
             document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
+            document.getElementById('switch-user-button').addEventListener('click', () => {
+                window.location.href = 'auth.html';
+            });
+            document.getElementById('logout-button').addEventListener('click', async () => {
+                try {
+                    await firebase.auth().signOut();
+                } catch (error) {
+                    console.error('Logout failed:', error);
+                }
+                window.location.href = 'auth.html';
+            });
             setupColorInputs();
             setupFormListeners();
             setupDragAndDrop();
@@ -402,7 +429,12 @@
         function populateBoardSelect(selectedId) {
             const sel = document.getElementById('boardTarget');
             sel.innerHTML = '<option value="">— None / Category only —</option>';
-            boards.forEach(b => {
+            const sortedBoards = [...boards].sort((a, b) => {
+                const aLabel = String((a && (a.label || a.id)) || '').trim().toLowerCase();
+                const bLabel = String((b && (b.label || b.id)) || '').trim().toLowerCase();
+                return aLabel.localeCompare(bLabel);
+            });
+            sortedBoards.forEach(b => {
                 const opt = document.createElement('option');
                 opt.value = b.id;
                 opt.dataset.boardType = b.board_type || '';
