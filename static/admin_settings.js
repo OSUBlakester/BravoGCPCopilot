@@ -2,6 +2,14 @@
 let isAuthContextReady = false;
 let isDomContentLoaded = false;
 
+function markAdminSaving() {
+    window.adminUnsavedIndicator?.markSaving?.();
+}
+
+function markAdminSaved() {
+    window.adminUnsavedIndicator?.markSaved?.();
+}
+
 // Volume Slider Handler
 function volumeSliderHandler() {
     console.log('Volume slider moved to:', this.value);
@@ -653,6 +661,7 @@ async function saveSettings() {
 
     console.log("Saving settings:", settingsToSave);
     console.log("FULL PAYLOAD:", JSON.stringify(settingsToSave, null, 2));
+    markAdminSaving();
     showTemporaryStatus(settingsStatus, 'Saving...', false, 0)
 
     try {
@@ -737,6 +746,8 @@ async function saveSettings() {
         if (typeof window.updateSightWordSettings === 'function') {
             window.updateSightWordSettings(currentSettings);
         }
+
+        markAdminSaved();
         
         showTemporaryStatus(settingsStatus, 'Settings saved successfully!', false);
 
@@ -931,6 +942,7 @@ async function loadToolbarPIN() {
  */
 async function saveToolbarPIN(newPIN) {
     try {
+        markAdminSaving();
         const response = await window.authenticatedFetch('/api/account/toolbar-pin', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -948,6 +960,7 @@ async function saveToolbarPIN(newPIN) {
         }
         
         console.log("Toolbar PIN saved successfully");
+        markAdminSaved();
         return true;
     } catch (error) {
         console.error('Error saving toolbar PIN:', error);

@@ -12,6 +12,14 @@ let saveStatus = null;
 let recognition; 
 let isDictating = false; 
 
+function markAdminSaving() {
+    window.adminUnsavedIndicator?.markSaving?.();
+}
+
+function markAdminSaved() {
+    window.adminUnsavedIndicator?.markSaved?.();
+}
+
 // --- Initialization Function ---
 async function initializePage() {
     if (isAuthContextReady && isDomContentLoaded) {
@@ -71,6 +79,7 @@ async function SaveDiaryHandler() {
         return;
     }
 
+    markAdminSaving();
     showStatus(saveStatus, "Saving...", false, 0);
     console.log(`Saving entry for date: ${date}`);
 
@@ -85,6 +94,7 @@ async function SaveDiaryHandler() {
             console.log('Diary entry saved successfully.');
             entryInput.value = ''; // Clear entry input after successful save
             // dateInput.value = ''; // Optionally clear date input
+            markAdminSaved();
             showStatus(saveStatus, "Entry saved successfully!", false);
             loadDiaryEntries(); // Reload entries to show the new/updated one and sorting
         } else {
