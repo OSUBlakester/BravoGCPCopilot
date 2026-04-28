@@ -151,10 +151,9 @@ def _load_navigation_targets(
 def _load_special_function_buttons(conn: sqlite3.Connection) -> set[int]:
     """Identify clear/period function buttons to skip during import.
 
-    Any resource that has BOTH action code 28 (clear) and code 60 (display
-    manipulation) but lacks a navigation code (8, 9, 73) is a special-function
-    button (clear, period, backspace variants) that Bravo already provides.
-    This catches all encoding variants: (28,60), (28,60,71), (28,53,60,71), etc.
+    Any non-navigation resource with action code 28 is a clear/display helper
+    button that Bravo already provides. Keeping the nav exclusion prevents
+    accidental removal of mixed-purpose navigation actions.
     """
     skip_buttons: set[int] = set()
 
@@ -163,13 +162,12 @@ def _load_special_function_buttons(conn: sqlite3.Connection) -> set[int]:
         WITH action_codes AS (
             SELECT a.resource_id,
                    SUM(CASE WHEN a.code = 28  THEN 1 ELSE 0 END) AS has_28,
-                   SUM(CASE WHEN a.code = 60  THEN 1 ELSE 0 END) AS has_60,
                    SUM(CASE WHEN a.code IN (8, 9, 73) THEN 1 ELSE 0 END) AS has_nav
             FROM actions a
             GROUP BY a.resource_id
         )
         SELECT resource_id FROM action_codes
-        WHERE has_28 > 0 AND has_60 > 0 AND has_nav = 0
+        WHERE has_28 > 0 AND has_nav = 0
         """
     )
 
@@ -184,6 +182,7 @@ def _load_named_helper_buttons(conn: sqlite3.Connection) -> set[int]:
 
     Covers:
     - Navigation helpers: home, find a word, mode switcher
+    - Clear helpers: clear, clear display
     - Period/punctuation buttons (label ".")
     - Delete-word buttons (various spellings of "delete wd")
     """
@@ -193,6 +192,9 @@ def _load_named_helper_buttons(conn: sqlite3.Connection) -> set[int]:
         "find a word",
         "home",
         "wordpower60_basic ss  [one finger swipe down]",
+        # Clear helpers (Bravo already provides Clear function)
+        "clear",
+        "clear display",
         # Punctuation — Bravo's Speak Display adds punctuation automatically
         ".",
         # Delete-word — Bravo has its own backspace-word action
@@ -217,6 +219,8 @@ HELPER_BUTTON_TEXT_EXCLUSIONS = {
     "find a word",
     "home",
     "wordpower60_basic ss [one finger swipe down]",
+    "clear",
+    "clear display",
     ".",
     "delete wd",
     "delete word",

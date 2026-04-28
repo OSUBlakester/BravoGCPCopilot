@@ -2,6 +2,14 @@
 let isAuthContextReady = false;
 let isDomContentLoaded = false;
 
+function markAdminSaving() {
+    window.adminUnsavedIndicator?.markSaving?.();
+}
+
+function markAdminSaved() {
+    window.adminUnsavedIndicator?.markSaved?.();
+}
+
 
 // DOM Elements - declare with 'let', assign in initializePage
 let locationInput = null;
@@ -282,6 +290,7 @@ async function saveFavorite() {
     }
     
     try {
+        markAdminSaving();
         let response;
         if (editingFavoriteName) {
             // We are editing an existing favorite
@@ -336,6 +345,7 @@ async function saveFavorite() {
         
         const result = await response.json();
         if (result.success) {
+            markAdminSaved();
             showStatus(result.message, false);
             addFavoriteModal.classList.add('hidden');
             await showManageFavoritesModal(); // Refresh the management list if it was open
@@ -503,6 +513,7 @@ async function deleteFavorite(favoriteName) {
     if (!confirm(`Are you sure you want to delete the favorite "${favoriteName}"?`)) return;
     
     try {
+        markAdminSaving();
         const response = await window.authenticatedFetch('/api/user-current-favorites/manage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -514,6 +525,7 @@ async function deleteFavorite(favoriteName) {
         
         const result = await response.json();
         if (result.success) {
+            markAdminSaved();
             showStatus(result.message, false);
             await showManageFavoritesModal(); // Refresh the modal
             await loadFavorites(); // Refresh the dropdown
@@ -657,6 +669,7 @@ async function saveCurrentUserState() {
         const topicSummary = topicSummaryInput.value;
 
         console.log('Data sent to backend:', { location, people, activity, topicTitle, focusChapters, topicSummary }); // Add this line
+        markAdminSaving();
         showStatus("Saving...", false, 0);
 
         try {
@@ -669,6 +682,7 @@ async function saveCurrentUserState() {
 
             if (response.ok) {
                 console.log('User current updated successfully.');
+                markAdminSaved();
                 showStatus("Current state saved successfully!", false);
             } else {
                 console.error('Failed to update user current:', response.statusText);

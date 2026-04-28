@@ -13,6 +13,18 @@ let currentEditingButton = null; // {row, col} of button being edited
 let draggedButton = null;
 let currentScrapingConfig = null;
 
+function markAdminDirty() {
+    window.adminUnsavedIndicator?.markDirty?.();
+}
+
+function markAdminSaving() {
+    window.adminUnsavedIndicator?.markSaving?.();
+}
+
+function markAdminSaved() {
+    window.adminUnsavedIndicator?.markSaved?.();
+}
+
 // Constants
 const GRID_ROWS = 10;
 const GRID_COLS = 10;
@@ -140,6 +152,7 @@ async function loadFavorites() {
 
 async function saveFavorites() {
     try {
+        markAdminSaving();
         showStatus('Saving favorites...', false);
         const response = await window.authenticatedFetch('/api/favorites', {
             method: 'POST',
@@ -150,7 +163,8 @@ async function saveFavorites() {
         if (!response.ok) {
             throw new Error(`HTTP error ${response.status}`);
         }
-        
+
+        markAdminSaved();
         showStatus('Favorites saved successfully!', false);
         setTimeout(() => showStatus('', false), 3000);
     } catch (error) {
@@ -302,6 +316,8 @@ function deleteButton() {
         favoritesData.buttons = favoritesData.buttons.filter(btn => 
             !(btn.row === currentEditingButton.row && btn.col === currentEditingButton.col)
         );
+
+        markAdminDirty();
         
         closeButtonEditor();
         renderGrid();
@@ -312,6 +328,7 @@ function deleteButton() {
 function clearAllTopics() {
     if (confirm('Are you sure you want to delete ALL topics? This cannot be undone.')) {
         favoritesData.buttons = [];
+        markAdminDirty();
         renderGrid();
         showStatus('All topics cleared', false);
     }
@@ -368,6 +385,8 @@ function handleDrop(e, targetRow, targetCol) {
         
         // Add source button back
         favoritesData.buttons.push(sourceButton);
+
+        markAdminDirty();
         
         renderGrid();
         showStatus('Topic moved', false);
@@ -458,6 +477,8 @@ function saveButtonChanges(e) {
             favoritesData.buttons[index] = buttonData;
         }
     }
+
+    markAdminDirty();
     
     closeButtonEditor();
     renderGrid();
@@ -511,6 +532,7 @@ function saveScrapingConfiguration() {
     }
     
     currentScrapingConfig = config;
+    markAdminDirty();
     updateScrapingConfigStatus();
     closeScrapingWizard();
     showStatus('Scraping configuration saved', false);

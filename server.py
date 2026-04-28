@@ -15177,6 +15177,7 @@ async def generate_category_words(
             'people', 'family', 'friends', 'person',
             'places', 'location', 'room', 'building',
             'things', 'objects', 'items', 'toys', 'games', 'tools', 'vehicles',
+            'science', 'space', 'planet', 'planets', 'imaginary', 'fantasy', 'mythical',
             'body parts', 'clothes', 'technology', 'furniture', 'school', 'work',
             'outside', 'nature', 'sports', 'hobbies', 'hardware', 'transportation',
             'money', 'shopping', 'entertainment', 'movies', 'tv', 'music', 'books'
@@ -15505,6 +15506,16 @@ def get_generic_category_words(category: str) -> List[str]:
     if any(keyword in category_lower for keyword in ['dinosaur', 'dino', 'jurassic', 'prehistoric']):
         logging.info(f"DEBUG: Matched dinosaurs category for '{category}'")
         return ["t-rex", "triceratops", "stegosaurus", "raptor", "brontosaurus", "pterodactyl", "ankylosaurus", "brachiosaurus"]
+
+    # Science / space
+    if any(keyword in category_lower for keyword in ['science', 'space', 'planet', 'astronomy', 'solar']):
+        logging.info(f"DEBUG: Matched science/space category for '{category}'")
+        return ["planet", "space", "earth", "moon", "sun", "star", "rocket", "astronaut"]
+
+    # Imaginary / fantasy
+    if any(keyword in category_lower for keyword in ['imaginary', 'fantasy', 'myth', 'mythical', 'magic']):
+        logging.info(f"DEBUG: Matched imaginary/fantasy category for '{category}'")
+        return ["dragon", "unicorn", "wizard", "fairy", "mermaid", "castle", "magic wand", "phoenix"]
     
     # Exact match fallback for common categories
     generic_words = {
@@ -15514,6 +15525,8 @@ def get_generic_category_words(category: str) -> List[str]:
         "Insects": ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper"],
         "Reptiles": ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon"],
         "Dinosaurs": ["t-rex", "triceratops", "stegosaurus", "raptor", "brontosaurus", "pterodactyl"],
+        "Science": ["planet", "space", "earth", "moon", "star", "rocket"],
+        "Imaginary": ["dragon", "unicorn", "wizard", "fairy", "mermaid", "castle"],
         "Around the House": ["kitchen", "bedroom", "bathroom", "living", "garage", "yard"],
         "In the Room": ["chair", "table", "bed", "lamp", "window", "door"],
         "General things": ["book", "phone", "keys", "bag", "water", "food"],
@@ -20915,7 +20928,7 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                     "hidden": False,
                     "background_color": "#ffffff",
                     "prompt_topic": None
-                }
+                },
             ],
             "prompt_topic": None,
             "background_color": "#FFFFFF"
@@ -21271,6 +21284,44 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                     "speech_text": None,
                     "static_options": None,
                     "label": "General things",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "button_1769550096760_science",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of nouns related to science, including planets, space, and astronomy concepts",
+                    "prompt_category": "science",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Science",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "button_1769550096761_imaginary",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of nouns for imaginary and fantasy things, including mythical creatures and magical objects",
+                    "prompt_category": "imaginary",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Imaginary",
                     "image_url": None,
                     "prompt_examples": None,
                     "children": [],

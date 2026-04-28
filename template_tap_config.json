@@ -521,6 +521,42 @@
           "special_function": null,
           "hidden": false,
           "children": []
+        },
+        {
+          "id": "button_1769550096760_science",
+          "label": "Science",
+          "speech_text": null,
+          "image_url": null,
+          "background_color": "#ffffff",
+          "text_color": "#000000",
+          "llm_prompt": "Generate a list of nouns related to science, including planets, space, and astronomy concepts",
+          "prompt_category": "science",
+          "prompt_topic": null,
+          "prompt_examples": null,
+          "prompt_exclusions": null,
+          "static_options": null,
+          "custom_audio_file": null,
+          "special_function": null,
+          "hidden": false,
+          "children": []
+        },
+        {
+          "id": "button_1769550096761_imaginary",
+          "label": "Imaginary",
+          "speech_text": null,
+          "image_url": null,
+          "background_color": "#ffffff",
+          "text_color": "#000000",
+          "llm_prompt": "Generate a list of nouns for imaginary and fantasy things, including mythical creatures and magical objects",
+          "prompt_category": "imaginary",
+          "prompt_topic": null,
+          "prompt_examples": null,
+          "prompt_exclusions": null,
+          "static_options": null,
+          "custom_audio_file": null,
+          "special_function": null,
+          "hidden": false,
+          "children": []
         }
       ]
     },

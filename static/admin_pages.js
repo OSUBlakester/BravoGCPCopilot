@@ -28,6 +28,18 @@ let initialPageDataString = '';
 let currentEditingButton = null; // {row, col} of button being edited
 let draggedButton = null;
 
+function markAdminDirty() {
+    window.adminUnsavedIndicator?.markDirty?.();
+}
+
+function markAdminSaving() {
+    window.adminUnsavedIndicator?.markSaving?.();
+}
+
+function markAdminSaved() {
+    window.adminUnsavedIndicator?.markSaved?.();
+}
+
 // --- Special Predefined Pages ---
 const SPECIAL_PAGES = [
     { name: 'freestyle', displayName: 'Freestyle Page' },
@@ -496,6 +508,8 @@ function swapButtons(fromRow, fromCol, toRow, toCol) {
         toButton.col = fromCol;
         currentPageData.buttons.push(toButton);
     }
+
+    markAdminDirty();
 }
 
 // --- Button Editor Functions ---
@@ -578,6 +592,8 @@ function saveButtonEdit() {
     if (buttonData.text || buttonData.LLMQuery || buttonData.targetPage) {
         currentPageData.buttons.push(buttonData);
     }
+
+    markAdminDirty();
     
     // Re-render grid and close modal
     renderButtonGrid();
@@ -593,6 +609,8 @@ function clearCurrentButton() {
             !(btn.row === currentEditingButton.row && btn.col === currentEditingButton.col)
         );
     }
+
+    markAdminDirty();
     
     // Re-render and close
     renderButtonGrid();
@@ -676,6 +694,7 @@ function clearAllButtons() {
     if (confirm('Are you sure you want to clear all buttons on this page? This action cannot be undone.')) {
         if (currentPageData) {
             currentPageData.buttons = [];
+            markAdminDirty();
             renderButtonGrid();
         }
     }
@@ -1132,6 +1151,7 @@ async function createNewPage() {
     console.log('Creating new page:', pageData);
 
     try {
+        markAdminSaving();
         const response = await window.authenticatedFetch('/pages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1150,6 +1170,7 @@ async function createNewPage() {
         // Select the newly created page
         selectPage.value = pageName;
         await handlePageSelected();
+        markAdminSaved();
         
         alert(`Page "${trimmedDisplayName}" created successfully!`);
 
@@ -1187,6 +1208,7 @@ async function updatePage() {
     console.log('Updating page data:', pageData);
 
     try {
+        markAdminSaving();
         const response = await window.authenticatedFetch('/pages', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -1204,6 +1226,7 @@ async function updatePage() {
         // Maintain selection of the updated page
         selectPage.value = selectedPageName;
         await handlePageSelected();
+        markAdminSaved();
         
         alert('Page updated successfully!');
 
@@ -1231,6 +1254,7 @@ async function deletePage() {
     }
 
     try {
+        markAdminSaving();
         const response = await window.authenticatedFetch(`/pages/${pageName}`, {
             method: 'DELETE'
         });
@@ -1238,6 +1262,7 @@ async function deletePage() {
         if (!response.ok) throw new Error(`Failed to delete page: ${response.statusText}`);
 
         await loadPages();
+    markAdminSaved();
         alert('Page deleted successfully!');
 
     } catch (error) {
@@ -1250,6 +1275,7 @@ function revertPage() {
     if (initialPageDataString) {
         currentPageData = JSON.parse(initialPageDataString);
         renderButtonGrid();
+        markAdminSaved();
         alert('Changes reverted.');
     }
 }
