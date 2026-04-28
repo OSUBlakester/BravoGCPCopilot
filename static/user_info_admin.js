@@ -60,6 +60,12 @@ let currentProfileImageData = null;
 let initialDataLoaded = false;
 let currentAiOptionOverrides = null;
 
+const UNSAVED_SCOPE_USER_PROFILE = 'user-profile';
+const UNSAVED_SCOPE_FRIENDS_FAMILY = 'friends-family';
+const UNSAVED_SCOPE_MOOD = 'mood';
+const UNSAVED_SCOPE_AI_OVERRIDES = 'ai-overrides';
+const UNSAVED_SCOPE_CUSTOM_IMAGES = 'custom-images';
+
 function getDefaultAiOptionOverrides() {
     return {
         exclusions: {
@@ -166,6 +172,30 @@ async function initializePage() {
         cancelAiOverridesBtn = document.getElementById('cancelAiOverridesBtn');
         saveAiOverridesBtn = document.getElementById('saveAiOverridesBtn');
         aiOverridesSaveStatus = document.getElementById('ai-overrides-save-status');
+
+        // Scope unsaved detection/highlighting so each Save button only reflects relevant edits.
+        if (userInfoTextarea) userInfoTextarea.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_USER_PROFILE);
+        if (userBirthdateInput) userBirthdateInput.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_USER_PROFILE);
+        if (userName) userName.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_USER_PROFILE);
+        if (saveInfoButton) saveInfoButton.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_USER_PROFILE);
+
+        const friendsFamilyTable = document.getElementById('friendsFamilyTable');
+        if (friendsFamilyTable) friendsFamilyTable.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_FRIENDS_FAMILY);
+        if (addFriendsFamilyRowButton) addFriendsFamilyRowButton.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_FRIENDS_FAMILY);
+        if (saveFriendsFamilyButton) saveFriendsFamilyButton.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_FRIENDS_FAMILY);
+
+        if (currentMoodSelect) currentMoodSelect.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_MOOD);
+        if (saveMoodBtn) saveMoodBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_MOOD);
+        if (clearMoodBtn) clearMoodBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_MOOD);
+
+        if (aiOverridesModal) aiOverridesModal.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_AI_OVERRIDES);
+        if (openAiOverridesModalBtn) openAiOverridesModalBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_AI_OVERRIDES);
+        if (saveAiOverridesBtn) saveAiOverridesBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_AI_OVERRIDES);
+
+        if (customImageModal) customImageModal.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_CUSTOM_IMAGES);
+        if (customImagePrimaryTag) customImagePrimaryTag.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_CUSTOM_IMAGES);
+        if (modalPrimaryTag) modalPrimaryTag.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_CUSTOM_IMAGES);
+        if (saveCustomImageBtn) saveCustomImageBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_CUSTOM_IMAGES);
 
         // Event Listeners - Thread Groups functionality removed
 
