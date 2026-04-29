@@ -273,7 +273,43 @@ function setupEventListeners() {
             }
         }
     });
+
+    setupAdminToolbarButtons();
     
+
+function setupAdminToolbarButtons() {
+    const switchUserButton = document.getElementById('switch-user-button');
+    const logoutButton = document.getElementById('logout-button');
+
+    function handleSwitchUser() {
+        console.log('Switching user profile. Clearing session and redirecting to auth page for profile selection.');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        sessionStorage.clear();
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    function handleLogout() {
+        console.log('Logging out. Clearing session and redirecting to auth page for login.');
+        localStorage.setItem('bravoIntentionalLogout', 'true');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        sessionStorage.clear();
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    if (switchUserButton) {
+        switchUserButton.addEventListener('click', handleSwitchUser);
+        console.log('admin_pages.js: Switch User button event listener added');
+    }
+
+    if (logoutButton) {
+        logoutButton.addEventListener('click', handleLogout);
+        console.log('admin_pages.js: Logout button event listener added');
+    }
+}
     // ...existing code...
 }
 
