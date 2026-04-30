@@ -28,12 +28,15 @@ let initialPageDataString = '';
 let currentEditingButton = null; // {row, col} of button being edited
 let draggedButton = null;
 
-function markAdminDirty() {
-    window.adminUnsavedIndicator?.markDirty?.();
+const UNSAVED_SCOPE_PAGE_SETTINGS = 'page-settings';
+const UNSAVED_SCOPE_BUTTON_GRID = 'button-grid';
+
+function markAdminDirty(scope) {
+    window.adminUnsavedIndicator?.markDirty?.(scope);
 }
 
-function markAdminSaving() {
-    window.adminUnsavedIndicator?.markSaving?.();
+function markAdminSaving(scope) {
+    window.adminUnsavedIndicator?.markSaving?.(scope);
 }
 
 function markAdminSaved() {
@@ -112,6 +115,22 @@ function assignDOMElements() {
     helpWizardModal = document.getElementById('helpWizardModal');
     imagePickerModal = document.getElementById('imagePickerModal');
 
+    if (pageForm) {
+        pageForm.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_PAGE_SETTINGS);
+    }
+    if (buttonGrid) {
+        buttonGrid.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_BUTTON_GRID);
+    }
+    if (buttonEditorModal) {
+        buttonEditorModal.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_BUTTON_GRID);
+    }
+    if (updatePageBtn) {
+        updatePageBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_PAGE_SETTINGS);
+    }
+    if (saveButtonsBtn) {
+        saveButtonsBtn.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_BUTTON_GRID);
+    }
+
 }
 
 function validateDOMElements() {
@@ -128,12 +147,12 @@ function setupEventListeners() {
     // Page management
     selectPage.addEventListener('change', handlePageSelected);
     createNewPageBtn.addEventListener('click', createNewPage);
-    updatePageBtn.addEventListener('click', updatePage);
+    updatePageBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_PAGE_SETTINGS));
     deletePageButton.addEventListener('click', deletePage);
     revertPageBtn.addEventListener('click', revertPage);
     
     // Button grid controls
-    saveButtonsBtn.addEventListener('click', updatePage);
+    saveButtonsBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_BUTTON_GRID));
     helpWizardBtn.addEventListener('click', startComprehensiveGuide);
     
     // Button Editor Modal
@@ -254,7 +273,43 @@ function setupEventListeners() {
             }
         }
     });
+
+    setupAdminToolbarButtons();
     
+
+function setupAdminToolbarButtons() {
+    const switchUserButton = document.getElementById('switch-user-button');
+    const logoutButton = document.getElementById('logout-button');
+
+    function handleSwitchUser() {
+        console.log('Switching user profile. Clearing session and redirecting to auth page for profile selection.');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        sessionStorage.clear();
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    function handleLogout() {
+        console.log('Logging out. Clearing session and redirecting to auth page for login.');
+        localStorage.setItem('bravoIntentionalLogout', 'true');
+        localStorage.setItem('bravoSkipDefaultUser', 'true');
+        sessionStorage.clear();
+        setTimeout(() => {
+            window.location.href = 'auth.html';
+        }, 100);
+    }
+
+    if (switchUserButton) {
+        switchUserButton.addEventListener('click', handleSwitchUser);
+        console.log('admin_pages.js: Switch User button event listener added');
+    }
+
+    if (logoutButton) {
+        logoutButton.addEventListener('click', handleLogout);
+        console.log('admin_pages.js: Logout button event listener added');
+    }
+}
     // ...existing code...
 }
 
@@ -509,7 +564,7 @@ function swapButtons(fromRow, fromCol, toRow, toCol) {
         currentPageData.buttons.push(toButton);
     }
 
-    markAdminDirty();
+    markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
 }
 
 // --- Button Editor Functions ---
@@ -593,7 +648,7 @@ function saveButtonEdit() {
         currentPageData.buttons.push(buttonData);
     }
 
-    markAdminDirty();
+    markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
     
     // Re-render grid and close modal
     renderButtonGrid();
@@ -610,7 +665,7 @@ function clearCurrentButton() {
         );
     }
 
-    markAdminDirty();
+    markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
     
     // Re-render and close
     renderButtonGrid();
@@ -694,7 +749,7 @@ function clearAllButtons() {
     if (confirm('Are you sure you want to clear all buttons on this page? This action cannot be undone.')) {
         if (currentPageData) {
             currentPageData.buttons = [];
-            markAdminDirty();
+            markAdminDirty(UNSAVED_SCOPE_BUTTON_GRID);
             renderButtonGrid();
         }
     }
@@ -1151,7 +1206,7 @@ async function createNewPage() {
     console.log('Creating new page:', pageData);
 
     try {
-        markAdminSaving();
+        markAdminSaving(UNSAVED_SCOPE_PAGE_SETTINGS);
         const response = await window.authenticatedFetch('/pages', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1180,7 +1235,7 @@ async function createNewPage() {
     }
 }
 
-async function updatePage() {
+async function updatePage(scope = UNSAVED_SCOPE_PAGE_SETTINGS) {
     // Get the currently selected page
     const selectedPageName = selectPage.value;
     if (!selectedPageName) {
@@ -1208,7 +1263,7 @@ async function updatePage() {
     console.log('Updating page data:', pageData);
 
     try {
-        markAdminSaving();
+        markAdminSaving(scope);
         const response = await window.authenticatedFetch('/pages', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -1254,7 +1309,7 @@ async function deletePage() {
     }
 
     try {
-        markAdminSaving();
+        markAdminSaving(UNSAVED_SCOPE_PAGE_SETTINGS);
         const response = await window.authenticatedFetch(`/pages/${pageName}`, {
             method: 'DELETE'
         });

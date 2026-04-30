@@ -5,6 +5,7 @@
     let isSaving = false;
     let lastSaveIntentTs = 0;
     let cachedSaveActionElements = [];
+    let activeUnsavedScope = null;
 
     function buildAuthHeaders() {
         const headers = {};
@@ -215,15 +216,19 @@
         updateSaveActionHighlights();
     }
 
-    function markDirty() {
+    function markDirty(scope) {
         isUnsaved = true;
         isSaving = false;
+        activeUnsavedScope = typeof scope === 'string' && scope.trim() ? scope.trim() : null;
         renderIndicator();
     }
 
-    function markSaving() {
+    function markSaving(scope) {
         if (!isUnsaved) {
             return;
+        }
+        if (typeof scope === 'string' && scope.trim()) {
+            activeUnsavedScope = scope.trim();
         }
         isSaving = true;
         renderIndicator();
@@ -232,7 +237,20 @@
     function markSaved() {
         isUnsaved = false;
         isSaving = false;
+        activeUnsavedScope = null;
         renderIndicator();
+    }
+
+    function inferUnsavedScopeFromElement(element) {
+        if (!element || typeof element.closest !== 'function') {
+            return null;
+        }
+        const scopeHost = element.closest('[data-unsaved-scope]');
+        if (!scopeHost) {
+            return null;
+        }
+        const scope = String(scopeHost.getAttribute('data-unsaved-scope') || '').trim();
+        return scope || null;
     }
 
     function isSaveActionElement(element) {
@@ -269,6 +287,11 @@
         cachedSaveActionElements = getSaveActionElements();
         cachedSaveActionElements.forEach(function (element) {
             element.classList.remove('admin-save-dirty', 'admin-save-saving');
+            const elementScope = String(element.getAttribute('data-unsaved-scope') || '').trim() || null;
+            const scopeMatches = !activeUnsavedScope || !elementScope || elementScope === activeUnsavedScope;
+            if (!scopeMatches) {
+                return;
+            }
             if (isSaving) {
                 element.classList.add('admin-save-saving');
             } else if (isUnsaved) {
@@ -299,13 +322,13 @@
 
         document.addEventListener('input', function (event) {
             if (event.isTrusted) {
-                markDirty();
+                markDirty(inferUnsavedScopeFromElement(event.target));
             }
         }, true);
 
         document.addEventListener('change', function (event) {
             if (event.isTrusted) {
-                markDirty();
+                markDirty(inferUnsavedScopeFromElement(event.target));
             }
         }, true);
 
@@ -316,7 +339,7 @@
 
             if (isSaveActionElement(event.target)) {
                 lastSaveIntentTs = Date.now();
-                markSaving();
+                markSaving(inferUnsavedScopeFromElement(event.target));
             }
         }, true);
 
