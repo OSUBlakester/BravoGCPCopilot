@@ -164,6 +164,8 @@ mood_update_timestamps = {}  # Format: {account_id/aac_user_id: timestamp}
 # This smooths interactive UX when users trigger the same button/prompt repeatedly.
 LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS = 180
 llm_quick_response_cache: Dict[str, Dict[str, Any]] = {}
+llm_inflight_requests: Dict[str, asyncio.Future] = {}
+llm_inflight_requests_lock = asyncio.Lock()
 
 # Short-lived in-memory cache for repeated category-words requests.
 CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS = 180
@@ -1569,10 +1571,10 @@ SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embedding
 
 # LLM Model Configuration - Environment Variables
 # Gemini Models
-GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-2.0-flash")
+GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-2.5-flash-lite")
 GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-1.5-flash-latest")
-# Fast lightweight model for low-latency word list generation (category-words endpoint)
-GEMINI_FAST_WORDS_MODEL = os.environ.get("GEMINI_FAST_WORDS_MODEL", "gemini-2.0-flash-lite")
+# Fast lightweight model for low-latency word list generation (category-words endpoint).
+GEMINI_FAST_WORDS_MODEL = os.environ.get("GEMINI_FAST_WORDS_MODEL", "gemini-2.5-flash-lite")
 
 # ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
 # GPT-4o/4o-mini use: max_tokens, adjustable temperature
@@ -3246,7 +3248,7 @@ Undated Diary Entries (use cautiously, max 5):
             # Gemini cached content rejects requests below 2048 total tokens in production.
             # Use a rough 4 chars/token estimate and skip cache creation when we are clearly under.
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 1024  # gemini-2.0-flash supports caching at 1024+ tokens
+            min_tokens_required = 2048
             
             logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
@@ -3552,7 +3554,14 @@ else:
             fallback_llm_model_instance = None
 
         try:
-            fast_words_llm_model_instance = genai.GenerativeModel(GEMINI_FAST_WORDS_MODEL)
+            fast_words_model_name = GEMINI_FAST_WORDS_MODEL
+            if "2.0-flash-lite" in fast_words_model_name:
+                logging.warning(
+                    f"Configured fast words model '{fast_words_model_name}' is deprecated for many accounts; "
+                    f"using primary model '{GEMINI_PRIMARY_MODEL}' instead."
+                )
+                fast_words_model_name = GEMINI_PRIMARY_MODEL
+            fast_words_llm_model_instance = genai.GenerativeModel(fast_words_model_name)
             logging.info(f"Fast words Gemini model '{fast_words_llm_model_instance.model_name}' initialized.")
         except Exception as e_fast:
             logging.error(f"Error initializing fast words model '{GEMINI_FAST_WORDS_MODEL}': {e_fast}", exc_info=True)
@@ -4765,6 +4774,10 @@ class LLMRequest(BaseModel):
     count: Optional[int] = None          # Override max options returned (e.g., for bulk board builder)
     compose_mode: bool = False          # True when the user is in an active compose session
     compose_body: str = ""               # Current composition text (sent for context when compose_mode is True)
+    request_id: Optional[str] = None     # Client-provided request correlation id for log tracing
+    button_text: Optional[str] = None    # Source button label from UI when available
+    page_name: Optional[str] = None      # Source page name from UI when available
+    click_timestamp: Optional[str] = None  # UI click timestamp for correlation
 
 # --- Vocabulary Level Helper Function ---
 def get_vocabulary_level_instruction(level: str) -> str:
@@ -4825,10 +4838,34 @@ async def get_llm_response_endpoint(
 ):
     global cache_manager
     global llm_quick_response_cache
+    global llm_inflight_requests
+    global llm_inflight_requests_lock
+    global fast_words_llm_model_instance
+    global primary_llm_model_instance
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     user_prompt_content = request_data.prompt
     request_start_time = time.perf_counter()
+
+    def _infer_button_label_from_prompt(prompt: str) -> Optional[str]:
+        prompt_lower = (prompt or "").lower()
+        explicit_prefixes = ["what", "who", "where", "when", "why", "how"]
+        for prefix in explicit_prefixes:
+            if f"begin with {prefix}" in prompt_lower:
+                return prefix.capitalize()
+        return None
+
+    request_correlation_id = (request_data.request_id or str(uuid.uuid4()))[:64]
+    button_label = (
+        (request_data.button_text or "").strip()
+        or _infer_button_label_from_prompt(user_prompt_content)
+        or "unknown"
+    )[:40]
+    page_label = ((request_data.page_name or "").strip() or "unknown")[:40]
+    log_context = (
+        f"request_id={request_correlation_id} button={button_label} "
+        f"page={page_label} account={account_id}/{aac_user_id}"
+    )
 
     # Get user's settings to determine LLM provider and options
     user_settings = await load_settings_from_file(account_id, aac_user_id)
@@ -4839,12 +4876,12 @@ async def get_llm_response_endpoint(
         default_data=DEFAULT_USER_INFO.copy()
     )
     ai_option_overrides = normalize_ai_option_overrides(user_info_doc.get("aiOptionOverrides", {}))
-    logging.info(f"Loaded AI option overrides for /llm {account_id}/{aac_user_id}: {ai_option_overrides}")
+    logging.info(f"Loaded AI option overrides for /llm [{log_context}]: {ai_option_overrides}")
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
     vocabulary_level = user_settings.get("vocabularyLevel", "functional")
     prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
-    logging.info(f"⏱️ /llm prep stage: {prep_elapsed_ms:.1f}ms for {account_id}/{aac_user_id}")
+    logging.info(f"⏱️ /llm prep stage: {prep_elapsed_ms:.1f}ms [{log_context}]")
 
     # Check if mood was recently updated and add small delay to prevent race conditions
     global mood_update_timestamps
@@ -4910,10 +4947,21 @@ CREATIVITY BOOSTERS:
     if request_data.compose_mode:
         include_rich_delta_context = False
     use_fast_generation_profile = not include_rich_delta_context and not request_data.compose_mode
+    is_starter_question_prompt = (
+        "all options must begin with" in user_prompt_content.lower()
+        and "generic, basic questions" in user_prompt_content.lower()
+    )
 
     if use_fast_generation_profile:
         estimated_max_output_tokens = min(768, max(320, requested_options_count * 28 + 120))
         temperature_value = 0.75
+
+        if is_starter_question_prompt:
+            # Starter question prompts (What/Who/Where/When/Why/How) should be short and stable.
+            # Lowering output budget and temperature reduces long-tail generation latency variance.
+            estimated_max_output_tokens = min(estimated_max_output_tokens, max(240, requested_options_count * 14 + 60))
+            temperature_value = 0.45
+
         json_format_instructions = f"""
 {vocab_instruction}
 
@@ -4974,7 +5022,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         cached_options = copy.deepcopy(cached_response_entry.get("response", []))
         total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
         logging.info(
-            f"⚡ /llm quick-cache HIT for {account_id}/{aac_user_id} key={quick_cache_key[-24:]} "
+            f"⚡ /llm quick-cache HIT [{log_context}] key={quick_cache_key[-24:]} "
             f"in {total_elapsed_ms:.1f}ms"
         )
         return JSONResponse(
@@ -4983,24 +5031,113 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 "X-LLM-Cache": "quick-hit",
                 "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
                 "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+                "X-LLM-Request-Id": request_correlation_id,
+                "X-LLM-Button": button_label,
+            },
+        )
+
+    is_inflight_owner = False
+    inflight_future: Optional[asyncio.Future] = None
+
+    async with llm_inflight_requests_lock:
+        existing_future = llm_inflight_requests.get(quick_cache_key)
+        if existing_future and not existing_future.done():
+            inflight_future = existing_future
+        else:
+            inflight_future = asyncio.get_running_loop().create_future()
+            llm_inflight_requests[quick_cache_key] = inflight_future
+            is_inflight_owner = True
+
+    if not is_inflight_owner:
+        try:
+            coalesced_options = await inflight_future
+        except Exception as coalesced_error:
+            logging.error(
+                f"⚠️ /llm coalesced wait failed [{log_context}] key={quick_cache_key[-24:]}: {coalesced_error}",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Coalesced /llm request failed")
+
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"🤝 /llm in-flight coalesced HIT [{log_context}] key={quick_cache_key[-24:]} "
+            f"in {total_elapsed_ms:.1f}ms"
+        )
+        return JSONResponse(
+            content=copy.deepcopy(coalesced_options),
+            headers={
+                "X-LLM-Cache": "inflight-hit",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+                "X-LLM-Request-Id": request_correlation_id,
+                "X-LLM-Button": button_label,
             },
         )
 
     logging.info(
         f"🧠 DELTA CONTEXT PROFILE: {'RICH' if include_rich_delta_context else 'FAST'} "
-        f"for {account_id}/{aac_user_id}"
+        f"[{log_context}]"
     )
     logging.info(
         f"⚙️ GENERATION PROFILE: {'FAST' if use_fast_generation_profile else 'RICH'} "
-        f"(max_output_tokens={estimated_max_output_tokens}, temperature={temperature_value}, requested_options={requested_options_count})"
+        f"(max_output_tokens={estimated_max_output_tokens}, temperature={temperature_value}, requested_options={requested_options_count}) [{log_context}]"
     )
 
     llm_response_json_str = ""
     llm_generate_start_time = time.perf_counter()
 
     # --- Route to appropriate LLM ---
-    if llm_provider == "chatgpt":
-        logging.info(f"Using OpenAI for {account_id}/{aac_user_id}. Building full prompt manually.")
+    if llm_provider != "chatgpt" and is_starter_question_prompt:
+        # Starter question prompts are dynamic and short-lived. Avoid cache warm-up/drift checks and
+        # generate directly to reduce latency variance caused by cache bookkeeping/fallback paths.
+        logging.info(f"⚡ Starter-question fast path (cache bypass) [{log_context}]")
+        fast_model = fast_words_llm_model_instance or primary_llm_model_instance
+
+        if not fast_model:
+            logging.warning(f"Starter-question fast model unavailable; using standard fallback path [{log_context}]")
+            llm_response_json_str = await _generate_gemini_content_with_fallback(
+                final_user_query,
+                generation_config,
+                account_id,
+                aac_user_id,
+            )
+        else:
+            try:
+                response = await _execute_gemini_call_with_retry(
+                    lambda: fast_model.generate_content(final_user_query, generation_config=generation_config),
+                    operation_label=f"gemini_starter_questions_fast:{fast_model.model_name}",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                    max_attempts=3,
+                    base_delay_seconds=0.2,
+                    max_delay_seconds=1.5,
+                )
+
+                llm_response_json_str = (response.text or "").strip()
+                if not llm_response_json_str:
+                    logging.warning(f"Starter-question fast path returned empty response; using standard fallback [{log_context}]")
+                    llm_response_json_str = await _generate_gemini_content_with_fallback(
+                        final_user_query,
+                        generation_config,
+                        account_id,
+                        aac_user_id,
+                    )
+                else:
+                    log_token_usage(response, "STARTER_FAST", account_id, aac_user_id)
+            except Exception as starter_fast_error:
+                logging.warning(
+                    f"Starter-question fast path failed [{log_context}]: {starter_fast_error}. "
+                    f"Using standard fallback path."
+                )
+                llm_response_json_str = await _generate_gemini_content_with_fallback(
+                    final_user_query,
+                    generation_config,
+                    account_id,
+                    aac_user_id,
+                )
+
+    elif llm_provider == "chatgpt":
+        logging.info(f"Using OpenAI [{log_context}]. Building full prompt manually.")
         full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(
             account_id,
             aac_user_id,
@@ -5014,7 +5151,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
         # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
-        logging.info(f"🚀 Using Gemini with Base+Delta caching for {account_id}/{aac_user_id}.")
+        logging.info(f"🚀 Using Gemini with Base+Delta caching [{log_context}].")
         
         # SMART DRIFT DETECTION: Check if cache needs rebuilding
         drift_check = await cache_manager.check_cache_drift(account_id, aac_user_id, max_drift=20)
@@ -5056,7 +5193,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                 
                 logging.info(f"🔍 COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
-                logging.info(f"📊 USER QUERY that triggered LLM: {user_prompt_content[:500]}")
+                logging.info(f"📊 USER QUERY that triggered LLM [{log_context}]: {user_prompt_content[:500]}")
                 logging.info(f"⚙️ Generation config: {generation_config}")
                 
                 # Use cached base context + pass delta as standard input
@@ -5088,9 +5225,9 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 # Log detailed token usage for cached requests
                 log_token_usage(response, "CACHED+DELTA", account_id, aac_user_id)
                 
-                logging.info(f"✅ Successfully generated content using BASE cache + DELTA context for {account_id}/{aac_user_id}.")
+                logging.info(f"✅ Successfully generated content using BASE cache + DELTA context [{log_context}].")
             except Exception as e:
-                logging.error(f"Error using cached content for {account_id}/{aac_user_id}: {e}. Falling back.")
+                logging.error(f"Error using cached content [{log_context}]: {e}. Falling back.")
                 full_prompt = await build_full_prompt_for_non_cached_llm(
                     account_id,
                     aac_user_id,
@@ -5103,7 +5240,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 )
                 llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
         else:
-            logging.warning(f"No valid cache found for {account_id}/{aac_user_id}. Attempting to warm up cache...")
+            logging.warning(f"No valid cache found [{log_context}]. Attempting to warm up cache...")
             
             # Try to warm up cache before falling back to full prompt
             try:
@@ -5127,7 +5264,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                     
                     logging.info(f"🔍 NEW_CACHE COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
-                    logging.info(f"📊 USER QUERY that triggered LLM (new cache path): {user_prompt_content[:500]}")
+                    logging.info(f"📊 USER QUERY that triggered LLM (new cache path) [{log_context}]: {user_prompt_content[:500]}")
                     logging.info(f"⚙️ Generation config: {generation_config}")
                     
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
@@ -5158,10 +5295,10 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     # Log detailed token usage for newly cached requests
                     log_token_usage(response, "NEW_CACHE+DELTA", account_id, aac_user_id)
                     
-                    logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA for {account_id}/{aac_user_id}.")
+                    logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA [{log_context}].")
                 else:
                     # Cache creation failed, use full prompt fallback
-                    logging.warning(f"Cache creation failed for {account_id}/{aac_user_id}. Using full prompt fallback.")
+                    logging.warning(f"Cache creation failed [{log_context}]. Using full prompt fallback.")
                     full_prompt = await build_full_prompt_for_non_cached_llm(
                         account_id,
                         aac_user_id,
@@ -5175,7 +5312,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
                     
             except Exception as warmup_error:
-                logging.error(f"Cache warmup failed for {account_id}/{aac_user_id}: {warmup_error}. Using full prompt fallback.")
+                logging.error(f"Cache warmup failed [{log_context}]: {warmup_error}. Using full prompt fallback.")
                 full_prompt = await build_full_prompt_for_non_cached_llm(
                     account_id,
                     aac_user_id,
@@ -5189,9 +5326,9 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
 
     llm_generate_elapsed_ms = (time.perf_counter() - llm_generate_start_time) * 1000
-    logging.info(f"⏱️ /llm generation stage: {llm_generate_elapsed_ms:.1f}ms for {account_id}/{aac_user_id}")
+    logging.info(f"⏱️ /llm generation stage: {llm_generate_elapsed_ms:.1f}ms [{log_context}]")
     
-    logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
+    logging.info(f"--- LLM Final JSON Response Text [{log_context}] (Length: {len(llm_response_json_str)}) ---")
 
     def extract_json_from_response(response_text: str) -> str:
         """Extract JSON from LLM response, handling markdown code blocks and conversational text"""
@@ -5466,11 +5603,16 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             "response": copy.deepcopy(biased_options),
         }
 
+        if inflight_future and not inflight_future.done():
+            inflight_future.set_result(copy.deepcopy(biased_options))
+        async with llm_inflight_requests_lock:
+            llm_inflight_requests.pop(quick_cache_key, None)
+
         total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
         logging.info(
             f"⏱️ /llm total: {total_elapsed_ms:.1f}ms "
             f"(prep={prep_elapsed_ms:.1f}ms, generate={llm_generate_elapsed_ms:.1f}ms) "
-            f"for {account_id}/{aac_user_id}"
+            f"[{log_context}]"
         )
         return JSONResponse(
             content=biased_options,
@@ -5478,14 +5620,26 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 "X-LLM-Cache": "quick-miss",
                 "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate={llm_generate_elapsed_ms:.1f};total={total_elapsed_ms:.1f}",
                 "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+                "X-LLM-Request-Id": request_correlation_id,
+                "X-LLM-Button": button_label,
             },
         )
 
     except HTTPException:
+        if is_inflight_owner and inflight_future and not inflight_future.done():
+            inflight_future.set_exception(HTTPException(status_code=500, detail="Owner /llm request failed"))
+        if is_inflight_owner:
+            async with llm_inflight_requests_lock:
+                llm_inflight_requests.pop(quick_cache_key, None)
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logging.error(f"Error processing LLM response for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+        if is_inflight_owner and inflight_future and not inflight_future.done():
+            inflight_future.set_exception(e)
+        if is_inflight_owner:
+            async with llm_inflight_requests_lock:
+                llm_inflight_requests.pop(quick_cache_key, None)
+        logging.error(f"Error processing LLM response [{log_context}]: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing LLM response: {str(e)}")
 
 

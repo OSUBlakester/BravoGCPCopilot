@@ -290,11 +290,13 @@ let activeLLMPromptForContext = null; // Store the prompt that generated current
 const LLM_PREFETCH_MAX_BUTTONS_PER_PAGE = 1;
 const LLM_PREFETCH_DELAY_MS = 1200;
 const LLM_PREFETCH_HISTORY_TTL_MS = 180000;
+const ENABLE_LLM_PREFETCH = false;
 let llmPrefetchTimer = null;
 const llmPrefetchHistory = new Map();
 const llmInFlightRequests = new Map();
 const NAV_TARGET_LLM_PREFETCH_KEY = 'bravoNavTargetLlmPrefetch';
 let loadedUserPages = [];
+let currentRenderedPageName = 'home';
 
 function cancelActivePrefetchRequests(reason = 'interactive request') {
     let cancelledCount = 0;
@@ -325,6 +327,11 @@ function findFirstVisibleLlmButtonForPage(page) {
 }
 
 function queueNavigationTargetPrefetch(targetPageName) {
+    if (!ENABLE_LLM_PREFETCH) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
     const normalizedTargetPage = String(targetPageName || '').trim();
     if (!normalizedTargetPage || !Array.isArray(loadedUserPages) || loadedUserPages.length === 0) {
         return;
@@ -352,6 +359,11 @@ function queueNavigationTargetPrefetch(targetPageName) {
 }
 
 function triggerNavigationTargetPrefetchForCurrentPage(pageName) {
+    if (!ENABLE_LLM_PREFETCH) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
     const raw = sessionStorage.getItem(NAV_TARGET_LLM_PREFETCH_KEY);
     if (!raw) return;
 
@@ -432,12 +444,18 @@ function pruneLlmPrefetchHistory(nowTs = Date.now()) {
 }
 
 function scheduleLlmPrefetchForVisibleButtons(visibleButtons) {
+    if (!ENABLE_LLM_PREFETCH) return;
+
     if (!Array.isArray(visibleButtons) || visibleButtons.length === 0) return;
     if (isComposeSessionActive() || isLLMProcessing) return;
 
+    const pageNameForPrefetch = String(currentRenderedPageName || '').trim().toLowerCase();
+    const prefetchLimit = pageNameForPrefetch === 'questions' ? 3 : LLM_PREFETCH_MAX_BUTTONS_PER_PAGE;
+    const prefetchDelayMs = pageNameForPrefetch === 'questions' ? 250 : LLM_PREFETCH_DELAY_MS;
+
     const llmButtons = visibleButtons
         .filter(buttonData => buttonData && typeof buttonData.LLMQuery === 'string' && buttonData.LLMQuery.trim().length > 0)
-        .slice(0, LLM_PREFETCH_MAX_BUTTONS_PER_PAGE);
+        .slice(0, prefetchLimit);
 
     if (llmButtons.length === 0) return;
 
@@ -447,10 +465,12 @@ function scheduleLlmPrefetchForVisibleButtons(visibleButtons) {
 
     llmPrefetchTimer = setTimeout(() => {
         void prefetchLlmOptionsForButtons(llmButtons);
-    }, LLM_PREFETCH_DELAY_MS);
+    }, prefetchDelayMs);
 }
 
 async function prefetchLlmOptionsForButtons(llmButtons) {
+    if (!ENABLE_LLM_PREFETCH) return;
+
     const nowTs = Date.now();
     pruneLlmPrefetchHistory(nowTs);
 
@@ -3167,6 +3187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Ensure pageToDisplay is not null/undefined before accessing properties
         sessionStorage.setItem('currentPageDisplayNameForBanner', pageToDisplay.displayName || capitalizeFirstLetter(pageToDisplay.name));
         setBannerAndPageTitle(); // Call again to set the correct title
+        currentRenderedPageName = String(pageName || 'home').trim().toLowerCase() || 'home';
         triggerNavigationTargetPrefetchForCurrentPage(pageName);
 
         if (isComposeEntryView) {
@@ -4372,16 +4393,11 @@ async function getLLMResponse(prompt, options = {}) {
     const requestKey = `${prompt.length}:${prompt}`;
     const existingRequestEntry = llmInFlightRequests.get(requestKey);
     if (existingRequestEntry) {
-        if (source === 'interactive' && existingRequestEntry.source === 'prefetch') {
-            if (existingRequestEntry.abortController) {
-                existingRequestEntry.abortController.abort();
-            }
-            llmInFlightRequests.delete(requestKey);
-            console.log(`🛑 Aborted in-flight prefetch for prompt length ${prompt.length}; prioritizing interactive request`);
-        } else {
-            console.log(`♻️ Reusing in-flight /llm request (${source}) for prompt length ${prompt.length}`);
-            return existingRequestEntry.promise;
-        }
+        console.log(
+            `♻️ Reusing in-flight /llm request (existing=${existingRequestEntry.source}, requested=${source}) ` +
+            `for prompt length ${prompt.length}`
+        );
+        return existingRequestEntry.promise;
     }
 
     console.log("Sending LLM Request (Prompt length):", prompt.length);
