@@ -17,9 +17,12 @@ let gamepadIndex = null; // To store the index of the connected gamepad
 let gamepadPollInterval = null; // Interval ID for gamepad polling
 let scanningPaused = false; // Global scanning pause flag
 let waitForSwitchToScan = false; // Wait for switch press before scanning (matches gridpage setting)
+let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
 let gridColumns = 6; // Default number of grid columns for alphabet grid sizing
 let autoClean = false; // Auto Clean setting for automatic cleanup on Speak Display
 const FREESTYLE_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_freestyle';
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 
 // --- User Management Variables (Same as gridpage.js) ---
 let currentAacUserId = null;
@@ -541,6 +544,7 @@ async function loadScanSettings() {
             scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             scanLoopLimit = settings.scanLoopLimit || 0;
             waitForSwitchToScan = settings.waitForSwitchToScan === true;
+            playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
             // Set the waiting flag immediately so that any startScanning() calls during
             // page load (e.g. from loadWordOptions finally block) are blocked right away.
             if (waitForSwitchToScan) {
@@ -571,6 +575,26 @@ async function loadScanSettings() {
         }
     } catch (error) {
         console.error('Error loading scan settings:', error);
+    }
+}
+
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+        return;
+    }
+
+    hasPlayedWaitForSwitchChime = true;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Freestyle page-ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize freestyle page-ready chime audio:', error);
     }
 }
 
@@ -684,6 +708,7 @@ function startInitialScanning() {
             stopScanning();
             window.waitingForInitialSwitch = true;
             console.log('✋ Waiting for switch press before scanning (freestyle).');
+            playPageReadyChimeIfEnabled();
             const hasShownPrompt = sessionStorage.getItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY) === 'true';
             if (!hasShownPrompt) {
                 sessionStorage.setItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY, 'true');

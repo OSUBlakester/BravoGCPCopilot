@@ -4,6 +4,9 @@ let currentAacUserId = null;
 let defaultDelay = 3500;
 let scanMode = 'auto';
 let waitForSwitchToScan = false;
+let playWaitForSwitchChime = false;
+let hasPlayedWaitForSwitchChime = false;
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 
 let scanningInterval = null;
 let currentScanPhase = 'rows'; // rows | items
@@ -72,11 +75,30 @@ async function loadSettings() {
         defaultDelay = settings.scanDelay || 3500;
         scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
+        playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
         if (waitForSwitchToScan) {
             window.waitingForInitialSwitch = true;
         }
     } catch (error) {
         console.error('Failed to load settings:', error);
+    }
+}
+
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) return;
+
+    hasPlayedWaitForSwitchChime = true;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Numbers page-ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize numbers page-ready chime audio:', error);
     }
 }
 
@@ -548,6 +570,8 @@ async function initialize() {
     bindKeyboardScanning();
     if (!waitForSwitchToScan) {
         resetToRowsAndRestart(0);
+    } else {
+        playPageReadyChimeIfEnabled();
     }
 }
 

@@ -47,6 +47,8 @@ class MoodSelection {
         this.isScanning = false;
         this.ScanningOff = false; // Will be loaded from settings
         this.scanMode = 'auto'; // auto | step
+        this.playWaitForSwitchChime = false;
+        this.hasPlayedWaitForSwitchChime = false;
         this.activeAnnouncementAudioContext = null;
         this.activeAnnouncementAudioSource = null;
         
@@ -262,6 +264,7 @@ class MoodSelection {
             this.ScanningOff = true;
             this.scanMode = 'auto';
             this.waitForSwitchToScan = false;
+            this.playWaitForSwitchChime = false;
             this.defaultDelay = settings.scanDelay || 3500;
             return;
         }
@@ -269,7 +272,28 @@ class MoodSelection {
         this.ScanningOff = settings.ScanningOff === true;
         this.scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         this.waitForSwitchToScan = settings.waitForSwitchToScan === true;
+        this.playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
         this.defaultDelay = settings.scanDelay || 3500;
+    }
+
+    playPageReadyChimeIfEnabled() {
+        if (!this.playWaitForSwitchChime || this.hasPlayedWaitForSwitchChime) {
+            return;
+        }
+
+        this.hasPlayedWaitForSwitchChime = true;
+        try {
+            const audio = new Audio('/static/notification.mp3');
+            audio.preload = 'auto';
+            const playPromise = audio.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch((error) => {
+                    console.warn('Mood page-ready chime playback was blocked or failed:', error);
+                });
+            }
+        } catch (error) {
+            console.warn('Unable to initialize mood page-ready chime audio:', error);
+        }
     }
 
     /**
@@ -533,6 +557,7 @@ class MoodSelection {
             if (this.waitForSwitchToScan && !scanningHasStarted) {
                 console.log('Waiting for switch press to begin scanning...');
                 this.waitingForInitialSwitch = true;
+                this.playPageReadyChimeIfEnabled();
                 // Play prompt in personal speaker
                 this.speakText("Press switch to begin scanning", false, false); // personal speaker, not announcement
             } else {

@@ -1560,6 +1560,9 @@
         let startupHomeBoardId = null; // Home board id from /api/tap-interface/boards
         let startupHomeBoardLabel = null; // Home board label from /api/tap-interface/boards
         let startupHomeBoard = null; // Full home board object from /api/tap-interface/boards
+        let boardsById = {}; // All boards keyed by id, populated at startup for board_type lookup
+        const categoryWordsCache = {}; // Cache: cacheKey -> words array, cleared on build-space change
+        const tapCategoryWordsInFlight = new Map(); // Request de-dupe for repeated identical word fetches
         let temporaryNavigationReturnStack = []; // One-shot return targets for temporary navigation
         let temporaryNavigationPending = false; // True only after taking a temporary-navigation button
         let activeBoardModifierState = { boardId: null, modifierId: null }; // TouchChat-style one-shot modifier state
@@ -2796,6 +2799,30 @@
                 console.log(`Grid row height: ${rowHeight}px for ${freestyleColumns} columns`);
             }
         }
+
+        function logTapLlmDiagnostics(response, source, requestStartMs = null, promptLength = null, requestedCount = null) {
+            try {
+                const serverTiming = response?.headers?.get('X-LLM-Timing') || 'unknown';
+                const serverProfile = response?.headers?.get('X-LLM-Profile') || 'unknown';
+                const serverCache = response?.headers?.get('X-LLM-Cache') || 'unknown';
+                const clientElapsed = typeof requestStartMs === 'number'
+                    ? Math.round(performance.now() - requestStartMs)
+                    : null;
+
+                console.log('🧪 TAP /llm diagnostics:', {
+                    source,
+                    promptLength,
+                    requestedCount,
+                    status: response?.status,
+                    timing: serverTiming,
+                    profile: serverProfile,
+                    cache: serverCache,
+                    clientElapsedMs: clientElapsed,
+                });
+            } catch (diagnosticError) {
+                console.warn('Failed to log TAP /llm diagnostics:', diagnosticError);
+            }
+        }
         
         // Regenerate phrase options using stored context with exclusion
         async function regeneratePhraseOptions() {
@@ -2831,12 +2858,15 @@
                         prompt: followUpPrompt,
                         response_format: 'json'
                     };
-                    
+
+                    const llmRequestStartMs = performance.now();
                     const response = await authenticatedFetch('/llm', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(requestBody)
                     });
+
+                    logTapLlmDiagnostics(response, 'regenerate-followup', llmRequestStartMs, followUpPrompt.length, LLMOptions);
                     
                     if (!response.ok) {
                         throw new Error(`HTTP error! status: ${response.status}`);
@@ -3227,6 +3257,7 @@
             startupHomeBoardId = null;
             startupHomeBoardLabel = null;
             startupHomeBoard = null;
+            boardsById = {};
             try {
                 const response = await authenticatedFetch(`/api/tap-interface/boards?t=${Date.now()}`);
                 if (!response.ok) {
@@ -3244,7 +3275,13 @@
                 }
 
                 startupHomeBoardId = homeId;
-                const homeBoard = boards.find(board => String(board?.id || '').trim() === homeId);
+                // Cache all boards by id so we can look up board_type for any category button
+                boards.forEach(board => {
+                    if (board && board.id) {
+                        boardsById[String(board.id).trim()] = board;
+                    }
+                });
+                const homeBoard = boardsById[homeId] || null;
                 startupHomeBoardLabel = homeBoard && homeBoard.label ? String(homeBoard.label).trim() : null;
                 startupHomeBoard = homeBoard && typeof homeBoard === 'object' ? homeBoard : null;
             } catch (error) {
@@ -3312,6 +3349,7 @@
                 board_id: board.id || null,
                 label: board.label || 'Home',
                 is_home_board: true,
+                board_type: board.board_type || null,
                 speech_text: board.speech_text || null,
                 image_url: board.image_url || null,
                 background_color: board.background_color || '#FFFFFF',
@@ -3619,6 +3657,45 @@ VARIETY RULES:
             return starterPool.slice(0, desiredCount);
         }
 
+        function getCategoryFallbackWords(category, count = null) {
+            const desiredCount = Math.max(1, Number(count) || FreestyleWordOptions || 29);
+            const categoryText = String(category || '').toLowerCase();
+
+            const categoryPools = [
+                {
+                    matches: ['people', 'person', 'family', 'friend', 'relationships', 'social'],
+                    words: ['mom', 'dad', 'friend', 'teacher', 'baby', 'doctor', 'brother', 'sister', 'grandma', 'grandpa', 'aunt', 'uncle']
+                },
+                {
+                    matches: ['animal', 'pet', 'wild', 'zoo'],
+                    words: ['dog', 'cat', 'horse', 'bear', 'lion', 'tiger', 'rabbit', 'elephant', 'monkey', 'bird']
+                },
+                {
+                    matches: ['food', 'meal', 'snack'],
+                    words: ['pizza', 'apple', 'sandwich', 'pasta', 'cookie', 'banana', 'chicken', 'fries', 'rice', 'bread']
+                },
+                {
+                    matches: ['drink', 'beverage'],
+                    words: ['water', 'juice', 'milk', 'soda', 'coffee', 'tea', 'smoothie', 'lemonade']
+                },
+                {
+                    matches: ['place', 'location', 'room', 'building'],
+                    words: ['home', 'school', 'park', 'store', 'restaurant', 'hospital', 'church', 'library']
+                },
+                {
+                    matches: ['thing', 'object', 'item'],
+                    words: ['book', 'chair', 'phone', 'toy', 'ball', 'computer', 'blanket', 'backpack']
+                }
+            ];
+
+            const matchedPool = categoryPools.find(pool => pool.matches.some(token => categoryText.includes(token)));
+            if (matchedPool) {
+                return matchedPool.words.slice(0, desiredCount).map(text => ({ text, keywords: [] }));
+            }
+
+            return getFallbackStarterWords(desiredCount);
+        }
+
         async function generateDefaultHomeStarterWords(count = null) {
             const desiredCount = Math.max(1, Number(count) || FreestyleWordOptions || 29);
 
@@ -3655,6 +3732,12 @@ VARIETY RULES:
 
                 const fallback = getFallbackStarterWords(desiredCount * 2);
                 const merged = normalizeStarterWordOptions([...normalized, ...fallback]);
+                if (merged.length === 0) {
+                    console.warn('Home starter fallback merge produced empty options; using hard fallback pool');
+                    return getFallbackStarterWords(desiredCount);
+                }
+
+                console.log('Home starter words: using merged fallback set, count =', Math.min(merged.length, desiredCount));
                 return merged.slice(0, desiredCount);
             } catch (error) {
                 console.error('Error generating default home starter words:', error);
@@ -4639,17 +4722,25 @@ VARIETY RULES:
             }
             
             console.log('Loading phrases for category:', category.label);
+            const phraseSectionEnabled = LLMOptions > 0;
             
             // Clear existing options and show loading state for both sections
             llmStaticOptions.innerHTML = '';
             freestyleOptions.innerHTML = '';
             
             // Show loading state for phrases
-            for (let i = 0; i < LLMOptions; i++) {
-                const btn = document.createElement('button');
-                btn.className = 'option-button loading';
-                btn.textContent = '...';
-                llmStaticOptions.appendChild(btn);
+            if (phraseSectionEnabled) {
+                for (let i = 0; i < LLMOptions; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'option-button loading';
+                    btn.textContent = '...';
+                    llmStaticOptions.appendChild(btn);
+                }
+            } else {
+                const phraseSection = document.querySelector('.phrases-section');
+                if (phraseSection) {
+                    phraseSection.style.display = 'none';
+                }
             }
             
             // Show loading state for words
@@ -4667,45 +4758,79 @@ VARIETY RULES:
 
                 console.log('⏱️ Starting parallel fetch at:', Date.now());
 
+                // Resolve board_type up front — needed by both phrases and words sections
+                const resolvedBoardType = String(
+                    category.board_type
+                    || (category.board_id && boardsById[String(category.board_id)]?.board_type)
+                    || ''
+                ).toLowerCase();
+                const isCategoryAiBoard = resolvedBoardType === 'ai';
+                const isCategoryHomeAiBoard = shouldUseDefaultHomeStarterWords(category) && isCategoryAiBoard;
+
                 // Start both promises immediately - they will execute concurrently
                 let phrasesPromise, wordsPromise;
                 
                 // PHRASES SECTION LOGIC
-                if (category.llm_prompt) {
+                if (phraseSectionEnabled && category.llm_prompt) {
                     console.log('⏱️ Starting phrases fetch with prompt at:', Date.now());
                     phrasesPromise = generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
-                } else {
+                } else if (phraseSectionEnabled && isCategoryHomeAiBoard) {
+                    // AI-defined Home board with no explicit llm_prompt — use communication-starter prompt
+                    // rather than the literal "Generate phrases related to Home" fallback which produces house nouns
+                    console.log('⏱️ Starting phrases fetch with Home communication-starter prompt at:', Date.now());
+                    const homeStarterPhrasesPrompt = `Generate ${LLMOptions} short, natural conversation-starter phrases for an AAC Home board.
+Focus on everyday communication starters that a person might use to begin a conversation, share a feeling, make a request, or comment on what's happening.
+Incorporate context about the user's current location, activity, and people nearby when available.
+Examples of good styles: "I want to...", "Can we...", "I feel...", "Let's go...", "I need help with", "What are we...", "I'm feeling..."
+Avoid phrases that are literally about the home as a building or location. Keep options short, practical, and broadly useful.`;
+                    phrasesPromise = generateGridpageLLMOptions(homeStarterPhrasesPrompt, LLMOptions);
+                } else if (phraseSectionEnabled) {
                     console.log('⏱️ Starting phrases fetch with fallback prompt at:', Date.now());
                     const fallbackPrompt = `Generate phrases related to ${category.label}`;
                     phrasesPromise = generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
+                } else {
+                    phrasesPromise = Promise.resolve([]);
                 }
 
                 // WORDS SECTION LOGIC
                 console.log('⏱️ Starting words fetch at:', Date.now());
-                if (Array.isArray(category.board_word_options) && category.board_word_options.length > 0) {
+                console.log('[DEBUG] board_type resolved:', resolvedBoardType, 'board_id:', category.board_id, 'isAiBoard:', isCategoryAiBoard);
+                if (Array.isArray(category.board_word_options) && category.board_word_options.length > 0 && !isCategoryAiBoard) {
                     console.log('Using structured board word options for Words section:', category.board_word_options);
                     wordsPromise = Promise.resolve(category.board_word_options);
-                } else if (category.static_options) {
+                } else if (category.static_options && !isCategoryAiBoard) {
                     console.log('Using static options for Words section:', category.static_options);
                     const staticWords = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
-                } else if (shouldUseDefaultHomeStarterWords(category)) {
+                } else if (shouldUseDefaultHomeStarterWords(category) && isCategoryAiBoard) {
                     console.log('Using default Home starter prompt for Words section');
                     wordsPromise = generateDefaultHomeStarterWords(FreestyleWordOptions);
                 } else {
-                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, FreestyleWordOptions, category.words_prompt, category.llm_prompt);
+                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, FreestyleWordOptions, category.words_prompt, category.llm_prompt, isCategoryAiBoard);
                 }
 
                 console.log('⏱️ Waiting for both fetches at:', Date.now());
                 // Wait for both to complete in parallel
                 const [phrasesOptions, wordsOptions] = await Promise.all([phrasesPromise, wordsPromise]);
 
+                let finalPhrasesOptions = Array.isArray(phrasesOptions) ? phrasesOptions : [];
+                if (LLMOptions > 0 && finalPhrasesOptions.length === 0) {
+                    console.warn('[Tap] Phrase generation returned empty array, applying deterministic fallback phrases.', {
+                        category: category.label,
+                        llmOptions: LLMOptions,
+                        wordsCount: Array.isArray(wordsOptions) ? wordsOptions.length : 0
+                    });
+                    finalPhrasesOptions = buildTapFallbackPhrases(category.label, wordsOptions, LLMOptions);
+                }
+
                 console.log('⏱️ Both fetches completed at:', Date.now());
-                console.log('Final phrases options:', phrasesOptions);
+                console.log('Final phrases options:', finalPhrasesOptions);
                 console.log('Final words options:', wordsOptions);
                 
                 // Render both sections with deferred images for batch loading
-                renderCategoryOptions(phrasesOptions, true); // true = defer images
+                if (phraseSectionEnabled) {
+                    renderCategoryOptions(finalPhrasesOptions, true); // true = defer images
+                }
                 if (wordsOptions) {
                     renderFreestyleOptions(wordsOptions, true); // true = defer images
                 }
@@ -4713,7 +4838,7 @@ VARIETY RULES:
                 // Load images for both phrases and words in parallel
                 setTimeout(() => {
                     Promise.all([
-                        loadImagesForPhrases(phrasesOptions),
+                        phraseSectionEnabled ? loadImagesForPhrases(finalPhrasesOptions) : Promise.resolve(),
                         wordsOptions ? loadImagesForWords(wordsOptions) : Promise.resolve()
                     ]);
                 }, 50);
@@ -4867,13 +4992,21 @@ VARIETY RULES:
 
             // Close modal and load options
             closeModal();
+            const phraseSectionEnabled = LLMOptions > 0;
             
             // Clear existing options and show loading
             llmStaticOptions.innerHTML = '';
-            for (let i = 0; i < LLMOptions; i++) {
-                const btn = document.createElement('button');
-                btn.className = 'option-button loading';
-                llmStaticOptions.appendChild(btn);
+            if (phraseSectionEnabled) {
+                for (let i = 0; i < LLMOptions; i++) {
+                    const btn = document.createElement('button');
+                    btn.className = 'option-button loading';
+                    llmStaticOptions.appendChild(btn);
+                }
+            } else {
+                const phraseSection = document.querySelector('.phrases-section');
+                if (phraseSection) {
+                    phraseSection.style.display = 'none';
+                }
             }
 
             try {
@@ -4893,13 +5026,19 @@ VARIETY RULES:
                     // Generate full phrases using gridpage-style LLM and store context for regeneration
                     currentPhrasePrompt = subcategory.llm_prompt;
                     currentPhraseContext = subcategory;
-                    options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
+                    if (phraseSectionEnabled) {
+                        options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
+                    }
                 }
 
-                renderCategoryOptions(options, true); // Defer images for batch loading
+                if (phraseSectionEnabled) {
+                    renderCategoryOptions(options, true); // Defer images for batch loading
+                }
                 
                 // Batch load phrase images after render
-                setTimeout(() => loadImagesForPhrases(options), 50);
+                if (phraseSectionEnabled) {
+                    setTimeout(() => loadImagesForPhrases(options), 50);
+                }
 
                 // Also update freestyle options with the selected category context 
                 // IMPORTANT: Use just the subcategory name for API calls, not the full path
@@ -4907,7 +5046,8 @@ VARIETY RULES:
                 const categoryForApi = subcategory.label; // Just "Insects", not "Animals, Insects"
                 const fullPath = fullParentPath; // Keep full path for display/context
                 // Set currentCategory to preserve context for future freestyle calls
-                currentCategory = { label: fullPath };
+                // Preserve board_type from parent so AI/Static distinction flows into subcategory word generation
+                currentCategory = { label: fullPath, board_type: currentCategory?.board_type || null };
                 console.log('Subcategory has words_prompt:', subcategory.words_prompt);
                 console.log('Using category for API:', categoryForApi, 'vs full path:', fullPath);
                 // Store the words prompt and instruction prompt globally for word selection
@@ -4933,12 +5073,13 @@ VARIETY RULES:
             // Use LLMOptions setting if count not specified
             const optionsCount = count !== null ? count : LLMOptions;
             console.log('generateGridpageLLMOptions called with prompt:', prompt, 'count:', optionsCount);
+
+            if (optionsCount <= 0) {
+                console.warn('Skipping phrase generation because optionsCount <= 0. LLMOptions currently disables phrase buttons.');
+                return [];
+            }
             
             try {
-                const summaryInstruction = SummaryOff
-                    ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
-                    : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
-
                 // Format prompt to request full phrases (similar to gridpage LLMQuery)
                 const enhancedPrompt = `Generate ${optionsCount} complete communication phrases for: ${prompt}
                 
@@ -4948,11 +5089,10 @@ VARIETY RULES:
                 - Use first person perspective as if the user is speaking
                 - Make each option distinct and useful for communication
                 - Focus on natural, conversational language
-                
-                Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-                ${summaryInstruction}
-                The "keywords" key should contain 3-5 words that match available symbols.
-                Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]`;
+
+                Return ONLY a valid JSON array of strings with exactly ${optionsCount} items.
+                Do not return objects, keys, markdown, or commentary.
+                Example: ["I am having a great day.", "Can we do something fun together?"]`;
 
                 console.log('Sending request to /llm endpoint with enhanced prompt:', enhancedPrompt);
 
@@ -4962,6 +5102,7 @@ VARIETY RULES:
                     response_format: 'json'
                 };
 
+                const llmRequestStartMs = performance.now();
                 const response = await authenticatedFetch('/llm', {
                     method: 'POST',
                     headers: {
@@ -4970,13 +5111,25 @@ VARIETY RULES:
                     body: JSON.stringify(requestBody)
                 });
 
+                logTapLlmDiagnostics(response, 'generate-phrases', llmRequestStartMs, enhancedPrompt.length, optionsCount);
+
                 console.log('LLM response status:', response.status);
                 
                 if (response.ok) {
                     const data = await response.json();
                     console.log('LLM response data:', data);
-                    // Response format: [{option: "full phrase", summary: "short text", keywords: []}]
-                    return Array.isArray(data) ? data : [];
+
+                    const normalizedOptions = normalizeTapPhraseResponse(data);
+                    if (normalizedOptions.length === 0) {
+                        console.warn('LLM phrase response normalized to empty array', {
+                            promptLength: enhancedPrompt.length,
+                            requestedCount: optionsCount,
+                            responseType: Array.isArray(data) ? 'array' : typeof data,
+                            responseKeys: (data && typeof data === 'object') ? Object.keys(data) : null
+                        });
+                    }
+
+                    return normalizedOptions.slice(0, optionsCount);
                 } else {
                     const errorText = await response.text();
                     console.error('LLM request failed:', response.status, errorText);
@@ -4992,12 +5145,13 @@ VARIETY RULES:
         async function generateGridpageLLMOptionsWithExclusion(prompt, count, excludedOptionsText) {
             const optionsCount = count || LLMOptions;
             console.log('generateGridpageLLMOptionsWithExclusion called with prompt:', prompt, 'count:', optionsCount, 'excluding:', excludedOptionsText);
+
+            if (optionsCount <= 0) {
+                console.warn('Skipping phrase exclusion generation because optionsCount <= 0.');
+                return [];
+            }
             
             try {
-                const summaryInstruction = SummaryOff
-                    ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
-                    : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
-                
                 const enhancedPrompt = `For the request "${prompt}", provide ${optionsCount} new complete communication phrases.
                 IMPORTANTLY, exclude the following options if possible: "${excludedOptionsText}".
                 
@@ -5007,11 +5161,10 @@ VARIETY RULES:
                 - Use first person perspective as if the user is speaking
                 - Make each option distinct and useful for communication
                 - Focus on natural, conversational language
-                
-                Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-                ${summaryInstruction}
-                The "keywords" key should contain 3-5 words that match available symbols.
-                Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]`;
+
+                Return ONLY a valid JSON array of strings with exactly ${optionsCount} items.
+                Do not return objects, keys, markdown, or commentary.
+                Example: ["I am really enjoying this.", "Would you like to talk more about it?"]`;
                 
                 console.log('Sending exclusion request to /llm endpoint with enhanced prompt:', enhancedPrompt);
                 
@@ -5020,12 +5173,15 @@ VARIETY RULES:
                     prompt: enhancedPrompt,
                     response_format: 'json'
                 };
-                
+
+                const llmRequestStartMs = performance.now();
                 const response = await authenticatedFetch('/llm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestBody)
                 });
+
+                logTapLlmDiagnostics(response, 'generate-phrases-exclusion', llmRequestStartMs, enhancedPrompt.length, optionsCount);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -5033,13 +5189,123 @@ VARIETY RULES:
                 
                 const data = await response.json();
                 console.log('LLM exclusion response:', data);
-                
-                return Array.isArray(data) ? data : [];
+
+                return normalizeTapPhraseResponse(data).slice(0, optionsCount);
                 
             } catch (error) {
                 console.error('Error in generateGridpageLLMOptionsWithExclusion:', error);
                 return [];
             }
+        }
+
+        function normalizeTapPhraseResponse(data) {
+            const candidates = Array.isArray(data)
+                ? data
+                : (Array.isArray(data?.options)
+                    ? data.options
+                    : (Array.isArray(data?.phrases)
+                        ? data.phrases
+                        : (Array.isArray(data?.results) ? data.results : [])));
+
+            const normalized = [];
+            const seen = new Set();
+
+            candidates.forEach((item) => {
+                if (item === null || item === undefined) {
+                    return;
+                }
+
+                const rawText = (typeof item === 'string')
+                    ? item
+                    : (item.option || item.text || item.summary || '');
+                const text = cleanNumberedListItem(String(rawText || '').trim());
+                if (!text) {
+                    return;
+                }
+
+                const key = text.toLowerCase();
+                if (seen.has(key)) {
+                    return;
+                }
+                seen.add(key);
+
+                if (typeof item === 'object' && item.option && item.summary) {
+                    normalized.push({
+                        option: cleanNumberedListItem(String(item.option).trim()),
+                        summary: cleanNumberedListItem(String(item.summary).trim()),
+                        keywords: Array.isArray(item.keywords) ? item.keywords : []
+                    });
+                } else {
+                    normalized.push(text);
+                }
+            });
+
+            return normalized;
+        }
+
+        function logTapCategoryWordsDiagnostics(response, source, requestStartMs = null, requestKey = null) {
+            try {
+                const serverTiming = response?.headers?.get('X-LLM-Timing') || 'unknown';
+                const serverProfile = response?.headers?.get('X-LLM-Profile') || 'unknown';
+                const serverCache = response?.headers?.get('X-LLM-Cache') || 'unknown';
+                const clientElapsed = typeof requestStartMs === 'number'
+                    ? Math.round(performance.now() - requestStartMs)
+                    : null;
+
+                console.log('🧪 TAP category-words diagnostics:', {
+                    source,
+                    requestKey,
+                    status: response?.status,
+                    timing: serverTiming,
+                    profile: serverProfile,
+                    cache: serverCache,
+                    clientElapsedMs: clientElapsed,
+                });
+            } catch (diagnosticError) {
+                console.warn('Failed to log TAP category-words diagnostics:', diagnosticError);
+            }
+        }
+
+        function buildTapFallbackPhrases(categoryLabel, wordsOptions = [], count = null) {
+            const desiredCount = Math.max(1, count || LLMOptions || 10);
+            const safeCategory = String(categoryLabel || 'this').trim() || 'this';
+            const candidateWords = Array.isArray(wordsOptions)
+                ? wordsOptions
+                    .map((item) => {
+                        if (typeof item === 'string') return item;
+                        return item?.text || item?.option || '';
+                    })
+                    .map(text => String(text || '').trim())
+                    .filter(Boolean)
+                : [];
+
+            const seedWord = candidateWords[0] || 'that';
+            const secondSeedWord = candidateWords[1] || 'it';
+
+            const templates = [
+                `I want to talk about ${safeCategory}.`,
+                `Can you help me with ${safeCategory}?`,
+                `I need more information about ${safeCategory}.`,
+                `Let's focus on ${safeCategory}.`,
+                `I would like ${seedWord}.`,
+                `Can we try ${seedWord} now?`,
+                `I need ${secondSeedWord}.`,
+                'Please show me more options.',
+                `I have something to say about ${safeCategory}.`,
+                'Can we do this together?'
+            ];
+
+            const unique = [];
+            const seen = new Set();
+            templates.forEach((phrase) => {
+                const normalized = phrase.toLowerCase();
+                if (!seen.has(normalized)) {
+                    seen.add(normalized);
+                    unique.push(phrase);
+                }
+            });
+
+            return unique.slice(0, desiredCount);
         }
         
         // Generate freestyle-style single words using category-specific endpoint
@@ -5439,12 +5705,15 @@ VARIETY RULES:
                                 prompt: followUpPrompt,
                                 response_format: 'json'
                             };
-                            
+
+                            const llmRequestStartMs = performance.now();
                             const response = await authenticatedFetch('/llm', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(requestBody)
                             });
+
+                            logTapLlmDiagnostics(response, 'tap-phrase-followup', llmRequestStartMs, followUpPrompt.length, LLMOptions);
                             
                             if (!response.ok) {
                                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -5588,7 +5857,14 @@ VARIETY RULES:
                     console.log('Using category-specific words for:', categoryOrPath);
                     // categoryOrPath may be an object or a string full path
                     const categoryPath = (typeof categoryOrPath === 'string') ? categoryOrPath : (categoryOrPath.label || '');
-                    const options = await generateFreestyleOptionsForCategory(categoryPath, FreestyleWordOptions, wordsPrompt, instructionPrompt);
+                    // Inherit AI board flag from currentCategory so subcategories respect the parent board type
+                    const resolvedParentBoardType = String(
+                        currentCategory?.board_type
+                        || (currentCategory?.board_id && boardsById[String(currentCategory.board_id)]?.board_type)
+                        || ''
+                    ).toLowerCase();
+                    const isAiBoard = resolvedParentBoardType === 'ai';
+                    const options = await generateFreestyleOptionsForCategory(categoryPath, FreestyleWordOptions, wordsPrompt, instructionPrompt, isAiBoard);
                     renderFreestyleOptions(options, true); // Defer images for batch loading
                     setTimeout(() => loadImagesForWords(options), 50);
                     return;
@@ -5605,16 +5881,39 @@ VARIETY RULES:
 
         // Use the category-specific endpoint to get words for a category path. This should be called
         // only on the initial category selection to get category-focused single words.
-        async function generateFreestyleOptionsForCategory(categoryFullPath, count = 29, wordsPrompt = null, instructionPrompt = null) {
-            console.log('generateFreestyleOptionsForCategory called with path:', categoryFullPath, 'count:', count, 'wordsPrompt:', wordsPrompt, 'instructionPrompt:', instructionPrompt);
+        async function generateFreestyleOptionsForCategory(categoryFullPath, count = 29, wordsPrompt = null, instructionPrompt = null, isAiBoard = false) {
+            console.log('generateFreestyleOptionsForCategory called with path:', categoryFullPath, 'count:', count, 'wordsPrompt:', wordsPrompt, 'instructionPrompt:', instructionPrompt, 'isAiBoard:', isAiBoard);
             
             try {
+                const desiredCount = Math.max(1, Number(count) || FreestyleWordOptions || 29);
+                const phraseSectionEnabled = LLMOptions > 0;
                 // Get current mood for context
                 const currentMood = getCurrentMood ? getCurrentMood() : null;
                 console.log('Current mood for context:', currentMood);
 
                 // Prepare build space content
                 let buildSpaceContent = buildSpace.value || "";
+
+                // Check cache — use category path + build space as cache key
+                // Only cache when build space is empty (category-level browsing, not mid-sentence)
+                const cacheKey = `${categoryFullPath}::${count}::${wordsPrompt || ''}::${instructionPrompt || ''}::${currentMood || ''}`;
+                if (!buildSpaceContent && categoryWordsCache[cacheKey]) {
+                    const cachedWords = categoryWordsCache[cacheKey];
+                    if (Array.isArray(cachedWords) && cachedWords.length >= desiredCount) {
+                        console.log('⚡ Category words cache hit for:', categoryFullPath);
+                        return cachedWords;
+                    }
+
+                    if (Array.isArray(cachedWords) && cachedWords.length > 0) {
+                        console.warn('⚠️ Category words cache hit was underfilled; topping up fallback words for:', categoryFullPath);
+                        const toppedUp = normalizeStarterWordOptions([
+                            ...cachedWords,
+                            ...getCategoryFallbackWords(categoryFullPath, desiredCount * 2)
+                        ]).slice(0, desiredCount);
+                        categoryWordsCache[cacheKey] = toppedUp;
+                        return toppedUp;
+                    }
+                }
                 
                 // NOTE: Words Prompt logic removed as per user request (it wasn't working as expected).
                 // We keep the variable passed in case we want to re-enable it later.
@@ -5629,39 +5928,94 @@ VARIETY RULES:
                 }
                 */
 
-                // IMPORTANT: Use instructionPrompt (from Phrase Prompt) as the custom_prompt if available
-                // Use wordsPrompt as context (appended to build space), NOT as the instruction
+                // Keep words LLM-backed by default, even when phrase options are disabled.
+                // Prefer explicit wordsPrompt, then fallback to instructionPrompt.
+                const isHomeCategory = String(categoryFullPath || '').trim().toLowerCase() === 'home';
+                const effectiveCustomPrompt = wordsPrompt
+                    || instructionPrompt
+                    || ((isHomeCategory && isAiBoard) ? getDefaultHomeStarterPrompt(desiredCount) : null);
+
+                if (isHomeCategory && isAiBoard && !wordsPrompt && !instructionPrompt) {
+                    console.log('Home category detected with no custom prompt; applying default home starter prompt');
+                }
+
+                // Optional local switch for emergency low-latency mode; keep false by default
+                // so category words continue to come from LLM-guided generation.
+                const forceFastGenericWords = false;
+
+                // AI boards always use LLM — never allow the generic-fast static fallback.
+                const preferGenericFast = !isAiBoard && forceFastGenericWords && !phraseSectionEnabled && !effectiveCustomPrompt;
+
                 const requestBody = {
                     category: categoryFullPath,
+                    max_options: desiredCount,
                     build_space_content: buildSpaceContent,
                     exclude_words: [],
                     current_mood: currentMood,
-                    custom_prompt: instructionPrompt || null  // Use instructionPrompt for server priority
+                    custom_prompt: effectiveCustomPrompt,
+                    prefer_generic_fast: preferGenericFast
                 };
+                const requestKey = JSON.stringify(requestBody);
+                const existingRequest = tapCategoryWordsInFlight.get(requestKey);
+                if (existingRequest) {
+                    console.log('♻️ Reusing in-flight category-words request for:', categoryFullPath);
+                    return await existingRequest;
+                }
                 
-                console.log('Sending request to category-words:', requestBody);
+                const requestPromise = (async () => {
+                    console.log('Sending request to category-words:', requestBody);
 
-                const response = await authenticatedFetch('/api/freestyle/category-words', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestBody)
-                });
+                    const requestStartMs = performance.now();
+                    const response = await authenticatedFetch('/api/freestyle/category-words', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
 
-                console.log('Category-words API response status:', response.status);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('Category-words API response data:', data);
-                    // Response format: {words: [{text: "word", keywords: []}]}
-                    return data.words || [];
-                } else {
+                    logTapCategoryWordsDiagnostics(response, 'generate-category-words', requestStartMs, requestKey.slice(0, 80));
+                    console.log('Category-words API response status:', response.status);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('Category-words API response data:', data);
+                        // Response format: {words: [{text: "word", keywords: []}]}
+                        let words = data.words || [];
+                        if (!Array.isArray(words) || words.length === 0) {
+                            console.warn('Category-words returned no options, using category fallback words');
+                            words = getCategoryFallbackWords(categoryFullPath, desiredCount);
+                            console.log('Category words fallback branch executed, count =', words.length, 'category =', categoryFullPath);
+                        } else if (words.length < desiredCount) {
+                            console.warn('Category-words returned underfilled options; topping up with category fallback words');
+                            words = normalizeStarterWordOptions([
+                                ...words,
+                                ...getCategoryFallbackWords(categoryFullPath, desiredCount * 2)
+                            ]).slice(0, desiredCount);
+                            console.log('Category words underfill top-up executed, count =', words.length, 'category =', categoryFullPath);
+                        }
+                        // Cache when build space was empty (pure category browsing)
+                        if (!buildSpaceContent && words.length > 0) {
+                            categoryWordsCache[cacheKey] = words;
+                            console.log('⚡ Category words cached for:', categoryFullPath);
+                        }
+                        return words;
+                    }
+
                     const errorText = await response.text();
                     console.error('Category-words API failed:', response.status, errorText);
                     throw new Error(`Failed to generate category freestyle options: ${response.status} ${errorText}`);
+                })();
+
+                tapCategoryWordsInFlight.set(requestKey, requestPromise);
+                try {
+                    return await requestPromise;
+                } finally {
+                    tapCategoryWordsInFlight.delete(requestKey);
                 }
             } catch (error) {
                 console.error('Error generating freestyle options for category:', error);
-                return [];
+                const fallbackWords = getCategoryFallbackWords(categoryFullPath, Math.max(1, Number(count) || FreestyleWordOptions || 29));
+                console.log('Category words exception fallback executed, count =', fallbackWords.length, 'category =', categoryFullPath);
+                return fallbackWords;
             }
         }
 

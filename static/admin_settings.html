@@ -606,6 +606,10 @@
                     <input type="checkbox" id="waitForSwitchToScan" name="waitForSwitchToScan" class="mr-2 w-5 h-5">
                     <label for="waitForSwitchToScan" class="text-lg font-medium text-gray-700">Wait For Switch to Start Scanning</label>
                 </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="playWaitForSwitchChime" name="playWaitForSwitchChime" class="mr-2 w-5 h-5">
+                    <label for="playWaitForSwitchChime" class="text-lg font-medium text-gray-700">Page Ready Chime</label>
+                </div>
             </div>
         </div>
 
@@ -1038,6 +1042,7 @@
                                         <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
                                         <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
                                         <p><strong>Wait For Switch to Start Scanning:</strong> When enabled, scanning will not begin automatically. User must press their switch to start scanning on initial page load. After first press, scanning continues normally.</p>
+                                        <p><strong>Page Ready Chime:</strong> When enabled, a chime will play after a page has been loaded and is waiting for the switch to begin scanning.</p>
                                         <div class="bg-orange-50 border-l-4 border-orange-500 p-3 rounded">
                                             <p class="text-xs text-gray-700"><strong>💡 Tip:</strong> Start with slower scan speeds and gradually increase as the user becomes more comfortable with the interface.</p>
                                         </div>
@@ -1599,6 +1604,24 @@
                 },
                 cleanup: function() {
                     const checkbox = document.getElementById('waitForSwitchToScan');
+                    const container = checkbox?.closest('.flex.items-center');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Page Ready Chime',
+                content: 'When enabled, a chime will play after a page has been loaded and is waiting for the switch to begin scanning.',
+                highlight: '#playWaitForSwitchChime',
+                action: function() {
+                    const checkbox = document.getElementById('playWaitForSwitchChime');
+                    const container = checkbox?.closest('.flex.items-center');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('playWaitForSwitchChime');
                     const container = checkbox?.closest('.flex.items-center');
                     if (container) container.classList.remove('guide-highlight-target');
                 }

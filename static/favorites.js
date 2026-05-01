@@ -30,10 +30,13 @@ let ScanningOff = false; // Default scanning state
 let scanMode = 'auto'; // auto | step
 let gridColumns = 10; // Default number of grid columns for button sizing
 let waitForSwitchToScan = false; // Wait for switch before scanning starts
+let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
 let gamepadIndex = null; // Connected gamepad index
 let gamepadPollInterval = null; // requestAnimationFrame handle for gamepad polling
 let suppressSwitchActivationUntil = 0; // Prevent initial switch press from also selecting first button
 const FAVORITES_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_favorites';
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 
 // Speech recognition variables (from gridpage.js)
 let recognition = null;
@@ -217,6 +220,7 @@ async function loadUserSettings() {
 
             scanMode = userSettings && userSettings.scanMode === 'step' ? 'step' : 'auto';
             waitForSwitchToScan = userSettings && userSettings.waitForSwitchToScan === true;
+            playWaitForSwitchChime = userSettings && userSettings.playWaitForSwitchChime === true;
             
             // Load scan loop limit
             if (userSettings && typeof userSettings.scanLoopLimit === 'number' && !isNaN(userSettings.scanLoopLimit)) {
@@ -242,6 +246,27 @@ async function loadUserSettings() {
             scanLoopLimit: 0 
         };
         waitForSwitchToScan = false;
+        playWaitForSwitchChime = false;
+    }
+}
+
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+        return;
+    }
+
+    hasPlayedWaitForSwitchChime = true;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Favorites page-ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize favorites page-ready chime audio:', error);
     }
 }
 
@@ -379,6 +404,7 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
     if (waitForSwitchToScan) {
         window.waitingForInitialSwitch = true;
         console.log(`✋ Waiting for switch press before scanning (${source}).`);
+        playPageReadyChimeIfEnabled();
 
         const hasShownPrompt = sessionStorage.getItem(FAVORITES_SWITCH_PROMPT_SHOWN_KEY) === 'true';
         if (allowPrompt && !hasShownPrompt) {
