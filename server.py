@@ -160,6 +160,15 @@ oauth2_scheme = HTTPBearer()
 # Mood update tracking to prevent race conditions
 mood_update_timestamps = {}  # Format: {account_id/aac_user_id: timestamp}
 
+# Short-lived in-memory cache for repeated /llm option requests.
+# This smooths interactive UX when users trigger the same button/prompt repeatedly.
+LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS = 180
+llm_quick_response_cache: Dict[str, Dict[str, Any]] = {}
+
+# Short-lived in-memory cache for repeated category-words requests.
+CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS = 180
+category_words_quick_response_cache: Dict[str, Dict[str, Any]] = {}
+
 # Redis cache client (initialized in lifespan)
 redis_client = None
 
@@ -1559,8 +1568,10 @@ SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embedding
 
 # LLM Model Configuration - Environment Variables
 # Gemini Models
-GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-1.5-flash-latest")
+GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-2.0-flash")
 GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-1.5-flash-latest")
+# Fast lightweight model for low-latency word list generation (category-words endpoint)
+GEMINI_FAST_WORDS_MODEL = os.environ.get("GEMINI_FAST_WORDS_MODEL", "gemini-2.0-flash-lite")
 
 # ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
 # GPT-4o/4o-mini use: max_tokens, adjustable temperature
@@ -2050,6 +2061,72 @@ def _build_option_search_text(item: Any) -> str:
     return " ".join(parts)
 
 
+def _derive_llm_option_summary(option_text: str, summary: Optional[str] = None) -> str:
+    summary_text = re.sub(r"\s+", " ", str(summary or "").strip())
+    if not summary_text:
+        summary_text = re.sub(r"[.!?]+$", "", option_text.strip())
+
+    words = [word for word in summary_text.split() if word]
+    if len(words) <= 5:
+        return " ".join(words)
+    return " ".join(words[:5])
+
+
+def _derive_llm_option_keywords(
+    option_text: str,
+    summary_text: str,
+    existing_keywords: Optional[Any] = None,
+) -> List[str]:
+    if isinstance(existing_keywords, list):
+        normalized_keywords: List[str] = []
+        seen_keywords: set[str] = set()
+        for keyword in existing_keywords:
+            keyword_text = re.sub(r"\s+", " ", str(keyword or "").strip().lower())
+            if not keyword_text or keyword_text in seen_keywords:
+                continue
+            seen_keywords.add(keyword_text)
+            normalized_keywords.append(keyword_text)
+            if len(normalized_keywords) >= 5:
+                return normalized_keywords
+
+    token_source = f"{summary_text} {option_text}".lower()
+    candidate_tokens = re.findall(r"[a-z0-9']+", token_source)
+    stop_words = {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "i", "if",
+        "in", "is", "it", "me", "my", "of", "on", "or", "so", "that", "the", "this", "to",
+        "up", "we", "with", "you", "your"
+    }
+
+    derived_keywords: List[str] = []
+    seen_tokens: set[str] = set()
+    for token in candidate_tokens:
+        if len(token) < 3 or token in stop_words or token in seen_tokens:
+            continue
+        seen_tokens.add(token)
+        derived_keywords.append(token)
+        if len(derived_keywords) >= 5:
+            break
+
+    return derived_keywords
+
+
+def _normalize_llm_option_item(item: Any) -> Optional[Dict[str, Any]]:
+    option_text = re.sub(r"\s+", " ", _extract_option_text(item).strip())
+    if not option_text:
+        return None
+
+    provided_summary = item.get("summary") if isinstance(item, dict) else None
+    provided_keywords = item.get("keywords") if isinstance(item, dict) else None
+    summary_text = _derive_llm_option_summary(option_text, provided_summary)
+    keyword_list = _derive_llm_option_keywords(option_text, summary_text, provided_keywords)
+
+    return {
+        "option": option_text,
+        "summary": summary_text or option_text,
+        "keywords": keyword_list,
+    }
+
+
 def _contains_any_pattern(text: str, patterns: List[str]) -> bool:
     if not text:
         return False
@@ -2523,12 +2600,15 @@ class GeminiCacheManager:
         self.db = firestore.Client()
         
         self.ttl_seconds = ttl_hours * 3600
+        self.local_validation_ttl_seconds = 60
+        self._validated_cache_refs: Dict[str, Dict[str, Any]] = {}
         logging.info(f"✅ Cache Manager initialized with Firestore persistence and {ttl_hours}-hour TTL.")
 
     def _get_user_key(self, account_id: str, aac_user_id: str) -> str:
         """Generates a unique key for a user to manage their cache."""
         # Versioned to invalidate stale cached base context after diary context moved to DELTA.
-        return f"v2_{account_id}_{aac_user_id}"
+        # v3: model upgraded from gemini-1.5-flash-latest to gemini-2.0-flash (caches are model-specific)
+        return f"v3_{account_id}_{aac_user_id}"
     
     async def _load_cache_from_firestore(self, user_key: str) -> Optional[Dict]:
         """Load cache info from Firestore."""
@@ -2543,8 +2623,15 @@ class GeminiCacheManager:
             logging.error(f"Error loading cache from Firestore for {user_key}: {e}")
             return None
     
-    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float, message_count: int = 0):
-        """Save cache info to Firestore with message count for drift tracking."""
+    async def _save_cache_to_firestore(
+        self,
+        user_key: str,
+        cache_name: str,
+        created_at: float,
+        message_count: int = 0,
+        chat_history_cached: bool = True,
+    ):
+        """Save cache info to Firestore with enough metadata to decide if drift checks apply."""
         try:
             expires_at = created_at + self.ttl_seconds
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
@@ -2557,10 +2644,19 @@ class GeminiCacheManager:
                     "created_at": created_at,
                     "expires_at": expires_at,
                     "ttl_seconds": self.ttl_seconds,
-                    "message_count": message_count  # Track messages in cache for drift detection
+                    "message_count": message_count,
+                    "chat_history_cached": bool(chat_history_cached),
                 }
             )
-            logging.info(f"💾 Saved cache reference to Firestore: {user_key} -> {cache_name} ({message_count} messages)")
+            logging.info(
+                f"💾 Saved cache reference to Firestore: {user_key} -> {cache_name} "
+                f"({message_count} messages, chat_history_cached={bool(chat_history_cached)})"
+            )
+            self._validated_cache_refs[user_key] = {
+                "cache_name": cache_name,
+                "expires_at": expires_at,
+                "validated_at": dt.now().timestamp(),
+            }
         except Exception as e:
             logging.error(f"Error saving cache to Firestore for {user_key}: {e}")
     
@@ -2569,12 +2665,25 @@ class GeminiCacheManager:
         try:
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
             await asyncio.to_thread(doc_ref.delete)
+            self._validated_cache_refs.pop(user_key, None)
             logging.info(f"Deleted cache reference from Firestore: {user_key}")
         except Exception as e:
             logging.error(f"Error deleting cache from Firestore for {user_key}: {e}")
 
     async def _is_cache_valid(self, user_key: str) -> bool:
         """Checks if a user's cache exists in Firestore and is within its TTL."""
+        now_ts = dt.now().timestamp()
+        local_cache_ref = self._validated_cache_refs.get(user_key)
+        if local_cache_ref:
+            if (
+                local_cache_ref.get('cache_name')
+                and local_cache_ref.get('expires_at', 0) > now_ts
+                and (now_ts - local_cache_ref.get('validated_at', 0)) <= self.local_validation_ttl_seconds
+            ):
+                return True
+            if local_cache_ref.get('expires_at', 0) <= now_ts:
+                self._validated_cache_refs.pop(user_key, None)
+
         print(f"DEBUG: _is_cache_valid called for {user_key}", flush=True)
         cache_data = await self._load_cache_from_firestore(user_key)
         print(f"DEBUG: cache_data from Firestore: {cache_data}", flush=True)
@@ -2598,6 +2707,11 @@ class GeminiCacheManager:
             try:
                 # Verify the cache still exists in Gemini API
                 await asyncio.to_thread(caching.CachedContent.get, cache_name)
+                self._validated_cache_refs[user_key] = {
+                    "cache_name": cache_name,
+                    "expires_at": cache_data.get('expires_at', now_ts + self.ttl_seconds),
+                    "validated_at": now_ts,
+                }
                 logging.info(f"Cache for '{user_key}' is valid: {cache_name}")
                 return True
             except Exception as e:
@@ -2752,7 +2866,17 @@ Analyze the provided context to create helpful, personalized suggestions."""
         logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
         return base_string
     
-    async def _build_delta_context(self, account_id: str, aac_user_id: str, query_hint: str = "", compose_mode: bool = False, compose_body: str = "") -> str:
+    async def _build_delta_context(
+        self,
+        account_id: str,
+        aac_user_id: str,
+        query_hint: str = "",
+        compose_mode: bool = False,
+        compose_body: str = "",
+        prefetched_user_info: Optional[Dict[str, Any]] = None,
+        prefetched_settings: Optional[Dict[str, Any]] = None,
+        include_rich_context: bool = True,
+    ) -> str:
         """
         Builds the DELTA context - dynamic data that changes frequently.
         This is passed as standard input text with each request (NOT cached).
@@ -2766,20 +2890,26 @@ Analyze the provided context to create helpful, personalized suggestions."""
         """
         logging.info(f"⚡ Building DELTA context (dynamic data) for {account_id}/{aac_user_id}...")
         
+        query_hint_lower = str(query_hint or "").lower()
+
         # Fetch dynamic data
         # NOTE: chat_history uses recent messages (CHAT_HISTORY_ACTIVE_DAYS) to match BASE context
         # NOTE: pages moved to BASE cache (they rarely change, but are huge)
         tasks = {
-            "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
-            "settings": load_settings_from_file(account_id, aac_user_id),
-            "birthdays": load_birthdays_from_file(account_id, aac_user_id),
-            "friends_family": load_friends_family_from_file(account_id, aac_user_id),
-            "diary": load_diary_entries(account_id, aac_user_id),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
         }
+        if include_rich_context:
+            tasks["birthdays"] = load_birthdays_from_file(account_id, aac_user_id)
+            tasks["friends_family"] = load_friends_family_from_file(account_id, aac_user_id)
+            tasks["diary"] = load_diary_entries(account_id, aac_user_id)
         results = await asyncio.gather(*tasks.values())
         context_data = dict(zip(tasks.keys(), results))
+        context_data["user_info"] = prefetched_user_info if isinstance(prefetched_user_info, dict) else DEFAULT_USER_INFO
+        context_data["settings"] = prefetched_settings if isinstance(prefetched_settings, dict) else {}
+        context_data.setdefault("birthdays", {})
+        context_data.setdefault("friends_family", {})
+        context_data.setdefault("diary", [])
         
         delta_parts = ["=== DYNAMIC CONTEXT (Current Session Data) ==="]
         
@@ -2853,12 +2983,14 @@ Analyze the provided context to create helpful, personalized suggestions."""
 
                 if topic_title or focus_chapters or discussion_narrative:
                     discussion_lines = [
-                        "📚 BOOK/DISCUSSION CONTEXT (HIGH PRIORITY FOR TOPIC OPTIONS)",
+                        "📚 BOOK/DISCUSSION CONTEXT (SUPPLEMENTAL)",
                         f"Topic Title: {topic_title or 'Not provided'}",
                         f"Focus Chapters: {focus_chapters or 'Not provided'}",
                         f"Discussion Narrative: {discussion_narrative or 'Not provided'}",
-                        "⚠️ Use the discussion narrative as authoritative context for discussion options.",
-                        "⚠️ If chapter range is provided, avoid introducing events beyond that range."
+                        "Use this context at the SAME PRIORITY as Location, People Present, and Activity.",
+                        "Only apply this context when the request is clearly about the current topic/book/discussion.",
+                        "If the request is general, do not force topic-specific options.",
+                        "If chapter range is provided and topic context is used, avoid introducing events beyond that range."
                     ]
                     delta_parts.append("\n" + "\n".join(discussion_lines) + "\n")
             else:
@@ -2889,14 +3021,12 @@ Analyze the provided context to create helpful, personalized suggestions."""
             max_items=20,
         )
 
-        query_hint_lower = str(query_hint or "").lower()
-
         delta_parts.append(
             f"\n--- TODAY'S DATE (CRITICAL FOR DIARY CONTEXT) ---\n{current_date_str}\n"
             "⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events.\n"
         )
 
-        if context_data["diary"]:
+        if include_rich_context and context_data["diary"]:
             def parse_diary_date(entry: Dict) -> Optional[date]:
                 if not isinstance(entry, dict):
                     return None
@@ -3023,7 +3153,7 @@ Undated Diary Entries (use cautiously, max 5):
             "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
             "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
         ]
-        if any(keyword in query_hint_lower for keyword in celebration_keywords):
+        if include_rich_context and any(keyword in query_hint_lower for keyword in celebration_keywords):
             celebrations_context += (
                 "\n⚠️ HIGH PRIORITY FOR THIS REQUEST: The prompt indicates greetings/plans/celebrations. "
                 "Prefer options that reference relevant upcoming birthdays/holidays naturally and in first person."
@@ -3035,10 +3165,32 @@ Undated Diary Entries (use cautiously, max 5):
 
         delta_parts.append("\n🎉 " + celebrations_context + "\n")
         
-        # CHAT HISTORY: Now ALL recent messages go in DELTA (not cached)
+        # CHAT HISTORY: rich mode keeps full recent history, fast mode keeps a compact tail.
         # This significantly reduces cache size/cost since messages change frequently
         if context_data["chat_history"]:
             recent_messages = context_data["chat_history"]
+
+            if not include_rich_context:
+                compact_messages: List[Dict[str, Any]] = []
+                for msg in recent_messages[-8:]:
+                    if not isinstance(msg, dict):
+                        continue
+                    compact_messages.append({
+                        "question": str(msg.get("question", ""))[:120],
+                        "response": str(msg.get("response", ""))[:180],
+                        "timestamp": msg.get("timestamp"),
+                    })
+                delta_parts.append(
+                    f"\n💬 RECENT CHAT SNAPSHOT (FAST MODE, last {len(compact_messages)} messages):\n"
+                    f"{json.dumps(compact_messages, indent=2)}\n"
+                )
+                delta_string = "\n".join(delta_parts)
+                logging.warning(
+                    f"✅ DELTA context (FAST) for {account_id}/{aac_user_id} is {len(delta_string)} chars "
+                    f"(~{len(delta_string)//4} tokens)"
+                )
+                logging.warning(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
+                return delta_string
             
             # Extract jokes from recent messages for explicit repetition avoidance
             recent_jokes = []
@@ -3092,7 +3244,7 @@ Undated Diary Entries (use cautiously, max 5):
             # Gemini cached content rejects requests below 2048 total tokens in production.
             # Use a rough 4 chars/token estimate and skip cache creation when we are clearly under.
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 2048
+            min_tokens_required = 1024  # gemini-2.0-flash supports caching at 1024+ tokens
             
             logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
@@ -3117,7 +3269,13 @@ Undated Diary Entries (use cautiously, max 5):
             )
 
             # Save to Firestore (no message count since we don't cache chat anymore)
-            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count=0)
+            await self._save_cache_to_firestore(
+                user_key,
+                cached_content.name,
+                created_at,
+                message_count=0,
+                chat_history_cached=False,
+            )
             logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
         except Exception as e:
@@ -3222,6 +3380,19 @@ Undated Diary Entries (use cautiously, max 5):
             return {"should_rebuild": True, "reason": "no_cache", "drift": 0}
         
         messages_in_cache = cache_data.get('message_count', 0)
+        chat_history_cached = cache_data.get('chat_history_cached')
+
+        # Chat history is no longer part of the cached BASE context. For those caches,
+        # rebuilding on chat drift only destroys the cache benefit without improving relevance.
+        if chat_history_cached is False or messages_in_cache == 0:
+            return {
+                "should_rebuild": False,
+                "reason": "chat_history_not_cached",
+                "drift": 0,
+                "max_drift": max_drift,
+                "messages_in_cache": messages_in_cache,
+                "current_message_count": None,
+            }
         
         # Get current message count
         chat_history = await load_chat_history(account_id, aac_user_id)
@@ -3326,6 +3497,7 @@ chroma_client_global = None # NEW: Keep a global chroma client for static db if 
 sentence_transformer_model = None # DISABLED - not currently used
 primary_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 fallback_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
+fast_words_llm_model_instance: Optional[genai.GenerativeModel] = None # Lightweight fast model for category word lists
 openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
 tts_client: Optional[google_tts.TextToSpeechClient] = None # Global instance
 firestore_db: Optional[FirestoreClient] = None
@@ -3376,11 +3548,19 @@ else:
         except Exception as e_fallback:
             logging.error(f"Error initializing fallback Gemini model '{DEFAULT_FALLBACK_LLM_MODEL_NAME}': {e_fallback}", exc_info=True)
             fallback_llm_model_instance = None
+
+        try:
+            fast_words_llm_model_instance = genai.GenerativeModel(GEMINI_FAST_WORDS_MODEL)
+            logging.info(f"Fast words Gemini model '{fast_words_llm_model_instance.model_name}' initialized.")
+        except Exception as e_fast:
+            logging.error(f"Error initializing fast words model '{GEMINI_FAST_WORDS_MODEL}': {e_fast}", exc_info=True)
+            fast_words_llm_model_instance = None
     except Exception as e_genai_config: # Catch any error from genai.configure itself
         logging.error(f"Fatal error during Gemini API configuration: {e_genai_config}", exc_info=True)
         # Ensure models are None if configuration fails
         primary_llm_model_instance = None
         fallback_llm_model_instance = None
+        fast_words_llm_model_instance = None
 
 # --- Initialize OpenAI Client ---
 logging.info("Initializing OpenAI client...")
@@ -4354,6 +4534,71 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {e_other_primary}")
 
 
+async def _generate_fast_category_words_content(prompt_text: str, account_id: str = "unknown", aac_user_id: str = "unknown") -> str:
+    global fast_words_llm_model_instance, primary_llm_model_instance
+
+    if not prompt_text or not prompt_text.strip():
+        logging.error("Empty or whitespace-only prompt provided to fast category-words Gemini path")
+        raise HTTPException(status_code=400, detail="Empty prompt provided to LLM")
+
+    model_instance = fast_words_llm_model_instance or primary_llm_model_instance
+    if not model_instance:
+        logging.warning("Fast category-words model unavailable; falling back to standard Gemini path")
+        return await _generate_gemini_content_with_fallback(prompt_text, None, account_id, aac_user_id)
+
+    generation_config = {
+        "temperature": 0.2,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_output_tokens": 220,
+    }
+
+    start_time = time.perf_counter()
+    logging.info(
+        f"Attempting fast category-words generation with model: {model_instance.model_name} "
+        f"for {account_id}/{aac_user_id}"
+    )
+    logging.info(f"Fast category-words prompt length: {len(prompt_text)} characters")
+
+    try:
+        response = await _execute_gemini_call_with_retry(
+            lambda: model_instance.generate_content(prompt_text, generation_config=generation_config),
+            operation_label=f"gemini_fast_category_words:{model_instance.model_name}",
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            max_attempts=3,
+            base_delay_seconds=0.25,
+            max_delay_seconds=2.0,
+        )
+
+        response_text = ""
+        if hasattr(response, 'text') and response.text:
+            response_text = response.text.strip()
+        elif hasattr(response, 'parts') and isinstance(response.parts, list) and response.parts:
+            response_text = "".join(part.text for part in response.parts if hasattr(part, 'text')).strip()
+
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000)
+        logging.info(
+            f"Fast category-words Gemini completed in {elapsed_ms}ms using {model_instance.model_name} "
+            f"for {account_id}/{aac_user_id}"
+        )
+
+        if hasattr(response, 'usage_metadata'):
+            log_token_usage(response, "FAST_CATEGORY_WORDS", account_id, aac_user_id)
+
+        if response_text:
+            return response_text
+
+        logging.warning("Fast category-words Gemini returned empty response; falling back to standard Gemini path")
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
+    except Exception as fast_error:
+        logging.warning(
+            f"Fast category-words Gemini path failed for {account_id}/{aac_user_id}: {fast_error}. "
+            f"Falling back to standard Gemini path."
+        )
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
+
+
 @app.options("/llm")
 async def options_llm(request: Request):
     print("OPTIONS /llm HEADERS:", dict(request.headers))
@@ -4390,7 +4635,16 @@ async def refresh_user_cache(current_ids: Annotated[Dict[str, str], Depends(get_
     return JSONResponse(content={"message": f"Cache invalidated for user {aac_user_id}."})
 
 
-async def build_full_prompt_for_non_cached_llm(account_id: str, aac_user_id: str, user_query: str, compose_mode: bool = False, compose_body: str = "") -> str:
+async def build_full_prompt_for_non_cached_llm(
+    account_id: str,
+    aac_user_id: str,
+    user_query: str,
+    compose_mode: bool = False,
+    compose_body: str = "",
+    prefetched_user_info: Optional[Dict[str, Any]] = None,
+    prefetched_settings: Optional[Dict[str, Any]] = None,
+    include_rich_delta_context: bool = True,
+) -> str:
     """
     Builds the complete LLM prompt from scratch by fetching all context data.
     This is used as a fallback when a cache is not available.
@@ -4404,7 +4658,16 @@ async def build_full_prompt_for_non_cached_llm(account_id: str, aac_user_id: str
         base_context = await cache_manager._build_base_context(account_id, aac_user_id)
         logging.info(f"✅ Base context built: {len(base_context)} chars")
         
-        delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_query, compose_mode=compose_mode, compose_body=compose_body)
+        delta_context = await cache_manager._build_delta_context(
+            account_id,
+            aac_user_id,
+            user_query,
+            compose_mode=compose_mode,
+            compose_body=compose_body,
+            prefetched_user_info=prefetched_user_info,
+            prefetched_settings=prefetched_settings,
+            include_rich_context=include_rich_delta_context,
+        )
         logging.info(f"✅ Delta context built: {len(delta_context)} chars")
         
         # Combine base + delta (same as cached requests do)
@@ -4559,9 +4822,11 @@ async def get_llm_response_endpoint(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
 ):
     global cache_manager
+    global llm_quick_response_cache
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     user_prompt_content = request_data.prompt
+    request_start_time = time.perf_counter()
 
     # Get user's settings to determine LLM provider and options
     user_settings = await load_settings_from_file(account_id, aac_user_id)
@@ -4576,6 +4841,8 @@ async def get_llm_response_endpoint(
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
     vocabulary_level = user_settings.get("vocabularyLevel", "functional")
+    prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+    logging.info(f"⏱️ /llm prep stage: {prep_elapsed_ms:.1f}ms for {account_id}/{aac_user_id}")
 
     # Check if mood was recently updated and add small delay to prevent race conditions
     global mood_update_timestamps
@@ -4627,17 +4894,37 @@ CREATIVITY BOOSTERS:
 """
         user_prompt_content = randomization_prompt + user_prompt_content
 
-    # Define generation config and add JSON formatting instructions  
-    generation_config = {
-        "response_mime_type": "application/json", 
-        "temperature": 0.9,  # Increased temperature for more creativity
-        "max_output_tokens": 4096  # Ensure enough space for complete JSON responses
-    }
-    
+    requested_options_count = request_data.count if request_data.count and request_data.count > 0 else int(llm_options_value)
+
     # Get vocabulary level instruction
     vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
-    
-    json_format_instructions = f"""
+
+    high_context_keywords = [
+        "diary", "journal", "memory", "remember", "yesterday", "tomorrow", "schedule",
+        "calendar", "birthday", "holiday", "celebrate", "celebration", "anniversary",
+        "what happened", "what did", "plan", "plans", "upcoming", "event",
+    ]
+    include_rich_delta_context = any(keyword in user_prompt_content.lower() for keyword in high_context_keywords)
+    if request_data.compose_mode:
+        include_rich_delta_context = False
+    use_fast_generation_profile = not include_rich_delta_context and not request_data.compose_mode
+
+    if use_fast_generation_profile:
+        estimated_max_output_tokens = min(768, max(320, requested_options_count * 28 + 120))
+        temperature_value = 0.75
+        json_format_instructions = f"""
+{vocab_instruction}
+
+CRITICAL FORMAT: Return ONLY a valid JSON array of strings with exactly {requested_options_count} items. Nothing else.
+Each string element must be a complete, natural-sounding spoken option (e.g., "Hello, how are you?", "I'm having a great day!").
+For jokes, include the punchline in the same string (e.g., "Why did the chicken cross the road? To get to the other side!").
+Do NOT return objects, do NOT include keys like "option", "summary", or "keywords" - the server will handle those automatically.
+No markdown, no code blocks, no commentary. Return ONLY the JSON array.
+Example: ["hello everyone", "good to see you", "what's going on"]"""
+    else:
+        estimated_max_output_tokens = max(768, min(2048, int(llm_options_value) * 140))
+        temperature_value = 0.9
+        json_format_instructions = f"""
 {vocab_instruction}
 
 CRITICAL: Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
@@ -4655,15 +4942,73 @@ IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND p
 - Do not forget commas between array elements
 
 Return ONLY valid JSON - no other text before or after the JSON array."""
+
+    generation_config = {
+        "response_mime_type": "application/json",
+        "temperature": temperature_value,
+        "max_output_tokens": estimated_max_output_tokens,
+    }
+
     ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
     final_user_query = f"{user_prompt_content}\n\n{ai_override_prompt_block}\n\n{json_format_instructions}"
 
+    compose_body_hash = hashlib.sha1((request_data.compose_body or "").encode("utf-8")).hexdigest()[:10]
+    prompt_hash = hashlib.sha1(user_prompt_content.encode("utf-8")).hexdigest()[:16]
+    quick_cache_key = (
+        f"{account_id}|{aac_user_id}|{llm_provider}|{requested_options_count}|"
+        f"{int(include_rich_delta_context)}|{int(request_data.compose_mode)}|{prompt_hash}|{compose_body_hash}"
+    )
+
+    now_ts = time.time()
+    if len(llm_quick_response_cache) > 600:
+        llm_quick_response_cache = {
+            key: value
+            for key, value in llm_quick_response_cache.items()
+            if (now_ts - float(value.get("created_at", 0))) < LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS
+        }
+
+    cached_response_entry = llm_quick_response_cache.get(quick_cache_key)
+    if cached_response_entry and (now_ts - float(cached_response_entry.get("created_at", 0))) < LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS:
+        cached_options = copy.deepcopy(cached_response_entry.get("response", []))
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"⚡ /llm quick-cache HIT for {account_id}/{aac_user_id} key={quick_cache_key[-24:]} "
+            f"in {total_elapsed_ms:.1f}ms"
+        )
+        return JSONResponse(
+            content=cached_options,
+            headers={
+                "X-LLM-Cache": "quick-hit",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+            },
+        )
+
+    logging.info(
+        f"🧠 DELTA CONTEXT PROFILE: {'RICH' if include_rich_delta_context else 'FAST'} "
+        f"for {account_id}/{aac_user_id}"
+    )
+    logging.info(
+        f"⚙️ GENERATION PROFILE: {'FAST' if use_fast_generation_profile else 'RICH'} "
+        f"(max_output_tokens={estimated_max_output_tokens}, temperature={temperature_value}, requested_options={requested_options_count})"
+    )
+
     llm_response_json_str = ""
+    llm_generate_start_time = time.perf_counter()
 
     # --- Route to appropriate LLM ---
     if llm_provider == "chatgpt":
         logging.info(f"Using OpenAI for {account_id}/{aac_user_id}. Building full prompt manually.")
-        full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query, compose_mode=request_data.compose_mode, compose_body=request_data.compose_body)
+        full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(
+            account_id,
+            aac_user_id,
+            final_user_query,
+            compose_mode=request_data.compose_mode,
+            compose_body=request_data.compose_body,
+            prefetched_user_info=user_info_doc,
+            prefetched_settings=user_settings,
+            include_rich_delta_context=include_rich_delta_context,
+        )
         llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
         # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
@@ -4694,7 +5039,16 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         if cached_content_ref:
             try:
                 # Build delta context (dynamic data not in cache)
-                delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content, compose_mode=request_data.compose_mode, compose_body=request_data.compose_body)
+                delta_context = await cache_manager._build_delta_context(
+                    account_id,
+                    aac_user_id,
+                    user_prompt_content,
+                    compose_mode=request_data.compose_mode,
+                    compose_body=request_data.compose_body,
+                    prefetched_user_info=user_info_doc,
+                    prefetched_settings=user_settings,
+                    include_rich_context=include_rich_delta_context,
+                )
                 
                 # Combine delta + user query
                 combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
@@ -4735,7 +5089,16 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 logging.info(f"✅ Successfully generated content using BASE cache + DELTA context for {account_id}/{aac_user_id}.")
             except Exception as e:
                 logging.error(f"Error using cached content for {account_id}/{aac_user_id}: {e}. Falling back.")
-                full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query, compose_mode=request_data.compose_mode, compose_body=request_data.compose_body)
+                full_prompt = await build_full_prompt_for_non_cached_llm(
+                    account_id,
+                    aac_user_id,
+                    final_user_query,
+                    compose_mode=request_data.compose_mode,
+                    compose_body=request_data.compose_body,
+                    prefetched_user_info=user_info_doc,
+                    prefetched_settings=user_settings,
+                    include_rich_delta_context=include_rich_delta_context,
+                )
                 llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
         else:
             logging.warning(f"No valid cache found for {account_id}/{aac_user_id}. Attempting to warm up cache...")
@@ -4749,7 +5112,16 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 if cached_content_ref:
                     # Cache was successfully created, use it with delta context
-                    delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content, compose_mode=request_data.compose_mode, compose_body=request_data.compose_body)
+                    delta_context = await cache_manager._build_delta_context(
+                        account_id,
+                        aac_user_id,
+                        user_prompt_content,
+                        compose_mode=request_data.compose_mode,
+                        compose_body=request_data.compose_body,
+                        prefetched_user_info=user_info_doc,
+                        prefetched_settings=user_settings,
+                        include_rich_context=include_rich_delta_context,
+                    )
                     combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                     
                     logging.info(f"🔍 NEW_CACHE COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
@@ -4788,13 +5160,34 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 else:
                     # Cache creation failed, use full prompt fallback
                     logging.warning(f"Cache creation failed for {account_id}/{aac_user_id}. Using full prompt fallback.")
-                    full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query, compose_mode=request_data.compose_mode, compose_body=request_data.compose_body)
+                    full_prompt = await build_full_prompt_for_non_cached_llm(
+                        account_id,
+                        aac_user_id,
+                        final_user_query,
+                        compose_mode=request_data.compose_mode,
+                        compose_body=request_data.compose_body,
+                        prefetched_user_info=user_info_doc,
+                        prefetched_settings=user_settings,
+                        include_rich_delta_context=include_rich_delta_context,
+                    )
                     llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
                     
             except Exception as warmup_error:
                 logging.error(f"Cache warmup failed for {account_id}/{aac_user_id}: {warmup_error}. Using full prompt fallback.")
-                full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query, compose_mode=request_data.compose_mode, compose_body=request_data.compose_body)
+                full_prompt = await build_full_prompt_for_non_cached_llm(
+                    account_id,
+                    aac_user_id,
+                    final_user_query,
+                    compose_mode=request_data.compose_mode,
+                    compose_body=request_data.compose_body,
+                    prefetched_user_info=user_info_doc,
+                    prefetched_settings=user_settings,
+                    include_rich_delta_context=include_rich_delta_context,
+                )
                 llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
+
+    llm_generate_elapsed_ms = (time.perf_counter() - llm_generate_start_time) * 1000
+    logging.info(f"⏱️ /llm generation stage: {llm_generate_elapsed_ms:.1f}ms for {account_id}/{aac_user_id}")
     
     logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
 
@@ -4902,6 +5295,84 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         
         return json_str
 
+    def salvage_llm_output(*candidate_strings: str) -> Optional[Any]:
+        import ast
+        import re
+
+        for candidate in candidate_strings:
+            if not candidate or not str(candidate).strip():
+                continue
+
+            text = str(candidate).strip()
+            try:
+                parsed_literal = ast.literal_eval(text)
+                if isinstance(parsed_literal, (list, dict)):
+                    logging.warning("Recovered LLM response using ast.literal_eval fallback")
+                    return parsed_literal
+            except Exception:
+                pass
+
+            object_matches = re.finditer(r'\{[^{}]*\}', text, re.DOTALL)
+            recovered_objects: List[Dict[str, Any]] = []
+            for match in object_matches:
+                object_text = match.group(0)
+                option_match = re.search(r'("option"|\'option\')\s*:\s*("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', object_text, re.DOTALL)
+                if not option_match:
+                    continue
+
+                try:
+                    option_text = ast.literal_eval(option_match.group(2))
+                except Exception:
+                    continue
+
+                summary_match = re.search(r'("summary"|\'summary\')\s*:\s*("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', object_text, re.DOTALL)
+                keywords_match = re.search(r'("keywords"|\'keywords\')\s*:\s*(\[[^\]]*\])', object_text, re.DOTALL)
+                summary_text = None
+                keyword_values = None
+
+                if summary_match:
+                    try:
+                        summary_text = ast.literal_eval(summary_match.group(2))
+                    except Exception:
+                        summary_text = None
+
+                if keywords_match:
+                    try:
+                        parsed_keywords = ast.literal_eval(keywords_match.group(2))
+                        if isinstance(parsed_keywords, list):
+                            keyword_values = parsed_keywords
+                    except Exception:
+                        keyword_values = None
+
+                recovered_objects.append({
+                    "option": option_text,
+                    "summary": summary_text,
+                    "keywords": keyword_values,
+                })
+
+            if recovered_objects:
+                logging.warning(f"Recovered {len(recovered_objects)} LLM option objects via regex salvage")
+                return recovered_objects
+
+            string_matches = re.finditer(r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', text, re.DOTALL)
+            recovered_strings: List[str] = []
+            for match in string_matches:
+                token = match.group(0)
+                try:
+                    parsed_token = ast.literal_eval(token)
+                except Exception:
+                    continue
+                if isinstance(parsed_token, str):
+                    cleaned_token = re.sub(r"\s+", " ", parsed_token).strip()
+                    if cleaned_token and cleaned_token not in {"option", "summary", "keywords"}:
+                        recovered_strings.append(cleaned_token)
+
+            if len(recovered_strings) >= 3:
+                logging.warning(f"Recovered {len(recovered_strings)} LLM option strings via regex salvage")
+                return recovered_strings
+
+        return None
+
     try:
         parsed_llm_output = json.loads(clean_json_str)
     except json.JSONDecodeError as first_error:
@@ -4914,19 +5385,24 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             parsed_llm_output = json.loads(repaired_json_str)
             logging.info("✅ JSON repair successful!")
         except json.JSONDecodeError as second_error:
-            # Repair failed, log details and re-raise
-            logging.error(f"JSON repair failed: {second_error}")
-            logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
-            logging.error(f"Repaired JSON (first 2000 chars): {repaired_json_str[:2000]}")
-            logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
-            
-            # Log the specific problematic area around the error
-            if hasattr(second_error, 'pos'):
-                start = max(0, second_error.pos - 200)
-                end = min(len(repaired_json_str), second_error.pos + 200)
-                logging.error(f"Problem area (±200 chars around error): {repaired_json_str[start:end]}")
-            
-            raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
+            salvaged_llm_output = salvage_llm_output(repaired_json_str, clean_json_str, llm_response_json_str)
+            if salvaged_llm_output is not None:
+                parsed_llm_output = salvaged_llm_output
+                logging.warning("Recovered malformed LLM output using salvage fallback after JSON repair failure")
+            else:
+                # Repair failed, log details and re-raise
+                logging.error(f"JSON repair failed: {second_error}")
+                logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
+                logging.error(f"Repaired JSON (first 2000 chars): {repaired_json_str[:2000]}")
+                logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
+                
+                # Log the specific problematic area around the error
+                if hasattr(second_error, 'pos'):
+                    start = max(0, second_error.pos - 200)
+                    end = min(len(repaired_json_str), second_error.pos + 200)
+                    logging.error(f"Problem area (±200 chars around error): {repaired_json_str[start:end]}")
+                
+                raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
     
     # Continue with processing the parsed output
     try:
@@ -4950,10 +5426,21 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             logging.error(f"Logic Error: After processing, extracted LLM options were not a list: {type(extracted_options_list)} - Content: {llm_response_json_str}")
             raise HTTPException(status_code=500, detail="Internal server error: Failed to extract LLM options as a list.")
 
+        normalized_options = []
+        for raw_item in extracted_options_list:
+            normalized_item = _normalize_llm_option_item(raw_item)
+            if normalized_item:
+                normalized_options.append(normalized_item)
+
+        if not normalized_options:
+            logging.error(f"LLM returned no usable option items after normalization: {parsed_llm_output}")
+            raise HTTPException(status_code=500, detail="LLM response did not contain any usable options.")
+
         logging.info(f"📊 1. Extracted options count: {len(extracted_options_list)}")
+        logging.info(f"📊 1b. Normalized options count: {len(normalized_options)}")
         effective_max_options = request_data.count if request_data.count and request_data.count > 0 else llm_options_value
         logging.info(f"📊 Using max_options={effective_max_options} (request.count={request_data.count}, llm_options_value={llm_options_value})")
-        enforced_options = enforce_ai_option_overrides(extracted_options_list, ai_option_overrides, effective_max_options)
+        enforced_options = enforce_ai_option_overrides(normalized_options, ai_option_overrides, effective_max_options)
         logging.info(f"📊 2. After enforce_ai_option_overrides: {len(enforced_options)}")
         
         sentiment_aligned_options = apply_prompt_sentiment_alignment(
@@ -4971,7 +5458,26 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         )
         logging.info(f"📊 4. After apply_inclusion_preference_bias: {len(biased_options)}")
         logging.info(f"📊 5. FINAL OPTIONS BEING RETURNED: {biased_options[:2] if biased_options else 'empty'}")
-        return JSONResponse(content=biased_options)
+
+        llm_quick_response_cache[quick_cache_key] = {
+            "created_at": time.time(),
+            "response": copy.deepcopy(biased_options),
+        }
+
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"⏱️ /llm total: {total_elapsed_ms:.1f}ms "
+            f"(prep={prep_elapsed_ms:.1f}ms, generate={llm_generate_elapsed_ms:.1f}ms) "
+            f"for {account_id}/{aac_user_id}"
+        )
+        return JSONResponse(
+            content=biased_options,
+            headers={
+                "X-LLM-Cache": "quick-miss",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate={llm_generate_elapsed_ms:.1f};total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+            },
+        )
 
     except HTTPException:
         # Re-raise HTTP exceptions as-is
@@ -15139,6 +15645,7 @@ async def cleanup_quotes_endpoint(
 
 class FreestyleCategoryWordsRequest(BaseModel):
     category: str = Field(..., min_length=1, description="Category name for word generation")
+    max_options: Optional[int] = Field(None, description="Override FreestyleOptions for this request", ge=1, le=50)
     build_space_content: Optional[str] = Field("", description="Current build space content for context")
     exclude_words: Optional[List[str]] = Field(default_factory=list, description="Words to exclude from generation")
     current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
@@ -15147,6 +15654,45 @@ class FreestyleCategoryWordsRequest(BaseModel):
     source_page: Optional[str] = Field(None, description="Page name the user navigated from")
     is_llm_generated: bool = Field(default=False, description="Whether the source page was LLM-generated")
     originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
+    prefer_generic_fast: bool = Field(default=False, description="When true and no custom prompt is provided, return fast generic category words without LLM generation")
+
+
+def build_category_fallback_word_objects(
+    category: str,
+    desired_count: int,
+    excluded_words: Optional[set[str]] = None,
+    seen_words: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Build category-aware fallback word objects up to the desired count."""
+    target_count = max(1, int(desired_count or 1))
+    excluded = set(excluded_words or set())
+    seen = set(seen_words or set())
+    category_lower = str(category or "").lower()
+
+    supplemental_words = [
+        "I", "you", "we", "me", "my", "your", "our", "this", "that", "here", "there",
+        "want", "need", "like", "help", "go", "come", "see", "look", "talk", "play", "stop",
+        "more", "all", "some", "none", "yes", "no", "please", "okay", "again", "now", "later",
+        "today", "tomorrow", "good", "bad", "happy", "sad", "big", "small", "fast", "slow",
+        "home", "school", "outside", "inside", "friend", "family", "people", "who", "what", "where", "when", "why", "how"
+    ]
+
+    fallback_candidates = list(get_generic_category_words(category))
+    if any(token in category_lower for token in ["home", "general"]):
+        fallback_candidates.extend(supplemental_words)
+
+    result: List[Dict[str, Any]] = []
+    for candidate in fallback_candidates:
+        clean_word = str(candidate or "").strip()
+        clean_lower = clean_word.lower()
+        if not clean_word or clean_lower in excluded or clean_lower in seen:
+            continue
+        seen.add(clean_lower)
+        result.append({"text": clean_word, "keywords": []})
+        if len(result) >= target_count:
+            break
+
+    return result
 
 @app.post("/api/freestyle/category-words")
 async def generate_category_words(
@@ -15156,20 +15702,69 @@ async def generate_category_words(
     """
     Generates word options for a specific category using LLM with user context
     """
-    # TEMPORARY DEBUG: Log the exact category being received
     logging.info(f"CATEGORY_DEBUG: Received category request: '{request.category}'")
-    
-    aac_user_id = current_ids["aac_user_id"]
+
     account_id = current_ids["account_id"]
-    
+    aac_user_id = current_ids["aac_user_id"]
+    request_start_time = time.perf_counter()
+
     try:
-        # Load user settings to get FreestyleOptions and vocabulary level
-        settings = await load_settings_from_file(account_id, aac_user_id)
-        freestyle_options = settings.get("FreestyleOptions", 6)  # Default to 6 if not set
+        settings, user_info, user_current = await asyncio.gather(
+            load_settings_from_file(account_id, aac_user_id),
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data={"narrative": ""}
+            ),
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/current_state",
+                default_data=DEFAULT_USER_CURRENT.copy()
+            )
+        )
+
+        configured_freestyle_options = settings.get("FreestyleOptions", 6)
+        requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
+        freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
         vocabulary_level = settings.get("vocabularyLevel", "functional")
-        
-        # Detect if this is a NOUN category (objects, animals, places, people)
-        # These categories need specific vocabulary even at emergent level
+        prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+
+        excluded_words = {
+            str(word).strip().lower()
+            for word in (request.exclude_words or [])
+            if str(word).strip()
+        }
+
+        if request.prefer_generic_fast and not (request.custom_prompt and str(request.custom_prompt).strip()):
+            generic_words = get_generic_category_words(request.category)
+            final_words: List[Dict[str, Any]] = []
+            seen_words: set[str] = set()
+            for generic_word in generic_words:
+                cleaned_word = str(generic_word).strip()
+                lowered_word = cleaned_word.lower()
+                if not cleaned_word or lowered_word in excluded_words or lowered_word in seen_words:
+                    continue
+                seen_words.add(lowered_word)
+                final_words.append({"text": cleaned_word, "keywords": []})
+                if len(final_words) >= freestyle_options:
+                    break
+
+            total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+            logging.info(
+                f"Fast generic category-words response for '{request.category}' with {len(final_words)} words "
+                f"for account {account_id}, user {aac_user_id} in {total_elapsed_ms:.1f}ms"
+            )
+            return JSONResponse(
+                content={"words": final_words},
+                headers={
+                    "X-LLM-Cache": "generic-fast",
+                    "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                    "X-LLM-Profile": "CATEGORY_WORDS_GENERIC_FAST",
+                },
+            )
+
         category_lower = request.category.lower()
         noun_categories = [
             'animals', 'pets', 'insects', 'reptiles', 'birds', 'fish', 'wild', 'dinosaur', 'dinosaurs',
@@ -15182,63 +15777,24 @@ async def generate_category_words(
             'outside', 'nature', 'sports', 'hobbies', 'hardware', 'transportation',
             'money', 'shopping', 'entertainment', 'movies', 'tv', 'music', 'books'
         ]
+        adjective_only_categories = [
+            'rating', 'emotions', 'touch', 'sight', 'taste', 'color', 'size',
+            'shape', 'age', 'smell', 'character', 'temperature', 'sound'
+        ]
         is_noun_category = any(noun_cat in category_lower for noun_cat in noun_categories)
-        
-        # Get vocabulary level instruction - use relaxed version for noun categories
-        if is_noun_category:
-            # For noun categories, use lighter vocabulary constraints
-            # Users need specific nouns even at emergent level (e.g., "butterfly" not "pretty bug")
-            vocab_instruction = f"""VOCABULARY GUIDANCE for {vocabulary_level.upper()} level:
-While maintaining a {vocabulary_level} level approach, prioritize SPECIFIC NOUNS over generic descriptions.
-- Generate concrete, specific names rather than descriptive phrases
-- It's better to use a specific noun (e.g., "butterfly", "grasshopper") than a vague description (e.g., "pretty bug", "jumping bug")
-- Images will help users understand specific nouns even if the word is advanced
-- Focus on commonly known items within this category
-- Return members of the category itself, not related objects, body parts, habitats, materials, or concepts
-- Example: for dinosaurs, prefer "T-rex" or "triceratops" instead of "fossil", "dinosaur egg", or "big teeth"
-"""
-        else:
-            # For non-noun categories (adjectives, actions, etc.), use full vocabulary constraints
-            vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
-        
-        # Load user context for better word generation
-        user_info = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data={"narrative": ""}
-        )
-        
-        user_current = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/current_state",
-            default_data=DEFAULT_USER_CURRENT.copy()
-        )
-        
-        # Build exclude words clause
-        exclude_clause = ""
-        if request.exclude_words:
-            exclude_words_str = ", ".join(request.exclude_words)
-            exclude_clause = f" Do not include these words that were already shown: {exclude_words_str}."
-        
-        # Build context clause
-        context_clause = ""
-        if request.build_space_content:
-            context_clause = f" Current message being built: '{request.build_space_content}'."
-        
-        # Get comprehensive user context
+        is_adjective_category = any(adj_cat in category_lower for adj_cat in adjective_only_categories)
+
         user_context_parts = []
         if user_info.get("narrative"):
-            user_context_parts.append(f"User info: {user_info['narrative']}")
+            user_context_parts.append(f"user={user_info['narrative']}")
         if user_current.get("location"):
-            user_context_parts.append(f"Current location: {user_current['location']}")
+            user_context_parts.append(f"location={user_current['location']}")
         if user_current.get("people"):
-            user_context_parts.append(f"People present: {user_current['people']}")
+            user_context_parts.append(f"people={user_current['people']}")
         if user_current.get("activity"):
-            user_context_parts.append(f"Current activity: {user_current['activity']}")
-            
-        user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
+            user_context_parts.append(f"activity={user_current['activity']}")
+        user_context = " | ".join(user_context_parts) if user_context_parts else "general"
+
         live_context_summary = ", ".join(
             part for part in [
                 f"location={user_current.get('location')}" if user_current.get('location') else "",
@@ -15251,468 +15807,326 @@ While maintaining a {vocabulary_level} level approach, prioritize SPECIFIC NOUNS
         navigation_context = ""
         if request.context and request.source_page:
             if request.is_llm_generated:
-                navigation_context = f"Coming from LLM-generated page '{request.source_page}' with context: {request.context}"
+                navigation_context = f"page={request.source_page};context={request.context};origin=llm"
             else:
-                navigation_context = f"Coming from page '{request.source_page}' with topic: {request.context}"
+                navigation_context = f"page={request.source_page};topic={request.context}"
         elif request.source_page and request.source_page.lower() not in ('home', 'unknownpage', ''):
-            navigation_context = f"Coming from page '{request.source_page}'"
+            navigation_context = f"page={request.source_page}"
             if request.originating_button_text:
-                navigation_context += f" (via button: {request.originating_button_text})"
+                navigation_context += f";button={request.originating_button_text}"
         elif request.originating_button_text:
-            navigation_context = f"Coming from button: {request.originating_button_text}"
-        
-        # Detect if this is an adjective-only category (descriptive attributes)
-        category_lower = request.category.lower()
-        adjective_only_categories = [
-            'rating', 'emotions', 'touch', 'sight', 'taste', 'color', 'size', 
-            'shape', 'age', 'smell', 'character', 'temperature', 'sound'
-        ]
-        is_adjective_category = any(adj_cat in category_lower for adj_cat in adjective_only_categories)
-        
-        # Build adjective-only constraint if needed
-        adjective_constraint = ""
-        if is_adjective_category:
-            adjective_constraint = """
-CRITICAL CONSTRAINT - ADJECTIVES ONLY:
-- Generate ONLY single adjectives or adjective phrases (1-2 words maximum)
-- Do NOT include nouns in your responses
-- Do NOT include verbs in your responses  
-- Do NOT combine adjectives with nouns (e.g., "good" NOT "good food", "big" NOT "big house")
-- Examples of CORRECT responses: "good", "bad", "happy", "soft", "bright", "hot", "large"
-- Examples of INCORRECT responses: "good time", "bad day", "happy person", "soft pillow"
-"""
+            navigation_context = f"button={request.originating_button_text}"
 
-        noun_constraint = ""
-        if is_noun_category:
-            noun_constraint = """
-CRITICAL CONSTRAINT - CATEGORY MEMBERS ONLY:
-- Return specific members of the requested category itself
-- Do NOT include related objects, parts, materials, tracks, habitats, sounds, or accessories
-- Prefer concrete names over descriptive phrases
-- Example for dinosaurs: "T-rex", "triceratops", "stegosaurus" are correct; "fossil", "dinosaur egg", and "sharp teeth" are incorrect
-"""
-        
-        # Add mood context only if semantically relevant to the category
         mood_context = ""
         if request.current_mood and request.current_mood != 'none':
-            # Only apply mood context for categories that are inherently about emotions/feelings
-            # Avoid applying mood to descriptive categories (like "positive adjectives" which describe objects, not feelings)
             mood_relevant_categories = [
-                'feeling', 'emotion', 'mood', 'how i feel', 'my feelings', 
+                'feeling', 'emotion', 'mood', 'how i feel', 'my feelings',
                 'emotional', 'mental state', 'how are you'
             ]
-            
-            # Check if this category is actually about the user's emotional state
-            is_mood_relevant = any(mood_keyword in category_lower for mood_keyword in mood_relevant_categories)
-            
-            if is_mood_relevant:
-                mood_context = f" The user is currently feeling {request.current_mood}, so prioritize words that match this emotional state."
-            # For non-mood categories, don't inject mood context as it can interfere with specific category requirements
-        
-        # Create the prompt - use custom prompt if provided, otherwise use general template
-        if request.custom_prompt:
-            logging.info(f"DEBUG: Using custom prompt for category '{request.category}': {request.custom_prompt[:50]}...")
-            # Custom prompt takes priority - use it directly with minimal server additions
-            # IMPORTANT: Do NOT inject mood_context here as it overrides the custom prompt's intent
-            
-            prompt = f"""{vocab_instruction}
+            if any(mood_keyword in category_lower for mood_keyword in mood_relevant_categories):
+                mood_context = f"mood={request.current_mood}"
 
-TASK: Generate words based on the following specific instructions.
-            
-INSTRUCTIONS:
-{request.custom_prompt}
-{adjective_constraint}
-{noun_constraint}
+        vocab_instruction = (
+            f"Vocab level: {vocabulary_level}. Use specific nouns only."
+            if is_noun_category
+            else f"Vocab level: {vocabulary_level}. Use common everyday AAC-friendly words."
+        )
+        adjective_constraint = "Adjectives only. No nouns or verbs." if is_adjective_category else ""
+        noun_constraint = "Category members only. No parts, habitats, accessories, or related objects." if is_noun_category else ""
+        instruction_text = str(request.custom_prompt or f"Generate useful AAC words for category '{request.category}'.").strip()
+        build_space_text = str(request.build_space_content or "").strip()
+        exclude_words_text = ", ".join(sorted(excluded_words)) if excluded_words else "none"
 
-AVAILABLE CONTEXT:
-- User context: {user_context}
-{f"- Navigation context: {navigation_context}" if navigation_context else ""}
+        cache_payload = {
+            "category": request.category,
+            "build_space": build_space_text,
+            "exclude": sorted(excluded_words),
+            "current_mood": request.current_mood or "",
+            "custom_prompt": instruction_text,
+            "context": request.context or "",
+            "source_page": request.source_page or "",
+            "originating_button_text": request.originating_button_text or "",
+            "is_llm_generated": bool(request.is_llm_generated),
+            "freestyle_options": freestyle_options,
+            "vocabulary_level": vocabulary_level,
+            "noun_only": is_noun_category,
+            "adjective_only": is_adjective_category,
+        }
+        quick_cache_key = (
+            f"{account_id}|{aac_user_id}|cw|"
+            f"{hashlib.sha1(json.dumps(cache_payload, sort_keys=True).encode('utf-8')).hexdigest()[:24]}"
+        )
 
-CONSTRAINTS:
-- You MUST follow all "Do not" or "Exclude" instructions in the prompt above.
-- Provide exactly {freestyle_options} words or short phrases (1-3 words each).
-- STRICTLY ADHERE to the user's instructions.
-- PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words (e.g., use "loud" instead of "cacophonous").
-- Do NOT include mood or emotion words (like "happy", "sad", "melancholy") unless the instructions specifically ask for feelings. Focus on describing the object, event, or experience itself.
-- Treat current location, people present, activity, and the page/button the user came from as first-class ranking signals when they semantically fit the requested category.
-- If the live context clearly matches the category, bias the list toward words that are useful right now instead of generic category fillers.
-{context_clause}
-{exclude_clause}
+        now_ts = time.time()
+        if len(category_words_quick_response_cache) > 600:
+            expired_keys = [
+                key
+                for key, value in category_words_quick_response_cache.items()
+                if (now_ts - float(value.get("created_at", 0))) >= CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS
+            ]
+            for key in expired_keys:
+                category_words_quick_response_cache.pop(key, None)
 
-FORMAT:
-- word|keyword (one per line)
-- No numbering, no headers.
-- If the word itself is the best keyword, use the same word (e.g., "car|car")"""
-        else:
-            # Use general template for categories without specific instructions
-            prompt = f"""{vocab_instruction}
+        cached_response_entry = category_words_quick_response_cache.get(quick_cache_key)
+        if cached_response_entry and (now_ts - float(cached_response_entry.get("created_at", 0))) < CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS:
+            cached_words = copy.deepcopy(cached_response_entry.get("response", []))
+            total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+            logging.info(
+                f"⚡ /api/freestyle/category-words quick-cache HIT for {account_id}/{aac_user_id} "
+                f"key={quick_cache_key[-24:]} in {total_elapsed_ms:.1f}ms"
+            )
+            return JSONResponse(
+                content={"words": cached_words},
+                headers={
+                    "X-LLM-Cache": "quick-hit",
+                    "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                    "X-LLM-Profile": "CATEGORY_WORDS_JSON",
+                },
+            )
 
-Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
+        estimated_max_output_tokens = min(768, max(220, freestyle_options * 28 + 120))
+        temperature_value = 0.35 if is_noun_category else 0.5
+        generation_config = {
+            "response_mime_type": "application/json",
+            "temperature": temperature_value,
+            "max_output_tokens": estimated_max_output_tokens,
+        }
 
-You are helping someone communicate by providing words that fit the category '{request.category}'. Use the user context below to personalize your suggestions, but ONLY when the personal information semantically fits the category type.
+        full_prompt = f"""{vocab_instruction}
+Generate AAC word options.
+Return ONLY a valid JSON array with exactly {freestyle_options} objects.
+Each object must have:
+- text: a 1-3 word AAC-friendly option
+- keywords: an array of 0-3 short image-search hints
 
+Category: {request.category}
+Instruction: {instruction_text}
 User context: {user_context}
+Live context: {live_context_summary}
+Navigation context: {navigation_context or 'none'}
+Current message: {build_space_text or 'none'}
+Exclude: {exclude_words_text}
+{mood_context}
 {adjective_constraint}
 {noun_constraint}
 
-DECISION FRAMEWORK for using personal context:
-- For SEMANTIC categories (adjectives, emotions, actions, descriptions): Use personal context to choose which appropriate words to prioritize, but don't include personal nouns that don't fit the semantic type
-- For OBJECT categories (animals, food, places, people): Personal preferences can be included as objects (e.g., user's favorite restaurant for "places")
-- For ABSTRACT categories (feelings, activities): Personal context helps choose relevant options from the category
+Rules:
+- Use common, useful, everyday AAC vocabulary
+- Stay tightly on the requested category
+- No markdown or commentary
 
-EXAMPLES of appropriate personalization:
-- "Positive adjectives" + user likes Disney → "magical, wonderful, exciting" (Disney-inspired adjectives, not "Disney" itself)
-- "Animals" + user likes dogs → include "puppy, retriever, beagle" (specific dog types)
-- "Food" + user likes Italian → "pizza, pasta, gelato" (actual Italian foods)
-Requirements:
-- Provide exactly {freestyle_options} words or short phrases (1-3 words each)
-- ALL words must semantically belong to the category type '{request.category}'
-- PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words.
-- Do NOT include mood or emotion words unless the category is explicitly about feelings.
-- Use current location, people present, activity, and page/button context as first-class ranking signals when they fit the category.
-- If the live context clearly matches the category, bias the list toward words that are useful in the immediate situation instead of generic category members.
-- Use personal context to choose the most relevant and useful words from the category
-- Words should be commonly used and appropriate for AAC communication
-- For each word, provide a related keyword for image searching
-- Format: "word|keyword" (e.g., "butterfly|insect", "snake|reptile", "gecko|lizard")
-- The keyword should be a single word that would help find relevant images
-- If the word itself is the best keyword, use the same word (e.g., "car|car")
-- DO NOT use numbered lists (1., 2., etc.) - just provide the words one per line
-- DO NOT include explanatory text or headers - only the word|keyword pairs
+Example:
+[{{"text":"park","keywords":["outside"]}},{{"text":"school","keywords":["building"]}}]"""
 
-Live context: {live_context_summary}
-Navigation context: {navigation_context if navigation_context else 'none'}
+        user_query_only = f"""Category={request.category}
+Instruction={instruction_text}
+Count={freestyle_options}
+Live={live_context_summary}
+Navigation={navigation_context or 'none'}
+Current message={build_space_text or 'none'}
+Exclude={exclude_words_text}
+{mood_context}
+{adjective_constraint}
+{noun_constraint}
+Return only JSON array of objects with text and keywords."""
 
-Category: {request.category}"""
+        llm_generate_start_time = time.perf_counter()
+        words_response = await _generate_gemini_content_with_caching(
+            account_id,
+            aac_user_id,
+            full_prompt,
+            generation_config=generation_config,
+            cache_manager=cache_manager,
+            user_query_only=user_query_only,
+        )
+        llm_generate_elapsed_ms = (time.perf_counter() - llm_generate_start_time) * 1000
+        logging.info(
+            f"⏱️ /api/freestyle/category-words generation stage: {llm_generate_elapsed_ms:.1f}ms "
+            f"for {account_id}/{aac_user_id}"
+        )
 
-        # Generate words using LLM
-        words_response = await _generate_gemini_content_with_fallback(prompt, None, account_id, aac_user_id)
-        
-        # Debug logging for AI response
-        logging.info(f"DEBUG: Category '{request.category}' - AI response length: {len(words_response) if words_response else 0}")
-        if words_response:
-            logging.info(f"DEBUG: Category '{request.category}' - AI response preview: {words_response[:200]}...")
-            logging.info(f"DEBUG: Category '{request.category}' - Full AI response: {words_response}")
-        else:
-            logging.info(f"DEBUG: Category '{request.category}' - AI response was empty/None")
-        
-        # Parse the response into individual words with keywords
-        words = []
-        if words_response:
-            lines = words_response.strip().split('\n')
-            for line in lines:
-                # Clean the line: remove numbers, bullets, quotes, etc.
-                clean_line = line.strip()
-                # Remove numbered list formatting (1., 2., etc.)
-                import re
-                clean_line = re.sub(r'^\d+\.?\s*', '', clean_line)
-                # Remove bullet points and other formatting
-                clean_line = clean_line.strip('-').strip('*').strip('•').strip().strip('"').strip("'")
-                
-                if '|' in clean_line:
-                    # Parse word|keyword format
-                    parts = clean_line.split('|', 1)
-                    word = parts[0].strip()
-                    keyword = parts[1].strip() if len(parts) > 1 else word
-                    
-                    if word and len(word.split()) <= 3:  # Allow words and short phrases (1-3 words)
-                        words.append({
-                            "text": word,
-                            "keywords": [keyword] if keyword != word else []
-                        })
-                else:
-                    # Fallback for lines without keyword format
-                    word = clean_line
-                    if word and len(word.split()) <= 3:  # Allow words and short phrases (1-3 words)
-                        words.append({
-                            "text": word,
-                            "keywords": []
-                        })
-        
-        # Ensure we have the right number of words
-        if len(words) < freestyle_options:
-            # If we don't have enough, pad with generic words for the category
-            logging.info(f"DEBUG: Category '{request.category}' - Only got {len(words)} words from AI, padding with fallback words")
-            generic_words = get_generic_category_words(request.category)
-            existing_word_texts_lower = [w.get("text", w).lower() if isinstance(w, dict) else w.lower() for w in words]
-            
-            for generic_word in generic_words:
-                # Case-insensitive check to prevent duplicates
-                if (generic_word.lower() not in existing_word_texts_lower and 
-                    generic_word.lower() not in [w.lower() for w in request.exclude_words]):
-                    words.append({
-                        "text": generic_word,
+        import re
+        clean_json_str = str(words_response or "").strip()
+        if not clean_json_str.startswith('['):
+            json_match = re.search(r'\[.*\]', clean_json_str, re.DOTALL)
+            if json_match:
+                clean_json_str = json_match.group(0)
+
+        try:
+            parsed_output = json.loads(clean_json_str) if clean_json_str else []
+        except json.JSONDecodeError:
+            parsed_output = []
+            # Fallback: tolerate non-JSON model text by parsing line-based word|keyword or plain lines.
+            for raw_line in str(words_response or "").splitlines():
+                clean_line = re.sub(r'^\d+\.?\s*', '', str(raw_line).strip()).strip('-').strip('*').strip('•').strip().strip('"').strip("'")
+                if not clean_line:
+                    continue
+                # Ignore bare JSON syntax fragments that should never be interpreted as options.
+                if clean_line in {'[', ']', '{', '}', ',', '},', '],'}:
+                    continue
+
+                text_field_match = re.search(r'"text"\s*:\s*"([^"]+)"', clean_line)
+                if text_field_match:
+                    parsed_output.append({
+                        "text": text_field_match.group(1).strip(),
                         "keywords": []
                     })
-                    existing_word_texts_lower.append(generic_word.lower())  # Update the tracking set
-                    if len(words) >= freestyle_options:
-                        break
-        
-        # Deduplicate words (case-insensitive) to prevent "Please"/"please" duplicates
-        deduplicated_words = []
-        seen_words = set()
-        for word_obj in words:
-            word_text = word_obj.get("text", "").strip()
+                    continue
+
+                if '|' in clean_line:
+                    word_part, keyword_part = clean_line.split('|', 1)
+                    parsed_output.append({
+                        "text": word_part.strip(),
+                        "keywords": [keyword_part.strip()] if keyword_part.strip() else []
+                    })
+                else:
+                    parsed_output.append({"text": clean_line, "keywords": []})
+        if isinstance(parsed_output, dict):
+            parsed_items = (
+                parsed_output.get("words")
+                or parsed_output.get("options")
+                or parsed_output.get("results")
+                or []
+            )
+        elif isinstance(parsed_output, list):
+            parsed_items = parsed_output
+        else:
+            parsed_items = []
+
+        normalized_words: List[Dict[str, Any]] = []
+        seen_words: set[str] = set()
+        for item in parsed_items:
+            if isinstance(item, dict):
+                word_text = str(item.get("text") or item.get("word") or item.get("option") or item.get("summary") or "").strip()
+                raw_keywords = item.get("keywords") or []
+            else:
+                word_text = str(item or "").strip()
+                raw_keywords = []
+
+            word_text = re.sub(r'^\d+\.?\s*', '', word_text).strip().strip('"').strip("'")
             word_lower = word_text.lower()
-            if word_lower not in seen_words:
-                seen_words.add(word_lower)
-                deduplicated_words.append(word_obj)
-        
-        # Trim to exact number requested
-        final_words = deduplicated_words[:freestyle_options]
-        
-        logging.info(f"Generated {len(words)} words (deduplicated to {len(final_words)}) for category '{request.category}' for account {account_id}, user {aac_user_id}")
-        return JSONResponse(content={"words": final_words})
-        
+            if not word_text or len(word_text.split()) > 3 or word_lower in excluded_words or word_lower in seen_words:
+                continue
+            # Reject non-word JSON fragments (for example "[", "{", "text:").
+            if re.fullmatch(r'[\[\]\{\}:,]+', word_text):
+                continue
+            if not re.search(r'[a-zA-Z0-9]', word_text):
+                continue
+
+            keyword_list = raw_keywords if isinstance(raw_keywords, list) else [raw_keywords]
+            normalized_keywords: List[str] = []
+            seen_keywords: set[str] = set()
+            for keyword in keyword_list:
+                clean_keyword = str(keyword or "").strip()
+                clean_keyword_lower = clean_keyword.lower()
+                if not clean_keyword or clean_keyword_lower == word_lower or clean_keyword_lower in seen_keywords:
+                    continue
+                seen_keywords.add(clean_keyword_lower)
+                normalized_keywords.append(clean_keyword)
+                if len(normalized_keywords) >= 3:
+                    break
+
+            seen_words.add(word_lower)
+            normalized_words.append({
+                "text": word_text,
+                "keywords": normalized_keywords,
+            })
+            if len(normalized_words) >= freestyle_options:
+                break
+
+        if len(normalized_words) < freestyle_options:
+            logging.info(
+                f"DEBUG: Category '{request.category}' - Only got {len(normalized_words)} words from AI, padding with fallback words"
+            )
+            normalized_words.extend(
+                build_category_fallback_word_objects(
+                    request.category,
+                    freestyle_options - len(normalized_words),
+                    excluded_words=excluded_words,
+                    seen_words=seen_words,
+                )
+            )
+
+        final_words = normalized_words[:freestyle_options]
+        category_words_quick_response_cache[quick_cache_key] = {
+            "created_at": time.time(),
+            "response": copy.deepcopy(final_words),
+        }
+
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"⏱️ /api/freestyle/category-words total: {total_elapsed_ms:.1f}ms "
+            f"(prep={prep_elapsed_ms:.1f}ms, generate={llm_generate_elapsed_ms:.1f}ms) "
+            f"for {account_id}/{aac_user_id}"
+        )
+        return JSONResponse(
+            content={"words": final_words},
+            headers={
+                "X-LLM-Cache": "quick-store",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate={llm_generate_elapsed_ms:.1f};total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "CATEGORY_WORDS_JSON",
+            },
+        )
+
     except Exception as e:
         logging.error(f"Error generating category words for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
-        return JSONResponse(content={"words": []})
+        fallback_target_count = max(1, int(locals().get("freestyle_options", 29) or 29))
+        fallback_words = build_category_fallback_word_objects(request.category, fallback_target_count)
+        return JSONResponse(
+            content={"words": fallback_words},
+            headers={
+                "X-LLM-Cache": "error-fallback",
+                "X-LLM-Timing": "prep=0.0;generate=0.0;total=0.0",
+                "X-LLM-Profile": "CATEGORY_WORDS_ERROR_FALLBACK",
+                "X-LLM-Error": type(e).__name__,
+            },
+        )
+
 
 def get_generic_category_words(category: str) -> List[str]:
-    """Get generic fallback words for a category with flexible matching"""
-    
-    # Log the exact category name for debugging
-    logging.info(f"DEBUG: get_generic_category_words called with category: '{category}'")
-    
-    # Flexible category mapping - check for keywords in category name
-    category_lower = category.lower()
-    
-    # Insect-related categories (most specific first)
-    if any(keyword in category_lower for keyword in ['insect', 'bug', 'beetles', 'butterfly', 'bee']):
-        logging.info(f"DEBUG: Matched insects category for '{category}'")
+    """Get generic fallback words for a category with flexible matching."""
+    category_lower = str(category or "").lower()
+
+    if any(keyword in category_lower for keyword in ['insect', 'bug', 'beetle', 'butterfly', 'bee']):
         return ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper", "beetle", "moth"]
-    
-    # Reptile-related categories
     if any(keyword in category_lower for keyword in ['reptile', 'snake', 'lizard', 'turtle']):
-        logging.info(f"DEBUG: Matched reptiles category for '{category}'")
         return ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon", "alligator", "crocodile"]
-    
-    # Fish and sea life
     if any(keyword in category_lower for keyword in ['fish', 'sea', 'ocean', 'marine', 'aquatic']):
-        logging.info(f"DEBUG: Matched fish/sea category for '{category}'")
         return ["fish", "shark", "whale", "dolphin", "octopus", "crab", "lobster", "seahorse"]
-    
-    # Birds
-    if any(keyword in category_lower for keyword in ['bird', 'flying', 'wings', 'feather']):
-        logging.info(f"DEBUG: Matched birds category for '{category}'")
-        return ["bird", "eagle", "robin", "owl", "parrot", "penguin", "chicken", "duck"]
-    
-    # Wild animals
-    if any(keyword in category_lower for keyword in ['wild', 'jungle', 'safari', 'zoo']):
-        logging.info(f"DEBUG: Matched wild animals category for '{category}'")
-        return ["lion", "tiger", "elephant", "giraffe", "zebra", "monkey", "bear", "deer"]
+    if any(keyword in category_lower for keyword in ['bird', 'flying', 'wing', 'feather']):
+        return ["bird", "eagle", "duck", "owl", "parrot", "robin", "penguin", "sparrow"]
+    if any(keyword in category_lower for keyword in ['dinosaur', 'dino']):
+        return [
+            "T-rex", "triceratops", "stegosaurus", "brontosaurus", "velociraptor", "spinosaurus", "ankylosaurus", "brachiosaurus",
+            "diplodocus", "allosaurus", "parasaurolophus", "iguanodon", "carnotaurus", "pachycephalosaurus", "oviraptor", "gallimimus",
+            "microraptor", "deinonychus", "utahraptor", "compsognathus", "dilophosaurus", "acrocanthosaurus", "ceratosaurus", "argentinosaurus",
+            "apatosaurus", "megalosaurus", "hadrosaur", "sauropod", "theropod", "herbivore dinosaur", "carnivore dinosaur", "dinosaur egg",
+            "fossil", "fossil bone", "skeleton", "extinct", "prehistoric", "jurassic", "cretaceous", "triassic"
+        ]
+    if any(keyword in category_lower for keyword in ['animal', 'pet', 'wild']):
+        return ["dog", "cat", "horse", "bear", "lion", "tiger", "rabbit", "elephant"]
+    if any(keyword in category_lower for keyword in ['people', 'person', 'family', 'friend']):
+        return ["mom", "dad", "friend", "teacher", "baby", "doctor", "brother", "sister"]
+    if any(keyword in category_lower for keyword in ['place', 'location', 'room', 'building']):
+        return ["home", "school", "park", "store", "restaurant", "hospital", "church", "library"]
+    if any(keyword in category_lower for keyword in ['thing', 'object', 'item']):
+        return ["book", "chair", "phone", "toy", "ball", "computer", "blanket", "backpack"]
+    if any(keyword in category_lower for keyword in ['food', 'meal', 'snack']):
+        return ["pizza", "apple", "sandwich", "pasta", "cookie", "banana", "chicken", "fries"]
+    if any(keyword in category_lower for keyword in ['drink', 'beverage']):
+        return ["water", "juice", "milk", "soda", "coffee", "tea", "smoothie", "lemonade"]
+    if any(keyword in category_lower for keyword in ['action', 'verb']):
+        return ["go", "eat", "play", "help", "want", "need", "stop", "look"]
+    if any(keyword in category_lower for keyword in ['describe', 'adjective', 'color', 'size', 'shape']):
+        return ["big", "small", "red", "blue", "round", "soft", "fast", "hot"]
+    if any(keyword in category_lower for keyword in ['number', 'count']):
+        return ["one", "two", "three", "four", "five", "more", "all", "none"]
+    if any(keyword in category_lower for keyword in ['weather']):
+        return ["sunny", "rain", "cloud", "snow", "windy", "storm", "hot", "cold"]
+    if any(keyword in category_lower for keyword in ['date', 'time', 'calendar']):
+        return ["today", "tomorrow", "morning", "night", "Monday", "birthday", "weekend", "later"]
 
-    # Dinosaurs
-    if any(keyword in category_lower for keyword in ['dinosaur', 'dino', 'jurassic', 'prehistoric']):
-        logging.info(f"DEBUG: Matched dinosaurs category for '{category}'")
-        return ["t-rex", "triceratops", "stegosaurus", "raptor", "brontosaurus", "pterodactyl", "ankylosaurus", "brachiosaurus"]
-
-    # Science / space
-    if any(keyword in category_lower for keyword in ['science', 'space', 'planet', 'astronomy', 'solar']):
-        logging.info(f"DEBUG: Matched science/space category for '{category}'")
-        return ["planet", "space", "earth", "moon", "sun", "star", "rocket", "astronaut"]
-
-    # Imaginary / fantasy
-    if any(keyword in category_lower for keyword in ['imaginary', 'fantasy', 'myth', 'mythical', 'magic']):
-        logging.info(f"DEBUG: Matched imaginary/fantasy category for '{category}'")
-        return ["dragon", "unicorn", "wizard", "fairy", "mermaid", "castle", "magic wand", "phoenix"]
-    
-    # Exact match fallback for common categories
-    generic_words = {
-        "People": ["mom", "dad", "friend", "teacher", "doctor", "family"],
-        "Places": ["home", "school", "store", "park", "hospital", "library"],
-        "Animals": ["dog", "cat", "bird", "fish", "horse", "rabbit"],
-        "Insects": ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper"],
-        "Reptiles": ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon"],
-        "Dinosaurs": ["t-rex", "triceratops", "stegosaurus", "raptor", "brontosaurus", "pterodactyl"],
-        "Science": ["planet", "space", "earth", "moon", "star", "rocket"],
-        "Imaginary": ["dragon", "unicorn", "wizard", "fairy", "mermaid", "castle"],
-        "Around the House": ["kitchen", "bedroom", "bathroom", "living", "garage", "yard"],
-        "In the Room": ["chair", "table", "bed", "lamp", "window", "door"],
-        "General things": ["book", "phone", "keys", "bag", "water", "food"],
-        "Actions": ["go", "come", "eat", "drink", "sleep", "play"],
-        "Feelings & Emotions": ["happy", "sad", "angry", "excited", "tired", "scared"],
-        "Questions & Comments": ["what", "where", "when", "how", "why", "please"],
-        "Times and Dates": ["today", "tomorrow", "morning", "night", "week", "month"],
-        "Activities & Hobbies": ["read", "music", "games", "sports", "art", "cooking"],
-        "Medical & Health": ["medicine", "doctor", "hurt", "sick", "better", "hospital"],
-        "Food & Drinks": ["water", "milk", "bread", "apple", "sandwich", "juice"],
-        "Colors & Descriptions": ["red", "blue", "big", "small", "hot", "cold"],
-        "Numbers & Quantities": ["one", "two", "many", "few", "more", "less"],
-        "School & Learning": ["book", "pencil", "teacher", "class", "homework", "test"],
-        "Transportation": ["car", "bus", "train", "bike", "walk", "plane"],
-        "Weather": ["sunny", "rainy", "cold", "hot", "cloudy", "windy"],
-        "Technology": ["computer", "phone", "tablet", "internet", "email", "game"],
-        "Sports & Games": ["ball", "team", "play", "win", "run", "jump"]
-    }
-    
-    # Try exact match first
-    exact_match = generic_words.get(category)
-    if exact_match:
-        logging.info(f"DEBUG: Found exact match for '{category}'")
-        return exact_match
-    
-    # Log when falling back to generic words
-    logging.info(f"DEBUG: No match found for '{category}', using generic fallback")
-    return ["thing", "stuff", "item", "object", "something", "anything"]
-
-
-# --- ADMIN ENDPOINTS ---
-
-class CopyProfilesBetweenAccountsRequest(BaseModel):
-    source_email: str
-    target_email: str
-    admin_password: str = "admin123"  # Simple password protection
-
-@app.post("/api/admin/copy-profiles-between-accounts")
-async def copy_profiles_between_accounts(request: CopyProfilesBetweenAccountsRequest):
-    """
-    Admin endpoint to copy all AAC user profiles from one Firebase account to another.
-    This is specifically for setting up the demo readonly account.
-    """
-    
-    # Simple password protection
-    if request.admin_password != "admin123":
-        raise HTTPException(status_code=403, detail="Invalid admin password")
-    
-    try:
-        logging.info(f"Starting profile copy from {request.source_email} to {request.target_email}")
-        
-        # Get account IDs from Firebase Auth
-        source_account_id = None
-        target_account_id = None
-        
-        try:
-            source_user_record = auth.get_user_by_email(request.source_email)
-            source_account_id = source_user_record.uid
-            logging.info(f"Found source account ID: {source_account_id}")
-        except auth.UserNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Source email {request.source_email} not found")
-        
-        try:
-            target_user_record = auth.get_user_by_email(request.target_email)
-            target_account_id = target_user_record.uid
-            logging.info(f"Found target account ID: {target_account_id}")
-        except auth.UserNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Target email {request.target_email} not found")
-        
-        # Get all users from source account
-        source_users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(source_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
-        source_users_docs = await asyncio.to_thread(source_users_ref.stream)
-        
-        source_users = []
-        for doc in source_users_docs:
-            user_data = doc.to_dict()
-            user_data['aac_user_id'] = doc.id
-            source_users.append(user_data)
-        
-        if not source_users:
-            raise HTTPException(status_code=404, detail=f"No profiles found in source account {request.source_email}")
-        
-        logging.info(f"Found {len(source_users)} profiles to copy")
-        
-        # Check existing users in target account and clean them up
-        target_users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
-        existing_target_docs = await asyncio.to_thread(target_users_ref.stream)
-        existing_target_users = list(existing_target_docs)
-        existing_count = len(existing_target_users)
-        
-        # Clean up existing profiles in target account to avoid duplicates
-        if existing_count > 0:
-            logging.info(f"Found {existing_count} existing profiles in target account. Cleaning up before copying...")
-            
-            for existing_doc in existing_target_users:
-                try:
-                    # Delete all user data subcollections first
-                    existing_user_id = existing_doc.id
-                    
-                    # Delete user data subcollections
-                    subcollections = ['info', 'settings', 'favorites', 'threads', 'birthdays', 'user_current', 'user_narrative']
-                    for subcoll in subcollections:
-                        subcoll_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(existing_user_id).collection(subcoll)
-                        docs = await asyncio.to_thread(subcoll_ref.stream)
-                        for doc in docs:
-                            await asyncio.to_thread(doc.reference.delete)
-                    
-                    # Delete the user document itself
-                    await asyncio.to_thread(existing_doc.reference.delete)
-                    logging.info(f"Deleted existing profile: {existing_doc.to_dict().get('display_name', existing_user_id)}")
-                    
-                except Exception as e:
-                    logging.error(f"Error deleting existing profile {existing_user_id}: {e}")
-            
-            logging.info(f"Cleanup completed. Removed {existing_count} existing profiles.")
-        else:
-            logging.info("No existing profiles found in target account.")
-        
-        copied_profiles = []
-        failed_profiles = []
-        
-        # Copy each user
-        for user in source_users:
-            display_name = user.get('display_name', 'Unknown')
-            source_user_id = user['aac_user_id']
-            
-            try:
-                logging.info(f"Copying profile: {display_name}")
-                
-                # Generate new user ID for target account
-                new_user_id = str(uuid.uuid4())
-                
-                # Create user document in target account
-                target_user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(new_user_id)
-                
-                # Prepare user data (remove old aac_user_id)
-                clean_user_data = {k: v for k, v in user.items() if k != 'aac_user_id'}
-                clean_user_data['created_at'] = dt.now().isoformat()
-                clean_user_data['last_updated'] = dt.now().isoformat()
-                
-                # Set the user document
-                await asyncio.to_thread(target_user_ref.set, clean_user_data)
-                
-                # Copy all user data across accounts
-                await _copy_user_data_cross_account(source_account_id, source_user_id, target_account_id, new_user_id)
-                
-                copied_profiles.append({
-                    "display_name": display_name,
-                    "source_id": source_user_id,
-                    "target_id": new_user_id
-                })
-                
-                logging.info(f"Successfully copied profile: {display_name}")
-                
-            except Exception as e:
-                logging.error(f"Failed to copy profile {display_name}: {e}", exc_info=True)
-                failed_profiles.append({
-                    "display_name": display_name,
-                    "error": str(e)
-                })
-        
-        # Update target account user limit
-        new_user_limit = existing_count + len(copied_profiles) + 2  # +2 for buffer
-        target_account_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id)
-        await asyncio.to_thread(target_account_ref.update, {
-            "num_users_allowed": new_user_limit,
-            "last_updated": dt.now().isoformat()
-        })
-        
-        logging.info(f"Profile copy complete. Copied {len(copied_profiles)} profiles, failed {len(failed_profiles)}")
-        
-        return JSONResponse(content={
-            "success": True,
-            "message": f"Successfully copied {len(copied_profiles)} out of {len(source_users)} profiles",
-            "source_email": request.source_email,
-            "target_email": request.target_email,
-            "copied_count": len(copied_profiles),
-            "failed_count": len(failed_profiles),
-            "copied_profiles": copied_profiles,
-            "failed_profiles": failed_profiles,
-            "new_user_limit": new_user_limit
-        })
-        
-    except Exception as e:
-        logging.error(f"Error copying profiles between accounts: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to copy profiles: {str(e)}")
+    return ["more", "help", "go", "stop", "want", "like", "here", "there"]
 
 
 class DebugUserInfoRequest(BaseModel):

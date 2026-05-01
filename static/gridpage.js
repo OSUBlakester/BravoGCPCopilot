@@ -284,6 +284,177 @@ const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
 const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening'; // CSS class for highlighting
 let activeOriginatingButtonText = null; // NEW: To store the text of the button that initiated the LLM query
 let activeLLMPromptForContext = null; // Store the prompt that generated current LLM buttons
+const LLM_PREFETCH_MAX_BUTTONS_PER_PAGE = 1;
+const LLM_PREFETCH_DELAY_MS = 1200;
+const LLM_PREFETCH_HISTORY_TTL_MS = 180000;
+let llmPrefetchTimer = null;
+const llmPrefetchHistory = new Map();
+const llmInFlightRequests = new Map();
+const NAV_TARGET_LLM_PREFETCH_KEY = 'bravoNavTargetLlmPrefetch';
+let loadedUserPages = [];
+
+function cancelActivePrefetchRequests(reason = 'interactive request') {
+    let cancelledCount = 0;
+    for (const [requestKey, requestEntry] of llmInFlightRequests.entries()) {
+        if (requestEntry && requestEntry.source === 'prefetch' && requestEntry.abortController) {
+            requestEntry.abortController.abort();
+            llmInFlightRequests.delete(requestKey);
+            cancelledCount += 1;
+        }
+    }
+
+    if (cancelledCount > 0) {
+        console.log(`🛑 Cancelled ${cancelledCount} in-flight prefetch request(s): ${reason}`);
+    }
+}
+
+function findFirstVisibleLlmButtonForPage(page) {
+    if (!page || !Array.isArray(page.buttons)) return null;
+
+    return page.buttons.find((buttonData) => {
+        if (!(buttonData && buttonData.text && String(buttonData.text).trim() && buttonData.hidden !== true)) {
+            return false;
+        }
+
+        const llmQuery = typeof buttonData.LLMQuery === 'string' ? buttonData.LLMQuery.trim() : '';
+        return llmQuery.length > 0;
+    }) || null;
+}
+
+function queueNavigationTargetPrefetch(targetPageName) {
+    const normalizedTargetPage = String(targetPageName || '').trim();
+    if (!normalizedTargetPage || !Array.isArray(loadedUserPages) || loadedUserPages.length === 0) {
+        return;
+    }
+
+    const destinationPage = loadedUserPages.find((page) => String(page?.name || '').trim() === normalizedTargetPage);
+    const targetButton = findFirstVisibleLlmButtonForPage(destinationPage);
+    if (!targetButton) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
+    const llmQuery = String(targetButton.LLMQuery || '').trim();
+    if (!llmQuery) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
+    sessionStorage.setItem(NAV_TARGET_LLM_PREFETCH_KEY, JSON.stringify({
+        pageName: normalizedTargetPage,
+        buttonText: String(targetButton.text || '').trim(),
+        llmQuery,
+        storedAt: Date.now(),
+    }));
+}
+
+function triggerNavigationTargetPrefetchForCurrentPage(pageName) {
+    const raw = sessionStorage.getItem(NAV_TARGET_LLM_PREFETCH_KEY);
+    if (!raw) return;
+
+    sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+
+    try {
+        const payload = JSON.parse(raw);
+        if (!payload || String(payload.pageName || '').trim() !== String(pageName || '').trim()) {
+            return;
+        }
+
+        const ageMs = Date.now() - Number(payload.storedAt || 0);
+        if (!Number.isFinite(ageMs) || ageMs > LLM_PREFETCH_HISTORY_TTL_MS) {
+            return;
+        }
+
+        const llmQuery = String(payload.llmQuery || '').trim();
+        if (!llmQuery) {
+            return;
+        }
+
+        const promptForLLM = buildPromptForLLMQuery(llmQuery);
+        const prefetchKey = `${promptForLLM.length}:${promptForLLM}`;
+        pruneLlmPrefetchHistory();
+        if (llmPrefetchHistory.has(prefetchKey)) {
+            return;
+        }
+
+        llmPrefetchHistory.set(prefetchKey, Date.now());
+        void getLLMResponse(promptForLLM, { source: 'prefetch' }).then(() => {
+            console.log('⚡ Navigation target prefetch complete:', {
+                page: pageName,
+                button: payload.buttonText || 'button',
+                promptLength: promptForLLM.length,
+            });
+        });
+    } catch (error) {
+        console.warn('Failed to process navigation target prefetch hint:', error);
+    }
+}
+
+function getSummaryInstructionText() {
+    return SummaryOff
+        ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
+        : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
+}
+
+function buildPromptForLLMQuery(llmQuery) {
+    return `"${llmQuery}". Format as a JSON list... ${getSummaryInstructionText()} ...${getComposePromptContext()}`;
+}
+
+function pruneLlmPrefetchHistory(nowTs = Date.now()) {
+    for (const [key, ts] of llmPrefetchHistory.entries()) {
+        if ((nowTs - ts) > LLM_PREFETCH_HISTORY_TTL_MS) {
+            llmPrefetchHistory.delete(key);
+        }
+    }
+}
+
+function scheduleLlmPrefetchForVisibleButtons(visibleButtons) {
+    if (!Array.isArray(visibleButtons) || visibleButtons.length === 0) return;
+    if (isComposeSessionActive() || isLLMProcessing) return;
+
+    const llmButtons = visibleButtons
+        .filter(buttonData => buttonData && typeof buttonData.LLMQuery === 'string' && buttonData.LLMQuery.trim().length > 0)
+        .slice(0, LLM_PREFETCH_MAX_BUTTONS_PER_PAGE);
+
+    if (llmButtons.length === 0) return;
+
+    if (llmPrefetchTimer) {
+        clearTimeout(llmPrefetchTimer);
+    }
+
+    llmPrefetchTimer = setTimeout(() => {
+        void prefetchLlmOptionsForButtons(llmButtons);
+    }, LLM_PREFETCH_DELAY_MS);
+}
+
+async function prefetchLlmOptionsForButtons(llmButtons) {
+    const nowTs = Date.now();
+    pruneLlmPrefetchHistory(nowTs);
+
+    for (const buttonData of llmButtons) {
+        const llmQuery = String(buttonData.LLMQuery || '').trim();
+        if (!llmQuery) continue;
+
+        const promptForLLM = buildPromptForLLMQuery(llmQuery);
+        const prefetchKey = `${promptForLLM.length}:${promptForLLM}`;
+        const previousTs = llmPrefetchHistory.get(prefetchKey);
+        if (previousTs && (nowTs - previousTs) < LLM_PREFETCH_HISTORY_TTL_MS) {
+            continue;
+        }
+
+        llmPrefetchHistory.set(prefetchKey, nowTs);
+
+        try {
+            await getLLMResponse(promptForLLM, { source: 'prefetch' });
+            console.log('⚡ LLM prefetch complete:', {
+                button: buttonData.text || 'button',
+                promptLength: promptForLLM.length,
+            });
+        } catch (error) {
+            console.warn(`LLM prefetch error for "${buttonData.text || 'button'}":`, error);
+        }
+    }
+}
 
 function persistFollowUpConversation() {
     localStorage.setItem(FOLLOW_UP_CONVERSATION_KEY, JSON.stringify(followUpConversation));
@@ -2938,6 +3109,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error(`Failed to load pages: ${pagesResponse.status} - ${errorText}`);
         }
         const userPages = await pagesResponse.json();
+        loadedUserPages = Array.isArray(userPages) ? userPages : [];
 
         let pageToDisplay = userPages.find(p => p.name === pageName);
 
@@ -2970,6 +3142,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Ensure pageToDisplay is not null/undefined before accessing properties
         sessionStorage.setItem('currentPageDisplayNameForBanner', pageToDisplay.displayName || capitalizeFirstLetter(pageToDisplay.name));
         setBannerAndPageTitle(); // Call again to set the correct title
+        triggerNavigationTargetPrefetchForCurrentPage(pageName);
 
         if (isComposeEntryView) {
             const fromUrl = params.get('from') || getComposeReturnTarget();
@@ -3512,6 +3685,9 @@ async function generateGrid(page, container) {
         console.log('  waitForSwitchToScan:', waitForSwitchToScan);
         startOrWaitForScanning({ allowPrompt: true, source: 'generateGrid' });
     }, defaultDelay);
+
+    // Warm likely first-click LLM requests in the background so switching to a new button is faster.
+    scheduleLlmPrefetchForVisibleButtons(sortedButtons);
 }
 
 // --- Button Click Handling ---
@@ -3641,14 +3817,14 @@ async function handleButtonClick(buttonData) {
         console.log('🔍 STEP 3: Checking llmQuery:', llmQuery ? 'YES' : 'NO', 'Value:', llmQuery);
         if (llmQuery) {
             console.log('✅ ENTERING LLM QUERY BRANCH');
-            const t0 = performance.now();
+            const tBranchStart = performance.now();
             // Case 1: Button triggers an LLM query.
+            let speechAnnouncePromise = null;
+            let speechAnnounceStart = 0;
             if (speechPhrase) {
                 console.log('🎤 Has speech phrase, announcing:', speechPhrase);
-                const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system", false); // Announce while speech bubble is clear.
-                const tAnnounce1 = performance.now();
-                console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                speechAnnounceStart = performance.now();
+                speechAnnouncePromise = announce(speechPhrase, "system", false); // Start announcement without blocking LLM fetch.
                 
                 // Record chat history for user speech selection
                 console.log('🎯 GRIDPAGE Recording speech selection:', speechPhrase);
@@ -3691,13 +3867,23 @@ async function handleButtonClick(buttonData) {
             }
             sessionStorage.setItem('currentQuestion', llmQuery);
 
-            const summaryInstruction = SummaryOff ?
-                'The "summary" key should contain the exact same FULL text as the "option" key.' :
-                'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
-
-            const promptForLLM = `"${llmQuery}". Format as a JSON list... ${summaryInstruction} ...${getComposePromptContext()}`;
+            const promptForLLM = buildPromptForLLMQuery(llmQuery);
+            cancelActivePrefetchRequests('user initiated LLM button click');
             const tLLM0 = performance.now();
-            const options = await getLLMResponse(promptForLLM);
+            const optionsPromise = getLLMResponse(promptForLLM);
+
+            if (speechAnnouncePromise) {
+                speechAnnouncePromise
+                    .then(() => {
+                        const tAnnounce1 = performance.now();
+                        console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-speechAnnounceStart).toFixed(2)} ms (overlapped with LLM fetch)`);
+                    })
+                    .catch((announceError) => {
+                        console.error('Speech announcement failed during LLM fetch:', announceError);
+                    });
+            }
+
+            const options = await optionsPromise;
             const tLLM1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: getLLMResponse took ${(tLLM1-tLLM0).toFixed(2)} ms`);
             
@@ -3707,6 +3893,14 @@ async function handleButtonClick(buttonData) {
             await generateLlmButtons(options); // This function will restart scanning.
             const tGen1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: generateLlmButtons took ${(tGen1-tGen0).toFixed(2)} ms`);
+            const preRequestMs = tLLM0 - tBranchStart;
+            const networkAndModelMs = tLLM1 - tLLM0;
+            const renderMs = tGen1 - tGen0;
+            const clickToButtonsMs = tGen1 - tBranchStart;
+            console.log(
+                `[PERF] click->buttons=${clickToButtonsMs.toFixed(2)} ms ` +
+                `(pre-request=${preRequestMs.toFixed(2)} ms, llm=${networkAndModelMs.toFixed(2)} ms, render=${renderMs.toFixed(2)} ms)`
+            );
             debugTimes.llmBranch = performance.now();
 
         } else if (localQueryType === "currentevents") {
@@ -3961,6 +4155,7 @@ async function handleButtonClick(buttonData) {
                 }
             } else {
                 // Normal page: use gridpage.html?page=targetPage
+                queueNavigationTargetPrefetch(targetPage);
                 window.location.href = `gridpage.html?page=${targetPage}`;
             }
             debugTimes.targetPageBranch = performance.now();
@@ -4146,8 +4341,26 @@ async function getCurrentEvents(eventType) {
 }
 
 // --- LLM Interaction ---
-async function getLLMResponse(prompt) {
+async function getLLMResponse(prompt, options = {}) {
+    const source = options && options.source ? String(options.source) : 'interactive';
+    const requestKey = `${prompt.length}:${prompt}`;
+    const existingRequestEntry = llmInFlightRequests.get(requestKey);
+    if (existingRequestEntry) {
+        if (source === 'interactive' && existingRequestEntry.source === 'prefetch') {
+            if (existingRequestEntry.abortController) {
+                existingRequestEntry.abortController.abort();
+            }
+            llmInFlightRequests.delete(requestKey);
+            console.log(`🛑 Aborted in-flight prefetch for prompt length ${prompt.length}; prioritizing interactive request`);
+        } else {
+            console.log(`♻️ Reusing in-flight /llm request (${source}) for prompt length ${prompt.length}`);
+            return existingRequestEntry.promise;
+        }
+    }
+
     console.log("Sending LLM Request (Prompt length):", prompt.length);
+    const abortController = new AbortController();
+    const requestPromise = (async () => {
     try {
         function prepareJsonString(str) { /* ... */ }
 
@@ -4163,7 +4376,19 @@ async function getLLMResponse(prompt) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
             body: JSON.stringify(requestBody),
+            signal: abortController.signal,
         });
+
+        const llmTimingHeader = response.headers.get('X-LLM-Timing');
+        const llmProfileHeader = response.headers.get('X-LLM-Profile');
+        const llmCacheHeader = response.headers.get('X-LLM-Cache');
+        if ((llmTimingHeader || llmProfileHeader || llmCacheHeader) && source !== 'prefetch') {
+            console.log('🧪 /llm server diagnostics:', {
+                timing: llmTimingHeader || 'n/a',
+                profile: llmProfileHeader || 'n/a',
+                cache: llmCacheHeader || 'n/a',
+            });
+        }
 
         if (!response.ok) {
             const eT = await response.text();
@@ -4171,7 +4396,9 @@ async function getLLMResponse(prompt) {
         }
 
         const parsedJson = await response.json();
-        console.log("LLM Response Received (Raw Parsed):", parsedJson);
+        if (source !== 'prefetch') {
+            console.log("LLM Response Received (Raw Parsed):", parsedJson);
+        }
 
         if (!Array.isArray(parsedJson)) {
             console.error("LLM response was not an array:", parsedJson);
@@ -4209,7 +4436,9 @@ async function getLLMResponse(prompt) {
             return null; // Return null if the object is not in the expected format
         }).filter(Boolean); // The .filter(Boolean) removes any null entries
 
-        console.log("Transformed and Validated Data:", transformedData);
+        if (source !== 'prefetch') {
+            console.log("Transformed and Validated Data:", transformedData);
+        }
         
         if (transformedData.length !== parsedJson.length) {
             console.warn(`Filtered out ${parsedJson.length - transformedData.length} malformed items from the LLM response.`);
@@ -4218,12 +4447,33 @@ async function getLLMResponse(prompt) {
         return transformedData;
 
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            if (source === 'prefetch') {
+                console.log(`⏭️ Prefetch request aborted for prompt length ${prompt.length}`);
+            }
+            return [];
+        }
         console.error("Error fetching or processing LLM Response:", error);
         const loadingIndicator = document.getElementById('loading-indicator');
         if (loadingIndicator) {
             loadingIndicator.style.display = 'none';
         }
         return [];
+    }
+    })();
+
+    const requestEntry = {
+        source,
+        promise: requestPromise,
+        abortController,
+    };
+    llmInFlightRequests.set(requestKey, requestEntry);
+    try {
+        return await requestPromise;
+    } finally {
+        if (llmInFlightRequests.get(requestKey) === requestEntry) {
+            llmInFlightRequests.delete(requestKey);
+        }
     }
 }
 
