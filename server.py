@@ -1571,10 +1571,17 @@ SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embedding
 
 # LLM Model Configuration - Environment Variables
 # Gemini Models
-GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-2.5-flash-lite")
-GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-1.5-flash-latest")
+GEMINI_PRIMARY_MODEL = (os.environ.get("GEMINI_PRIMARY_MODEL") or "").strip()
+if not GEMINI_PRIMARY_MODEL:
+    raise RuntimeError("Missing required environment variable: GEMINI_PRIMARY_MODEL")
+
+GEMINI_FALLBACK_MODEL = (os.environ.get("GEMINI_FALLBACK_MODEL") or "").strip()
+if not GEMINI_FALLBACK_MODEL:
+    raise RuntimeError("Missing required environment variable: GEMINI_FALLBACK_MODEL")
+
 # Fast lightweight model for low-latency word list generation (category-words endpoint).
-GEMINI_FAST_WORDS_MODEL = os.environ.get("GEMINI_FAST_WORDS_MODEL", "gemini-2.5-flash-lite")
+# Defaults to the configured primary model if not explicitly provided.
+GEMINI_FAST_WORDS_MODEL = (os.environ.get("GEMINI_FAST_WORDS_MODEL") or GEMINI_PRIMARY_MODEL).strip()
 
 # ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
 # GPT-4o/4o-mini use: max_tokens, adjustable temperature
