@@ -309,6 +309,7 @@ template_user_data_paths = {
         "ScanningOff": False,
         "scanMode": "auto",
         "waitForSwitchToScan": False,
+        "playWaitForSwitchChime": False,
         "SummaryOff": False,
         "selected_tts_voice_name": "en-US-Neural2-A",
         "gridColumns": 10,
@@ -1675,6 +1676,7 @@ DEFAULT_SETTINGS = {
     "ScanningOff": False, # Default scanning off
     "scanMode": "auto", # Scanning mode: "auto" timer scanning or "step" switch-driven scanning
     "waitForSwitchToScan": False, # Default wait for switch to start scanning
+    "playWaitForSwitchChime": False, # Default page-ready chime off while waiting for switch
     "SummaryOff": False, # Default summary off
     "selected_tts_voice_name": DEFAULT_TTS_VOICE, # Default TTS voice
     "gridColumns": DEFAULT_COLUMNS, # Default grid columns
@@ -8088,6 +8090,7 @@ class SettingsModel(BaseModel):
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
     scanMode: Optional[str] = Field(None, description="Scanning mode: 'auto' or 'step'")
     waitForSwitchToScan: Optional[bool] = Field(None, description="Enable/disable waiting for switch press before starting scanning on initial page load.") # Added waitForSwitchToScan
+    playWaitForSwitchChime: Optional[bool] = Field(None, description="Play a chime after page load when waiting for the switch to begin scanning.")
     SummaryOff: Optional[bool] = Field(None, description="Enable/disable summary generation.") # Added SummaryOff    
     selected_tts_voice_name: Optional[str] = None
     gridColumns: Optional[int] = Field(None, description="Number of columns displayed in grid", ge=2, le=18)

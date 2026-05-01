@@ -57,6 +57,7 @@ const scanLoopLimitInput = document.getElementById('scanLoopLimit');
 const scanModeInput = document.getElementById('scanMode');
 const ScanningOffInput = document.getElementById('ScanningOff');
 const waitForSwitchToScanInput = document.getElementById('waitForSwitchToScan');
+const playWaitForSwitchChimeInput = document.getElementById('playWaitForSwitchChime');
 // const useTapInterfaceInput = document.getElementById('useTapInterface'); // Removed from UI
 const interfaceAuditoryInput = document.getElementById('interfaceAuditory');
 const interfaceTapInput = document.getElementById('interfaceTap');
@@ -256,6 +257,7 @@ async function loadSettings() {
         if (disableTapPictogramsInput) { disableTapPictogramsInput.checked = currentSettings.disableTapPictograms || false; }
         if (ScanningOffInput) { ScanningOffInput.checked = currentSettings.ScanningOff || false; }
         if (waitForSwitchToScanInput) { waitForSwitchToScanInput.checked = currentSettings.waitForSwitchToScan || false; }
+        if (playWaitForSwitchChimeInput) { playWaitForSwitchChimeInput.checked = currentSettings.playWaitForSwitchChime || false; }
         if (enableSightWordsInput) { enableSightWordsInput.checked = currentSettings.enableSightWords !== false; }
         if (sightWordGradeLevelInput) { sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k'; }
         if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
@@ -545,6 +547,7 @@ async function saveSettings() {
     const newDisableTapPictograms = disableTapPictogramsInput ? disableTapPictogramsInput.checked : false;
     const newScanningOff = ScanningOffInput ? ScanningOffInput.checked : false;
     const newWaitForSwitchToScan = waitForSwitchToScanInput ? waitForSwitchToScanInput.checked : false;
+    const newPlayWaitForSwitchChime = playWaitForSwitchChimeInput ? playWaitForSwitchChimeInput.checked : false;
     const newEnableSightWords = enableSightWordsInput.checked;
     const newSightWordGradeLevel = sightWordGradeLevelInput.value;
     const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
@@ -638,6 +641,7 @@ async function saveSettings() {
         scanMode: newScanMode,
         ScanningOff: newScanningOff,    
         waitForSwitchToScan: newWaitForSwitchToScan,
+        playWaitForSwitchChime: newPlayWaitForSwitchChime,
         SummaryOff: newSummaryOff,
         autoClean: newAutoClean,
         displaySplash: newDisplaySplash,
@@ -701,6 +705,7 @@ async function saveSettings() {
         if (scanModeInput) scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto';
         if (ScanningOffInput) ScanningOffInput.checked = currentSettings.ScanningOff || false;
         if (waitForSwitchToScanInput) waitForSwitchToScanInput.checked = currentSettings.waitForSwitchToScan || false;
+        if (playWaitForSwitchChimeInput) playWaitForSwitchChimeInput.checked = currentSettings.playWaitForSwitchChime || false;
         if (SummaryOffInput) SummaryOffInput.checked = currentSettings.SummaryOff || false;
         if (autoCleanInput) autoCleanInput.checked = currentSettings.autoClean || false;
         if (displaySplashInput) displaySplashInput.checked = currentSettings.displaySplash || false;

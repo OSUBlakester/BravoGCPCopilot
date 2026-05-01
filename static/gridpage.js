@@ -277,9 +277,12 @@ let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
 let scanMode = 'auto'; // auto | step
 let waitForSwitchToScan = false; // Default wait for switch state
+let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
 let suppressSwitchActivationUntil = 0; // Timestamp guard to prevent immediate button activation after starting scan
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
 const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening'; // CSS class for highlighting
 let activeOriginatingButtonText = null; // NEW: To store the text of the button that initiated the LLM query
@@ -398,6 +401,26 @@ function getSummaryInstructionText() {
 
 function buildPromptForLLMQuery(llmQuery) {
     return `"${llmQuery}". Format as a JSON list... ${getSummaryInstructionText()} ...${getComposePromptContext()}`;
+}
+
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+        return;
+    }
+
+    hasPlayedWaitForSwitchChime = true;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Page ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize page ready chime audio:', error);
+    }
 }
 
 function pruneLlmPrefetchHistory(nowTs = Date.now()) {
@@ -890,6 +913,7 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
     if (waitForSwitchToScan) {
         window.waitingForInitialSwitch = true;
         console.log(`✋ Waiting for switch press before scanning (${source}).`);
+        playPageReadyChimeIfEnabled();
 
         const hasShownPrompt = sessionStorage.getItem(GRID_SWITCH_PROMPT_SHOWN_KEY) === 'true';
         if (allowPrompt && !hasShownPrompt) {
@@ -1967,6 +1991,7 @@ async function loadScanSettings() {
         ScanningOff = settings.ScanningOff === true;
         scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
+        playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
         disableTapPictograms = settings.disableTapPictograms === true;
@@ -3504,6 +3529,7 @@ function updateGridLayout() {
 async function generateGrid(page, container) {
     stopAuditoryScanning();
     window.waitingForInitialSwitch = false;
+    hasPlayedWaitForSwitchChime = false;
     isPausedFromScanLimit = false;
     currentRowScanMode = false;
     currentRow = -1;
@@ -5703,6 +5729,8 @@ async function generateLlmButtons(options) {
     isLLMProcessing = false; // Reset processing flag since LLM results are ready
     options = Array.isArray(options) ? options : [];
     stopAuditoryScanning();
+    window.waitingForInitialSwitch = false;
+    hasPlayedWaitForSwitchChime = false;
     const gridContainer = document.getElementById('gridContainer');
     if (!gridContainer) { console.error("gridContainer not found!"); return; }
     gridContainer.innerHTML = '';

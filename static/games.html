@@ -912,6 +912,8 @@
         let ScanningOff = false; // Default
         let scanMode = 'auto'; // auto | step
         let waitForSwitchToScan = false; // Default
+        let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+        let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
         let useTapInterface = false; // Whether user is using tap interface
         let selectedTtsVoiceName = 'en-US-Neural2-A';
         let configuredSpeechRateWpm = 170;
@@ -919,6 +921,27 @@
         let waitingForInitialSwitch = false;
         let pendingScanContainerId = null;
         const GAMES_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_games';
+        const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
+
+        function playPageReadyChimeIfEnabled() {
+            if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+                return;
+            }
+
+            hasPlayedWaitForSwitchChime = true;
+            try {
+                const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+                audio.preload = 'auto';
+                const playPromise = audio.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch((error) => {
+                        console.warn('Games page-ready chime playback was blocked or failed:', error);
+                    });
+                }
+            } catch (error) {
+                console.warn('Unable to initialize games page-ready chime audio:', error);
+            }
+        }
         
         function updateGridLayout() {
             const gridContainer = document.getElementById('gridContainer');
@@ -1120,6 +1143,7 @@
                     scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
                     console.log('scanMode loaded:', scanMode);
                     waitForSwitchToScan = settings.waitForSwitchToScan === true;
+                    playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
                     console.log('waitForSwitchToScan loaded:', waitForSwitchToScan);
                     
                     // Load tap interface preference
@@ -1150,6 +1174,7 @@
                 ScanningOff = false;
                 scanMode = 'auto';
                 waitForSwitchToScan = false;
+                playWaitForSwitchChime = false;
                 selectedTtsVoiceName = 'en-US-Neural2-A';
                 configuredSpeechRateWpm = 170;
             }
@@ -1369,6 +1394,7 @@
                 pendingScanContainerId = containerId;
                 stopScanning();
                 console.log(`SCANNING: Waiting for switch press before scanning (${containerId})`);
+                playPageReadyChimeIfEnabled();
 
                 const hasShownPrompt = sessionStorage.getItem(GAMES_SWITCH_PROMPT_SHOWN_KEY) === 'true';
                 if (!hasShownPrompt) {
