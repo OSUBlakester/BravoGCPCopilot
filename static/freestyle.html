@@ -89,6 +89,35 @@
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
+
+        .freestyle-top-row {
+            display: grid;
+            grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+            gap: 9px;
+            align-items: stretch;
+        }
+
+        .freestyle-exit-standalone {
+            align-self: stretch;
+            min-height: 100%;
+            white-space: normal;
+        }
+
+        .freestyle-exit-standalone.exit-btn {
+            background: #fff1f2;
+            border-color: #fda4af;
+            color: #9f1239;
+        }
+
+        @media (max-width: 700px) {
+            .freestyle-top-row {
+                grid-template-columns: 1fr;
+            }
+
+            .freestyle-exit-standalone {
+                min-height: 42px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -133,21 +162,24 @@
         </div>
 
         <main class="compose-page">
-            <section id="action-section" data-section-id="action" class="compose-section scan-section">
-                <h2 class="section-title">Build Space</h2>
-                <div class="current-word-wrap">
-                    <textarea id="current-word" class="current-word-input" rows="3" placeholder="Build your message here..."></textarea>
-                    <div class="word-controls">
-                        <button id="read-creation-btn" class="word-control-btn compose-button read-btn">Speak Display</button>
-                        <button id="exit-creation-btn" class="word-control-btn compose-button exit-btn">Exit Freestyle</button>
-                        <button id="backspace-btn" class="word-control-btn compose-button backspace-btn">Backspace</button>
-                        <button id="clear-word-btn" class="word-control-btn compose-button clear-btn">Clear Display</button>
-                        <button id="ai-edit-btn" class="word-control-btn compose-button ai-edit-btn">Clean Up</button>
-                        <button id="new-row-btn" class="word-control-btn compose-button new-row-btn">New Row</button>
-                        <button id="action-go-back-btn" class="word-control-btn compose-button">Go Back</button>
+            <div class="freestyle-top-row">
+                <button id="exit-creation-btn" class="word-control-btn compose-button exit-btn freestyle-exit-standalone">Exit Freestyle</button>
+
+                <section id="action-section" data-section-id="action" class="compose-section scan-section">
+                    <h2 class="section-title">Build Space</h2>
+                    <div class="current-word-wrap">
+                        <textarea id="current-word" class="current-word-input" rows="3" placeholder="Build your message here..."></textarea>
+                        <div class="word-controls">
+                            <button id="read-creation-btn" class="word-control-btn compose-button read-btn">Speak Display</button>
+                            <button id="backspace-btn" class="word-control-btn compose-button backspace-btn">Backspace</button>
+                            <button id="clear-word-btn" class="word-control-btn compose-button clear-btn">Clear Display</button>
+                            <button id="ai-edit-btn" class="word-control-btn compose-button ai-edit-btn">Clean Up</button>
+                            <button id="new-row-btn" class="word-control-btn compose-button new-row-btn">New Row</button>
+                            <button id="action-go-back-btn" class="word-control-btn compose-button">Go Back</button>
+                        </div>
                     </div>
-                </div>
-            </section>
+                </section>
+            </div>
 
             <section id="choose-word-section" data-section-id="choose-word" class="compose-section predictions-section scan-section">
                 <h2 class="section-title" id="words-section-title">Suggested Words</h2>
