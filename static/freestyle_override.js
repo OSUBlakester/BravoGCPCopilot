@@ -171,13 +171,24 @@ ADDITIONAL FREESTYLE REQUIREMENTS:
 - Return words or short phrases only.`;
 }
 
-async function requestFreestyleGeneralWords(requestDifferentOptions = false) {
+function freestyleStartsWithLetterFilter(word, selectedLetter) {
+    const trimmedWord = String(word || '').trim();
+    if (!trimmedWord || !selectedLetter) return false;
+    const normalizedStart = trimmedWord.replace(/^[^a-zA-Z]+/, '');
+    return normalizedStart.toLowerCase().startsWith(String(selectedLetter).toLowerCase());
+}
+
+async function requestFreestyleGeneralWords(requestDifferentOptions = false, requestOptions = {}) {
+    const startsWithLetter = String(requestOptions?.startsWithLetter || '').trim();
+    const requestedOptionCount = startsWithLetter
+        ? Math.min(50, Math.max(24, Math.max(1, LLMOptions) * 4))
+        : Math.max(1, LLMOptions);
     const payload = {
         ...getFreestyleRequestPayloadBase(),
         build_space_text: getCombinedBuildText().trim(),
         single_words_only: true,
         request_different_options: requestDifferentOptions,
-        max_options: Math.max(1, LLMOptions)
+        max_options: requestedOptionCount
     };
 
     try {
@@ -193,17 +204,25 @@ async function requestFreestyleGeneralWords(requestDifferentOptions = false) {
 
         const data = await response.json();
         const options = Array.isArray(data.word_options) ? data.word_options : [];
-        const nextWords = options
+        const parsedWords = options
             .map((item) => (typeof item === 'object' && item?.text ? item.text : item))
             .filter((item) => typeof item === 'string' && item.trim() !== '')
-            .slice(0, Math.max(1, LLMOptions));
+            .slice(0, requestedOptionCount);
+
+        const nextWords = startsWithLetter
+            ? parsedWords.filter((item) => freestyleStartsWithLetterFilter(item, startsWithLetter)).slice(0, Math.max(1, LLMOptions))
+            : parsedWords.slice(0, Math.max(1, LLMOptions));
 
         const fallbackWords = isStartingNewSentence()
             ? getSentenceStarterFallbackWords()
             : ['I', 'want', 'need', 'can', 'please', 'help', 'yes', 'no']
                 .slice(0, Math.max(1, LLMOptions));
 
-        currentPredictions = nextWords.length > 0 ? nextWords : fallbackWords;
+        const filteredFallbackWords = startsWithLetter
+            ? fallbackWords.filter((item) => freestyleStartsWithLetterFilter(item, startsWithLetter))
+            : fallbackWords;
+
+        currentPredictions = nextWords.length > 0 ? nextWords : filteredFallbackWords;
         renderWordPredictions();
         return nextWords.length > 0;
     } catch (error) {
@@ -212,19 +231,35 @@ async function requestFreestyleGeneralWords(requestDifferentOptions = false) {
             ? getSentenceStarterFallbackWords()
             : ['I', 'want', 'need', 'can', 'please', 'help', 'yes', 'no']
                 .slice(0, Math.max(1, LLMOptions));
-        currentPredictions = fallbackWords;
+        const filteredFallbackWords = startsWithLetter
+            ? fallbackWords.filter((item) => freestyleStartsWithLetterFilter(item, startsWithLetter))
+            : fallbackWords;
+        currentPredictions = filteredFallbackWords;
         renderWordPredictions();
         return false;
     }
 }
 
-requestCategoryWordsWithExclusions = async function(category, customPrompt, fallbackWords = [], excludeWords = []) {
+requestCategoryWordsWithExclusions = async function(category, customPrompt, fallbackWords = [], excludeWords = [], requestOptions = {}) {
+    const startsWithLetter = String(requestOptions?.startsWithLetter || '').trim();
+    const requestedOptionCount = startsWithLetter
+        ? Math.min(50, Math.max(24, Math.max(1, LLMOptions) * 4))
+        : Math.max(1, LLMOptions);
+    const basePrompt = String(customPrompt || '').trim();
+    const promptWithLetterConstraint = startsWithLetter
+        ? `${basePrompt}\n\nSTARTING LETTER REQUIREMENT:\n- Every option text must begin with '${startsWithLetter}' (case-insensitive).\n- Do not return options that start with any other letter.`
+        : basePrompt;
+    const filteredFallbackWords = startsWithLetter
+        ? fallbackWords.filter((item) => freestyleStartsWithLetterFilter(item, startsWithLetter))
+        : fallbackWords;
+
     const payload = {
         ...getFreestyleRequestPayloadBase(),
         category,
+        max_options: requestedOptionCount,
         build_space_content: getCombinedBuildText().trim(),
         exclude_words: excludeWords,
-        custom_prompt: customPrompt
+        custom_prompt: promptWithLetterConstraint
     };
 
     try {
@@ -235,24 +270,28 @@ requestCategoryWordsWithExclusions = async function(category, customPrompt, fall
         });
 
         if (!response.ok) {
-            currentPredictions = fallbackWords;
+            currentPredictions = filteredFallbackWords;
             renderWordPredictions();
             return false;
         }
 
         const data = await response.json();
         const rawWords = Array.isArray(data.words) ? data.words : [];
-        const nextWords = rawWords
+        const parsedWords = rawWords
             .map((item) => (typeof item === 'object' && item?.text ? item.text : item))
             .filter((item) => typeof item === 'string' && item.trim() !== '')
-            .slice(0, Math.max(1, LLMOptions));
+            .slice(0, requestedOptionCount);
 
-        currentPredictions = nextWords.length > 0 ? nextWords : fallbackWords;
+        const nextWords = startsWithLetter
+            ? parsedWords.filter((item) => freestyleStartsWithLetterFilter(item, startsWithLetter)).slice(0, Math.max(1, LLMOptions))
+            : parsedWords.slice(0, Math.max(1, LLMOptions));
+
+        currentPredictions = nextWords.length > 0 ? nextWords : filteredFallbackWords;
         renderWordPredictions();
         return nextWords.length > 0;
     } catch (error) {
         console.error('Failed to load freestyle category words with context:', error);
-        currentPredictions = fallbackWords;
+        currentPredictions = filteredFallbackWords;
         renderWordPredictions();
         return false;
     }
@@ -260,10 +299,13 @@ requestCategoryWordsWithExclusions = async function(category, customPrompt, fall
 
 buildCategorySpecificPrompt = buildFreestyleCategoryPrompt;
 
-loadGeneralWords = async function(excludeWords = [], fallbackWordsOverride = null) {
-    const didLoadWords = await requestFreestyleGeneralWords(Boolean(excludeWords?.length));
+loadGeneralWords = async function(excludeWords = [], fallbackWordsOverride = null, requestOptions = {}) {
+    const startsWithLetter = String(requestOptions?.startsWithLetter || '').trim();
+    const didLoadWords = await requestFreestyleGeneralWords(Boolean(excludeWords?.length), requestOptions);
     if (!didLoadWords && fallbackWordsOverride) {
-        currentPredictions = fallbackWordsOverride;
+        currentPredictions = startsWithLetter
+            ? fallbackWordsOverride.filter((item) => freestyleStartsWithLetterFilter(item, startsWithLetter))
+            : fallbackWordsOverride;
         renderWordPredictions();
     }
     return didLoadWords;

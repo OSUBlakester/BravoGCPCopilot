@@ -35,10 +35,12 @@ let categoryNavigationStack = [];
 let currentNumberRange = null;
 let currentNumberPageOffset = 0;
 let currentNumberBase = 0;
+let currentSomethingElseStartsWithLetter = '';
 let lastAnnouncedSpellingWord = '';
 let availableCompletedSpellingWord = '';
 let spellingPriorityMode = 'none';
 let spellingPredictionRequestToken = 0;
+const SOMETHING_ELSE_LETTER_MODAL_ID = 'something-else-letter-modal';
 
 let announcementQueue = [];
 let isAnnouncingNow = false;
@@ -1144,8 +1146,20 @@ async function requestCategoryWords(category, customPrompt, fallbackWords = []) 
     return requestCategoryWordsWithExclusions(category, customPrompt, fallbackWords, []);
 }
 
-async function requestCategoryWordsWithExclusions(category, customPrompt, fallbackWords = [], excludeWords = []) {
+async function requestCategoryWordsWithExclusions(category, customPrompt, fallbackWords = [], excludeWords = [], requestOptions = {}) {
+    const startsWithLetter = String(requestOptions?.startsWithLetter || '').trim();
+    const requestedOptionCount = startsWithLetter
+        ? Math.min(50, Math.max(24, Math.max(1, LLMOptions) * 4))
+        : Math.max(1, LLMOptions);
     const buildSpaceContent = getCombinedBuildText().trim();
+    const basePrompt = String(customPrompt || '').trim();
+    const promptWithLetterConstraint = startsWithLetter
+        ? `${basePrompt}\n\nSTARTING LETTER REQUIREMENT:\n- Every option text must begin with '${startsWithLetter}' (case-insensitive).\n- Do not return options that start with any other letter.`
+        : basePrompt;
+
+    const filteredFallbackWords = startsWithLetter
+        ? fallbackWords.filter((word) => startsWithLetterFilter(word, startsWithLetter))
+        : fallbackWords;
 
     try {
         const response = await authenticatedFetch('/api/freestyle/category-words', {
@@ -1153,34 +1167,40 @@ async function requestCategoryWordsWithExclusions(category, customPrompt, fallba
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 category,
+                max_options: requestedOptionCount,
                 build_space_content: buildSpaceContent,
                 exclude_words: excludeWords,
-                custom_prompt: customPrompt
+                custom_prompt: promptWithLetterConstraint
             })
         });
         if (!response.ok) {
-            currentPredictions = fallbackWords;
+            currentPredictions = filteredFallbackWords;
             renderWordPredictions();
             return false;
         }
         const data = await response.json();
         const rawWords = data.words || [];
-        const nextWords = rawWords
+        const parsedWords = rawWords
             .map((w) => (typeof w === 'object' && w.text ? w.text : w))
             .filter((w) => typeof w === 'string' && w.trim() !== '')
-            .slice(0, Math.max(1, LLMOptions));
-        currentPredictions = nextWords.length > 0 ? nextWords : fallbackWords;
+            .slice(0, requestedOptionCount);
+
+        const nextWords = startsWithLetter
+            ? parsedWords.filter((word) => startsWithLetterFilter(word, startsWithLetter)).slice(0, Math.max(1, LLMOptions))
+            : parsedWords.slice(0, Math.max(1, LLMOptions));
+
+        currentPredictions = nextWords.length > 0 ? nextWords : filteredFallbackWords;
         renderWordPredictions();
         return nextWords.length > 0;
     } catch (error) {
         console.error('Error loading category words:', error);
-        currentPredictions = fallbackWords;
+        currentPredictions = filteredFallbackWords;
         renderWordPredictions();
         return false;
     }
 }
 
-async function loadGeneralWords(excludeWords = [], fallbackWordsOverride = null) {
+async function loadGeneralWords(excludeWords = [], fallbackWordsOverride = null, requestOptions = {}) {
     const fallbackWords = isStartingNewSentence()
         ? getSentenceStarterFallbackWords()
         : ['I', 'want', 'to', 'go', 'more', 'help', 'with', 'and', 'the', 'it']
@@ -1189,13 +1209,14 @@ async function loadGeneralWords(excludeWords = [], fallbackWordsOverride = null)
         'general',
         getContextFreeGeneralPrompt(),
         fallbackWordsOverride || fallbackWords,
-        excludeWords
+        excludeWords,
+        requestOptions
     );
 }
 
-async function loadCategoryWords(categorySelection, excludeWords = [], fallbackWordsOverride = null) {
+async function loadCategoryWords(categorySelection, excludeWords = [], fallbackWordsOverride = null, requestOptions = {}) {
     if (!categorySelection) {
-        return loadGeneralWords(excludeWords, fallbackWordsOverride);
+        return loadGeneralWords(excludeWords, fallbackWordsOverride, requestOptions);
     }
 
     const fallbackWords = fallbackWordsOverride || getCategoryFallbackWords(categorySelection);
@@ -1204,7 +1225,8 @@ async function loadCategoryWords(categorySelection, excludeWords = [], fallbackW
         categorySelection.promptCategory,
         buildCategorySpecificPrompt(categorySelection),
         fallbackWords,
-        excludeWords
+        excludeWords,
+        requestOptions
     );
 }
 
@@ -1254,11 +1276,134 @@ async function refreshSuggestedWords() {
         return null;
     }
     if (currentCategory) {
-        await loadCategoryWords(currentCategory);
+        await loadCategoryWords(
+            currentCategory,
+            [],
+            null,
+            currentSomethingElseStartsWithLetter
+                ? { startsWithLetter: currentSomethingElseStartsWithLetter }
+                : {}
+        );
         return null;
     }
-    await loadGeneralWords();
+    await loadGeneralWords(
+        [],
+        null,
+        currentSomethingElseStartsWithLetter
+            ? { startsWithLetter: currentSomethingElseStartsWithLetter }
+            : {}
+    );
     return null;
+}
+
+function getSomethingElseLetterOrder() {
+    if (spellLetterOrder === 'qwerty') {
+        return ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', 'Z', 'X', 'C', 'V', 'B', 'N', 'M'];
+    }
+    return Array.from({ length: 26 }, (_, index) => String.fromCharCode(65 + index));
+}
+
+function startsWithLetterFilter(word, selectedLetter) {
+    const trimmedWord = String(word || '').trim();
+    if (!trimmedWord || !selectedLetter) return false;
+    const normalizedStart = trimmedWord.replace(/^[^a-zA-Z]+/, '');
+    return normalizedStart.toLowerCase().startsWith(String(selectedLetter).toLowerCase());
+}
+
+function ensureSomethingElseLetterModal() {
+    let modal = document.getElementById(SOMETHING_ELSE_LETTER_MODAL_ID);
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = SOMETHING_ELSE_LETTER_MODAL_ID;
+    modal.className = 'something-else-modal hidden';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'something-else-modal-dialog';
+
+    const title = document.createElement('h3');
+    title.className = 'something-else-modal-title';
+    title.textContent = 'Something Else A-Z';
+
+    const helperText = document.createElement('p');
+    helperText.className = 'something-else-modal-helper';
+    helperText.textContent = 'Pick a starting letter for new suggestions.';
+
+    const letterGrid = document.createElement('div');
+    letterGrid.id = 'something-else-letter-grid';
+    letterGrid.className = 'something-else-letter-grid';
+
+    const goBackButton = document.createElement('button');
+    goBackButton.id = 'something-else-go-back-btn';
+    goBackButton.className = 'something-else-go-back-btn compose-button';
+    goBackButton.textContent = 'Go Back';
+    goBackButton.addEventListener('click', () => {
+        closeSomethingElseLetterModal(true);
+    });
+
+    dialog.appendChild(title);
+    dialog.appendChild(helperText);
+    dialog.appendChild(letterGrid);
+    dialog.appendChild(goBackButton);
+    modal.appendChild(dialog);
+
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) {
+            closeSomethingElseLetterModal(true);
+        }
+    });
+
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function renderSomethingElseLetterButtons() {
+    const modal = ensureSomethingElseLetterModal();
+    const letterGrid = modal.querySelector('#something-else-letter-grid');
+    if (!letterGrid) return;
+
+    letterGrid.innerHTML = '';
+    getSomethingElseLetterOrder().forEach((letter) => {
+        const button = document.createElement('button');
+        button.className = 'something-else-letter-btn compose-button';
+        button.textContent = letter;
+        button.dataset.letter = letter;
+        button.addEventListener('click', async () => {
+            await loadSomethingElseOptionsByLetter(letter);
+        });
+        letterGrid.appendChild(button);
+    });
+}
+
+function openSomethingElseLetterModal() {
+    if (currentSpellingWord) {
+        announce('Something Else A-Z is not available while spelling.', 'system', false, true)
+            .catch((error) => console.error('Failed to announce spelling restriction:', error));
+        restartScanning(250, false);
+        return;
+    }
+
+    if (currentNumberRange) {
+        announce('Something Else A-Z is not available in numbers mode.', 'system', false, true)
+            .catch((error) => console.error('Failed to announce numbers restriction:', error));
+        restartScanning(250, false);
+        return;
+    }
+
+    renderSomethingElseLetterButtons();
+    const modal = ensureSomethingElseLetterModal();
+    modal.classList.remove('hidden');
+    focusWordOptionsScanning(120);
+}
+
+function closeSomethingElseLetterModal(resumeScan = false) {
+    const modal = document.getElementById(SOMETHING_ELSE_LETTER_MODAL_ID);
+    if (!modal) return;
+    modal.classList.add('hidden');
+
+    if (resumeScan) {
+        focusWordOptionsScanning(120);
+    }
 }
 
 async function loadSomethingElseOptions() {
@@ -1290,13 +1435,65 @@ async function loadSomethingElseOptions() {
 
     let didLoadNewWords = false;
     if (currentCategory) {
-        didLoadNewWords = await loadCategoryWords(currentCategory, existingOptions, existingOptions);
+        didLoadNewWords = await loadCategoryWords(
+            currentCategory,
+            existingOptions,
+            existingOptions,
+            currentSomethingElseStartsWithLetter
+                ? { startsWithLetter: currentSomethingElseStartsWithLetter }
+                : {}
+        );
     } else {
-        didLoadNewWords = await loadGeneralWords(existingOptions, existingOptions);
+        didLoadNewWords = await loadGeneralWords(
+            existingOptions,
+            existingOptions,
+            currentSomethingElseStartsWithLetter
+                ? { startsWithLetter: currentSomethingElseStartsWithLetter }
+                : {}
+        );
     }
 
     if (!didLoadNewWords) {
         await announce('I could not find other word options.', 'system', false, true);
+    }
+
+    focusWordOptionsScanning(150);
+}
+
+async function loadSomethingElseOptionsByLetter(selectedLetter) {
+    const letter = String(selectedLetter || '').trim().toUpperCase();
+    if (!letter) {
+        closeSomethingElseLetterModal(true);
+        return;
+    }
+
+    currentSomethingElseStartsWithLetter = letter;
+
+    closeSomethingElseLetterModal(false);
+    stopAuditoryScanning();
+
+    const existingOptions = currentPredictions
+        .map((word) => String(word || '').trim())
+        .filter(Boolean);
+
+    let didLoadNewWords = false;
+    if (currentCategory) {
+        didLoadNewWords = await loadCategoryWords(
+            currentCategory,
+            existingOptions,
+            existingOptions,
+            { startsWithLetter: letter }
+        );
+    } else {
+        didLoadNewWords = await loadGeneralWords(
+            existingOptions,
+            existingOptions,
+            { startsWithLetter: letter }
+        );
+    }
+
+    if (!didLoadNewWords) {
+        await announce(`I could not find other options starting with ${letter}.`, 'system', false, true);
     }
 
     focusWordOptionsScanning(150);
@@ -1332,6 +1529,15 @@ function renderWordPredictions() {
             await loadSomethingElseOptions();
         });
         predictionsGrid.appendChild(somethingElseButton);
+
+        const somethingElseAZButton = document.createElement('button');
+        somethingElseAZButton.className = 'prediction-btn compose-button';
+        somethingElseAZButton.textContent = 'Something Else A-Z';
+        somethingElseAZButton.dataset.standardOption = 'true';
+        somethingElseAZButton.addEventListener('click', () => {
+            openSomethingElseLetterModal();
+        });
+        predictionsGrid.appendChild(somethingElseAZButton);
     }
 
     const totalButtons = predictionsGrid.querySelectorAll('.prediction-btn').length;
@@ -1354,6 +1560,7 @@ async function handlePredictionClick(word) {
     currentCategory = null;
     currentNumberRange = null;
     currentNumberPageOffset = 0;
+    currentSomethingElseStartsWithLetter = '';
     setActiveCategoryButton('General');
     updateWordsSectionTitle();
 
@@ -1645,11 +1852,16 @@ function getVisibleEnabledButtons(selector) {
     });
 }
 
+function isSomethingElseLetterModalOpen() {
+    const modal = document.getElementById(SOMETHING_ELSE_LETTER_MODAL_ID);
+    return Boolean(modal && !modal.classList.contains('hidden'));
+}
+
 function getSectionButtonsInOrder() {
-    const orderedIds = ['action-section', 'choose-word-section', 'tool-toggle-section', 'tool-panel-section'];
+    const orderedIds = ['exit-creation-btn', 'action-section', 'choose-word-section', 'tool-toggle-section', 'tool-panel-section'];
     return orderedIds
         .map((id) => document.getElementById(id))
-        .filter((section) => section && section.offsetParent !== null);
+        .filter((element) => element && element.offsetParent !== null && !element.disabled);
 }
 
 function getActionButtonsInOrder() {
@@ -1674,6 +1886,9 @@ function getItemsForSection(sectionId) {
         return getToolToggleButtonsInOrder();
     }
     if (sectionId === 'choose-word') {
+        if (isSomethingElseLetterModalOpen()) {
+            return getVisibleEnabledButtons('.something-else-letter-btn, #something-else-go-back-btn');
+        }
         return getVisibleEnabledButtons('.prediction-btn');
     }
     if (sectionId === 'tool-panel' && (activeTool === 'categories' || activeTool === 'numbers')) {

@@ -216,6 +216,74 @@ body {
     background: #fef3c7 !important;
 }
 
+/* ---- Something Else A-Z Modal ---- */
+
+.something-else-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 120;
+    padding: 12px;
+}
+
+.something-else-modal.hidden {
+    display: none;
+}
+
+.something-else-modal-dialog {
+    width: min(760px, 100%);
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 20px 35px rgba(15, 23, 42, 0.25);
+}
+
+.something-else-modal-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.something-else-modal-helper {
+    margin: 4px 0 10px;
+    font-size: 0.8rem;
+    color: #475569;
+}
+
+.something-else-letter-grid {
+    display: grid;
+    gap: 6px;
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+}
+
+.something-else-letter-btn,
+.something-else-go-back-btn {
+    border: 1px solid #93c5fd;
+    border-radius: 8px;
+    background: #dbeafe;
+    color: #0f172a;
+    font-weight: 700;
+    min-height: 38px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1.1;
+    padding: 4px 6px;
+}
+
+.something-else-go-back-btn {
+    margin-top: 10px;
+    width: 100%;
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
 /* ---- Responsive ---- */
 
 @media (max-width: 900px) {
@@ -273,6 +341,16 @@ body {
     .prediction-btn,
     .category-btn,
     .tool-select-btn {
+        min-height: 42px;
+        font-size: 0.82rem;
+    }
+
+    .something-else-letter-grid {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .something-else-letter-btn,
+    .something-else-go-back-btn {
         min-height: 42px;
         font-size: 0.82rem;
     }
