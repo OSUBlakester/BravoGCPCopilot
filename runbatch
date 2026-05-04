@@ -1,5 +1,0 @@
-#!/usr/bin/env zsh
-set -euo pipefail
-
-ROOT_DIR="/Users/blakethomas/Documents/Documents_Macbook_Air/BravoGCPCopilot"
-"$ROOT_DIR/venv/bin/python3" "$ROOT_DIR/batch_generate_missing_images.py" "$@"
