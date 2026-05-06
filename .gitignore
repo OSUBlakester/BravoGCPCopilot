@@ -164,6 +164,8 @@ check_guess_who_setup.sh
 copy_jokes_to_test.py
 
 # Local-only admin and content pipeline scripts
+picom_database_schema.json
+run_missing_images_free.sh
 bulk_import_bravo_images.py
 bulk_import_jokes.py
 convert_images_to_png.py
