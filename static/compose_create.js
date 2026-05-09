@@ -53,6 +53,122 @@ let lastScanPromptTime = 0;
 let scanCycleCount = 0;
 let scanLoopLimit = 0;
 let isPausedFromScanLimit = false;
+let userLanguageLocale = 'en-US';
+let defaultPartnerLanguageLocale = 'en-US';
+const categoryLabelTranslationCache = new Map();
+
+const LOCALE_LABEL_TO_TAG = {
+    'english (us)': 'en-US',
+    'spanish (us)': 'es-US',
+    'french (france)': 'fr-FR',
+    'german (germany)': 'de-DE',
+    'italian (italy)': 'it-IT',
+    'portuguese (brazil)': 'pt-BR',
+    'arabic': 'ar-XA'
+};
+
+function normalizeLocaleTag(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    const labelMatch = LOCALE_LABEL_TO_TAG[trimmed.toLowerCase()];
+    if (labelMatch) return labelMatch;
+
+    const cleaned = trimmed.replace(/_/g, '-');
+    const localeMatch = cleaned.match(/^([a-zA-Z]{2})(?:-([a-zA-Z]{2,3}))?$/);
+    if (!localeMatch) return '';
+
+    const lang = localeMatch[1].toLowerCase();
+    const region = localeMatch[2] ? localeMatch[2].toUpperCase() : '';
+    return region ? `${lang}-${region}` : lang;
+}
+
+function getEffectivePartnerLanguage() {
+    return normalizeLocaleTag(defaultPartnerLanguageLocale) || 'en-US';
+}
+
+function getEffectiveUserLanguage() {
+    return normalizeLocaleTag(userLanguageLocale) || 'en-US';
+}
+
+function walkCategoryNodes(nodes, visitor) {
+    const queue = Array.isArray(nodes) ? [...nodes] : [];
+    while (queue.length > 0) {
+        const node = queue.shift();
+        if (!node || typeof node !== 'object') continue;
+        visitor(node);
+        const children = Array.isArray(node.children) ? node.children : [];
+        children.forEach((child) => queue.push(child));
+    }
+}
+
+async function localizeCategoryTreeLabels(rootNodes) {
+    const locale = getEffectiveUserLanguage();
+    if (!locale || locale.toLowerCase().startsWith('en')) {
+        return;
+    }
+
+    const labelsToTranslate = [];
+    const seen = new Set();
+
+    walkCategoryNodes(rootNodes, (node) => {
+        const label = String(node.label || '').trim();
+        if (!label) return;
+        if (categoryLabelTranslationCache.has(label)) {
+            node.displayLabel = categoryLabelTranslationCache.get(label);
+            return;
+        }
+        const dedupeKey = label.toLowerCase();
+        if (!seen.has(dedupeKey)) {
+            seen.add(dedupeKey);
+            labelsToTranslate.push(label);
+        }
+    });
+
+    if (labelsToTranslate.length === 0) {
+        return;
+    }
+
+    try {
+        const response = await authenticatedFetch('/api/translate-lines', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lines: labelsToTranslate,
+                source_locale: 'en-US',
+                target_locale: locale
+            })
+        });
+
+        if (!response.ok) {
+            return;
+        }
+
+        const payload = await response.json();
+        const translatedLines = Array.isArray(payload.translated_lines) ? payload.translated_lines : [];
+        labelsToTranslate.forEach((label, index) => {
+            const translated = String(translatedLines[index] || '').trim();
+            if (translated) {
+                categoryLabelTranslationCache.set(label, translated);
+            }
+        });
+
+        walkCategoryNodes(rootNodes, (node) => {
+            const label = String(node.label || '').trim();
+            if (!label) return;
+            const translated = String(categoryLabelTranslationCache.get(label) || '').trim();
+            node.displayLabel = translated || label;
+        });
+    } catch (error) {
+        console.warn('Failed to localize category labels:', error);
+    }
+}
+
+function getCategoryDisplayLabel(node) {
+    if (!node || typeof node !== 'object') return '';
+    return String(node.displayLabel || node.label || '').trim();
+}
 
 function interruptScanningAnnouncementPlayback() {
     announcementQueue = [];
@@ -106,6 +222,15 @@ const toolPanelSection = document.getElementById('tool-panel-section');
 const categoryPanel = document.getElementById('category-panel');
 const lettersPanel = document.getElementById('letters-panel');
 const toolPanelTitle = document.getElementById('tool-panel-title');
+
+function getComposeLocalizedText(key, fallback) {
+    const body = document.body;
+    if (!body || !body.dataset) {
+        return fallback;
+    }
+    const candidate = String(body.dataset[key] || '').trim();
+    return candidate || fallback;
+}
 
 // ============================================================
 // Compose Session Helpers
@@ -202,6 +327,8 @@ async function loadSettings() {
         playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
         spellLetterOrder = typeof settings.spellLetterOrder === 'string' ? settings.spellLetterOrder : 'alphabetical';
         LLMOptions = settings.LLMOptions || 10;
+        userLanguageLocale = normalizeLocaleTag(settings.userLanguage) || 'en-US';
+        defaultPartnerLanguageLocale = normalizeLocaleTag(settings.defaultPartnerLanguage) || 'en-US';
         if (typeof settings.scanLoopLimit === 'number' && !Number.isNaN(settings.scanLoopLimit)) {
             scanLoopLimit = Math.max(0, Math.min(10, parseInt(settings.scanLoopLimit, 10)));
         } else {
@@ -311,6 +438,7 @@ async function announce(textToAnnounce, announcementType = 'system', recordHisto
                 body: JSON.stringify({
                     text,
                     routing_target: target === 'personal' ? 'personal' : 'system',
+                    language_code_override: target === 'system' ? getEffectivePartnerLanguage() : undefined,
                     use_system_voice: useSystemVoiceForRequest === true
                 })
             });
@@ -330,6 +458,57 @@ async function announce(textToAnnounce, announcementType = 'system', recordHisto
 
 async function speak(textToSpeak) {
     return announce(textToSpeak, 'personal', false, false);
+}
+
+async function translateLineBetweenLocales(text, sourceLocaleRaw, targetLocaleRaw) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return cleanText;
+
+    const sourceLocale = String(sourceLocaleRaw || '').trim() || undefined;
+    const targetLocale = String(targetLocaleRaw || '').trim() || undefined;
+    if (!targetLocale) return cleanText;
+    if (sourceLocale && sourceLocale.toLowerCase() === targetLocale.toLowerCase()) {
+        return cleanText;
+    }
+
+    try {
+        const response = await authenticatedFetch('/api/translate-lines', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lines: [cleanText],
+                source_locale: sourceLocale,
+                target_locale: targetLocale,
+            }),
+        });
+
+        if (!response.ok) {
+            return cleanText;
+        }
+
+        const payload = await response.json();
+        const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines[0] : '';
+        const normalized = String(translated || '').trim();
+        return normalized || cleanText;
+    } catch (error) {
+        console.warn('Failed to translate line between locales:', error);
+        return cleanText;
+    }
+}
+
+async function translateLineToPartnerLanguage(text) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return cleanText;
+    const targetLocale = getEffectivePartnerLanguage();
+    const sourceLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    return translateLineBetweenLocales(cleanText, sourceLocale, targetLocale);
+}
+
+async function announcePartnerFacingOutput(sourceText, recordHistory = false, showSplash = true) {
+    const cleanSource = String(sourceText || '').trim();
+    if (!cleanSource) return;
+    const translatedForPartner = await translateLineToPartnerLanguage(cleanSource);
+    await announce(translatedForPartner, 'system', recordHistory, showSplash);
 }
 
 async function cleanupTextValue(text) {
@@ -544,18 +723,18 @@ function exitCreation() {
 async function readCreation() {
     const text = getCombinedBuildText().trim();
     if (!text) {
-        await announce('Creation is empty.', 'system', false, true);
+        await announcePartnerFacingOutput('Creation is empty.', false, true);
         return;
     }
     stopAuditoryScanning();
-    await announce(text, 'system', false, true);
+    await announcePartnerFacingOutput(text, false, true);
     restartScanning(250, true);
 }
 
 async function aiEditCreation() {
     const text = getCombinedBuildText().trim();
     if (!text) {
-        await announce('Creation is empty.', 'system', false, true);
+        await announcePartnerFacingOutput('Creation is empty.', false, true);
         return;
     }
 
@@ -567,10 +746,10 @@ async function aiEditCreation() {
         setBuildSpaceText(cleaned);
         syncBuildSpaceToComposeSession();
         await refreshSuggestedWords();
-        await announce(cleaned || 'Creation is empty.', 'system', false, true);
+        await announcePartnerFacingOutput(cleaned || 'Creation is empty.', false, true);
     } catch (error) {
         console.error('AI edit failed:', error);
-        await announce('Unable to AI edit right now.', 'system', false, true);
+        await announcePartnerFacingOutput('Unable to AI edit right now.', false, true);
     }
     restartScanning(250, true);
 }
@@ -578,7 +757,7 @@ async function aiEditCreation() {
 async function newRow() {
     const text = getCombinedBuildText().trimEnd();
     if (!text) {
-        await announce('Creation is empty.', 'system', false, true);
+        await announcePartnerFacingOutput('Creation is empty.', false, true);
         return;
     }
 
@@ -600,10 +779,10 @@ async function newRow() {
         setActiveTool(null);
         syncBuildSpaceToComposeSession();
         await refreshSuggestedWords();
-        await announce('Started new row.', 'system', false, true);
+        await announcePartnerFacingOutput('Started new row.', false, true);
     } catch (error) {
         console.error('New row failed:', error);
-        await announce('Unable to start a new row right now.', 'system', false, true);
+        await announcePartnerFacingOutput('Unable to start a new row right now.', false, true);
     }
 
     restartScanning(250, true);
@@ -669,7 +848,7 @@ function updateCategoryPanelHeading() {
         toolPanelTitle.textContent = 'Word Categories';
         return;
     }
-    const pathLabel = categoryNavigationStack.map((node) => node.label).join(' / ');
+    const pathLabel = categoryNavigationStack.map((node) => getCategoryDisplayLabel(node) || String(node.label || '')).join(' / ');
     toolPanelTitle.textContent = `Word Categories — ${pathLabel}`;
 }
 
@@ -716,9 +895,10 @@ function renderNumbersToolPanel() {
     categoryGridEl.innerHTML = '';
     updateCategoryPanelHeading();
 
+    const goBackLabel = getComposeLocalizedText('composeGoBack', 'Go Back');
     const goBackButton = document.createElement('button');
     goBackButton.className = 'category-btn compose-button';
-    goBackButton.textContent = 'Go Back';
+    goBackButton.textContent = goBackLabel;
     goBackButton.addEventListener('click', () => {
         closeActiveTool();
     });
@@ -743,7 +923,7 @@ function renderNumbersToolPanel() {
     NUMBER_TOOL_EXPANSIONS.forEach((increment) => {
         const addButton = document.createElement('button');
         addButton.className = 'category-btn compose-button';
-        addButton.textContent = `Add ${increment.toLocaleString()}`;
+        addButton.textContent = `+ ${increment.toLocaleString()}`;
         addButton.addEventListener('click', () => {
             currentNumberBase += increment;
             currentNumberRange = null;
@@ -756,7 +936,7 @@ function renderNumbersToolPanel() {
 
     const resetButton = document.createElement('button');
     resetButton.className = 'category-btn compose-button';
-    resetButton.textContent = 'Reset to 0';
+    resetButton.textContent = '↺ 0';
     resetButton.addEventListener('click', () => {
         currentNumberBase = 0;
         currentNumberRange = null;
@@ -776,16 +956,17 @@ function setActiveCategoryButton(label) {
 function updateWordsSectionTitle() {
     const wordsTitleEl = document.getElementById('words-section-title');
     if (!wordsTitleEl) return;
+    const suggestedWordsLabel = getComposeLocalizedText('composeSuggestedWords', 'Suggested Words');
     if (currentNumberRange) {
         const pageValues = getCurrentNumberPageValues();
         if (pageValues.length > 0) {
-            wordsTitleEl.textContent = `Words — ${pageValues[0]}-${pageValues[pageValues.length - 1]}`;
+            wordsTitleEl.textContent = `${suggestedWordsLabel} - ${pageValues[0]}-${pageValues[pageValues.length - 1]}`;
             return;
         }
-        wordsTitleEl.textContent = `Words — ${currentNumberRange.label}`;
+        wordsTitleEl.textContent = `${suggestedWordsLabel} - ${currentNumberRange.label}`;
         return;
     }
-    wordsTitleEl.textContent = currentCategory ? `Words — ${currentCategory.label}` : 'Suggested Words';
+    wordsTitleEl.textContent = currentCategory ? `${suggestedWordsLabel} - ${currentCategory.label}` : suggestedWordsLabel;
 }
 
 function setActiveTool(toolName) {
@@ -890,6 +1071,7 @@ async function loadCategories() {
         const config = await response.json();
         const buttons = Array.isArray(config.buttons) ? config.buttons : [];
         topLevelCategories = buttons.filter(shouldIncludeCategoryNode);
+        await localizeCategoryTreeLabels(topLevelCategories);
         categoryNavigationStack = [];
         renderCurrentCategoryPanel();
     } catch (error) {
@@ -933,8 +1115,12 @@ function renderCategoryFallback() {
         { label: 'Describe', prompt_category: 'describe', children: [] },
         { label: 'Animals', prompt_category: 'animals', children: [] }
     ];
-    categoryNavigationStack = [];
-    renderCurrentCategoryPanel();
+    localizeCategoryTreeLabels(topLevelCategories)
+        .catch((error) => console.warn('Failed to localize fallback categories:', error))
+        .finally(() => {
+            categoryNavigationStack = [];
+            renderCurrentCategoryPanel();
+        });
 }
 
 function renderCurrentCategoryPanel() {
@@ -944,9 +1130,10 @@ function renderCurrentCategoryPanel() {
     categoryGridEl.innerHTML = '';
     updateCategoryPanelHeading();
 
+    const goBackLabel = getComposeLocalizedText('composeGoBack', 'Go Back');
     const goBackButton = document.createElement('button');
     goBackButton.className = 'category-btn compose-button';
-    goBackButton.textContent = 'Go Back';
+    goBackButton.textContent = goBackLabel;
     goBackButton.addEventListener('click', () => {
         if (parentNode) {
             categoryNavigationStack.pop();
@@ -974,8 +1161,9 @@ function renderCurrentCategoryPanel() {
     } else {
         const allParentButton = document.createElement('button');
         allParentButton.className = 'category-btn compose-button';
-        allParentButton.textContent = `All ${parentNode.label}`;
-        allParentButton.dataset.categoryLabel = parentNode.label || '';
+        const parentLabel = getCategoryDisplayLabel(parentNode) || String(parentNode.label || '');
+        allParentButton.textContent = `All ${parentLabel}`;
+        allParentButton.dataset.categoryLabel = parentLabel || '';
         allParentButton.addEventListener('click', async () => {
             await selectCategory(parentNode);
         });
@@ -983,10 +1171,11 @@ function renderCurrentCategoryPanel() {
     }
 
     categories.forEach((cat) => {
+        const displayLabel = getCategoryDisplayLabel(cat) || String(cat.label || cat);
         const btn = document.createElement('button');
         btn.className = 'category-btn compose-button';
-        btn.textContent = cat.label || cat;
-        btn.dataset.categoryLabel = cat.label || cat;
+        btn.textContent = displayLabel;
+        btn.dataset.categoryLabel = displayLabel;
         btn.dataset.promptCategory = cat.prompt_category || (cat.label || cat).toLowerCase();
         btn.addEventListener('click', async () => {
             if (canDrillIntoCategory(cat)) {
@@ -1005,17 +1194,18 @@ function renderCurrentCategoryPanel() {
 
 async function selectCategory(cat) {
     const label = cat.label || String(cat);
+    const displayLabel = getCategoryDisplayLabel(cat) || label;
     const promptCategory = cat.prompt_category || label.toLowerCase();
     const llmPrompt = String(cat.llm_prompt || '').trim();
     const wordsPrompt = String(cat.words_prompt || '').trim();
 
     currentCategory = {
-        label,
+        label: displayLabel,
         promptCategory,
         llmPrompt,
         wordsPrompt
     };
-    setActiveCategoryButton(label);
+    setActiveCategoryButton(displayLabel);
     updateWordsSectionTitle();
     document.getElementById('choose-word-section')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
@@ -1503,10 +1693,15 @@ function renderWordPredictions() {
     predictionsGrid.classList.toggle('numbers-mode', Boolean(currentNumberRange));
     predictionsGrid.innerHTML = '';
 
+    const goBackLabel = getComposeLocalizedText('composeGoBack', 'Go Back');
+    const somethingElseLabel = getComposeLocalizedText('composeSomethingElse', 'Something Else');
+    const somethingElseAzLabel = getComposeLocalizedText('composeSomethingElseAz', 'Something Else A-Z');
+
     const goBackButton = document.createElement('button');
     goBackButton.className = 'prediction-btn compose-button';
-    goBackButton.textContent = 'Go Back';
+    goBackButton.textContent = goBackLabel;
     goBackButton.dataset.standardOption = 'true';
+    goBackButton.dataset.standardOptionType = 'go-back';
     goBackButton.addEventListener('click', () => {
         restartScanning(120, true);
     });
@@ -1523,8 +1718,9 @@ function renderWordPredictions() {
     if (!currentSpellingWord) {
         const somethingElseButton = document.createElement('button');
         somethingElseButton.className = 'prediction-btn compose-button';
-        somethingElseButton.textContent = 'Something Else';
+        somethingElseButton.textContent = somethingElseLabel;
         somethingElseButton.dataset.standardOption = 'true';
+        somethingElseButton.dataset.standardOptionType = 'something-else';
         somethingElseButton.addEventListener('click', async () => {
             await loadSomethingElseOptions();
         });
@@ -1532,8 +1728,9 @@ function renderWordPredictions() {
 
         const somethingElseAZButton = document.createElement('button');
         somethingElseAZButton.className = 'prediction-btn compose-button';
-        somethingElseAZButton.textContent = 'Something Else A-Z';
+        somethingElseAZButton.textContent = somethingElseAzLabel;
         somethingElseAZButton.dataset.standardOption = 'true';
+        somethingElseAZButton.dataset.standardOptionType = 'something-else-az';
         somethingElseAZButton.addEventListener('click', () => {
             openSomethingElseLetterModal();
         });
@@ -1549,7 +1746,7 @@ function renderWordPredictions() {
 
 async function handlePredictionClick(word) {
     stopAuditoryScanning();
-    await announce(word, 'system', false, true);
+    await announcePartnerFacingOutput(word, false, true);
     appendWordToBuildSpace(word);
     clearCurrentSpellingWord();
     updateLetterAvailability('');
@@ -1671,7 +1868,7 @@ async function chooseCurrentSpellingWord() {
     }
 
     stopAuditoryScanning();
-    await announce(chosenWord, 'system', false, true);
+    await announcePartnerFacingOutput(chosenWord, false, true);
 
     const nextText = currentBuildSpaceText
         ? /[\s\n]$/.test(currentBuildSpaceText)
@@ -1936,6 +2133,9 @@ function getScanPromptTextForElement(element) {
     }
 
     if (element.classList && element.classList.contains('scan-section')) {
+        const configuredScanLabel = String(element.dataset.scanLabel || '').trim();
+        if (configuredScanLabel) return configuredScanLabel;
+
         const sectionId = element.dataset.sectionId;
         if (sectionId === 'action') return 'Actions';
         if (sectionId === 'tool-toggle') return 'Tools';

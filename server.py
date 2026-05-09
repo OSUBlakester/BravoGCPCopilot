@@ -992,6 +992,7 @@ class UserCurrentState(BaseModel):
     focusChapters: Optional[str] = ""
     focusPlotPoints: Optional[str] = ""
     topicSummary: Optional[str] = ""
+    locationLanguageOverride: Optional[str] = None
     mood: Optional[str] = None  # Current mood - saved to info/user_narrative
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
     favorite_name: Optional[str] = None  # NEW: Name of the favorite that was loaded
@@ -1012,6 +1013,7 @@ class UserCurrentFavorite(BaseModel):
     focusChapters: Optional[str] = ""
     focusPlotPoints: Optional[str] = ""
     topicSummary: Optional[str] = ""
+    locationLanguageOverride: Optional[str] = None
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
     schedule: Optional[FavoriteSchedule] = None # NEW: Schedule for this favorite
 
@@ -1027,6 +1029,7 @@ class FavoriteRequest(BaseModel):
     focusChapters: Optional[str] = ""
     focusPlotPoints: Optional[str] = ""
     topicSummary: Optional[str] = ""
+    locationLanguageOverride: Optional[str] = None
     schedule: Optional[FavoriteSchedule] = None # NEW: Schedule for this favorite
 
 class ManageFavoriteRequest(BaseModel):
@@ -1057,6 +1060,8 @@ async def get_user_current_endpoint(current_ids: Annotated[Dict[str, str], Depen
         )
         current_mood = user_info.get("currentMood")
         
+        normalized_location_override = _normalize_locale_tag(user_current_content_dict.get("locationLanguageOverride"))
+
         # Return the full state including favorite tracking fields and mood
         return JSONResponse(content={
             "location": user_current_content_dict.get("location", ""),
@@ -1066,6 +1071,7 @@ async def get_user_current_endpoint(current_ids: Annotated[Dict[str, str], Depen
             "focusChapters": user_current_content_dict.get("focusChapters", ""),
             "focusPlotPoints": user_current_content_dict.get("focusPlotPoints", ""),
             "topicSummary": user_current_content_dict.get("topicSummary", ""),
+            "locationLanguageOverride": normalized_location_override,
             "mood": current_mood,  # Include mood from user_narrative
             "loaded_at": user_current_content_dict.get("loaded_at"),
             "favorite_name": user_current_content_dict.get("favorite_name"),
@@ -1086,6 +1092,7 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
     focus_chapters = payload.focusChapters or ""
     focus_plot_points = payload.focusPlotPoints or ""
     topic_summary = payload.topicSummary or ""
+    location_language_override = _normalize_locale_tag(payload.locationLanguageOverride)
     discussion_narrative = (topic_summary or focus_plot_points or "").strip()
     mood = payload.mood  # Current mood
     loaded_at = payload.loaded_at  # Timestamp when favorite was loaded
@@ -1124,6 +1131,7 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
         "focusChapters": focus_chapters,
         "focusPlotPoints": focus_plot_points,
         "topicSummary": discussion_narrative,
+        "locationLanguageOverride": location_language_override,
         "saved_at": saved_at  # Always update saved_at when manually saving
     }
     
@@ -1199,7 +1207,19 @@ async def get_user_current_favorites(current_ids: Annotated[Dict[str, str], Depe
             doc_subpath="info/current_favorites",
             default_data={"favorites": []}
         )
-        return UserCurrentFavoritesData(**favorites_data)
+
+        raw_favorites = favorites_data.get("favorites", []) if isinstance(favorites_data, dict) else []
+        normalized_favorites = []
+        for favorite in raw_favorites:
+            if not isinstance(favorite, dict):
+                continue
+            normalized_favorite = favorite.copy()
+            normalized_favorite["locationLanguageOverride"] = _normalize_locale_tag(
+                normalized_favorite.get("locationLanguageOverride")
+            )
+            normalized_favorites.append(normalized_favorite)
+
+        return UserCurrentFavoritesData(favorites=normalized_favorites)
     except Exception as e:
         logging.error(f"Error loading user current favorites: {e}")
         return UserCurrentFavoritesData(favorites=[])
@@ -1235,6 +1255,7 @@ async def save_user_current_favorite(payload: FavoriteRequest, current_ids: Anno
             "focusChapters": payload.focusChapters or "",
             "focusPlotPoints": payload.focusPlotPoints or "",
             "topicSummary": payload.topicSummary or "",
+            "locationLanguageOverride": _normalize_locale_tag(payload.locationLanguageOverride),
             "schedule": payload.schedule.model_dump() if payload.schedule else None
         }
         favorites_list.append(new_favorite)
@@ -1291,6 +1312,7 @@ async def manage_user_current_favorite(payload: ManageFavoriteRequest, current_i
                         "focusChapters": payload.favorite.focusChapters or "",
                         "focusPlotPoints": payload.favorite.focusPlotPoints or "",
                         "topicSummary": payload.favorite.topicSummary or "",
+                        "locationLanguageOverride": _normalize_locale_tag(payload.favorite.locationLanguageOverride),
                         "schedule": payload.favorite.schedule.model_dump() if payload.favorite.schedule else None
                     }
                     break
@@ -1664,6 +1686,7 @@ DEFAULT_USER_CURRENT = {
     "focusChapters": "",
     "focusPlotPoints": "",
     "topicSummary": "",
+    "locationLanguageOverride": None,
     "loaded_at": None,
     "favorite_name": None,
     "saved_at": None
@@ -1671,6 +1694,8 @@ DEFAULT_USER_CURRENT = {
 DEFAULT_COLUMNS = 10 # Default number of columns in the grid
 DEFAULT_LIGHT_COLOR = 4294659860 # Default light color
 DEFAULT_DARK_COLOR = 4278198852 # Default dark color
+DEFAULT_USER_LANGUAGE = "en-US"
+DEFAULT_PARTNER_LANGUAGE = "en-US"
 
 # --- Updated Defaults to include wake word parts ---
 DEFAULT_SETTINGS = {
@@ -1688,6 +1713,11 @@ DEFAULT_SETTINGS = {
     "playWaitForSwitchChime": False, # Default page-ready chime off while waiting for switch
     "SummaryOff": False, # Default summary off
     "selected_tts_voice_name": DEFAULT_TTS_VOICE, # Default TTS voice
+    "userLanguage": DEFAULT_USER_LANGUAGE,
+    "defaultPartnerLanguage": DEFAULT_PARTNER_LANGUAGE,
+    "defaultPartnerVoice": DEFAULT_TTS_VOICE,
+    "locationOverrideLanguages": [],
+    "locationOverrideVoices": {},
     "gridColumns": DEFAULT_COLUMNS, # Default grid columns
     "lightColorValue": DEFAULT_LIGHT_COLOR, # Default light color
     "darkColorValue": DEFAULT_DARK_COLOR, # Default dark color
@@ -1704,8 +1734,118 @@ DEFAULT_SETTINGS = {
     "useTapInterface": False,  # Default to gridpage interface
     "applicationVolume": 8,  # Default application volume (80%)
     "spellLetterOrder": "alphabetical",  # Default spell page letter order
-    "vocabularyLevel": "functional"  # Default vocabulary level: emergent|functional|developing|proficient
+    "vocabularyLevel": "functional",  # Default vocabulary level: emergent|functional|developing|proficient
+    "specialPageTranslations": {}
 }
+
+
+def _normalize_locale_tag(value: Optional[str]) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().replace("_", "-")
+    if not cleaned:
+        return None
+
+    label_to_locale = {
+        "english (us)": "en-US",
+        "spanish (us)": "es-US",
+        "french (france)": "fr-FR",
+        "german (germany)": "de-DE",
+        "italian (italy)": "it-IT",
+        "portuguese (brazil)": "pt-BR",
+        "arabic": "ar-XA",
+    }
+
+    mapped = label_to_locale.get(cleaned.lower())
+    if mapped:
+        return mapped
+
+    parts = cleaned.split("-")
+    if len(parts) == 1:
+        lang = parts[0].lower()
+        if len(lang) != 2:
+            return None
+        return lang
+    lang = parts[0].lower()
+    region = parts[1].upper()
+    if len(lang) != 2 or len(region) < 2:
+        return None
+    return f"{lang}-{region}"
+
+def _sanitize_translated_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r'^[\s"“”‘’`]+', '', text)
+    text = re.sub(r'[\s"“”‘’`]+$', '', text)
+    text = text.rstrip(",")
+    return text.strip()
+
+def _normalize_language_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    merged = DEFAULT_SETTINGS.copy()
+    if isinstance(settings, dict):
+        merged.update(settings)
+
+    user_language = _normalize_locale_tag(merged.get("userLanguage")) or DEFAULT_USER_LANGUAGE
+    partner_language = _normalize_locale_tag(merged.get("defaultPartnerLanguage")) or DEFAULT_PARTNER_LANGUAGE
+
+    partner_voice = (merged.get("defaultPartnerVoice") or "").strip()
+    if not partner_voice:
+        partner_voice = (merged.get("selected_tts_voice_name") or "").strip() or DEFAULT_TTS_VOICE
+
+    location_override_languages_raw = merged.get("locationOverrideLanguages")
+    normalized_override_languages: List[str] = []
+    if isinstance(location_override_languages_raw, list):
+        for item in location_override_languages_raw:
+            normalized = _normalize_locale_tag(item)
+            if normalized and normalized not in normalized_override_languages:
+                normalized_override_languages.append(normalized)
+
+    location_override_voices_raw = merged.get("locationOverrideVoices")
+    normalized_override_voices: Dict[str, str] = {}
+    if isinstance(location_override_voices_raw, dict):
+        for locale_key, voice_name in location_override_voices_raw.items():
+            normalized_locale = _normalize_locale_tag(locale_key)
+            normalized_voice = str(voice_name or "").strip()
+            if normalized_locale and normalized_voice:
+                normalized_override_voices[normalized_locale] = normalized_voice
+
+    merged["userLanguage"] = user_language
+    merged["defaultPartnerLanguage"] = partner_language
+    merged["defaultPartnerVoice"] = partner_voice
+    merged["selected_tts_voice_name"] = partner_voice
+    merged["locationOverrideLanguages"] = normalized_override_languages
+    merged["locationOverrideVoices"] = normalized_override_voices
+
+    special_page_translations_raw = merged.get("specialPageTranslations")
+    normalized_special_page_translations: Dict[str, Dict[str, Dict[str, str]]] = {}
+    if isinstance(special_page_translations_raw, dict):
+        for page_key, locale_map in special_page_translations_raw.items():
+            page_name = str(page_key or "").strip().lower()
+            if not page_name or not isinstance(locale_map, dict):
+                continue
+
+            normalized_locale_map: Dict[str, Dict[str, str]] = {}
+            for locale_key, field_map in locale_map.items():
+                normalized_locale = _normalize_locale_tag(locale_key)
+                if not normalized_locale or not isinstance(field_map, dict):
+                    continue
+
+                normalized_field_map: Dict[str, str] = {}
+                for field_key, field_value in field_map.items():
+                    key_name = str(field_key or "").strip()
+                    value_text = _sanitize_translated_text(field_value)
+                    if key_name and value_text:
+                        normalized_field_map[key_name] = value_text
+
+                if normalized_field_map:
+                    normalized_locale_map[normalized_locale] = normalized_field_map
+
+            if normalized_locale_map:
+                normalized_special_page_translations[page_name] = normalized_locale_map
+
+    merged["specialPageTranslations"] = normalized_special_page_translations
+    return merged
 
 
 # --- Default Birthday Structure ---
@@ -7352,6 +7492,7 @@ class PlayAudioRequest(BaseModel):
     text: str
     routing_target: Optional[RoutingTarget] = "default"
     voice_name_override: Optional[str] = None
+    language_code_override: Optional[str] = None
     use_system_voice: bool = False
     speech_rate_override: Optional[int] = Field(None, gt=49, lt=401)
 
@@ -7375,15 +7516,17 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
         elif request.use_system_voice:
             voice_to_use = DEFAULT_TTS_VOICE
         else:
-            voice_to_use = user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
+            voice_to_use = user_settings.get("defaultPartnerVoice") or user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
         rate_to_use = request.speech_rate_override or user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
+        language_code_to_use = _normalize_locale_tag(request.language_code_override)
 
         logging.info(f"Synthesizing speech for account {account_id} user {aac_user_id} with text: '{request.text[:50]}...' for routing target: {request.routing_target}")
 
         audio_bytes, sample_rate = await synthesize_speech_to_bytes(
             text=request.text,
             voice_name=voice_to_use, # Pass the value from settings
-            wpm_rate=rate_to_use      # Pass the value from settings
+            wpm_rate=rate_to_use,      # Pass the value from settings
+            language_code=language_code_to_use,
         )
         import base64
         encoded_audio = base64.b64encode(audio_bytes).decode('utf-8')
@@ -7422,7 +7565,18 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
 
 # Ensure this function (synthesize_speech_to_bytes) is in your server.py file,
 # unindented at the global scope, and has this full body.
-async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int) -> tuple[bytes, int]:
+def _infer_language_code_from_voice(voice_name: str, fallback_locale: str = "en-US") -> str:
+    if not voice_name:
+        return fallback_locale
+    match = re.match(r"^([a-z]{2})[-_]([A-Za-z]{2,4})", voice_name)
+    if not match:
+        return fallback_locale
+    lang = match.group(1).lower()
+    region = match.group(2).upper()
+    return f"{lang}-{region}"
+
+
+async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int, language_code: Optional[str] = None) -> tuple[bytes, int]:
     """
     Synthesizes speech using the provided parameters. No DB lookups.
     """
@@ -7451,7 +7605,8 @@ async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int) 
         else:
             synthesis_input = google_tts.SynthesisInput(text=segment_text)
 
-        voice_params = google_tts.VoiceSelectionParams(language_code="en-US", name=voice_name)
+        effective_language_code = _normalize_locale_tag(language_code) or _infer_language_code_from_voice(voice_name)
+        voice_params = google_tts.VoiceSelectionParams(language_code=effective_language_code, name=voice_name)
 
         sample_rate_hertz = 24000
         if "Standard" in voice_name:
@@ -8254,6 +8409,11 @@ class SettingsModel(BaseModel):
     playWaitForSwitchChime: Optional[bool] = Field(None, description="Play a chime after page load when waiting for the switch to begin scanning.")
     SummaryOff: Optional[bool] = Field(None, description="Enable/disable summary generation.") # Added SummaryOff    
     selected_tts_voice_name: Optional[str] = None
+    userLanguage: Optional[str] = Field(None, description="Primary user language locale (e.g., es-ES).")
+    defaultPartnerLanguage: Optional[str] = Field(None, description="Default partner language locale (e.g., en-US).")
+    defaultPartnerVoice: Optional[str] = Field(None, description="Default partner language TTS voice name.")
+    locationOverrideLanguages: Optional[List[str]] = Field(None, description="Admin-defined location override language locales.")
+    locationOverrideVoices: Optional[Dict[str, str]] = Field(None, description="Voice mapping for each location override language locale.")
     gridColumns: Optional[int] = Field(None, description="Number of columns displayed in grid", ge=2, le=18)
     lightColorValue: Optional[int] = Field(None, description="Color value for light theme (e.g., 4294779156).", gt=0)
     darkColorValue: Optional[int] = Field(None, description="Color value for dark theme (e.g., 4294901764).", gt=0)
@@ -8271,6 +8431,7 @@ class SettingsModel(BaseModel):
     applicationVolume: Optional[int] = Field(None, description="Application volume level 0-10", ge=0, le=10)
     spellLetterOrder: Optional[str] = Field(None, description="Letter order for spell page: 'alphabetical', 'qwerty', or 'frequency'")
     vocabularyLevel: Optional[str] = Field(None, description="Vocabulary complexity level for LLM outputs: 'emergent', 'functional', 'developing', or 'proficient'")
+    specialPageTranslations: Optional[Dict[str, Dict[str, Dict[str, str]]]] = Field(None, description="Pretranslated static UI strings for special pages by page and locale.")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -8320,6 +8481,48 @@ class SettingsModel(BaseModel):
             if normalized in ['auto', 'step']:
                 return normalized
         raise ValueError("Invalid scanMode value. Must be 'auto' or 'step'")
+
+    @field_validator('userLanguage', 'defaultPartnerLanguage', mode='before')
+    @classmethod
+    def validate_language_locale(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = _normalize_locale_tag(value)
+        if not normalized:
+            raise ValueError("Invalid locale format. Use BCP-47 style like en-US or es-MX")
+        return normalized
+
+    @field_validator('locationOverrideLanguages', mode='before')
+    @classmethod
+    def validate_location_override_languages(cls, value: Any) -> Optional[List[str]]:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("locationOverrideLanguages must be a list of locale strings")
+        normalized: List[str] = []
+        for item in value:
+            locale = _normalize_locale_tag(item)
+            if not locale:
+                raise ValueError("locationOverrideLanguages contains an invalid locale")
+            if locale not in normalized:
+                normalized.append(locale)
+        return normalized
+
+    @field_validator('locationOverrideVoices', mode='before')
+    @classmethod
+    def validate_location_override_voices(cls, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("locationOverrideVoices must be a locale-to-voice map")
+        normalized: Dict[str, str] = {}
+        for locale_key, voice_name in value.items():
+            locale = _normalize_locale_tag(locale_key)
+            voice = str(voice_name or "").strip()
+            if not locale or not voice:
+                raise ValueError("locationOverrideVoices contains invalid locale or empty voice")
+            normalized[locale] = voice
+        return normalized
     
 
 class VoiceDetail(BaseModel):
@@ -8339,12 +8542,13 @@ async def load_settings_from_file(account_id: str, aac_user_id: str) -> Dict:
     """
     Loads settings from Firestore for a specific user, returning defaults if error/missing.
     """
-    return await load_firestore_document(
+    loaded = await load_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="settings/app_settings",
         default_data=DEFAULT_SETTINGS.copy()
     )
+    return _normalize_language_settings(loaded)
 
 
 @app.get("/api/interface-preference")
@@ -8408,6 +8612,7 @@ async def save_settings_to_file(account_id: str, aac_user_id: str, settings_data
     
     # Merge (update existing defaults with new sanitized data)
     current_settings.update(sanitized_data_to_save)
+    current_settings = _normalize_language_settings(current_settings)
     
     # DEBUG: Log FreestyleOptions in final merged settings
     logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions in final merged settings: {current_settings.get('FreestyleOptions', 'NOT_FOUND')}")
@@ -8442,6 +8647,21 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
 
     update_data = settings_update.model_dump(exclude_unset=True)
     logging.info(f"POST /api/settings request received for account {account_id} and user {aac_user_id} with update data: {update_data}")
+
+    current_settings_snapshot = await load_settings_from_file(account_id, aac_user_id)
+    merged_preview = _normalize_language_settings({**current_settings_snapshot, **update_data})
+    default_partner_voice = str(merged_preview.get("defaultPartnerVoice") or "").strip()
+    if not default_partner_voice:
+        raise HTTPException(status_code=400, detail="Default partner voice is required when partner language is configured")
+
+    override_languages = merged_preview.get("locationOverrideLanguages") or []
+    override_voices = merged_preview.get("locationOverrideVoices") or {}
+    missing_voice_locales = [locale for locale in override_languages if not str(override_voices.get(locale) or "").strip()]
+    if missing_voice_locales:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing voice selection for location override language(s): {', '.join(missing_voice_locales)}"
+        )
     
     # DEBUG: Log FreestyleOptions specifically
     if 'FreestyleOptions' in update_data:
@@ -8453,6 +8673,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
         # Return the requested settings as if they were saved (temporary session behavior)
         current_settings = await load_settings_from_file(account_id, aac_user_id)
         current_settings.update(update_data)  # Apply changes temporarily
+        current_settings = _normalize_language_settings(current_settings)
         return JSONResponse(content=SettingsModel(**current_settings).model_dump())
     
     # Regular mode: save settings normally
@@ -9127,11 +9348,12 @@ async def get_available_llm_models():
 
 
 @app.get("/api/tts-voices", response_model=List[VoiceDetail])
-async def get_tts_voices_endpoint():
+async def get_tts_voices_endpoint(locale: Optional[str] = None):
     if not tts_client:
         raise HTTPException(status_code=503, detail="TTS client not available")
     try:
-        response = tts_client.list_voices(language_code="en-US") # Filter for en-US directly
+        normalized_locale = _normalize_locale_tag(locale) if locale else None
+        response = tts_client.list_voices(language_code=normalized_locale) if normalized_locale else tts_client.list_voices()
         voices = []
         for voice in response.voices:
             voices.append(VoiceDetail(
@@ -9145,6 +9367,733 @@ async def get_tts_voices_endpoint():
     except Exception as e:
         logging.error(f"Error fetching TTS voices: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching TTS voices: {str(e)}")
+
+
+class TranslateLinesRequest(BaseModel):
+    lines: List[str]
+    source_locale: Optional[str] = None
+    target_locale: str
+
+
+class TranslatePagesRequest(BaseModel):
+    source_locale: Optional[str] = None
+    target_locale: str
+    scope: Literal["current", "all"] = "current"
+    page_name: Optional[str] = None
+    include_display_name: bool = True
+    include_button_text: bool = True
+    include_speech_phrase: bool = True
+    include_llm_query: bool = False
+
+
+def _extract_translated_lines_from_model_text(response_text: str, expected_count: int) -> List[str]:
+    """Parse translated lines from model output text with tolerant JSON extraction."""
+    raw_text = str(response_text or "").strip()
+    if not raw_text:
+        raise ValueError("Empty translation response text")
+
+
+    candidate_payloads: List[str] = [raw_text]
+
+    # Markdown fenced JSON blocks
+    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw_text, re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        candidate_payloads.append(fence_match.group(1).strip())
+
+    # First JSON array-like region
+    array_match = re.search(r"\[.*\]", raw_text, re.DOTALL)
+    if array_match:
+        candidate_payloads.append(array_match.group(0).strip())
+
+    for payload_text in candidate_payloads:
+        try:
+            parsed = json.loads(payload_text)
+        except Exception:
+            try:
+                import ast
+
+                parsed = ast.literal_eval(payload_text)
+            except Exception:
+                continue
+
+        # Accept either plain list or wrapped object.
+        if isinstance(parsed, dict):
+            parsed = parsed.get("translated_lines")
+
+        if isinstance(parsed, str) and expected_count == 1:
+            return [_sanitize_translated_text(parsed)]
+
+        if isinstance(parsed, list):
+            translated_lines = [_sanitize_translated_text(item) for item in parsed]
+            if len(translated_lines) == expected_count:
+                return translated_lines
+
+    # Last-resort fallback: accept one translation per line when the model
+    # returns plain text instead of structured JSON.
+    fallback_lines = [
+        _sanitize_translated_text(re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line))
+        for line in raw_text.splitlines()
+        if line.strip()
+    ]
+    if len(fallback_lines) == expected_count:
+        return fallback_lines
+
+    if len(fallback_lines) > expected_count:
+        return fallback_lines[-expected_count:]
+
+    if expected_count == 1:
+        return [_sanitize_translated_text(raw_text)]
+
+    raise ValueError("Unable to parse translated lines with expected shape")
+
+
+async def _translate_lines_with_models(
+    lines: List[str],
+    source_locale: Optional[str],
+    target_locale: str
+) -> List[str]:
+    if not lines:
+        return []
+
+    locale_label_map = {
+        "en-US": "English (US)",
+        "es-US": "Spanish (US)",
+        "fr-FR": "French (France)",
+        "de-DE": "German (Germany)",
+        "it-IT": "Italian (Italy)",
+        "pt-BR": "Portuguese (Brazil)",
+        "ar-XA": "Arabic"
+    }
+
+    source_instruction = locale_label_map.get(source_locale, source_locale) if source_locale else "auto-detect"
+    target_instruction = locale_label_map.get(target_locale, target_locale)
+    trimmed_lines = [str(line or "").strip() for line in lines]
+
+    if all(not line for line in trimmed_lines):
+        return trimmed_lines
+
+    prompt = (
+        "You are a translation engine for AAC communication. "
+        f"Translate each line from {source_instruction} to {target_instruction}. "
+        "If a line is already in the target language, keep it as-is. "
+        "Do not transliterate unless required by the target language. "
+        "Return ONLY valid JSON as an array of strings with exactly the same number of items and same order. "
+        "Do not add explanations. Preserve punctuation and intent.\n\n"
+        f"LINES_JSON:\n{json.dumps(trimmed_lines, ensure_ascii=False)}"
+    )
+
+    model_candidates: List[genai.GenerativeModel] = []
+    if primary_llm_model_instance:
+        model_candidates.append(primary_llm_model_instance)
+    if fallback_llm_model_instance and fallback_llm_model_instance is not primary_llm_model_instance:
+        model_candidates.append(fallback_llm_model_instance)
+
+    if not model_candidates:
+        raise HTTPException(status_code=503, detail="Translation model unavailable")
+
+    last_error: Optional[Exception] = None
+    for model in model_candidates:
+        try:
+            strict_cfg = genai.GenerationConfig(
+                temperature=0,
+                response_mime_type="application/json"
+            )
+            response = await asyncio.to_thread(
+                model.generate_content,
+                prompt,
+                generation_config=strict_cfg
+            )
+            response_text = (getattr(response, "text", "") or "").strip()
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE LENGTH (%s->%s): %s chars",
+                source_locale or "auto",
+                target_locale,
+                len(response_text),
+            )
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE PREVIEW (%s->%s): %s",
+                source_locale or "auto",
+                target_locale,
+                response_text[:500] if response_text else "EMPTY",
+            )
+            return _extract_translated_lines_from_model_text(response_text, len(trimmed_lines))
+        except Exception as strict_error:
+            last_error = strict_error
+
+        try:
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            response_text = (getattr(response, "text", "") or "").strip()
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE LENGTH (retry %s->%s): %s chars",
+                source_locale or "auto",
+                target_locale,
+                len(response_text),
+            )
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE PREVIEW (retry %s->%s): %s",
+                source_locale or "auto",
+                target_locale,
+                response_text[:500] if response_text else "EMPTY",
+            )
+            return _extract_translated_lines_from_model_text(response_text, len(trimmed_lines))
+        except Exception as retry_error:
+            last_error = retry_error
+
+    logging.warning(
+        "Batch translation failed for %s line(s); falling back to per-line translation. Last error: %s",
+        len(trimmed_lines),
+        last_error,
+    )
+
+    fallback_translated_lines: List[str] = []
+    for source_line in trimmed_lines:
+        translated_line = source_line
+        if source_line:
+            single_line_prompt = (
+                "You are a translation engine for AAC communication. "
+                f"Translate this line from {source_instruction} to {target_instruction}. "
+                "If the line is already in the target language, keep it as-is. "
+                "Return ONLY the translated line with no explanation, numbering, or markdown.\n\n"
+                f"LINE:\n{json.dumps(source_line, ensure_ascii=False)}"
+            )
+
+            for model in model_candidates:
+                try:
+                    strict_cfg = genai.GenerationConfig(
+                        temperature=0,
+                        response_mime_type="application/json"
+                    )
+                    response = await asyncio.to_thread(
+                        model.generate_content,
+                        single_line_prompt,
+                        generation_config=strict_cfg
+                    )
+                    response_text = (getattr(response, "text", "") or "").strip()
+                    parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
+                    translated_line = str(parsed_line[0] or "").strip() or source_line
+                    break
+                except Exception:
+                    try:
+                        response = await asyncio.to_thread(model.generate_content, single_line_prompt)
+                        response_text = (getattr(response, "text", "") or "").strip()
+                        parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
+                        translated_line = str(parsed_line[0] or "").strip() or source_line
+                        break
+                    except Exception:
+                        continue
+
+        fallback_translated_lines.append(translated_line)
+
+    if any(line for line in fallback_translated_lines):
+        return fallback_translated_lines
+
+    if last_error:
+        raise last_error
+    raise ValueError("Unknown translation failure")
+
+
+FREESTYLE_UI_TEXT_DEFAULTS: Dict[str, str] = {
+    "baseTitle": "Free Style Communication",
+    "baseTitleShort": "Free Style",
+    "exitFreestyle": "Exit Freestyle",
+    "buildSpace": "Build Space",
+    "buildMessagePlaceholder": "Build your message here...",
+    "speakDisplay": "Speak Display",
+    "backspace": "Backspace",
+    "clearDisplay": "Clear Display",
+    "cleanUp": "Clean Up",
+    "newRow": "New Row",
+    "goBack": "Go Back",
+    "somethingElse": "Something Else",
+    "somethingElseAz": "Something Else A-Z",
+    "suggestedWords": "Suggested Words",
+    "tools": "Tools",
+    "wordCategories": "Word Categories",
+    "spelling": "Spelling",
+    "numbers": "Numbers",
+    "numbersAdd": "Add",
+    "numbersReset": "Reset to",
+    "actionSection": "Action",
+    "chooseWordSection": "Choose Word",
+    "loading": "Loading...",
+    # Audio prompts spoken to the user
+    "promptDisplayEmpty": "Display is empty.",
+    "promptUnableToSpeak": "Unable to speak display right now.",
+    "promptStartedNewRow": "Started new row.",
+    "promptUnableToStartRow": "Unable to start a new row right now.",
+    "promptNoOtherOptions": "I could not find other word options.",
+    "promptNoMoreNumbers": "No more numbers in this range.",
+}
+
+GAMES_UI_TEXT_DEFAULTS: Dict[str, str] = {
+    "gamesHubTitle": "Games",
+    "loadingGames": "Loading Games...",
+    "menuHome": "Home",
+    "menu20Questions": "20 Questions",
+    "menuGuessWho": "Guess Who",
+    "menuGuessWhere": "Guess Where",
+    "menuGuessWhat": "Guess What",
+    "menuHangman": "Hangman",
+    "menuStoryBuilder": "Story Builder",
+    "storyEntryGoBack": "Go Back",
+    "storyEntryCreateNewStory": "Create a New Story",
+    "storyEntryReadExistingStory": "Read an Existing Story",
+    "storyNoSavedStoriesFound": "No saved stories found",
+    "untitledStory": "Untitled Story",
+    "statusChooseHowToPlay": "Choose how you want to play:",
+    "roleAsk": "I ask the questions",
+    "roleAnswer": "They ask the questions",
+    "categoryPerson": "Person",
+    "categoryPlace": "Place",
+    "categoryThing": "Thing",
+    "statusSayReadySelected": "Say \"ready\" when you have selected something for me to guess",
+    "statusWhatTypeThing": "What type of thing are you thinking of?",
+    "statusSayReadySelectedYour": "Say \"ready\" when you have selected your",
+    "statusThinkingQuestions": "Let me think of some questions...",
+    "statusQuestionsRemaining": "Questions remaining:",
+    "statusGuessesRemaining": "Guesses remaining:",
+    "statusChooseYour": "Choose your",
+    "statusReadyWithWakeWord": "I'm ready. To ask a question or make a guess, start with",
+    "statusListeningNext": "Listening for next question or guess...",
+    "statusWhatNext": "What would you like to do next?",
+    "somethingElse": "Something Else",
+    "exitGame": "Exit Game",
+    "isItPrefix": "Is it",
+    "questionsAsked": "Questions Asked:",
+    "listening": "Listening...",
+    "generatingOptions": "Generating options...",
+    "oops": "Oops!",
+    "genericError": "Something went wrong. Please try again.",
+    "askAnotherQuestion": "Ask Another Question",
+    "makeGuess": "Make a Guess",
+    "storyQa": "Story Q&A",
+    "savedStories": "Saved Stories",
+    "readAgain": "Read Again",
+    "exportAudio": "Export Audio",
+    "createIllustration": "Create Illustration",
+    "regenerateIllustration": "Regenerate Illustration",
+    "backToStories": "Back to Stories",
+    "storyDetail": "Story Detail",
+    "storyTitlePlaceholder": "Story title",
+    "storyTextPlaceholder": "Story text",
+    "noIllustrationYet": "No illustration yet.",
+    "readStory": "Read Story",
+    "saveEdits": "Save Edits",
+    "deleteStory": "Delete Story",
+    "backToBuilder": "Back to Builder",
+    "deleteStories": "Delete Stories",
+    "close": "Close",
+    "selectStoriesToDelete": "Select stories to delete.",
+    "cancel": "Cancel",
+    "deleteSelected": "Delete Selected",
+    "storyWakePrompt": "Say the wake word to ask the next question or complete the story.",
+    "noSavedStoriesYet": "No saved stories yet.",
+    "qPrefix": "Q:",
+    "aPrefix": "A:",
+    "failedLoadOptions": "Failed to load options. Please try again.",
+    "failedLoadQuestions": "Failed to load questions. Please try again.",
+    "failedLoadGuesses": "Failed to load guesses. Please try again.",
+    "failedLoadDifferentOptions": "Failed to load different options. Please try again.",
+    "guessGameTitle": "Guess Game",
+    "guessWhoTitle": "Guess Who",
+    "guessWhereTitle": "Guess Where",
+    "guessWhatTitle": "Guess What",
+    "selectCategoryTitle": "Select a Category",
+    "selectCategorySubtitle": "Choose a category for this game",
+    "chooseModeTitle": "Choose a Game Mode",
+    "chooseModeSubtitle": "How do you want to play?",
+    "selectYourItemTitle": "Select Your Person",
+    "selectYourItemSubtitle": "Choose who you want Player 2 to guess",
+    "selectClueTitle": "Select a Clue to Give",
+    "clueTargetPrefix": "Player 2 needs to guess:",
+    "playerGuessTitle": "Player 2's Guess",
+    "isThisCorrect": "Is this correct?",
+    "gameOverTitle": "Game Over!",
+    "cluesGiven": "Clues given:",
+    "guessesLeft": "Guesses left:",
+    "goBack": "Go Back",
+    "iPick": "I pick",
+    "youPick": "You pick",
+    "somethingElse": "Something Else",
+    "makeYourGuess": "Make your guess:",
+    "playerGuessedPrefix": "Player 2 guessed:",
+    "enterAdminPin": "Enter Admin PIN",
+    "pinPlaceholder": "Enter PIN",
+    "invalidPin": "Invalid PIN. Please try again.",
+    "pinLengthError": "PIN must be 3-10 characters.",
+    "cancel": "Cancel",
+    "submit": "Submit",
+    "manageCustomCategories": "Manage Custom Categories",
+    "resetToDefaults": "Reset to Defaults",
+    "saveCategories": "Save Categories",
+    "startTypingPreview": "Start typing to see preview...",
+    "noCategoriesEntered": "No categories entered yet...",
+    "playAgain": "Play Again",
+    "failedLoadCategories": "Failed to load categories. Please try again.",
+    "failedGeneratePeople": "Failed to generate people. Please try again.",
+    "failedGenerateClues": "Failed to generate clues. Please try again.",
+    "failedGenerateGuesses": "Failed to generate guesses. Please try again.",
+    "enterAtLeastOneCategory": "Please enter at least one category.",
+    "saveCategoriesSuccessPrefix": "Successfully saved",
+    "saveCategoriesSuccessSuffix": "custom categories!",
+    "failedSaveCategories": "Failed to save categories. Please try again.",
+    "resetToDefaultsConfirm": "Are you sure you want to reset to default categories? This will remove all custom categories.",
+    "resetToDefaultsSuccess": "Successfully reset to default categories!",
+    "failedResetCategories": "Failed to reset categories. Please try again.",
+    "hangmanTitle": "Hangman",
+    "hangmanLoading": "Loading Hangman...",
+    "hangmanSelectCategory": "Select a Category",
+    "hangmanChooseCategory": "Choose a category for Hangman",
+    "hangmanChooseMode": "Choose a Game Mode",
+    "hangmanWhoIsGuessing": "Who is guessing?",
+    "hangmanPickWord": "Pick a Word",
+    "hangmanPickWordSubtitle": "Choose a word for your partner to guess",
+    "hangmanGuessTheWord": "Guess the word!",
+    "hangmanWrongGuesses": "Wrong guesses:",
+    "hangmanDone": "Done",
+    "hangmanWaitingPartner": "Waiting for your partner",
+    "hangmanSetupSubtitle": "Get ready to play Hangman.",
+    "hangmanGameOver": "Game Over!",
+    "hangmanPlayAgain": "Play Again",
+    "hangmanModeIGuess": "I guess",
+    "hangmanModeYouGuess": "You guess",
+    "hangmanLetterCountReady": "Say \"ready\" when you have your word.",
+    "hangmanListeningReady": "Listening for: \"ready\"",
+    "hangmanListeningLetterCount": "Listening for: letter count",
+    "hangmanGreatHowMany": "Great! How many letters are in your word? Say the number.",
+    "hangmanLetterCountTooSmall": "Please say a number between 1 and 20.",
+    "hangmanGotItKeepGuessing": "Got it. Keep guessing!",
+    "hangmanOutOfGuessesYouWin": "Oh no! I'm out of guesses. You win!",
+    "hangmanWrongGuessesLeft": "wrong guesses left.",
+    "hangmanIsLetterInWord": "Is the letter",
+    "hangmanSayYesNo": "in your word? Say yes or no.",
+    "hangmanGreatTapBlanks": "Great! Tap the blanks where",
+    "hangmanTapDone": "goes, then tap Done.",
+    "hangmanNeedAtLeastOneBlank": "You need to tap at least one blank. Try again.",
+    "hangmanIWinWordIs": "I win! The word is",
+    "hangmanNopeLetterNotInWord": "is not in the word.",
+    "hangmanTooBad": "Too bad!",
+    "hangmanNoWrongGuess": "wrong guess",
+    "hangmanNoWrongGuesses": "wrong guesses",
+    "hangmanBetterLuck": "Better luck next time!",
+    "hangmanYouGotIt": "You got it! The word was",
+    "hangmanWrongAllowed": "wrong guesses allowed.",
+    "hangmanIPickedWord": "I picked my word! It has",
+    "hangmanLetters": "letters. Say",
+    "hangmanThenGuess": "then guess a letter!",
+    "hangmanAlreadyGuessed": "You already guessed",
+    "hangmanTryAnotherLetter": "Try another letter.",
+    "hangmanNoSavedStoriesYet": "No saved stories yet."
+}
+
+
+@app.post("/api/translate-lines")
+async def translate_lines_endpoint(request_data: TranslateLinesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    if not request_data.lines:
+        return JSONResponse(content={"translated_lines": []})
+
+    target_locale = _normalize_locale_tag(request_data.target_locale)
+    if not target_locale:
+        raise HTTPException(status_code=400, detail="Invalid target_locale")
+
+    source_locale = _normalize_locale_tag(request_data.source_locale) if request_data.source_locale else None
+    try:
+        translated_lines = await _translate_lines_with_models(
+            lines=request_data.lines,
+            source_locale=source_locale,
+            target_locale=target_locale
+        )
+        return JSONResponse(content={"translated_lines": translated_lines})
+    except Exception as e:
+        logging.error(f"Error translating lines: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to translate lines")
+
+
+@app.post("/api/admin/translate-pages")
+async def translate_pages_endpoint(
+    request_data: TranslatePagesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    target_locale = _normalize_locale_tag(request_data.target_locale)
+    if not target_locale:
+        raise HTTPException(status_code=400, detail="Invalid target_locale")
+
+    source_locale = _normalize_locale_tag(request_data.source_locale) if request_data.source_locale else None
+
+    if source_locale and source_locale.lower() == target_locale.lower():
+        raise HTTPException(status_code=400, detail="source_locale and target_locale must be different")
+
+    if not any([
+        request_data.include_display_name,
+        request_data.include_button_text,
+        request_data.include_speech_phrase,
+        request_data.include_llm_query
+    ]):
+        raise HTTPException(status_code=400, detail="Select at least one field to translate")
+
+    pages = await load_pages_from_file(account_id, aac_user_id)
+    if not isinstance(pages, list):
+        raise HTTPException(status_code=500, detail="Invalid pages data")
+
+    selected_page_name = None
+    pages_to_process = pages
+    if request_data.scope == "current":
+        selected_page_name = str(request_data.page_name or "").strip().lower()
+        if not selected_page_name:
+            raise HTTPException(status_code=400, detail="page_name is required when scope is current")
+        page_match = next((p for p in pages if str(p.get("name") or "").lower() == selected_page_name), None)
+        if not page_match:
+            raise HTTPException(status_code=404, detail=f"Page '{selected_page_name}' not found")
+        pages_to_process = [page_match]
+
+    has_games_target_in_scope = False
+    for page in pages_to_process:
+        page_name_token = str(page.get("name") or "").strip().lower()
+        if "game" in page_name_token:
+            has_games_target_in_scope = True
+            break
+
+        buttons = page.get("buttons")
+        if not isinstance(buttons, list):
+            continue
+
+        for button in buttons:
+            if not isinstance(button, dict):
+                continue
+            target_raw = str(button.get("targetPage") or "").strip().lower()
+            special_raw = str(button.get("special_function") or "").strip().lower()
+            if (
+                "!games" in target_raw
+                or "games.html" in target_raw
+                or "guess_games" in target_raw
+                or "guess" in target_raw and "game" in target_raw
+                or special_raw in {"games", "guess_games"}
+            ):
+                has_games_target_in_scope = True
+                break
+
+        if has_games_target_in_scope:
+            break
+
+    translation_jobs: List[Dict[str, Any]] = []
+
+    for page in pages_to_process:
+        if request_data.include_display_name:
+            page_display_name = str(page.get("displayName") or "").strip()
+            if page_display_name:
+                translation_jobs.append({
+                    "container": page,
+                    "field": "displayName",
+                    "text": page_display_name
+                })
+
+        buttons = page.get("buttons")
+        if not isinstance(buttons, list):
+            continue
+
+        for button in buttons:
+            if not isinstance(button, dict):
+                continue
+
+            if request_data.include_button_text:
+                button_text = str(button.get("text") or "").strip()
+                if button_text:
+                    translation_jobs.append({
+                        "container": button,
+                        "field": "text",
+                        "text": button_text
+                    })
+
+            if request_data.include_speech_phrase:
+                speech_phrase = str(button.get("speechPhrase") or "").strip()
+                if speech_phrase:
+                    translation_jobs.append({
+                        "container": button,
+                        "field": "speechPhrase",
+                        "text": speech_phrase
+                    })
+
+            if request_data.include_llm_query:
+                llm_query = str(button.get("LLMQuery") or "").strip()
+                if llm_query:
+                    translation_jobs.append({
+                        "container": button,
+                        "field": "LLMQuery",
+                        "text": llm_query
+                    })
+
+    if not translation_jobs:
+        return JSONResponse(content={
+            "message": "No translatable content found.",
+            "scope": request_data.scope,
+            "pages_processed": len(pages_to_process),
+            "strings_seen": 0,
+            "unique_strings": 0,
+            "strings_changed": 0
+        })
+
+    unique_texts: List[str] = []
+    text_to_index: Dict[str, int] = {}
+    for job in translation_jobs:
+        key = job["text"]
+        if key not in text_to_index:
+            text_to_index[key] = len(unique_texts)
+            unique_texts.append(key)
+        job["unique_index"] = text_to_index[key]
+
+    translated_unique: List[str] = [""] * len(unique_texts)
+    batch_size = 60
+
+    try:
+        for start_idx in range(0, len(unique_texts), batch_size):
+            batch = unique_texts[start_idx:start_idx + batch_size]
+            translated_batch = await _translate_lines_with_models(
+                lines=batch,
+                source_locale=source_locale,
+                target_locale=target_locale
+            )
+
+            if len(translated_batch) != len(batch):
+                raise ValueError("Translation batch returned unexpected line count")
+
+            for offset, translated_text in enumerate(translated_batch):
+                translated_unique[start_idx + offset] = str(translated_text or "").strip()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error translating pages for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to translate page content")
+
+    strings_changed = 0
+    for job in translation_jobs:
+        translated_value = _sanitize_translated_text(translated_unique[job["unique_index"]])
+        if translated_value and translated_value != job["text"]:
+            job["container"][job["field"]] = translated_value
+            strings_changed += 1
+
+    await save_pages_to_file(account_id, aac_user_id, pages)
+
+    special_pages_changed = 0
+    should_translate_freestyle_ui = request_data.scope == "all" or selected_page_name == "freestyle"
+    if should_translate_freestyle_ui:
+        freestyle_keys = list(FREESTYLE_UI_TEXT_DEFAULTS.keys())
+        freestyle_lines = [FREESTYLE_UI_TEXT_DEFAULTS[key] for key in freestyle_keys]
+        freestyle_translated_lines = await _translate_lines_with_models(
+            lines=freestyle_lines,
+            source_locale=source_locale,
+            target_locale=target_locale
+        )
+
+        freestyle_bundle: Dict[str, str] = {}
+        for index, key in enumerate(freestyle_keys):
+            translated_value = _sanitize_translated_text(freestyle_translated_lines[index])
+            fallback_value = FREESTYLE_UI_TEXT_DEFAULTS[key]
+            freestyle_bundle[key] = translated_value or fallback_value
+
+        current_settings = await load_settings_from_file(account_id, aac_user_id)
+        existing_special = current_settings.get("specialPageTranslations")
+        if not isinstance(existing_special, dict):
+            existing_special = {}
+
+        freestyle_locale_map = existing_special.get("freestyle")
+        if not isinstance(freestyle_locale_map, dict):
+            freestyle_locale_map = {}
+
+        previous_bundle = freestyle_locale_map.get(target_locale)
+        if previous_bundle != freestyle_bundle:
+            special_pages_changed = 1
+
+        freestyle_locale_map[target_locale] = freestyle_bundle
+        existing_special["freestyle"] = freestyle_locale_map
+        await save_settings_to_file(account_id, aac_user_id, {
+            "specialPageTranslations": existing_special
+        })
+
+    selected_page_token = str(selected_page_name or "").strip().lower()
+    should_translate_games_ui = (
+        request_data.scope == "all"
+        or selected_page_token in {"games", "guess who", "guess where", "guess what"}
+        or selected_page_token.startswith("guess ")
+        or has_games_target_in_scope
+    )
+    if should_translate_games_ui:
+        games_keys = list(GAMES_UI_TEXT_DEFAULTS.keys())
+        games_lines = [GAMES_UI_TEXT_DEFAULTS[key] for key in games_keys]
+        games_translated_lines = await _translate_lines_with_models(
+            lines=games_lines,
+            source_locale=source_locale,
+            target_locale=target_locale
+        )
+
+        games_bundle: Dict[str, str] = {}
+        for index, key in enumerate(games_keys):
+            translated_value = _sanitize_translated_text(games_translated_lines[index])
+            fallback_value = GAMES_UI_TEXT_DEFAULTS[key]
+            games_bundle[key] = translated_value or fallback_value
+
+        current_settings = await load_settings_from_file(account_id, aac_user_id)
+        existing_special = current_settings.get("specialPageTranslations")
+        if not isinstance(existing_special, dict):
+            existing_special = {}
+
+        games_locale_map = existing_special.get("games")
+        if not isinstance(games_locale_map, dict):
+            games_locale_map = {}
+
+        previous_bundle = games_locale_map.get(target_locale)
+        if previous_bundle != games_bundle:
+            special_pages_changed += 1
+
+        games_locale_map[target_locale] = games_bundle
+        existing_special["games"] = games_locale_map
+
+        games_button_labels_changed = 0
+        localized_games_label = _sanitize_translated_text(games_bundle.get("gamesHubTitle"))
+        if localized_games_label and target_locale.lower() != "en-us":
+            for page in pages_to_process:
+                buttons = page.get("buttons")
+                if not isinstance(buttons, list):
+                    continue
+
+                for button in buttons:
+                    if not isinstance(button, dict):
+                        continue
+
+                    target_raw = str(button.get("targetPage") or "").strip().lower()
+                    is_games_target = (
+                        "!games" in target_raw
+                        or "games.html" in target_raw
+                        or "guess_games" in target_raw
+                    )
+                    if not is_games_target:
+                        continue
+
+                    current_text = str(button.get("text") or "").strip()
+                    if current_text.lower() == "games" and current_text != localized_games_label:
+                        button["text"] = localized_games_label
+                        games_button_labels_changed += 1
+
+        if games_button_labels_changed > 0:
+            strings_changed += games_button_labels_changed
+            await save_pages_to_file(account_id, aac_user_id, pages)
+
+        await save_settings_to_file(account_id, aac_user_id, {
+            "specialPageTranslations": existing_special
+        })
+
+    return JSONResponse(content={
+        "message": "Page translation complete.",
+        "scope": request_data.scope,
+        "page_name": selected_page_name,
+        "pages_processed": len(pages_to_process),
+        "strings_seen": len(translation_jobs),
+        "unique_strings": len(unique_texts),
+        "strings_changed": strings_changed,
+        "special_pages_changed": special_pages_changed
+    })
     
 
 
@@ -11639,10 +12588,16 @@ async def get_freestyle_word_options(
     logging.warning(f"DEBUG Freestyle API - Received request: context='{request.context}', source_page='{request.source_page}', is_llm_generated={request.is_llm_generated}, originating_button='{request.originating_button_text}', build_space='{request.build_space_text}', max_options='{request.max_options}'")
     
     try:
-        # Load user settings to get FreestyleOptions
+        # Load user settings to get FreestyleOptions and user language
         settings = await load_settings_from_file(account_id, aac_user_id)
         # Use max_options from request if provided, otherwise use user's FreestyleOptions setting
         freestyle_options = request.max_options if request.max_options else settings.get("FreestyleOptions", 20)
+        user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        language_instruction = (
+            f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All words and phrases you return must be in that language. Do not use English unless '{user_language}' is English."
+            if not user_language.lower().startswith("en")
+            else ""
+        )
         
         # Load user context
         user_info = await load_firestore_document(
@@ -11746,7 +12701,7 @@ Requirements:
 - Make each option distinct and useful for completing communication
 - Consider natural sentence flow and common AAC patterns
 - Treat the live context as a PRIMARY signal for ranking. When the current location, people present, activity, or source page clearly suggest what the user is doing right now, prefer continuations that fit that real situation.
-- If there is meaningful live context, at least half of the options should feel appropriate for that immediate situation unless the existing build space clearly points elsewhere.
+- If there is meaningful live context, at least half of the options should feel appropriate for that immediate situation unless the existing build space clearly points elsewhere.{language_instruction}
 
 CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 - If build_space_text is "Who is here to play", provide options like "with friends|friendship", "games|games", "outside|outdoors"
@@ -11802,7 +12757,7 @@ Requirements:
 - The keyword should help find relevant images that represent the word
 - If the word itself is the best keyword, use the same word (e.g., "car|car")
 - Make each word distinct and commonly used
-- DO NOT use numbered lists - just provide word|keyword pairs, one per line
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line{language_instruction}
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
@@ -11832,7 +12787,7 @@ Requirements:
 - The keyword should help find relevant images that represent the word
 - If the word itself is the best keyword, use the same word (e.g., "car|car")
 - Make each word distinct and commonly used in AAC
-- DO NOT use numbered lists - just provide word|keyword pairs, one per line
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line{language_instruction}
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
@@ -11857,7 +12812,7 @@ Requirements:
 - Each option should be useful for starting or building communication
 - Include both basic needs words and descriptive words
 - Make each word distinct and commonly used in AAC
-- DO NOT use numbered lists - just provide word|keyword pairs, one per line
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line{language_instruction}
 
 Live context: {live_context_summary}
 Navigation context: {navigation_context_summary}
@@ -15893,6 +16848,12 @@ async def generate_category_words(
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
         freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
         vocabulary_level = settings.get("vocabularyLevel", "functional")
+        user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        language_instruction = (
+            f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All text values must be in that language. Do not use English unless '{user_language}' is English."
+            if not user_language.lower().startswith("en")
+            else ""
+        )
         prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
 
         excluded_words = {
@@ -16077,7 +17038,7 @@ Exclude: {exclude_words_text}
 Rules:
 - Use common, useful, everyday AAC vocabulary
 - Stay tightly on the requested category
-- No markdown or commentary
+- No markdown or commentary{language_instruction}
 
 Example:
 [{{"text":"park","keywords":["outside"]}},{{"text":"school","keywords":["building"]}}]"""

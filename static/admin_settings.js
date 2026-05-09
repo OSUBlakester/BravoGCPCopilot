@@ -74,6 +74,13 @@ const vocabularyLevelSelect = document.getElementById('vocabularyLevel');
 const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
 const testTtsVoiceButton = document.getElementById('testTtsVoiceButton');
 const ttsVoiceStatus = document.getElementById('tts-voice-status');
+const userLanguageSelect = document.getElementById('userLanguage');
+const defaultPartnerLanguageSelect = document.getElementById('defaultPartnerLanguage');
+const defaultPartnerVoiceSelect = document.getElementById('defaultPartnerVoiceSelect');
+const locationOverrideLanguagesSelect = document.getElementById('locationOverrideLanguages');
+const locationOverrideLanguagesTable = document.getElementById('locationOverrideLanguagesTable');
+const addLocationOverrideRowButton = document.getElementById('addLocationOverrideRowButton');
+const locationOverrideVoiceContainer = document.getElementById('locationOverrideVoiceContainer');
 const toolbarPINInput = document.getElementById('toolbarPIN');
 const spellLetterOrderSelect = document.getElementById('spellLetterOrder');
 // Grid slider elements will be assigned in initializePage when DOM is ready
@@ -119,6 +126,309 @@ let settingsStatus = null; // Changed to let
 let currentSettings = {};
 let availableVoices = []; // To store loaded voices
 
+const SUPPORTED_LANGUAGE_OPTIONS = [
+    { value: 'en-US', label: 'English (US)' },
+    { value: 'es-US', label: 'Spanish (US)' },
+    { value: 'fr-FR', label: 'French (France)' },
+    { value: 'de-DE', label: 'German (Germany)' },
+    { value: 'it-IT', label: 'Italian (Italy)' },
+    { value: 'pt-BR', label: 'Portuguese (Brazil)' },
+    { value: 'ar-XA', label: 'Arabic' }
+];
+
+function getSelectedMultiValues(selectEl) {
+    if (!selectEl) return [];
+    return Array.from(selectEl.selectedOptions || []).map(option => option.value).filter(Boolean);
+}
+
+function setSelectedMultiValues(selectEl, values) {
+    if (!selectEl) return;
+    const selectedSet = new Set(Array.isArray(values) ? values : []);
+    Array.from(selectEl.options).forEach(option => {
+        option.selected = selectedSet.has(option.value);
+    });
+}
+
+function populateLanguageSelectors() {
+    const makeOptions = (target) => {
+        if (!target) return;
+        target.innerHTML = '';
+        SUPPORTED_LANGUAGE_OPTIONS.forEach(lang => {
+            const opt = document.createElement('option');
+            opt.value = lang.value;
+            opt.textContent = lang.label;
+            target.appendChild(opt);
+        });
+    };
+
+    makeOptions(userLanguageSelect);
+    makeOptions(defaultPartnerLanguageSelect);
+    makeOptions(locationOverrideLanguagesSelect);
+}
+
+function getVoicesForLocale(locale) {
+    if (!locale) return availableVoices;
+    const localeLower = locale.toLowerCase();
+    return availableVoices.filter(voice => {
+        const languageCodes = Array.isArray(voice.language_codes) ? voice.language_codes : [];
+        return languageCodes.some(code => String(code).toLowerCase() === localeLower);
+    });
+}
+
+function fillVoiceSelect(selectEl, locale, selectedVoice = '') {
+    if (!selectEl) return;
+    const voices = getVoicesForLocale(locale);
+    selectEl.innerHTML = '<option value="">-- Select a Voice --</option>';
+    voices.forEach(voice => {
+        const option = document.createElement('option');
+        option.value = voice.name;
+        option.textContent = `${voice.name} (${String(voice.ssml_gender || 'unknown').toLowerCase()})`;
+        selectEl.appendChild(option);
+    });
+    if (selectedVoice) {
+        selectEl.value = selectedVoice;
+    }
+}
+
+function renderLocationOverrideVoiceControls(selectedLocales, selectedVoiceMap = {}) {
+    if (!locationOverrideVoiceContainer) return;
+    locationOverrideVoiceContainer.innerHTML = '';
+
+    if (!selectedLocales.length) {
+        const emptyText = document.createElement('p');
+        emptyText.className = 'text-sm text-gray-500';
+        emptyText.textContent = 'No location override languages selected.';
+        locationOverrideVoiceContainer.appendChild(emptyText);
+        return;
+    }
+
+    selectedLocales.forEach(locale => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'grid grid-cols-1 md:grid-cols-3 gap-3 items-center';
+
+        const label = document.createElement('label');
+        label.className = 'text-sm font-medium text-gray-700';
+        label.textContent = `Voice for ${locale}`;
+
+        const select = document.createElement('select');
+        select.className = 'md:col-span-2 focus:ring-indigo-500 focus:border-indigo-500 block w-full rounded-md sm:text-sm border-gray-300 shadow-sm';
+        select.dataset.locale = locale;
+
+        fillVoiceSelect(select, locale, selectedVoiceMap[locale] || '');
+
+        wrapper.appendChild(label);
+        wrapper.appendChild(select);
+        locationOverrideVoiceContainer.appendChild(wrapper);
+    });
+}
+
+// New table-based location override management functions
+function renderLocationOverrideLanguagesTable(localeVoiceMap = {}) {
+    if (!locationOverrideLanguagesTable) return;
+    locationOverrideLanguagesTable.innerHTML = '';
+
+    if (!localeVoiceMap || Object.keys(localeVoiceMap).length === 0) {
+        const emptyRow = document.createElement('tr');
+        const emptyCell = document.createElement('td');
+        emptyCell.colSpan = 3;
+        emptyCell.className = 'text-center py-4 text-gray-500';
+        emptyCell.textContent = 'No location override languages configured yet.';
+        emptyRow.appendChild(emptyCell);
+        locationOverrideLanguagesTable.appendChild(emptyRow);
+        return;
+    }
+
+    Object.entries(localeVoiceMap).forEach(([locale, voiceName]) => {
+        const row = document.createElement('tr');
+        row.className = 'border-b border-gray-300 hover:bg-gray-50';
+        row.dataset.locale = locale;
+
+        // Language cell
+        const langCell = document.createElement('td');
+        langCell.className = 'border border-gray-300 px-4 py-3';
+        const langSelect = document.createElement('select');
+        langSelect.className = 'w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500';
+        langSelect.dataset.locale = locale;
+        SUPPORTED_LANGUAGE_OPTIONS.forEach(lang => {
+            const opt = document.createElement('option');
+            opt.value = lang.value;
+            opt.textContent = lang.label;
+            langSelect.appendChild(opt);
+        });
+        langSelect.value = locale;
+        langSelect.addEventListener('change', (e) => {
+            // Update row's data-locale attribute when language changes
+            row.dataset.locale = e.target.value;
+            // Refresh voices for the new locale
+            updateVoiceSelectInRow(row, e.target.value, voiceName || '');
+        });
+        langCell.appendChild(langSelect);
+        row.appendChild(langCell);
+
+        // Voice cell
+        const voiceCell = document.createElement('td');
+        voiceCell.className = 'border border-gray-300 px-4 py-3';
+        const voiceSelect = document.createElement('select');
+        voiceSelect.className = 'w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500';
+        voiceSelect.dataset.locale = locale;
+        fillVoiceSelect(voiceSelect, locale, voiceName || '');
+        voiceCell.appendChild(voiceSelect);
+        row.appendChild(voiceCell);
+
+        // Delete button cell
+        const actionCell = document.createElement('td');
+        actionCell.className = 'border border-gray-300 px-4 py-3 text-center flex gap-2 justify-center';
+        const testBtn = document.createElement('button');
+        testBtn.type = 'button';
+        testBtn.className = 'inline-flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded transition-colors';
+        testBtn.innerHTML = '<i class=\"fas fa-volume-up\"></i>';
+        testBtn.title = 'Test this voice';
+        testBtn.addEventListener('click', () => testLocationOverrideVoice(voiceSelect));
+        actionCell.appendChild(testBtn);
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'inline-flex items-center gap-1 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded transition-colors';
+        deleteBtn.innerHTML = '<i class=\"fas fa-trash\"></i> Delete';
+        deleteBtn.addEventListener('click', () => deleteLocationOverrideRow(row));
+        actionCell.appendChild(deleteBtn);
+        row.appendChild(actionCell);
+
+        locationOverrideLanguagesTable.appendChild(row);
+    });
+}
+
+function updateVoiceSelectInRow(row, locale, currentVoice = '') {
+    const voiceSelect = row.querySelector('td:nth-child(2) select');
+    if (voiceSelect) {
+        fillVoiceSelect(voiceSelect, locale, currentVoice);
+    }
+}
+
+function addLocationOverrideRow() {
+    // Find the first unused language from SUPPORTED_LANGUAGE_OPTIONS
+    const existingLocales = new Set(
+        Array.from(locationOverrideLanguagesTable?.querySelectorAll('tr[data-locale]') || [])
+            .map(row => row.dataset.locale)
+    );
+
+    const availableLanguage = SUPPORTED_LANGUAGE_OPTIONS.find(lang => !existingLocales.has(lang.value));
+    if (!availableLanguage) {
+        alert('All supported languages are already in the table.');
+        return;
+    }
+
+    // Create new row with the suggested language
+    const newLocale = availableLanguage.value;
+    const newMap = { [newLocale]: '' };
+    
+    // Render just the new row
+    const row = document.createElement('tr');
+    row.className = 'border-b border-gray-300 hover:bg-gray-50';
+    row.dataset.locale = newLocale;
+
+    // Language cell
+    const langCell = document.createElement('td');
+    langCell.className = 'border border-gray-300 px-4 py-3';
+    const langSelect = document.createElement('select');
+    langSelect.className = 'w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500';
+    langSelect.dataset.locale = newLocale;
+    SUPPORTED_LANGUAGE_OPTIONS.forEach(lang => {
+        const opt = document.createElement('option');
+        opt.value = lang.value;
+        opt.textContent = lang.label;
+        langSelect.appendChild(opt);
+    });
+    langSelect.value = newLocale;
+    langSelect.addEventListener('change', (e) => {
+        row.dataset.locale = e.target.value;
+        updateVoiceSelectInRow(row, e.target.value, '');
+    });
+    langCell.appendChild(langSelect);
+    row.appendChild(langCell);
+
+    // Voice cell
+    const voiceCell = document.createElement('td');
+    voiceCell.className = 'border border-gray-300 px-4 py-3';
+    const voiceSelect = document.createElement('select');
+    voiceSelect.className = 'w-full px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500';
+    voiceSelect.dataset.locale = newLocale;
+    fillVoiceSelect(voiceSelect, newLocale, '');
+    voiceCell.appendChild(voiceSelect);
+    row.appendChild(voiceCell);
+
+    // Delete button cell
+    const actionCell = document.createElement('td');
+    actionCell.className = 'border border-gray-300 px-4 py-3 text-center flex gap-2 justify-center';
+    const testBtn = document.createElement('button');
+    testBtn.type = 'button';
+    testBtn.className = 'inline-flex items-center gap-1 px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded transition-colors';
+    testBtn.innerHTML = '<i class=\"fas fa-volume-up\"></i>';
+    testBtn.title = 'Test this voice';
+    testBtn.addEventListener('click', () => testLocationOverrideVoice(voiceSelect));
+    actionCell.appendChild(testBtn);
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'inline-flex items-center gap-1 px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded transition-colors';
+    deleteBtn.innerHTML = '<i class=\"fas fa-trash\"></i> Delete';
+    deleteBtn.addEventListener('click', () => deleteLocationOverrideRow(row));
+    actionCell.appendChild(deleteBtn);
+    row.appendChild(actionCell);
+
+    locationOverrideLanguagesTable.appendChild(row);
+}
+
+function deleteLocationOverrideRow(row) {
+    if (confirm('Are you sure you want to delete this location override language?')) {
+        row.remove();
+    }
+}
+
+function getLocationOverrideLanguagesFromTable() {
+    const map = {};
+    if (!locationOverrideLanguagesTable) return map;
+    const rows = locationOverrideLanguagesTable.querySelectorAll('tr[data-locale]');
+    rows.forEach(row => {
+        const locale = row.dataset.locale;
+        const voiceSelect = row.querySelector('td:nth-child(2) select');
+        const voiceName = voiceSelect?.value || '';
+        if (locale && voiceName) {
+            map[locale] = voiceName;
+        }
+    });
+    return map;
+}
+
+function getLocationOverrideVoiceMapFromUI() {
+    // Now using table-based approach instead
+    return getLocationOverrideLanguagesFromTable();
+}
+
+function refreshLanguageDependentVoiceControls() {
+    const partnerLocale = defaultPartnerLanguageSelect ? defaultPartnerLanguageSelect.value : 'en-US';
+    const selectedPartnerVoice = defaultPartnerVoiceSelect ? defaultPartnerVoiceSelect.value : '';
+    fillVoiceSelect(defaultPartnerVoiceSelect, partnerLocale, selectedPartnerVoice);
+    
+    // Also update test voice select to stay in sync
+    if (ttsVoiceSelect) {
+        fillVoiceSelect(ttsVoiceSelect, partnerLocale, selectedPartnerVoice);
+    }
+    
+    // Also update voice options in table rows
+    if (locationOverrideLanguagesTable) {
+        const rows = locationOverrideLanguagesTable.querySelectorAll('tr[data-locale]');
+        rows.forEach(row => {
+            const locale = row.dataset.locale;
+            const voiceSelect = row.querySelector('td:nth-child(2) select');
+            const currentVoice = voiceSelect?.value || '';
+            if (voiceSelect) {
+                fillVoiceSelect(voiceSelect, locale, currentVoice);
+            }
+        });
+    }
+}
+
 // --- Utility Functions ---
 function showTemporaryStatus(element, message, isError = false, duration = 3000) {
     if (!element) return;
@@ -137,41 +447,23 @@ function showTemporaryStatus(element, message, isError = false, duration = 3000)
  * Loads available TTS voices from the backend and populates the dropdown.
  */
 async function loadVoices() {
-    // ttsVoiceSelect will be assigned in initializePage, check there if needed
-    // For now, assume it will be available if this function is called from initializePage
     try {
-        // Use window.authenticatedFetch if this endpoint requires authentication
-        // Assuming /api/tts-voices is public or handled by a different auth mechanism if not using window.authenticatedFetch
-        const response = await window.authenticatedFetch('/api/tts-voices'); // Using authenticatedFetch
+        // This endpoint is public in backend and should not depend on /api/settings auth state.
+        const response = await fetch('/api/tts-voices');
         if (!response.ok) throw new Error(`Failed to load voices: ${response.statusText}`);
         availableVoices = await response.json();
-        
-        // Filter to only include US English voices (en-US, en_US, us-en variations)
-        const usEnVoices = availableVoices.filter(voice => {
-            if (!voice.name) return false;
-            const nameLower = voice.name.toLowerCase();
-            return nameLower.includes('en-us') || 
-                   nameLower.includes('en_us') || 
-                   nameLower.includes('us-en') ||
-                   nameLower.includes('us_en');
-        });
-        
-        console.log('All available voices:', availableVoices.map(v => v.name));
-        console.log('Filtered US English voices:', usEnVoices.map(v => v.name));
-        
-        ttsVoiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>'; // Default option
-        usEnVoices.forEach(voice => {
-            const option = document.createElement('option');
-            option.value = voice.name;
-            option.textContent = `${voice.name} (${voice.ssml_gender.toLowerCase()})`;
-            ttsVoiceSelect.appendChild(option);
-        });
-        
-        console.log(`Loaded ${usEnVoices.length} US English voices out of ${availableVoices.length} total voices`);
+        refreshLanguageDependentVoiceControls();
+        console.log(`Loaded ${availableVoices.length} total voices`);
     } catch (error) {
         console.error('Error loading TTS voices:', error);
-        ttsVoiceSelect.innerHTML = '<option value="">Error loading voices</option>';
+        if (defaultPartnerVoiceSelect) {
+            defaultPartnerVoiceSelect.innerHTML = '<option value="">Error loading voices</option>';
+        }
+        if (ttsVoiceSelect) {
+            ttsVoiceSelect.innerHTML = '<option value="">Error loading voices</option>';
+        }
         showTemporaryStatus(ttsVoiceStatus, `Error loading voices: ${error.message}`, true);
+        showTemporaryStatus(settingsStatus, `Error loading voices: ${error.message}`, true);
     }
 }
 
@@ -260,8 +552,24 @@ async function loadSettings() {
         if (playWaitForSwitchChimeInput) { playWaitForSwitchChimeInput.checked = currentSettings.playWaitForSwitchChime || false; }
         if (enableSightWordsInput) { enableSightWordsInput.checked = currentSettings.enableSightWords !== false; }
         if (sightWordGradeLevelInput) { sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k'; }
-        if (ttsVoiceSelect && currentSettings.selected_tts_voice_name) {
-            ttsVoiceSelect.value = currentSettings.selected_tts_voice_name;
+        if (userLanguageSelect) userLanguageSelect.value = currentSettings.userLanguage || 'en-US';
+        if (defaultPartnerLanguageSelect) defaultPartnerLanguageSelect.value = currentSettings.defaultPartnerLanguage || 'en-US';
+        if (locationOverrideLanguagesSelect) {
+            setSelectedMultiValues(locationOverrideLanguagesSelect, currentSettings.locationOverrideLanguages || []);
+        }
+        // Load location override languages table
+        const locationOverrideVoices = currentSettings.locationOverrideVoices || {};
+        if (Object.keys(locationOverrideVoices).length > 0) {
+            renderLocationOverrideLanguagesTable(locationOverrideVoices);
+        } else {
+            renderLocationOverrideLanguagesTable({});
+        }
+        refreshLanguageDependentVoiceControls();
+        if (defaultPartnerVoiceSelect) {
+            defaultPartnerVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
+        }
+        if (ttsVoiceSelect) {
+            ttsVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
         }
         // Load spellLetterOrder setting
         if (spellLetterOrderSelect) {
@@ -550,7 +858,17 @@ async function saveSettings() {
     const newPlayWaitForSwitchChime = playWaitForSwitchChimeInput ? playWaitForSwitchChimeInput.checked : false;
     const newEnableSightWords = enableSightWordsInput.checked;
     const newSightWordGradeLevel = sightWordGradeLevelInput.value;
-    const newSelectedTtsVoice = ttsVoiceSelect ? ttsVoiceSelect.value : null;
+    // Keep legacy selected_tts_voice_name aligned to the default partner voice.
+    const newSelectedTtsVoice = defaultPartnerVoiceSelect
+        ? defaultPartnerVoiceSelect.value
+        : (ttsVoiceSelect ? ttsVoiceSelect.value : null);
+    const newUserLanguage = userLanguageSelect ? userLanguageSelect.value : 'en-US';
+    const newDefaultPartnerLanguage = defaultPartnerLanguageSelect ? defaultPartnerLanguageSelect.value : 'en-US';
+    const newDefaultPartnerVoice = defaultPartnerVoiceSelect ? defaultPartnerVoiceSelect.value : '';
+    // Read from table-based location override languages
+    const locationOverrideTableMap = getLocationOverrideLanguagesFromTable();
+    const newLocationOverrideLanguages = Object.keys(locationOverrideTableMap);
+    const newLocationOverrideVoices = locationOverrideTableMap;
     const newGridColumns = gridColumnsSlider ? parseInt(gridColumnsSlider.value) : 6;
     const newToolbarPIN = toolbarPINInput ? toolbarPINInput.value.trim() : null;
     const newSpellLetterOrder = spellLetterOrderSelect ? spellLetterOrderSelect.value : 'alphabetical';
@@ -622,8 +940,18 @@ async function saveSettings() {
         settingsStatus.textContent = 'Toolbar PIN must be between 3 and 10 characters.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-    if (ttsVoiceSelect && !newSelectedTtsVoice && availableVoices.length > 0) { // Check if voices loaded but none selected
-        showTemporaryStatus(settingsStatus, 'Please select a TTS voice.', true, 4000); return;
+    if (!newDefaultPartnerVoice && availableVoices.length > 0) { // Always require a default partner voice when voices are available
+        showTemporaryStatus(settingsStatus, 'Please select a Default Partner Voice (required for announcements).', true, 4000); return;
+    }
+    if (!newUserLanguage) {
+        showTemporaryStatus(settingsStatus, 'Please select a user language.', true, 4000); return;
+    }
+    if (!newDefaultPartnerLanguage) {
+        showTemporaryStatus(settingsStatus, 'Please select a default partner language.', true, 4000); return;
+    }
+    const missingOverrideVoices = newLocationOverrideLanguages.filter(locale => !newLocationOverrideVoices[locale]);
+    if (missingOverrideVoices.length > 0) {
+        showTemporaryStatus(settingsStatus, `Select voices for override language(s): ${missingOverrideVoices.join(', ')}`, true, 5000); return;
     }
     // Provider selection is always valid since it has default values
     // Remove the old LLM model validation
@@ -652,7 +980,12 @@ async function saveSettings() {
         disableTapPictograms: newDisableTapPictograms,
         enableSightWords: newEnableSightWords,
         sightWordGradeLevel: newSightWordGradeLevel,
-        selected_tts_voice_name: newSelectedTtsVoice,
+        selected_tts_voice_name: newDefaultPartnerVoice,
+        userLanguage: newUserLanguage,
+        defaultPartnerLanguage: newDefaultPartnerLanguage,
+        defaultPartnerVoice: newDefaultPartnerVoice,
+        locationOverrideLanguages: newLocationOverrideLanguages,
+        locationOverrideVoices: newLocationOverrideVoices,
         llm_provider: newLlmProvider, // Updated to use provider instead of specific model
         gridColumns: newGridColumns, // Add gridColumns to save payload
         spellLetterOrder: newSpellLetterOrder, // Add spell letter order setting
@@ -714,7 +1047,16 @@ async function saveSettings() {
         if (enablePictogramsInput) enablePictogramsInput.checked = currentSettings.enablePictograms !== false;
         if (enableSightWordsInput) enableSightWordsInput.checked = currentSettings.enableSightWords !== false;
         if (sightWordGradeLevelInput) sightWordGradeLevelInput.value = currentSettings.sightWordGradeLevel || 'pre_k';
-        if (ttsVoiceSelect) ttsVoiceSelect.value = currentSettings.selected_tts_voice_name || '';
+        if (userLanguageSelect) userLanguageSelect.value = currentSettings.userLanguage || 'en-US';
+        if (defaultPartnerLanguageSelect) defaultPartnerLanguageSelect.value = currentSettings.defaultPartnerLanguage || 'en-US';
+        if (locationOverrideLanguagesSelect) {
+            setSelectedMultiValues(locationOverrideLanguagesSelect, currentSettings.locationOverrideLanguages || []);
+        }
+        refreshLanguageDependentVoiceControls();
+        if (defaultPartnerVoiceSelect) {
+            defaultPartnerVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
+        }
+        if (ttsVoiceSelect) ttsVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
         // Update gridColumns slider after save
         if (gridColumnsSlider && currentSettings.gridColumns !== undefined) {
             gridColumnsSlider.value = currentSettings.gridColumns;
@@ -759,6 +1101,108 @@ async function saveSettings() {
     } catch (error) {
         console.error('Error saving settings:', error);
         showTemporaryStatus(settingsStatus, `Error saving: ${error.message}`, true, 5000);
+    }
+}
+
+/**
+ * Tests the Default Partner Voice
+ */
+async function testDefaultPartnerVoice() {
+    if (!defaultPartnerVoiceSelect) return;
+    const selectedVoice = defaultPartnerVoiceSelect.value;
+    if (!selectedVoice) {
+        showTemporaryStatus(settingsStatus, "Please select a Default Partner Voice to test.", true, 3000);
+        return;
+    }
+    showTemporaryStatus(settingsStatus, `Testing voice: ${selectedVoice}...`, false, 0);
+    try {
+        const response = await window.authenticatedFetch('/api/test-tts-voice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                voice_name: selectedVoice, 
+                text: "This is a test of the Default Partner Voice."
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(errorData.detail || `Test failed: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        if (result.audio_url) {
+            const audioResponse = await fetch(result.audio_url);
+            if (!audioResponse.ok) throw new Error(`Failed to fetch audio file: ${audioResponse.status}`);
+            const audioArrayBuffer = await audioResponse.arrayBuffer();
+            await playTestAudio(audioArrayBuffer, result.sample_rate || 22050);
+            showTemporaryStatus(settingsStatus, "Default Partner Voice tested successfully!", false, 3000);
+        } else if (result.audio_data) {
+            const binaryString = window.atob(result.audio_data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            await playTestAudio(bytes.buffer, result.sample_rate || 22050);
+            showTemporaryStatus(settingsStatus, "Default Partner Voice tested successfully!", false, 3000);
+        } else {
+            throw new Error('No playable audio returned from test endpoint.');
+        }
+    } catch (error) {
+        console.error('Error testing voice:', error);
+        showTemporaryStatus(settingsStatus, `Error testing voice: ${error.message}`, true, 4000);
+    }
+}
+
+/**
+ * Tests a specific Location Override Voice
+ */
+async function testLocationOverrideVoice(voiceSelect) {
+    if (!voiceSelect) return;
+    const selectedVoice = voiceSelect.value;
+    if (!selectedVoice) {
+        alert("Please select a voice to test.");
+        return;
+    }
+    try {
+        showTemporaryStatus(settingsStatus, `Testing voice: ${selectedVoice}...`, false, 0);
+        const response = await window.authenticatedFetch('/api/test-tts-voice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                voice_name: selectedVoice, 
+                text: "This is a test of the location override voice."
+            })
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+            throw new Error(errorData.detail || `Test failed: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        if (result.audio_url) {
+            const audioResponse = await fetch(result.audio_url);
+            if (!audioResponse.ok) throw new Error(`Failed to fetch audio file: ${audioResponse.status}`);
+            const audioArrayBuffer = await audioResponse.arrayBuffer();
+            await playTestAudio(audioArrayBuffer, result.sample_rate || 22050);
+            showTemporaryStatus(settingsStatus, "Location override voice tested successfully!", false, 3000);
+        } else if (result.audio_data) {
+            const binaryString = window.atob(result.audio_data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            await playTestAudio(bytes.buffer, result.sample_rate || 22050);
+            showTemporaryStatus(settingsStatus, "Location override voice tested successfully!", false, 3000);
+        } else {
+            throw new Error('No playable audio returned from test endpoint.');
+        }
+    } catch (error) {
+        console.error('Error testing voice:', error);
+        showTemporaryStatus(settingsStatus, `Error testing voice: ${error.message}`, true, 4000);
     }
 }
 
@@ -1021,6 +1465,11 @@ async function initializePage() {
         // Add Event Listeners
         if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
         if (testTtsVoiceButton) testTtsVoiceButton.addEventListener('click', testSelectedVoice);
+        const testDefaultPartnerVoiceButton = document.getElementById('testDefaultPartnerVoiceButton');
+        if (testDefaultPartnerVoiceButton) testDefaultPartnerVoiceButton.addEventListener('click', testDefaultPartnerVoice);
+        if (defaultPartnerLanguageSelect) defaultPartnerLanguageSelect.addEventListener('change', refreshLanguageDependentVoiceControls);
+        if (addLocationOverrideRowButton) addLocationOverrideRowButton.addEventListener('click', addLocationOverrideRow);
+        if (locationOverrideLanguagesSelect) locationOverrideLanguagesSelect.addEventListener('change', refreshLanguageDependentVoiceControls);
         if (refreshEmailStatusButton) {
             refreshEmailStatusButton.addEventListener('click', () => {
                 loadEmailProviderStatus().catch((error) => {
@@ -1080,7 +1529,8 @@ async function initializePage() {
 
 
         // Initial data loading
-        if (ttsVoiceSelect) await loadVoices();
+        populateLanguageSelectors();
+        await loadVoices();
         // Static provider selection - no need to populate dropdown
         await loadSettings();
         await loadToolbarPIN(); // Load the toolbar PIN on page initialization

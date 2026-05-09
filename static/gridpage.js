@@ -411,8 +411,35 @@ function getSummaryInstructionText() {
         : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
 }
 
+function getUserLanguageOutputInstruction() {
+    const locale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    const localeNames = {
+        'en-US': 'English (US)',
+        'es-US': 'Spanish (US)',
+        'fr-FR': 'French (France)',
+        'de-DE': 'German (Germany)',
+        'it-IT': 'Italian (Italy)',
+        'pt-BR': 'Portuguese (Brazil)',
+        'ar-XA': 'Arabic'
+    };
+    const languageName = localeNames[locale] || locale;
+    return `IMPORTANT LANGUAGE RULE: Return ALL generated values for "option" and "summary" in ${languageName} (${locale}) only. Even if the prompt/context text is in another language, translate internally and still output in ${languageName} (${locale}).`;
+}
+
 function buildPromptForLLMQuery(llmQuery) {
-    return `"${llmQuery}". Format as a JSON list... ${getSummaryInstructionText()} ...${getComposePromptContext()}`;
+    return `
+Generate up to "${LLMOptions}" short, single-phrase options for this AAC context:
+"${llmQuery}"
+
+Do not include introductions or conclusions.
+Each option should be a clear, selectable phrase for AAC use.
+Return ONLY a JSON list where each item has "option", "summary", and "keywords" keys.
+The "option" key should contain the FULL option text.
+${getSummaryInstructionText()}
+${getUserLanguageOutputInstruction()}
+The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
+${getComposePromptContext()}
+`;
 }
 
 function playPageReadyChimeIfEnabled() {
@@ -853,6 +880,7 @@ ${composePromptContext}
 Return ONLY a JSON list where each item has "option", "summary", and "keywords" keys.
 The "option" key should contain the FULL option text.
 ${summaryInstruction}
+${getUserLanguageOutputInstruction()}
 The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
 `;
 }
@@ -1425,6 +1453,7 @@ async function fetchJokeOptions(limit, questionContext) {
 // --- NEW GLOBAL VARIABLES FOR ANNOUNCEMENT QUEUE & AUDIO CONTEXT FIX ---
 let announcementQueue = [];       // Queue for sequential announcements
 let isAnnouncingNow = false;      // Flag to prevent concurrent announce playback
+let announcementStartedAtMs = 0;  // Watchdog timestamp for stuck queue recovery
 let audioContextResumeAttempted = false; // Flag for AudioContext auto-resume helper
 let activeAnnouncementAudioContext = null;
 let activeAnnouncementAudioSource = null;
@@ -1473,6 +1502,255 @@ let systemSpeakerId = localStorage.getItem('bravoSystemSpeakerId') || 'default';
 
 let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
 let currentSpeechRate = 180;                 // Default words-per-minute
+let userLanguageLocale = 'en-US';
+let defaultPartnerLanguageLocale = 'en-US';
+let defaultPartnerVoiceName = 'en-US-Neural2-A';
+let locationOverrideVoicesMap = {};
+let currentLocationLanguageOverride = '';
+
+const TRANSLATION_CACHE_TTL_MS = 10 * 60 * 1000;
+const translationCache = new Map();
+const translationInFlight = new Map();
+const standardPromptTranslationCache = new Map();
+const llmSpecialButtonLabelCache = new Map();
+
+const LLM_SPECIAL_BUTTON_LABELS = Object.freeze({
+    home: 'Home',
+    somethingElse: 'Something Else',
+    freeStyle: 'Free Style',
+    askAgain: 'Please ask me again'
+});
+
+const STANDARD_ANNOUNCEMENT_TEXT = {
+    listening: "I'm listening.",
+    processing: "Okay, processing. Give me a moment."
+};
+
+const LOCALE_LABEL_TO_TAG = {
+    'english (us)': 'en-US',
+    'spanish (us)': 'es-US',
+    'french (france)': 'fr-FR',
+    'german (germany)': 'de-DE',
+    'italian (italy)': 'it-IT',
+    'portuguese (brazil)': 'pt-BR',
+    'arabic': 'ar-XA'
+};
+
+function normalizeLocaleTag(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    const labelMatch = LOCALE_LABEL_TO_TAG[trimmed.toLowerCase()];
+    if (labelMatch) return labelMatch;
+
+    const cleaned = trimmed.replace(/_/g, '-');
+    const localeMatch = cleaned.match(/^([a-zA-Z]{2})(?:-([a-zA-Z]{2,3}))?$/);
+    if (!localeMatch) return '';
+
+    const lang = localeMatch[1].toLowerCase();
+    const region = localeMatch[2] ? localeMatch[2].toUpperCase() : '';
+    return region ? `${lang}-${region}` : lang;
+}
+
+function getEffectivePartnerLanguage() {
+    return normalizeLocaleTag(currentLocationLanguageOverride)
+        || normalizeLocaleTag(defaultPartnerLanguageLocale)
+        || 'en-US';
+}
+
+function getEffectivePartnerVoice() {
+    const locale = getEffectivePartnerLanguage();
+    const localeVoice = locationOverrideVoicesMap && typeof locationOverrideVoicesMap === 'object'
+        ? locationOverrideVoicesMap[locale]
+        : '';
+    return String(localeVoice || defaultPartnerVoiceName || currentTtsVoiceName || '').trim();
+}
+
+function getWakeWordRecognitionLanguage() {
+    // Wake-word spotting should track the wake-word / user language, not the partner TTS language.
+    return normalizeLocaleTag(userLanguageLocale) || 'en-US';
+}
+
+async function loadCurrentLocationLanguageOverride() {
+    try {
+        const response = await authenticatedFetch('/get-user-current', { method: 'GET' });
+        if (!response.ok) return;
+        const state = await response.json();
+        currentLocationLanguageOverride = normalizeLocaleTag(state.locationLanguageOverride);
+    } catch (error) {
+        console.warn('Unable to load current location language override:', error);
+    }
+}
+
+async function translateLineBetweenLocales(text, sourceLocaleRaw, targetLocaleRaw) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return cleanText;
+
+    const sourceLocale = String(sourceLocaleRaw || '').trim() || undefined;
+    const targetLocale = String(targetLocaleRaw || '').trim() || undefined;
+    if (!targetLocale) return cleanText;
+    if (sourceLocale && sourceLocale.toLowerCase() === targetLocale.toLowerCase()) {
+        return cleanText;
+    }
+
+    const cacheKey = `${sourceLocale || 'auto'}__${targetLocale}__${cleanText.toLowerCase()}`;
+    const now = Date.now();
+    const cached = translationCache.get(cacheKey);
+    if (cached && (now - cached.ts) < TRANSLATION_CACHE_TTL_MS) {
+        return cached.value;
+    }
+    if (translationInFlight.has(cacheKey)) {
+        return translationInFlight.get(cacheKey);
+    }
+
+    const requestTranslation = async (sourceLocaleOverride) => {
+        const response = await authenticatedFetch('/api/translate-lines', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lines: [cleanText],
+                source_locale: sourceLocaleOverride || undefined,
+                target_locale: targetLocale,
+            }),
+        });
+        if (!response.ok) {
+            throw new Error(`Translate request failed: ${response.status}`);
+        }
+        const payload = await response.json();
+        const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines[0] : '';
+        return String(translated || '').trim();
+    };
+
+    const translationPromise = (async () => {
+        let translated = await requestTranslation(sourceLocale);
+        if (!translated || translated.toLowerCase() === cleanText.toLowerCase()) {
+            translated = await requestTranslation(null);
+        }
+        const finalValue = translated || cleanText;
+        translationCache.set(cacheKey, { value: finalValue, ts: Date.now() });
+        return finalValue;
+    })();
+
+    translationInFlight.set(cacheKey, translationPromise);
+    try {
+        return await translationPromise;
+    } catch (error) {
+        console.warn('Translation fallback to source text:', error);
+        return cleanText;
+    } finally {
+        translationInFlight.delete(cacheKey);
+    }
+}
+
+async function translateLineToPartnerLanguage(text) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return cleanText;
+    const targetLocale = getEffectivePartnerLanguage();
+    const sourceLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    return translateLineBetweenLocales(cleanText, sourceLocale, targetLocale);
+}
+
+function warmTranslationCacheForOptions(options) {
+    const list = Array.isArray(options) ? options : [];
+    if (!list.length) return;
+    const targetLocale = getEffectivePartnerLanguage();
+    const sourceLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    if (targetLocale.toLowerCase() === sourceLocale.toLowerCase()) return;
+
+    // Warm only the first several options to avoid unnecessary API load.
+    const warmCandidates = list
+        .slice(0, 10)
+        .map(item => String(item?.option || '').trim())
+        .filter(Boolean);
+
+    warmCandidates.forEach(text => {
+        translateLineToPartnerLanguage(text).catch(() => {});
+    });
+}
+
+async function announcePartnerFacingOutput(sourceText, recordHistory = false, showSplash = true) {
+    const cleanSource = String(sourceText || '').trim();
+    if (!cleanSource) return;
+    const translatedForPartner = await translateLineToPartnerLanguage(cleanSource);
+    await announce(translatedForPartner, 'system', recordHistory, showSplash);
+}
+
+async function getTranslatedStandardPrompt(promptKey, fallbackText) {
+    const targetLocale = getEffectivePartnerLanguage();
+    // Built-in standard prompts are authored in English.
+    // Always translate from English to the effective partner language.
+    const sourceLocale = 'en-US';
+    const baseText = String(fallbackText || '').trim();
+    if (!baseText) return baseText;
+
+    const cacheKey = `${promptKey}__${sourceLocale}__${targetLocale}`;
+    const cached = standardPromptTranslationCache.get(cacheKey);
+    if (cached) return cached;
+
+    const translated = await translateLineBetweenLocales(baseText, sourceLocale, targetLocale);
+    const finalText = String(translated || baseText).trim() || baseText;
+    standardPromptTranslationCache.set(cacheKey, finalText);
+    return finalText;
+}
+
+function warmStandardPromptTranslations() {
+    Object.entries(STANDARD_ANNOUNCEMENT_TEXT).forEach(([promptKey, text]) => {
+        getTranslatedStandardPrompt(promptKey, text).catch(() => {});
+    });
+}
+
+async function announceFastStandardPrompt(promptKey, fallbackText) {
+    // Ensure we have the latest saved location override before translating wake-word prompts.
+    await loadCurrentLocationLanguageOverride();
+    console.log('Standard prompt locale context:', {
+        promptKey,
+        userLanguageLocale,
+        defaultPartnerLanguageLocale,
+        currentLocationLanguageOverride,
+        effectivePartnerLanguage: getEffectivePartnerLanguage()
+    });
+    const translatedPrompt = await getTranslatedStandardPrompt(promptKey, fallbackText);
+    // Keep standard prompts on the normal announce path so they use configured
+    // partner voice, output routing, and splash behavior like other announcements.
+    await announce(translatedPrompt, 'system', false, true, false);
+}
+
+async function getLocalizedLlmSpecialButtonLabels() {
+    const locale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    const cached = llmSpecialButtonLabelCache.get(locale);
+    if (cached) {
+        return cached;
+    }
+
+    const defaults = { ...LLM_SPECIAL_BUTTON_LABELS };
+    if (locale.toLowerCase() === 'en-us') {
+        llmSpecialButtonLabelCache.set(locale, defaults);
+        return defaults;
+    }
+
+    const keys = Object.keys(defaults);
+    const translatedValues = await Promise.all(
+        keys.map(async (key) => {
+            const sourceText = defaults[key];
+            try {
+                const translated = await translateLineBetweenLocales(sourceText, 'en-US', locale);
+                return String(translated || sourceText).trim() || sourceText;
+            } catch (error) {
+                console.warn(`Failed to localize special button label "${sourceText}" for ${locale}:`, error);
+                return sourceText;
+            }
+        })
+    );
+
+    const localized = {};
+    keys.forEach((key, index) => {
+        localized[key] = translatedValues[index];
+    });
+
+    llmSpecialButtonLabelCache.set(locale, localized);
+    return localized;
+}
 
 // --- AAC Pictogram Support ---
 let enablePictograms = false; // Global setting for pictogram display - Always false for Gridpage
@@ -2049,6 +2327,15 @@ async function loadScanSettings() {
             console.warn("TTS Voice Name setting not found or invalid. Using default:", currentTtsVoiceName);
             // It will keep its default value of 'en-US-Neural2-A'
         }
+
+        userLanguageLocale = normalizeLocaleTag(settings?.userLanguage) || 'en-US';
+        defaultPartnerLanguageLocale = normalizeLocaleTag(settings?.defaultPartnerLanguage) || 'en-US';
+        defaultPartnerVoiceName = String(settings?.defaultPartnerVoice || settings?.selected_tts_voice_name || currentTtsVoiceName || '').trim() || currentTtsVoiceName;
+        locationOverrideVoicesMap = (settings?.locationOverrideVoices && typeof settings.locationOverrideVoices === 'object')
+            ? settings.locationOverrideVoices
+            : {};
+        currentTtsVoiceName = defaultPartnerVoiceName;
+        console.log(`Language context loaded. user=${userLanguageLocale}, partner=${defaultPartnerLanguageLocale}`);
         // --- END OF NEW LOGIC ---
 
    } catch (error) {
@@ -3110,10 +3397,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Parallelize independent async operations for faster load
-    const [scanSettingsResult, pagesResponse] = await Promise.all([
+    const [scanSettingsResult, locationOverrideResult, pagesResponse] = await Promise.all([
         loadScanSettings(),
+        loadCurrentLocationLanguageOverride(),
         authenticatedFetch('/pages', { method: 'GET' })
     ]);
+    warmStandardPromptTranslations();
     console.log('✅ Core initialization complete (parallelized)');
     
     // 3. Initialize grid layout with loaded gridColumns setting
@@ -3307,6 +3596,65 @@ document.addEventListener('DOMContentLoaded', async () => {
     // --- Setup Clear History Button ---
     const clearButton = document.getElementById('clear-history');
     const speechHistory = document.getElementById('speech-history');
+    const translateHistoryButton = document.getElementById('translate-history-btn');
+    const translateModal = document.getElementById('translate-modal');
+    const translateModalClose = document.getElementById('translate-modal-close');
+    const translateModalContent = document.getElementById('translate-modal-content');
+
+    const closeTranslateModal = () => {
+        if (!translateModal) return;
+        translateModal.classList.add('hidden');
+        translateModal.classList.remove('flex');
+    };
+
+    const openTranslateHistoryModal = async () => {
+        if (!speechHistory || !translateModal || !translateModalContent) return;
+        const lines = String(speechHistory.value || '')
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        if (!lines.length) {
+            translateModalContent.innerHTML = '<p class="text-gray-500">No speech history to translate.</p>';
+            translateModal.classList.remove('hidden');
+            translateModal.classList.add('flex');
+            return;
+        }
+
+        translateModalContent.innerHTML = '<p class="text-gray-500">Translating...</p>';
+        translateModal.classList.remove('hidden');
+        translateModal.classList.add('flex');
+
+        try {
+            const response = await authenticatedFetch('/api/translate-lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lines,
+                    source_locale: userLanguageLocale,
+                    target_locale: getEffectivePartnerLanguage(),
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Translate request failed (${response.status})`);
+            }
+
+            const payload = await response.json();
+            const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines : [];
+            const items = translated.map((line, idx) => `
+                <div class="border border-gray-200 rounded p-2">
+                    <div class="text-xs text-gray-500 mb-1">Line ${idx + 1}</div>
+                    <div>${String(line || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+            `).join('');
+            translateModalContent.innerHTML = items || '<p class="text-gray-500">No translated output available.</p>';
+        } catch (error) {
+            console.error('Error translating speech history:', error);
+            translateModalContent.innerHTML = '<p class="text-red-600">Unable to translate right now.</p>';
+        }
+    };
+
     if (clearButton && speechHistory) {
         clearButton.addEventListener('click', () => {
             speechHistory.value = '';
@@ -3319,6 +3667,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (speechHistory) {
         const storedHistory = localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId));
         if (storedHistory) { speechHistory.value = storedHistory; }
+    }
+    if (translateHistoryButton) {
+        translateHistoryButton.addEventListener('click', () => {
+            void openTranslateHistoryModal();
+        });
+    }
+    if (translateModalClose) {
+        translateModalClose.addEventListener('click', closeTranslateModal);
+    }
+    if (translateModal) {
+        translateModal.addEventListener('click', (event) => {
+            if (event.target === translateModal) {
+                closeTranslateModal();
+            }
+        });
     }
     // If a compose session is already active (e.g. returning to compose grid), switch the panel
     updateSpeechHistoryPanel();
@@ -3871,7 +4234,7 @@ async function handleButtonClick(buttonData) {
             if (speechPhrase) {
                 console.log('🎤 Has speech phrase, announcing:', speechPhrase);
                 speechAnnounceStart = performance.now();
-                speechAnnouncePromise = announce(speechPhrase, "system", false); // Start announcement without blocking LLM fetch.
+                speechAnnouncePromise = announcePartnerFacingOutput(speechPhrase, false); // Start announcement without blocking LLM fetch.
                 
                 // Record chat history for user speech selection
                 console.log('🎯 GRIDPAGE Recording speech selection:', speechPhrase);
@@ -4020,7 +4383,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system", false);
+                await announcePartnerFacingOutput(speechPhrase, false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (go-back) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -4056,7 +4419,7 @@ async function handleButtonClick(buttonData) {
                 
                 if (speechPhrase) {
                     const tAnnounce0 = performance.now();
-                    await announce(speechPhrase, "system", false);
+                    await announcePartnerFacingOutput(speechPhrase, false);
                     const tAnnounce1 = performance.now();
                     console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (temp nav return) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                     
@@ -4082,7 +4445,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system", false);
+                await announcePartnerFacingOutput(speechPhrase, false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (nav) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -4218,7 +4581,7 @@ async function handleButtonClick(buttonData) {
                 sessionStorage.removeItem('tempNavReturnPage');
                 
                 if (speechPhrase) {
-                    await announce(speechPhrase, "system", false);
+                    await announcePartnerFacingOutput(speechPhrase, false);
                     // Record chat history for user speech selection
                     console.log('🎯 GRIDPAGE Recording temp nav speech before return:', speechPhrase);
                     recordChatHistory("", speechPhrase).catch(error => {
@@ -4238,7 +4601,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system", false);
+                await announcePartnerFacingOutput(speechPhrase, false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (speak only) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -4533,9 +4896,16 @@ function setupSpeechRecognition() {
         console.error("Speech Recognition API not supported."); isSettingUpRecognition = false; return;
     }
     recognition = new SpeechRecognitionAPI();
+    recognition.lang = getWakeWordRecognitionLanguage();
     recognition.continuous = true;
     recognition.interimResults = false;
-    console.log("Keyword Recognition object created:", recognition);
+    console.log("Keyword Recognition object created:", {
+        lang: recognition.lang,
+        wakeWordInterjection,
+        wakeWordName,
+        userLanguageLocale,
+        defaultPartnerLanguageLocale
+    });
 
     recognition.onerror = function (event) {
         console.error("Keyword Speech recognition error:", event.error, event.message);
@@ -4596,7 +4966,8 @@ function setupSpeechRecognition() {
             const announcement = "I'm listening.";
             console.log("Calling announce for question prompt...");
             try {
-                await announce(announcement, "system", false);
+                await loadCurrentLocationLanguageOverride();
+                await announceFastStandardPrompt('listening', announcement);
                 console.log("Announce finished. Setting up question recognition.");
                 setupQuestionRecognition(); // This will set listeningForQuestion = true
             } catch (announceError) {
@@ -4625,10 +4996,10 @@ function setupSpeechRecognition() {
 function setupQuestionRecognition() {
     console.log("Attempting to set up question recognition...");
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) { console.error("Speech Recognition API not supported."); announce("Sorry, I can't use speech recognition.", "system", false); return; }
+    if (!SpeechRecognitionAPI) { console.error("Speech Recognition API not supported."); announcePartnerFacingOutput("Sorry, I can't use speech recognition.", false); return; }
 
     let questionRecognitionInstance = new SpeechRecognitionAPI(); // Use local instance
-    questionRecognitionInstance.lang = 'en-US';
+    questionRecognitionInstance.lang = getEffectivePartnerLanguage();
     questionRecognitionInstance.continuous = false;
     questionRecognitionInstance.interimResults = true;
     questionRecognitionInstance.maxAlternatives = 1;
@@ -4636,7 +5007,7 @@ function setupQuestionRecognition() {
     let finalTranscript = ''; let listeningTimeout; let hasProcessedResult = false; let isRestartingKeyword = false;
     const questionTextarea = document.getElementById(QUESTION_TEXTAREA_ID);
 
-    console.log("Question Recognition Config:", { continuous: false, interimResults: true, lang: 'en-US', maxAlternatives: 1 });
+    console.log("Question Recognition Config:", { continuous: false, interimResults: true, lang: questionRecognitionInstance.lang, maxAlternatives: 1 });
 
     questionRecognitionInstance.onstart = () => {
         console.log("Question Recognition: Listening started...");
@@ -4651,7 +5022,7 @@ function setupQuestionRecognition() {
         clearTimeout(listeningTimeout);
         listeningTimeout = setTimeout(() => {
              if (listeningForQuestion && !finalTranscript && !hasProcessedResult) {
-                 console.log("Question Timeout: No speech detected."); announce("I didn't hear anything. Try again?", "system", false);
+                 console.log("Question Timeout: No speech detected."); announcePartnerFacingOutput("I didn't hear anything. Try again?", false);
                  try { questionRecognitionInstance.stop(); } catch(e){}
              }
         }, 10000);
@@ -4679,9 +5050,34 @@ function setupQuestionRecognition() {
             document.getElementById('loading-indicator').style.display = 'flex';
 
             try {
-                announce("Okay, processing: " + finalTranscript.trim() + ". Give me a moment.", "system", false);
+                await announceFastStandardPrompt('processing', STANDARD_ANNOUNCEMENT_TEXT.processing);
                 updateStatusBar('Processing: ' + finalTranscript.trim() + '...');
-                currentQuestion = finalTranscript.trim().toLowerCase();
+
+                const rawQuestion = finalTranscript.trim();
+                const normalizedQuestion = await translateLineBetweenLocales(
+                    rawQuestion,
+                    getEffectivePartnerLanguage(),
+                    userLanguageLocale
+                );
+
+                const normalizedQuestionDisplay = String(normalizedQuestion || rawQuestion).trim();
+                currentQuestion = normalizedQuestionDisplay.toLowerCase();
+                if (currentQuestion !== rawQuestion.toLowerCase()) {
+                    console.log('Question translated to user language for LLM:', {
+                        source: rawQuestion,
+                        translated: currentQuestion,
+                        from: getEffectivePartnerLanguage(),
+                        to: userLanguageLocale
+                    });
+                }
+
+                const userLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+                const partnerLocale = String(getEffectivePartnerLanguage() || 'en-US').trim() || 'en-US';
+                if (userLocale.toLowerCase() !== partnerLocale.toLowerCase() && normalizedQuestionDisplay) {
+                    // Non-blocking confirmation in user language while LLM options are generated.
+                    announce(normalizedQuestionDisplay, 'system', false, false, true)
+                        .catch(error => console.warn('User-language confirmation prompt failed:', error));
+                }
                 initializeFollowUpConversation(currentQuestion);
 
                 const summaryInstruction = SummaryOff
@@ -4697,7 +5093,7 @@ function setupQuestionRecognition() {
                         await generateLlmButtons(jokeOptions);
                     } else {
                         console.warn("No jokes returned for joke request.");
-                        announce("I couldn't find any jokes right now.", "system", false);
+                        announcePartnerFacingOutput("I couldn't find any jokes right now.", false);
                         isRestartingKeyword = true;
                         setupSpeechRecognition();
                     }
@@ -4712,6 +5108,7 @@ function setupQuestionRecognition() {
                     Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
                     The "option" key should contain the FULL option text.
                     ${summaryInstruction}
+                    ${getUserLanguageOutputInstruction()}
                     The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
                     Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
                     ${getComposePromptContext()}
@@ -4722,11 +5119,11 @@ function setupQuestionRecognition() {
                 if (Array.isArray(prioritizedOptions) && (prioritizedOptions.length === 0 || prioritizedOptions.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
                     querytype = "question"; await generateLlmButtons(prioritizedOptions);
                 } else {
-                    console.error("LLM response invalid:", prioritizedOptions); announce("Unexpected response.", "system", false);
+                    console.error("LLM response invalid:", prioritizedOptions); announcePartnerFacingOutput("Unexpected response.", false);
                     isRestartingKeyword = true; setupSpeechRecognition();
                 }
             } catch (error) {
-                console.error('Error processing question:', error); announce("Error processing question.", "system", false);
+                console.error('Error processing question:', error); announcePartnerFacingOutput("Error processing question.", false);
                 isRestartingKeyword = true; setupSpeechRecognition();
             } finally {
                 //document.getElementById('loading-indicator').style.display = 'none';
@@ -4752,7 +5149,7 @@ function setupQuestionRecognition() {
         else if (event.error === 'network') { errorMessage = "Network error."; }
         else if (event.error === 'aborted') { errorMessage = ""; }
 
-        if (errorMessage) { announce(errorMessage, "system", false); }
+        if (errorMessage) { announcePartnerFacingOutput(errorMessage, false); }
         document.getElementById('loading-indicator').style.display = 'none';
         if (questionTextarea) {
             questionTextarea.placeholder = "Ask a question...";
@@ -4766,7 +5163,7 @@ function setupQuestionRecognition() {
             console.log("Attempting retry...");
             setTimeout(() => {
                  try { finalTranscript = ''; listeningForQuestion = true; hasProcessedResult = false; questionRecognitionInstance.start(); }
-                 catch (e) { console.error("Retry start error:", e); announce("Retry failed.", "system", false); listeningForQuestion = false; isRestartingKeyword = true; setupSpeechRecognition(); }
+                 catch (e) { console.error("Retry start error:", e); announcePartnerFacingOutput("Retry failed.", false); listeningForQuestion = false; isRestartingKeyword = true; setupSpeechRecognition(); }
             }, 500);
         } else { 
             console.log("Not retrying. Restarting keyword listener.");
@@ -4790,7 +5187,7 @@ function setupQuestionRecognition() {
         }
         updateStatusBar(''); // Clear status bar when recognition ends
 
-        if (stillListening && !hasProcessedResult && !wasRetried) { console.log("Ended without result/retry."); announce("Didn't catch that. Try again?", "system", false); }
+        if (stillListening && !hasProcessedResult && !wasRetried) { console.log("Ended without result/retry."); announcePartnerFacingOutput("Didn't catch that. Try again?", false); }
 
         if (!hasProcessedResult && !isRestartingKeyword) {
             console.log("Restarting keyword listener from onend.");
@@ -4810,7 +5207,7 @@ function setupQuestionRecognition() {
         console.log("Question Speech ended."); clearTimeout(listeningTimeout);
         listeningTimeout = setTimeout(() => {
             if (listeningForQuestion && !hasProcessedResult) {
-                console.warn("Timeout after speech end."); announce("Didn't get a final result.", "system", false);
+                console.warn("Timeout after speech end."); announcePartnerFacingOutput("Didn't get a final result.", false);
                 try { questionRecognitionInstance.stop(); } catch(e){}
             }
         }, 5000);
@@ -4819,7 +5216,7 @@ function setupQuestionRecognition() {
 
     setTimeout(() => {
         try { console.log("Calling start() for question recognition..."); questionRecognitionInstance.start(); }
-        catch (e) { console.error("Start error:", e); announce("Couldn't start listening.", "system", false); listeningForQuestion = false; clearTimeout(listeningTimeout); isRestartingKeyword = true; setupSpeechRecognition(); }
+        catch (e) { console.error("Start error:", e); announcePartnerFacingOutput("Couldn't start listening.", false); listeningForQuestion = false; clearTimeout(listeningTimeout); isRestartingKeyword = true; setupSpeechRecognition(); }
     }, 150);
 }
 
@@ -5012,21 +5409,48 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
 
     let audioContext;
     let source;
+    let playbackTimeoutId = null;
+
+    const clearPlaybackTimeout = () => {
+        if (playbackTimeoutId) {
+            clearTimeout(playbackTimeoutId);
+            playbackTimeoutId = null;
+        }
+    };
+
+    const closeAudioContextSafely = async () => {
+        if (audioContext && audioContext.state !== 'closed') {
+            try {
+                await audioContext.close();
+            } catch (_closeError) {
+                // ignore close errors
+            }
+        }
+    };
 
     try {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') {
             console.log("playAudioToDevice: AudioContext is suspended, attempting to resume.");
-            // We resume here; the tryResumeAudioContext() will provide the gesture.
-            audioContext.resume().catch(err => {
+            // Await resume so start/onended doesn't stall behind a suspended context.
+            try {
+                await audioContext.resume();
+            } catch (err) {
                 console.warn("playAudioToDevice: .resume() failed, probably no user gesture yet:", err);
-            });
+            }
         }
 
         if (typeof audioContext.setSinkId === 'function' && targetOutputDeviceId && targetOutputDeviceId !== 'default') {
             console.log(`playAudioToDevice: Attempting to call audioContext.setSinkId to device (ID: ${targetOutputDeviceId})`);
-            await audioContext.setSinkId(targetOutputDeviceId);
-            console.log(`playAudioToDevice: setSinkId call FINISHED for device ${targetOutputDeviceId}`);
+            try {
+                await Promise.race([
+                    audioContext.setSinkId(targetOutputDeviceId),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('setSinkId timeout')), 1500))
+                ]);
+                console.log(`playAudioToDevice: setSinkId call FINISHED for device ${targetOutputDeviceId}`);
+            } catch (sinkError) {
+                console.warn('playAudioToDevice: setSinkId failed or timed out, continuing with default output.', sinkError);
+            }
         } else {
             console.warn(`playAudioToDevice: Not performing explicit routing. Audio will play to browser's default speaker.`);
         }
@@ -5043,18 +5467,34 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         console.log("playAudioToDevice: Audio source started.");
 
         return new Promise((resolve) => {
-            source.onended = () => {
+            const finishPlayback = () => {
+                clearPlaybackTimeout();
                 console.log("playAudioToDevice: Audio playback ended.");
                 activeAnnouncementAudioSource = null;
                 if (activeAnnouncementAudioContext === audioContext) {
                     activeAnnouncementAudioContext = null;
                 }
-                audioContext.close(); // Important to release resources
+                closeAudioContextSafely();
                 resolve();
             };
+
+            source.onended = finishPlayback;
+
+            // Failsafe so queue cannot deadlock if onended never fires.
+            const durationMs = Math.max(1500, Math.ceil((audioBuffer.duration || 0) * 1000) + 2000);
+            playbackTimeoutId = setTimeout(() => {
+                console.warn(`playAudioToDevice: onended timeout (${durationMs}ms). Forcing playback completion.`);
+                try {
+                    source.stop(0);
+                } catch (_stopError) {
+                    // ignore
+                }
+                finishPlayback();
+            }, durationMs);
         }).catch(err => {
             console.error("playAudioToDevice: Error during audio playback promise:", err);
-            if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            clearPlaybackTimeout();
+            closeAudioContextSafely();
             if (activeAnnouncementAudioContext === audioContext) {
                 activeAnnouncementAudioContext = null;
                 activeAnnouncementAudioSource = null;
@@ -5064,7 +5504,8 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
 
     } catch (error) {
         console.error('playAudioToDevice: Fatal Error during setup or playback:', error);
-        if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        clearPlaybackTimeout();
+        closeAudioContextSafely();
         if (activeAnnouncementAudioContext === audioContext) {
             activeAnnouncementAudioContext = null;
             activeAnnouncementAudioSource = null;
@@ -5075,12 +5516,85 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
 
 // --- Announcement Queue Processor ---
 // This function manages playing announcements from the queue sequentially.
+function speakWithSystemVoice(textToSpeak) {
+    return new Promise((resolve, reject) => {
+        if (!window.speechSynthesis) {
+            reject(new Error('speechSynthesis is not available in this browser.'));
+            return;
+        }
+
+        let settled = false;
+        let utteranceTimeoutId = null;
+
+        const settleResolve = () => {
+            if (settled) return;
+            settled = true;
+            if (utteranceTimeoutId) {
+                clearTimeout(utteranceTimeoutId);
+                utteranceTimeoutId = null;
+            }
+            resolve();
+        };
+
+        const settleReject = (error) => {
+            if (settled) return;
+            settled = true;
+            if (utteranceTimeoutId) {
+                clearTimeout(utteranceTimeoutId);
+                utteranceTimeoutId = null;
+            }
+            reject(error);
+        };
+
+        try {
+            // Clear pending utterances so scanning speech stays responsive.
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(textToSpeak);
+            const normalizedWpm = Number(currentSpeechRate || 180);
+            // Rough mapping from WPM to browser speech rate (1.0 ~= ~180wpm).
+            utterance.rate = Math.max(0.5, Math.min(2.0, normalizedWpm / 180));
+
+            utterance.onend = () => settleResolve();
+            utterance.onerror = (event) => settleReject(new Error(`System voice failed: ${event.error || 'unknown error'}`));
+
+            const estimatedDurationMs = Math.max(3000, Math.min(15000, textToSpeak.length * 110));
+            utteranceTimeoutId = setTimeout(() => {
+                console.warn(`speakWithSystemVoice timeout (${estimatedDurationMs}ms). Forcing completion.`);
+                try {
+                    window.speechSynthesis.cancel();
+                } catch (_cancelError) {
+                    // ignore cancel errors
+                }
+                settleResolve();
+            }, estimatedDurationMs);
+
+            window.speechSynthesis.speak(utterance);
+        } catch (err) {
+            settleReject(err);
+        }
+    });
+}
+
 async function processAnnouncementQueue() {
-    if (isAnnouncingNow || announcementQueue.length === 0) {
+    if (announcementQueue.length === 0) {
         return; // Already playing or nothing to play.
     }
 
+    if (isAnnouncingNow) {
+        const activeForMs = announcementStartedAtMs > 0 ? (Date.now() - announcementStartedAtMs) : 0;
+        if (activeForMs > 25000) {
+            console.warn(`ANNOUNCE QUEUE: Detected stuck announcer (${activeForMs}ms). Resetting queue lock.`);
+            isAnnouncingNow = false;
+            announcementStartedAtMs = 0;
+        } else {
+            console.log(`ANNOUNCE QUEUE: Busy (${activeForMs}ms). Pending items: ${announcementQueue.length}`);
+            return;
+        }
+    }
+
     isAnnouncingNow = true;
+    announcementStartedAtMs = Date.now();
     const announcement = announcementQueue.shift();
     const { textToAnnounce, announcementType, recordHistory, showSplash, useSystemVoice, resolve, reject, historyText } = announcement;
 
@@ -5092,32 +5606,47 @@ async function processAnnouncementQueue() {
     }
 
     try {
-        // Fetch audio data from your server using authenticatedFetch
-        const response = await authenticatedFetch(`/play-audio`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
-            body: JSON.stringify({
-                text: textToAnnounce,
-                routing_target: announcementType,
-                use_system_voice: useSystemVoice === true
-            }),
-        });
+        if (useSystemVoice === true) {
+            // For scanning and other system prompts, use device/browser voice directly.
+            await speakWithSystemVoice(textToAnnounce);
+        } else {
+            // Fetch audio data from server-side TTS when partner voice is requested.
+            const controller = new AbortController();
+            const requestTimeoutId = setTimeout(() => controller.abort(), 15000);
+            let response;
+            try {
+                response = await authenticatedFetch(`/play-audio`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal,
+                    body: JSON.stringify({
+                        text: textToAnnounce,
+                        routing_target: announcementType,
+                        use_system_voice: false,
+                        voice_name_override: getEffectivePartnerVoice(),
+                        language_code_override: getEffectivePartnerLanguage(),
+                    }),
+                });
+            } finally {
+                clearTimeout(requestTimeoutId);
+            }
 
-        if (!response.ok) {
-            const errorBody = await response.json().catch(() => response.text());
-            throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => response.text());
+                throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+            }
+
+            const jsonResponse = await response.json();
+            const audioData = jsonResponse.audio_data;
+            const sampleRate = jsonResponse.sample_rate;
+
+            if (!audioData) {
+                throw new Error("No audio data received from server.");
+            }
+
+            const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
+            await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
         }
-
-        const jsonResponse = await response.json();
-        const audioData = jsonResponse.audio_data;
-        const sampleRate = jsonResponse.sample_rate;
-
-        if (!audioData) {
-            throw new Error("No audio data received from server.");
-        }
-
-        const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-        await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
 
         if (recordHistory) {
             const textForHistory = historyText || textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
@@ -5144,6 +5673,7 @@ async function processAnnouncementQueue() {
         reject(error);
     } finally {
         isAnnouncingNow = false;
+        announcementStartedAtMs = 0;
         if (announcementQueue.length > 0) {
             processAnnouncementQueue();
         }
@@ -5663,7 +6193,7 @@ async function resumeAuditoryScanning() {
     }, 1500);
 }
 
-async function createHomeButton() {
+async function createHomeButton(homeLabel = 'Home') {
     const homeButton = document.createElement('button');
     homeButton.className = '';
 
@@ -5687,12 +6217,12 @@ async function createHomeButton() {
 
         const imageElement = document.createElement('img');
         imageElement.src = homeImageUrl;
-        imageElement.alt = 'Home';
+        imageElement.alt = homeLabel;
         imageElement.style.width = '100%';
         imageElement.style.height = '100%';
         imageElement.style.objectFit = 'cover';
         imageElement.onerror = () => {
-            homeButton.textContent = 'Home';
+            homeButton.textContent = homeLabel;
         };
 
         const textFooter = document.createElement('div');
@@ -5711,7 +6241,7 @@ async function createHomeButton() {
         textFooter.style.right = '0';
 
         const textSpan = document.createElement('span');
-        textSpan.textContent = 'Home';
+        textSpan.textContent = homeLabel;
         textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
@@ -5723,7 +6253,7 @@ async function createHomeButton() {
         buttonContent.appendChild(textFooter);
         homeButton.appendChild(buttonContent);
     } else {
-        homeButton.textContent = 'Home';
+        homeButton.textContent = homeLabel;
     }
 
     homeButton.addEventListener('click', () => {
@@ -5756,6 +6286,9 @@ async function generateLlmButtons(options) {
     
     currentOptions = options;
     localStorage.setItem('llm_currentOptions', JSON.stringify(options));
+    const localizedLabels = await getLocalizedLlmSpecialButtonLabels();
+    // Start translating visible options in the background to reduce click-to-speech delay.
+    warmTranslationCacheForOptions(options);
     let isAnnouncing = false;
     console.log("Generating buttons for options:", options);
 
@@ -5792,12 +6325,12 @@ async function generateLlmButtons(options) {
     const fragment = document.createDocumentFragment();
 
     if (querytype === 'jokes') {
-        const homeButton = await createHomeButton();
+        const homeButton = await createHomeButton(localizedLabels.home);
         fragment.appendChild(homeButton);
     }
 
     if (querytype !== 'jokes') {
-        const homeButton = await createHomeButton();
+        const homeButton = await createHomeButton(localizedLabels.home);
         gridContainer.appendChild(homeButton);
     }
     
@@ -5809,6 +6342,9 @@ async function generateLlmButtons(options) {
             isAnnouncing = true;
             stopAuditoryScanning(); // Stop scanning when an option is chosen
             console.log("LLM Button Click. Announcing:", optionData.option); // Log the full option text
+
+            // Start translation immediately so it runs in parallel with non-blocking side effects.
+            const translatedOptionPromise = translateLineToPartnerLanguage(optionData.option);
 
             // --- Log LLM Button Click for Audit ---
             const clickTimestamp = new Date().toISOString();
@@ -5823,20 +6359,25 @@ async function generateLlmButtons(options) {
                 originating_button_text: optionData.originatingButtonText // NEW: Add originating button text
             };
             console.log("Logging LLM button click data:", logData);
-            try {
-                console.log('🔄 About to send audit log...');
-                const auditResponse = await authenticatedFetch('/api/audit/log-button-click', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(logData)
-                });
-                console.log('📊 Audit response received:', auditResponse.ok);
-                if (!auditResponse.ok) console.error("Failed to log LLM button click:", auditResponse.status, await auditResponse.text());
-                else console.log("LLM button click logged successfully:", logData);
-            } catch (auditError) {
-                console.error("Error sending LLM button click log:", auditError);
-            }
-            console.log('✅ Audit logging complete');
+            (async () => {
+                try {
+                    console.log('🔄 About to send audit log...');
+                    const auditResponse = await authenticatedFetch('/api/audit/log-button-click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(logData)
+                    });
+                    console.log('📊 Audit response received:', auditResponse.ok);
+                    if (!auditResponse.ok) {
+                        console.error("Failed to log LLM button click:", auditResponse.status, await auditResponse.text());
+                    } else {
+                        console.log("LLM button click logged successfully:", logData);
+                    }
+                } catch (auditError) {
+                    console.error("Error sending LLM button click log:", auditError);
+                }
+                console.log('✅ Audit logging complete');
+            })();
             // --- End Audit Logging ---
             
             // --- Record Chat History for LLM Selection ---
@@ -5859,8 +6400,9 @@ async function generateLlmButtons(options) {
             
             console.log('🔊 About to announce option...');
             try {
-                // Announce the selected option (using the full option text for clarity)
-                await announce(optionData.option, "system", true); // Use optionData.option directly
+                // Announce translated partner-facing output while preserving source text for LLM context.
+                const translatedOptionForPartner = await translatedOptionPromise;
+                await announce(translatedOptionForPartner, "system", true);
                 console.log("✅ Announcement finished for:", button.dataset.option);
 
                 if (querytype === 'jokes') {
@@ -6039,12 +6581,12 @@ async function generateLlmButtons(options) {
         
         const imageElement = document.createElement('img');
         imageElement.src = somethingElseImageUrl;
-        imageElement.alt = 'Something Else';
+        imageElement.alt = localizedLabels.somethingElse;
         imageElement.style.width = '100%';
         imageElement.style.height = '100%';
         imageElement.style.objectFit = 'cover';
         imageElement.onerror = () => {
-            somethingElseButton.textContent = 'Something Else';
+            somethingElseButton.textContent = localizedLabels.somethingElse;
         };
         
         const textFooter = document.createElement('div');
@@ -6063,7 +6605,7 @@ async function generateLlmButtons(options) {
         textFooter.style.right = '0';
         
         const textSpan = document.createElement('span');
-        textSpan.textContent = 'Something Else';
+        textSpan.textContent = localizedLabels.somethingElse;
         textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
@@ -6075,7 +6617,7 @@ async function generateLlmButtons(options) {
         buttonContent.appendChild(textFooter);
         somethingElseButton.appendChild(buttonContent);
     } else {
-        somethingElseButton.textContent = 'Something Else';
+        somethingElseButton.textContent = localizedLabels.somethingElse;
     }
     somethingElseButton.addEventListener('click', async () => {
         stopAuditoryScanning(); // Stop scanning before fetching new options
@@ -6210,12 +6752,12 @@ async function generateLlmButtons(options) {
         
         const imageElement = document.createElement('img');
         imageElement.src = freeStyleImageUrl;
-        imageElement.alt = 'Free Style';
+        imageElement.alt = localizedLabels.freeStyle;
         imageElement.style.width = '100%';
         imageElement.style.height = '100%';
         imageElement.style.objectFit = 'cover';
         imageElement.onerror = () => {
-            freeStyleButton.textContent = 'Free Style';
+            freeStyleButton.textContent = localizedLabels.freeStyle;
         };
         
         const textFooter = document.createElement('div');
@@ -6234,7 +6776,7 @@ async function generateLlmButtons(options) {
         textFooter.style.right = '0';
         
         const textSpan = document.createElement('span');
-        textSpan.textContent = 'Free Style';
+        textSpan.textContent = localizedLabels.freeStyle;
         textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
@@ -6246,7 +6788,7 @@ async function generateLlmButtons(options) {
         buttonContent.appendChild(textFooter);
         freeStyleButton.appendChild(buttonContent);
     } else {
-        freeStyleButton.textContent = 'Free Style';
+        freeStyleButton.textContent = localizedLabels.freeStyle;
     }
     freeStyleButton.addEventListener('click', () => {
         stopAuditoryScanning();
@@ -6287,7 +6829,7 @@ async function generateLlmButtons(options) {
 
     if (querytype === "question") {
         const askAgainButton = document.createElement('button');
-        askAgainButton.textContent = 'Please ask me again';
+        askAgainButton.textContent = localizedLabels.askAgain;
         askAgainButton.id = 'askAgainButton';
         // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
         askAgainButton.className = '';
@@ -6296,7 +6838,7 @@ async function generateLlmButtons(options) {
             activeOriginatingButtonText = null; // Reset, as a new question will be asked
             activeLLMPromptForContext = null;
             resetFollowUpConversation();
-            announce('Okay, please ask your question again after the tone.', "system", false)
+            announcePartnerFacingOutput('Okay, please ask your question again after the tone.', false)
                 .then(() => { activeLLMPromptForContext = "User chose to ask question again."; })
                 .then(() => {
                     // Reset state and start question recognition again

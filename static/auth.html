@@ -1313,6 +1313,51 @@
         }
 
         // Function to check mood selection and interface preference, then redirect appropriately
+        async function localizeMoodLoadingOverlay(settings, token, aacUserId) {
+            try {
+                const targetLocale = String(settings?.userLanguage || 'en-US').trim() || 'en-US';
+                if (targetLocale.toLowerCase() === 'en-us') {
+                    return;
+                }
+
+                const sourceLines = ['Welcome to Bravo!', 'Loading user data...'];
+                const response = await fetch('/api/translate-lines', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'X-User-ID': aacUserId,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        lines: sourceLines,
+                        source_locale: 'en-US',
+                        target_locale: targetLocale
+                    })
+                });
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const payload = await response.json();
+                const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines : [];
+                const translatedHeadline = String(translated[0] || '').trim();
+                const translatedLoading = String(translated[1] || '').trim();
+
+                const headlineEl = document.querySelector('.mood-loading-headline');
+                if (headlineEl && translatedHeadline) {
+                    headlineEl.textContent = translatedHeadline;
+                }
+
+                const loadingTextEl = document.getElementById('splash-text');
+                if (loadingTextEl && translatedLoading) {
+                    loadingTextEl.textContent = translatedLoading;
+                }
+            } catch (error) {
+                console.warn('Unable to localize mood loading overlay:', error);
+            }
+        }
+
         async function redirectToPreferredInterface() {
             try {
                 const token = sessionStorage.getItem('firebaseIdToken');
@@ -1365,6 +1410,7 @@
                     settings = await settingsResponse.json();
                     shouldShowMood = settings.enableMoodSelection === true;
                     console.log('Mood selection enabled:', shouldShowMood);
+                    await localizeMoodLoadingOverlay(settings, token, aacUserId);
                 } else {
                     console.error('Failed to fetch settings:', settingsResponse.status, await settingsResponse.text());
                     // Continue without mood selection
