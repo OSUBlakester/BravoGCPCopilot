@@ -5566,7 +5566,7 @@ function speakWithSystemVoice(textToSpeak) {
                 } catch (_cancelError) {
                     // ignore cancel errors
                 }
-                settleResolve();
+                settleReject(new Error('System voice timeout'));
             }, estimatedDurationMs);
 
             window.speechSynthesis.speak(utterance);
@@ -5574,6 +5574,44 @@ function speakWithSystemVoice(textToSpeak) {
             settleReject(err);
         }
     });
+}
+
+async function playAnnouncementWithServerTTS(textToAnnounce, announcementType) {
+    const controller = new AbortController();
+    const requestTimeoutId = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+        response = await authenticatedFetch(`/play-audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+                text: textToAnnounce,
+                routing_target: announcementType,
+                use_system_voice: false,
+                voice_name_override: getEffectivePartnerVoice(),
+                language_code_override: getEffectivePartnerLanguage(),
+            }),
+        });
+    } finally {
+        clearTimeout(requestTimeoutId);
+    }
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => response.text());
+        throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+    }
+
+    const jsonResponse = await response.json();
+    const audioData = jsonResponse.audio_data;
+    const sampleRate = jsonResponse.sample_rate;
+
+    if (!audioData) {
+        throw new Error("No audio data received from server.");
+    }
+
+    const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
+    await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
 }
 
 async function processAnnouncementQueue() {
@@ -5607,45 +5645,12 @@ async function processAnnouncementQueue() {
 
     try {
         if (useSystemVoice === true) {
-            // For scanning and other system prompts, use device/browser voice directly.
-            await speakWithSystemVoice(textToAnnounce);
+            // Browser speechSynthesis can timeout and desync scanning UI from audio.
+            // Route system prompts through the same server TTS path for reliable timing.
+            await playAnnouncementWithServerTTS(textToAnnounce, announcementType);
         } else {
             // Fetch audio data from server-side TTS when partner voice is requested.
-            const controller = new AbortController();
-            const requestTimeoutId = setTimeout(() => controller.abort(), 15000);
-            let response;
-            try {
-                response = await authenticatedFetch(`/play-audio`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: controller.signal,
-                    body: JSON.stringify({
-                        text: textToAnnounce,
-                        routing_target: announcementType,
-                        use_system_voice: false,
-                        voice_name_override: getEffectivePartnerVoice(),
-                        language_code_override: getEffectivePartnerLanguage(),
-                    }),
-                });
-            } finally {
-                clearTimeout(requestTimeoutId);
-            }
-
-            if (!response.ok) {
-                const errorBody = await response.json().catch(() => response.text());
-                throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
-            }
-
-            const jsonResponse = await response.json();
-            const audioData = jsonResponse.audio_data;
-            const sampleRate = jsonResponse.sample_rate;
-
-            if (!audioData) {
-                throw new Error("No audio data received from server.");
-            }
-
-            const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-            await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+            await playAnnouncementWithServerTTS(textToAnnounce, announcementType);
         }
 
         if (recordHistory) {
