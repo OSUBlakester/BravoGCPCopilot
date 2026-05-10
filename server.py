@@ -18534,7 +18534,10 @@ async def browse_images_for_admin(
                 "tags": data.get("tags", []),
                 "keywords": data.get("keywords", []),
                 "created_at": data.get("created_at") or data.get("updated_at"),
-                "preview_url": data.get("image_url", "")
+                "preview_url": data.get("image_url", ""),
+                "aliases": data.get("aliases", []),
+                "localized_tags": data.get("localized_tags", {}),
+                "localized_labels": data.get("localized_labels", {}),
             }
             images.append(admin_data)
         
@@ -18602,6 +18605,72 @@ async def api_update_image_tags(
     except Exception as e:
         logging.error(f"Error in update image tags API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/imagecreator/images/{image_id}/multilingual")
+async def api_update_image_multilingual(
+    image_id: str,
+    payload: Dict = Body(...),
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """Update multilingual metadata for an AAC image: localized_tags, localized_labels, aliases"""
+    try:
+        doc_ref = firestore_db.collection("aac_images").document(image_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        update_data: Dict[str, Any] = {}
+
+        # aliases: flat list of alternate search terms
+        if "aliases" in payload:
+            raw_aliases = payload["aliases"]
+            if isinstance(raw_aliases, list):
+                update_data["aliases"] = [str(a).strip() for a in raw_aliases if str(a).strip()]
+            else:
+                update_data["aliases"] = []
+
+        # localized_tags: {locale: [tag, ...]}
+        if "localized_tags" in payload:
+            raw_lt = payload["localized_tags"]
+            normalized_lt: Dict[str, List[str]] = {}
+            if isinstance(raw_lt, dict):
+                for locale_key, tag_list in raw_lt.items():
+                    locale = _normalize_locale_tag(str(locale_key))
+                    if not locale:
+                        continue
+                    if isinstance(tag_list, list):
+                        normalized_lt[locale] = [str(t).strip() for t in tag_list if str(t).strip()]
+            update_data["localized_tags"] = normalized_lt
+
+        # localized_labels: {locale: label_string}
+        if "localized_labels" in payload:
+            raw_ll = payload["localized_labels"]
+            normalized_ll: Dict[str, str] = {}
+            if isinstance(raw_ll, dict):
+                for locale_key, label in raw_ll.items():
+                    locale = _normalize_locale_tag(str(locale_key))
+                    if not locale:
+                        continue
+                    label_str = _sanitize_translated_text(label)
+                    if label_str:
+                        normalized_ll[locale] = label_str
+            update_data["localized_labels"] = normalized_ll
+
+        if not update_data:
+            return {"success": True, "message": "No changes provided"}
+
+        await asyncio.to_thread(doc_ref.update, update_data)
+        logging.info(f"Updated multilingual metadata for image {image_id}: {list(update_data.keys())}")
+
+        return {"success": True, "message": "Multilingual metadata updated successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating multilingual metadata for image {image_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/api/admin/images/bulk-delete")
 async def api_bulk_delete_images(
@@ -19816,6 +19885,7 @@ async def button_symbol_search(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
     q: str = "",
     keywords: str = "",
+    locale: str = "en-US",
     limit: int = 5
 ):
     """
@@ -19833,6 +19903,39 @@ async def button_symbol_search(
             })
         
         query_lower = q.lower().strip()
+        locale_norm = str(locale or "en-US").strip().lower()
+        locale_base = locale_norm.split('-')[0] if '-' in locale_norm else locale_norm
+
+        def _allowed_locale_keys():
+            keys = {"en", "en-us", locale_norm, locale_base}
+            return {k for k in keys if k}
+
+        allowed_locale_keys = _allowed_locale_keys()
+
+        def _extract_localized_terms_for_locale(localized_tags_raw, localized_labels_raw):
+            localized_terms = []
+
+            if isinstance(localized_tags_raw, dict):
+                for locale_key, locale_tags in localized_tags_raw.items():
+                    locale_key_norm = str(locale_key or "").strip().lower()
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    if isinstance(locale_tags, list):
+                        localized_terms.extend([
+                            str(tag).strip().lower()
+                            for tag in locale_tags
+                            if str(tag).strip()
+                        ])
+
+            if isinstance(localized_labels_raw, dict):
+                for locale_key, locale_label in localized_labels_raw.items():
+                    locale_key_norm = str(locale_key or "").strip().lower()
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    if isinstance(locale_label, str) and locale_label.strip():
+                        localized_terms.append(locale_label.strip().lower())
+
+            return localized_terms
         
         # Process keywords if provided (for LLM-generated content)
         keyword_list = []
@@ -19854,7 +19957,7 @@ async def button_symbol_search(
                 except:
                     pass
         
-        logging.info(f"Symbol search: query='{query_lower}', keywords={keyword_list}")
+        logging.info(f"Symbol search: query='{query_lower}', locale='{locale_norm}', keywords={keyword_list}")
         
         # Semantic mapping for common AAC terms
         semantic_mappings = {
@@ -19895,7 +19998,8 @@ async def button_symbol_search(
         
         for i, term in enumerate(search_terms_for_images[:3]):  # Check up to 3 terms for images
             try:
-                # Search bravo_images in aac_images collection using multiple case variations like the imagecreator endpoint
+                # Search bravo_images in aac_images collection using precomputed search_terms first,
+                # then legacy tags as fallback.
                 term_variations = [
                     term,                    # Original case
                     term.lower(),            # All lowercase  
@@ -19915,9 +20019,19 @@ async def button_symbol_search(
                 image_docs = []
                 for variation in unique_variations:
                     try:
-                        variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(max(20, limit * 5))
+                        # Preferred path: language-friendly array field
+                        variation_query = images_ref.where("search_terms", "array_contains", variation.lower()).limit(max(30, limit * 8))
                         variation_docs = list(variation_query.stream())
-                        image_docs.extend(variation_docs)
+                        for d in variation_docs:
+                            data = d.to_dict() or {}
+                            if data.get("source") == "bravo_images":
+                                image_docs.append(d)
+
+                        # Legacy fallback path
+                        if not variation_docs:
+                            legacy_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(max(20, limit * 5))
+                            legacy_docs = list(legacy_query.stream())
+                            image_docs.extend(legacy_docs)
                         
                         # Don't stop at first match - collect from all variations for better scoring
                     except Exception as e:
@@ -19969,6 +20083,16 @@ async def button_symbol_search(
                 logging.debug(f"BravoImages search failed for term '{term}': {e}")
         
         logging.info(f"Found {len(matched_symbols)} BravoImages matches")
+
+        # Fast return path for Tap interface (limit=1): avoid expensive fallback phases
+        if limit <= 1 and matched_symbols:
+            matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+            return JSONResponse(content={
+                "symbols": matched_symbols[:1],
+                "total_found": len(matched_symbols),
+                "query": q,
+                "search_type": "bravo_image_fast"
+            })
         
         # Phase -0.5: Search user's custom images (including profile images)
         account_id = current_ids["account_id"]
@@ -19997,6 +20121,14 @@ async def button_symbol_search(
                 tags_lower = [tag.lower() for tag in tags]
                 concept = custom_image.get('concept', '').lower()
                 subconcept = custom_image.get('subconcept', '').lower()
+                aliases = custom_image.get('aliases', [])
+                aliases_lower = [str(alias).strip().lower() for alias in aliases if isinstance(alias, (str, int, float)) and str(alias).strip()]
+
+                localized_tags_raw = custom_image.get('localized_tags')
+                localized_labels_raw = custom_image.get('localized_labels')
+                localized_terms_lower = _extract_localized_terms_for_locale(localized_tags_raw, localized_labels_raw)
+
+                all_search_terms_lower = [term for term in [concept, subconcept, *tags_lower, *aliases_lower, *localized_terms_lower] if term]
                 
                 # Debug logging for each image
                 logging.info(f"Checking custom image {custom_image_id}: concept='{concept}', subconcept='{subconcept}', tags={tags}")
@@ -20028,12 +20160,21 @@ async def button_symbol_search(
                                 tag_position_bonus = 8
                             break
                     match_score = 60 + tag_position_bonus  # Higher than BravoImages
+                elif query_lower in aliases_lower:
+                    matched_term = query_lower
+                    match_score = 58
+                elif query_lower in localized_terms_lower:
+                    matched_term = query_lower
+                    match_score = 56
                 elif query_lower in concept:
                     matched_term = query_lower
                     match_score = 45  # Partial concept match
                 elif query_lower in subconcept:
                     matched_term = query_lower
                     match_score = 40  # Partial subconcept match
+                elif any(query_lower in term for term in all_search_terms_lower):
+                    matched_term = query_lower
+                    match_score = 36
                 
                 # Check keyword list if no primary match
                 if not matched_term:
@@ -20059,6 +20200,14 @@ async def button_symbol_search(
                                     break
                             match_score = 55 + tag_position_bonus
                             break
+                        elif keyword in aliases_lower:
+                            matched_term = keyword
+                            match_score = 52
+                            break
+                        elif keyword in localized_terms_lower:
+                            matched_term = keyword
+                            match_score = 50
+                            break
                         elif keyword in concept:
                             matched_term = keyword
                             match_score = 35
@@ -20066,6 +20215,10 @@ async def button_symbol_search(
                         elif keyword in subconcept:
                             matched_term = keyword
                             match_score = 30
+                            break
+                        elif any(keyword in term for term in all_search_terms_lower):
+                            matched_term = keyword
+                            match_score = 28
                             break
                 
                 if matched_term:
@@ -20320,6 +20473,7 @@ async def batch_symbol_search(
     try:
         data = await request.json()
         terms = data.get('terms', [])
+        locale = str(data.get('locale') or 'en-US').strip().lower()
         
         logging.info(f"🔍 BATCH SEARCH: Received request with {len(terms) if terms else 0} terms")
         if terms:
@@ -20353,53 +20507,87 @@ async def batch_symbol_search(
             logging.info(f"🔍 BATCH: Searching for '{text}' with keywords {keywords}")
                 
             query_lower = text.lower()
+
+            def _normalize_term(v):
+                return str(v or '').strip().lower()
+
+            def _search_terms_for_item():
+                out = []
+                if query_lower:
+                    out.append(query_lower)
+                    for part in query_lower.split():
+                        part = part.strip().lower()
+                        if len(part) >= 3:
+                            out.append(part)
+                for kw in (keywords or [])[:3]:
+                    kw_norm = _normalize_term(kw)
+                    if kw_norm:
+                        out.append(kw_norm)
+                        for part in kw_norm.split():
+                            part = part.strip().lower()
+                            if len(part) >= 3:
+                                out.append(part)
+                deduped = []
+                seen = set()
+                for term in out:
+                    if term and term not in seen:
+                        seen.add(term)
+                        deduped.append(term)
+                return deduped[:8]
+
+            search_terms = _search_terms_for_item()
             
-            # Search BravoImages first
+            # Search BravoImages first using precomputed search_terms
             images_ref = firestore_db.collection("aac_images")
-            term_variations = [
-                text,                    # Original case (might be "tree", "Tree", etc.)
-                text.lower(),            # All lowercase
-                text.capitalize(),       # First letter capitalized
-                text.title()             # Title case (capitalizes each word)
-            ]
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            unique_variations = []
-            for variation in term_variations:
-                if variation not in seen:
-                    seen.add(variation)
-                    unique_variations.append(variation)
-            term_variations = unique_variations
-            
-            logging.info(f"🔍 BATCH: Trying variations for '{text}': {term_variations}")
-            
-            for variation in term_variations:
+            logging.info(f"🔍 BATCH: Trying terms for '{text}': {search_terms}")
+
+            best_url = None
+            best_score = -1
+
+            for idx, term in enumerate(search_terms):
                 try:
-                    variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(1)
-                    variation_docs = list(variation_query.stream())
-                    
-                    if variation_docs:
-                        image = variation_docs[0].to_dict()
-                        image_url = image.get('image_url')  # Use 'image_url' not 'url'
-                        if image_url:
-                            logging.info(f"🔍 BATCH: ✅ Found image for '{text}' (variation '{variation}'): {image_url}")
-                            return (text, image_url)
+                    matches = list(images_ref.where("search_terms", "array_contains", term).limit(6).stream())
+                    for doc in matches:
+                        image = doc.to_dict() or {}
+                        if image.get('source') != 'bravo_images':
+                            continue
+                        image_url = image.get('image_url')
+                        if not image_url:
+                            continue
+
+                        score = 100 - (idx * 5)
+                        tags = [str(t).strip().lower() for t in image.get('tags', []) if str(t).strip()]
+                        if term in tags:
+                            score += 20
+                            if tags and tags[0] == term:
+                                score += 10
+                        if query_lower == str(image.get('subconcept', '')).strip().lower():
+                            score += 25
+                        if query_lower == str(image.get('concept', '')).strip().lower():
+                            score += 20
+
+                        if score > best_score:
+                            best_score = score
+                            best_url = image_url
                 except Exception as e:
-                    logging.error(f"🔍 BATCH: Query failed for variation '{variation}': {e}")
+                    logging.error(f"🔍 BATCH: Query failed for term '{term}': {e}")
                     continue
+
+            if best_url:
+                logging.info(f"🔍 BATCH: ✅ Found image for '{text}' via search_terms")
+                return (text, best_url)
             
             logging.info(f"🔍 BATCH: ❌ No image found for '{text}' in BravoImages")
             
             # If BravoImages didn't match, try custom images
             try:
-                custom_ref = firestore_db.collection("accounts").document(account_id).collection("users").document(aac_user_id).collection("custom_images")
-                custom_query = custom_ref.where("status", "==", "active").where("tags", "array_contains", query_lower).limit(1)
+                custom_ref = firestore_db.collection("accounts").document(account_id).collection("profiles").document(aac_user_id).collection("custom_images")
+                custom_query = custom_ref.where("active", "==", True).where("tags", "array_contains", query_lower).limit(1)
                 custom_docs = list(custom_query.stream())
                 
                 if custom_docs:
                     custom_image = custom_docs[0].to_dict()
-                    image_url = custom_image.get('url')
+                    image_url = custom_image.get('image_url')
                     if image_url:
                         logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
                         return (text, image_url)
@@ -20458,15 +20646,52 @@ async def download_image_library(
         images_ref = firestore_db.collection('aac_images')
         query = images_ref.where('source', '==', 'bravo_images')
         docs = query.stream()
+
+        def _flatten_search_terms(value):
+            if isinstance(value, (str, int, float)):
+                text = str(value).strip()
+                return [text] if text else []
+            if isinstance(value, list):
+                output = []
+                for item in value:
+                    output.extend(_flatten_search_terms(item))
+                return output
+            if isinstance(value, dict):
+                output = []
+                for item in value.values():
+                    output.extend(_flatten_search_terms(item))
+                return output
+            return []
         
         library = []
         for doc in docs:
             data = doc.to_dict()
+            localized_tags = data.get('localized_tags', {})
+            localized_labels = data.get('localized_labels', {})
+            aliases = data.get('aliases', [])
+
+            search_terms = []
+            search_terms.extend(_flatten_search_terms(data.get('concept')))
+            search_terms.extend(_flatten_search_terms(data.get('subconcept')))
+            search_terms.extend(_flatten_search_terms(data.get('tags', [])))
+            search_terms.extend(_flatten_search_terms(aliases))
+            search_terms.extend(_flatten_search_terms(localized_tags))
+            search_terms.extend(_flatten_search_terms(localized_labels))
+
+            search_terms = [str(term).strip().lower() for term in search_terms if str(term).strip()]
+            search_terms = list(dict.fromkeys(search_terms))
+
             # Only include essential fields to minimize download size
             library.append({
                 'id': doc.id,
                 'image_url': data.get('image_url'),
+                'concept': data.get('concept'),
+                'subconcept': data.get('subconcept'),
                 'tags': data.get('tags', []),
+                'aliases': aliases,
+                'localized_tags': localized_tags,
+                'localized_labels': localized_labels,
+                'search_terms': search_terms,
                 'source': data.get('source'),
                 # Include any other metadata that might be useful for search
                 'category': data.get('category'),
