@@ -1594,6 +1594,9 @@
         let applicationVolume = 8; // Default application volume (0-10 scale)
         let tapTargetLocale = 'en-US'; // User-facing locale for Tap labels/options
         let tapPartnerLocale = 'en-US'; // Partner-heard locale for Tap announcements
+        let defaultPartnerVoiceName = 'en-US-Neural2-A';
+        let locationOverrideVoicesMap = {};
+        let currentLocationLanguageOverride = '';
         const tapRuntimeTranslationCache = new Map();
         const perfMetrics = {
             symbolLookups: [],
@@ -1604,6 +1607,53 @@
             indexBuildTime: null,
         };
         const SYSTEM_PREVIEW_VOICE_NAME = 'en-US-Neural2-A';
+
+        function normalizeLocaleTag(value) {
+            if (typeof value !== 'string') return '';
+            const cleaned = value.trim().replace(/_/g, '-');
+            if (!cleaned) return '';
+
+            const parts = cleaned.split('-');
+            if (parts.length === 1) {
+                const lang = parts[0].toLowerCase();
+                return /^[a-z]{2}$/.test(lang) ? lang : '';
+            }
+
+            const lang = String(parts[0] || '').toLowerCase();
+            const region = String(parts[1] || '').toUpperCase();
+            if (!/^[a-z]{2}$/.test(lang) || !/^[A-Z]{2,3}$/.test(region)) {
+                return '';
+            }
+            return `${lang}-${region}`;
+        }
+
+        function getEffectiveTapPartnerLocale() {
+            return normalizeLocaleTag(currentLocationLanguageOverride)
+                || normalizeLocaleTag(tapPartnerLocale)
+                || 'en-US';
+        }
+
+        function getEffectiveTapPartnerVoice() {
+            const effectiveLocale = getEffectiveTapPartnerLocale();
+            const localeVoice = locationOverrideVoicesMap && typeof locationOverrideVoicesMap === 'object'
+                ? String(locationOverrideVoicesMap[effectiveLocale] || '').trim()
+                : '';
+            return localeVoice || String(defaultPartnerVoiceName || currentTtsVoiceName || '').trim();
+        }
+
+        async function refreshTapLocationLanguageOverride() {
+            try {
+                const response = await authenticatedFetch('/get-user-current', { method: 'GET' });
+                if (!response.ok) return;
+                const state = await response.json();
+                currentLocationLanguageOverride = normalizeLocaleTag(state?.locationLanguageOverride || '');
+                if (currentLocationLanguageOverride) {
+                    console.log('Tap location language override active:', currentLocationLanguageOverride);
+                }
+            } catch (error) {
+                console.warn('Unable to load Tap location language override:', error);
+            }
+        }
 
         /**
          * AAC inflection-to-base-form lookup table for query normalization.
@@ -1708,39 +1758,51 @@
         let previewPendingButton = null;
         let previewPendingKey = null;
 
-        async function translateTapRuntimeLine(line, locale) {
+        async function translateTapRuntimeLine(line, locale, sourceLocaleOverride = null) {
             const source = String(line || '').trim();
             if (!source) {
                 return source;
             }
 
             const targetLocale = String(locale || tapTargetLocale || 'en-US').trim() || 'en-US';
-            if (targetLocale.toLowerCase() === 'en-us') {
+            const sourceLocale = String(sourceLocaleOverride || tapTargetLocale || 'en-US').trim() || 'en-US';
+            if (sourceLocale.toLowerCase() === targetLocale.toLowerCase()) {
                 return source;
             }
 
-            const cacheKey = `${targetLocale}:${source}`;
+            const cacheKey = `${sourceLocale}->${targetLocale}:${source}`;
             if (tapRuntimeTranslationCache.has(cacheKey)) {
                 return tapRuntimeTranslationCache.get(cacheKey);
             }
 
             try {
-                const response = await authenticatedFetch('/api/translate-lines', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        lines: [source],
-                        source_locale: 'en-US',
-                        target_locale: targetLocale
-                    })
-                });
+                const requestTranslation = async (sourceLocaleArg) => {
+                    const response = await authenticatedFetch('/api/translate-lines', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lines: [source],
+                            source_locale: sourceLocaleArg || undefined,
+                            target_locale: targetLocale
+                        })
+                    });
 
-                if (response.ok) {
+                    if (!response.ok) {
+                        return '';
+                    }
+
                     const payload = await response.json();
-                    const translated = String(payload?.translated_lines?.[0] || '').trim() || source;
-                    tapRuntimeTranslationCache.set(cacheKey, translated);
-                    return translated;
+                    return String(payload?.translated_lines?.[0] || '').trim();
+                };
+
+                let translated = await requestTranslation(sourceLocale);
+                if (!translated || translated.toLowerCase() === source.toLowerCase()) {
+                    translated = await requestTranslation(null);
                 }
+
+                const finalText = translated || source;
+                tapRuntimeTranslationCache.set(cacheKey, finalText);
+                return finalText;
             } catch (error) {
                 console.warn('[TAP I18N] Runtime line translation failed:', error);
             }
@@ -3141,10 +3203,24 @@
                 console.log('SummaryOff setting (FORCED FALSE for Tap):', SummaryOff);
 
                 // Load multilingual locale split (same pattern as games/grid)
-                tapTargetLocale = String(settings?.userLanguage || 'en-US').trim() || 'en-US';
-                tapPartnerLocale = String(settings?.defaultPartnerLanguage || 'en-US').trim() || 'en-US';
+                tapTargetLocale = normalizeLocaleTag(String(settings?.userLanguage || 'en-US')) || 'en-US';
+                tapPartnerLocale = normalizeLocaleTag(String(settings?.defaultPartnerLanguage || 'en-US')) || 'en-US';
                 console.log('Tap target locale (user display):', tapTargetLocale);
                 console.log('Tap partner locale (announcements):', tapPartnerLocale);
+
+                defaultPartnerVoiceName = String(settings?.defaultPartnerVoice || settings?.selected_tts_voice_name || currentTtsVoiceName || SYSTEM_PREVIEW_VOICE_NAME).trim() || SYSTEM_PREVIEW_VOICE_NAME;
+                const rawOverrideVoices = settings?.locationOverrideVoices;
+                const normalizedOverrideVoices = {};
+                if (rawOverrideVoices && typeof rawOverrideVoices === 'object') {
+                    Object.entries(rawOverrideVoices).forEach(([localeKey, voiceName]) => {
+                        const normalizedLocale = normalizeLocaleTag(localeKey);
+                        const normalizedVoice = String(voiceName || '').trim();
+                        if (normalizedLocale && normalizedVoice) {
+                            normalizedOverrideVoices[normalizedLocale] = normalizedVoice;
+                        }
+                    });
+                }
+                locationOverrideVoicesMap = normalizedOverrideVoices;
                 
                 // Load Pictogram setting
                 disableTapPictograms = settings.disableTapPictograms === true;
@@ -3162,6 +3238,8 @@
                     currentTtsVoiceName = settings.selected_tts_voice_name;
                     console.log(`TTS Voice Name loaded: "${currentTtsVoiceName}"`);
                 }
+
+                await refreshTapLocationLanguageOverride();
 
                 if (settings && typeof settings.applicationVolume === 'number' && !isNaN(settings.applicationVolume)) {
                     applicationVolume = Math.max(0, Math.min(10, Number(settings.applicationVolume)));
@@ -7794,6 +7872,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
             try {
                 // Fetch audio data from server using authenticatedFetch (like gridpage)
+                const effectiveLanguageCode = normalizeLocaleTag(languageCodeOverride || getEffectiveTapPartnerLocale()) || 'en-US';
+                const effectiveVoiceOverride = String(voiceNameOverride || getEffectiveTapPartnerVoice() || '').trim() || null;
+
                 console.log(`🔊 Fetching TTS audio from /play-audio...`);
                 const response = await authenticatedFetch(`/play-audio`, {
                     method: 'POST',
@@ -7801,9 +7882,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     body: JSON.stringify({
                         text: textToAnnounce,
                         routing_target: announcementType,
-                        voice_name_override: voiceNameOverride,
+                        voice_name_override: effectiveVoiceOverride,
                         speech_rate_override: speechRateOverride,
-                        language_code_override: (languageCodeOverride && languageCodeOverride.toLowerCase() !== 'en-us') ? languageCodeOverride : null
+                        language_code_override: effectiveLanguageCode
                     }),
                 });
 
@@ -8133,11 +8214,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
         }
         
         // Modified announce function to record chat history for personal messages
-        const originalAnnounce = window.announce;
         window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
-            if (originalAnnounce) {
-                await originalAnnounce(textToAnnounce, announcementType, recordHistory, options);
-            }
+            // Call the local announce() which handles translation and language routing
+            await announce(textToAnnounce, announcementType, recordHistory, options);
             
             // Record chat history for personal announcements (user selections)
             if (recordHistory && announcementType === "personal" && textToAnnounce && textToAnnounce.trim()) {
@@ -8530,8 +8609,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
         // Proper announcement system (from gridpage)
         async function announce(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
-            const languageCodeOverride = String(options.languageCodeOverride || tapPartnerLocale || 'en-US').trim() || 'en-US';
-            const localizedText = await translateTapRuntimeLine(textToAnnounce, languageCodeOverride);
+            const languageCodeOverride = normalizeLocaleTag(String(options.languageCodeOverride || getEffectiveTapPartnerLocale() || 'en-US')) || 'en-US';
+            const sourceLocaleOverride = normalizeLocaleTag(String(options.sourceLocaleOverride || tapTargetLocale || 'en-US')) || 'en-US';
+            const localizedText = await translateTapRuntimeLine(textToAnnounce, languageCodeOverride, sourceLocaleOverride);
             console.log(`🔊 ANNOUNCE: "${localizedText.substring(0, 50)}..." (Type: ${announcementType})`);
             
             // Initialize audio context if not already done
@@ -8544,7 +8624,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 announcementQueue.push({
                     textToAnnounce: localizedText,
                     announcementType,
-                    voiceNameOverride: options.voiceNameOverride || null,
+                    voiceNameOverride: options.voiceNameOverride || getEffectiveTapPartnerVoice() || null,
                     speechRateOverride: options.speechRateOverride || null,
                     languageCodeOverride,
                     volumeMultiplier: typeof options.volumeMultiplier === 'number' ? options.volumeMultiplier : 1.0,
