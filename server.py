@@ -18378,7 +18378,7 @@ async def log_missing_image(search_term: str, search_context: dict = None):
             
     except Exception as e:
         logging.error(f"❌ Error logging missing image '{search_term}': {e}")
-        raise  # Re-raise so the caller can handle it
+        # Do not re-raise - missing image logging is non-critical and must not 500 the caller
 
 # Redis cache helper functions
 async def clear_image_cache(pattern: str = "bravo_images:*"):
@@ -20429,12 +20429,22 @@ async def button_symbol_search(
         
         # Sort by match score and clean up response
         matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
-        
-        # Clean datetime objects for JSON serialization
-        for symbol in matched_symbols:
-            for field in ['created_at', 'updated_at', 'last_used']:
-                if field in symbol and symbol[field]:
-                    symbol[field] = symbol[field].isoformat() if hasattr(symbol[field], 'isoformat') else str(symbol[field])
+
+        # Recursively clean non-JSON-native values (e.g., Firestore DatetimeWithNanoseconds)
+        # so rare timestamp fields never crash button search responses.
+        def _json_safe(value):
+            if isinstance(value, dict):
+                return {k: _json_safe(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_json_safe(v) for v in value]
+            if hasattr(value, 'isoformat'):
+                try:
+                    return value.isoformat()
+                except Exception:
+                    return str(value)
+            return value
+
+        matched_symbols = [_json_safe(symbol) for symbol in matched_symbols]
         
         search_type = "keyword_array_fast" if keyword_list else ("semantic_fast" if query_lower in semantic_mappings else "keyword_fast")
         
@@ -20454,10 +20464,16 @@ async def button_symbol_search(
         
     except Exception as e:
         logging.error(f"Error in fast button symbol search: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Button search failed", "details": str(e)}
-        )
+        # Fail soft for UI image lookup calls: return empty results instead of 500
+        # so phrase rendering and announcements are never blocked by symbol search errors.
+        return JSONResponse(content={
+            "symbols": [],
+            "total_found": 0,
+            "query": q,
+            "search_type": "button_search_error_fallback",
+            "error": "Button search failed",
+            "details": str(e)
+        })
 
 
 @app.post("/api/symbols/batch-search")

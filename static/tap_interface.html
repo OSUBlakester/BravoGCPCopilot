@@ -1598,6 +1598,7 @@
         let locationOverrideVoicesMap = {};
         let currentLocationLanguageOverride = '';
         const tapRuntimeTranslationCache = new Map();
+        const tapRuntimeTranslationInFlight = new Map();
         const perfMetrics = {
             symbolLookups: [],
             totalServerFallbacks: 0,
@@ -1774,41 +1775,115 @@
             if (tapRuntimeTranslationCache.has(cacheKey)) {
                 return tapRuntimeTranslationCache.get(cacheKey);
             }
-
-            try {
-                const requestTranslation = async (sourceLocaleArg) => {
-                    const response = await authenticatedFetch('/api/translate-lines', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            lines: [source],
-                            source_locale: sourceLocaleArg || undefined,
-                            target_locale: targetLocale
-                        })
-                    });
-
-                    if (!response.ok) {
-                        return '';
-                    }
-
-                    const payload = await response.json();
-                    return String(payload?.translated_lines?.[0] || '').trim();
-                };
-
-                let translated = await requestTranslation(sourceLocale);
-                if (!translated || translated.toLowerCase() === source.toLowerCase()) {
-                    translated = await requestTranslation(null);
-                }
-
-                const finalText = translated || source;
-                tapRuntimeTranslationCache.set(cacheKey, finalText);
-                return finalText;
-            } catch (error) {
-                console.warn('[TAP I18N] Runtime line translation failed:', error);
+            if (tapRuntimeTranslationInFlight.has(cacheKey)) {
+                return tapRuntimeTranslationInFlight.get(cacheKey);
             }
 
-            tapRuntimeTranslationCache.set(cacheKey, source);
-            return source;
+            const translationPromise = (async () => {
+                try {
+                    const requestTranslation = async (sourceLocaleArg) => {
+                        const response = await authenticatedFetch('/api/translate-lines', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                lines: [source],
+                                source_locale: sourceLocaleArg || undefined,
+                                target_locale: targetLocale
+                            })
+                        });
+
+                        if (!response.ok) {
+                            return '';
+                        }
+
+                        const payload = await response.json();
+                        return String(payload?.translated_lines?.[0] || '').trim();
+                    };
+
+                    let translated = await requestTranslation(sourceLocale);
+                    if (!translated || translated.toLowerCase() === source.toLowerCase()) {
+                        translated = await requestTranslation(null);
+                    }
+
+                    const finalText = translated || source;
+                    tapRuntimeTranslationCache.set(cacheKey, finalText);
+                    return finalText;
+                } catch (error) {
+                    console.warn('[TAP I18N] Runtime line translation failed:', error);
+                    tapRuntimeTranslationCache.set(cacheKey, source);
+                    return source;
+                } finally {
+                    tapRuntimeTranslationInFlight.delete(cacheKey);
+                }
+            })();
+
+            tapRuntimeTranslationInFlight.set(cacheKey, translationPromise);
+            return translationPromise;
+        }
+
+        async function warmTapPartnerTranslationCacheForOptions(options) {
+            const partnerLocale = normalizeLocaleTag(getEffectiveTapPartnerLocale()) || 'en-US';
+            const userLocale = normalizeLocaleTag(tapTargetLocale || 'en-US') || 'en-US';
+            if (partnerLocale.toLowerCase() === userLocale.toLowerCase()) {
+                return;
+            }
+
+            const list = Array.isArray(options) ? options : [];
+            if (!list.length) {
+                return;
+            }
+
+            const uniqueTexts = [];
+            const seen = new Set();
+            for (const opt of list.slice(0, 12)) {
+                const text = typeof opt === 'object'
+                    ? String(opt.option || opt.summary || '').trim()
+                    : String(opt || '').trim();
+                if (!text || seen.has(text)) {
+                    continue;
+                }
+                seen.add(text);
+                uniqueTexts.push(text);
+            }
+
+            if (!uniqueTexts.length) {
+                return;
+            }
+
+            const missing = [];
+            uniqueTexts.forEach((text) => {
+                const cacheKey = `${userLocale}->${partnerLocale}:${text}`;
+                if (tapRuntimeTranslationCache.has(cacheKey) || tapRuntimeTranslationInFlight.has(cacheKey)) {
+                    return;
+                }
+                missing.push(text);
+            });
+
+            if (!missing.length) {
+                return;
+            }
+
+            const response = await authenticatedFetch('/api/translate-lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lines: missing,
+                    source_locale: userLocale,
+                    target_locale: partnerLocale
+                })
+            });
+
+            if (!response.ok) {
+                return;
+            }
+
+            const payload = await response.json();
+            const translatedLines = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+            missing.forEach((sourceText, index) => {
+                const translated = String(translatedLines[index] || '').trim() || sourceText;
+                const cacheKey = `${userLocale}->${partnerLocale}:${sourceText}`;
+                tapRuntimeTranslationCache.set(cacheKey, translated);
+            });
         }
 
         async function localizeTapOptionLabel(labelText) {
@@ -2121,9 +2196,33 @@
         // ============ CACHE MANAGEMENT ============
         const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         const CACHE_KEYS = {
-            INITIAL_PHRASES: 'tap_initial_phrases',
+            get INITIAL_PHRASES() { return `tap_initial_phrases_${tapTargetLocale || 'en-US'}`; },
             INITIAL_WORDS: 'tap_initial_words'
         };
+
+        // Returns a human-readable language name for LLM prompts from a BCP-47 locale tag
+        function getTapTargetLanguageName() {
+            const locale = String(tapTargetLocale || 'en-US').toLowerCase();
+            if (locale.startsWith('es')) return 'Spanish';
+            if (locale.startsWith('fr')) return 'French';
+            if (locale.startsWith('pt')) return 'Portuguese';
+            if (locale.startsWith('de')) return 'German';
+            if (locale.startsWith('it')) return 'Italian';
+            if (locale.startsWith('zh')) return 'Chinese';
+            if (locale.startsWith('ja')) return 'Japanese';
+            if (locale.startsWith('ko')) return 'Korean';
+            if (locale.startsWith('ar')) return 'Arabic';
+            if (locale.startsWith('ru')) return 'Russian';
+            return 'English';
+        }
+
+        // Returns a language directive line to append to LLM prompts when user language is non-English
+        function getTapLanguageDirective() {
+            const locale = String(tapTargetLocale || 'en-US').toLowerCase();
+            if (locale.startsWith('en')) return '';
+            const langName = getTapTargetLanguageName();
+            return `\nCRITICAL: Generate ALL phrases entirely in ${langName} (locale: ${tapTargetLocale}). Do NOT use English.`;
+        }
 
         function getCachedData(key) {
             try {
@@ -5705,7 +5804,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 - Use first person perspective as if the user is speaking
                 - Make each option distinct and useful for communication
                 - Focus on natural, conversational language
-
+${getTapLanguageDirective()}
                 Return ONLY a valid JSON array of strings with exactly ${optionsCount} items.
                 Do not return objects, keys, markdown, or commentary.
                 Example: ["I am having a great day.", "Can we do something fun together?"]`;
@@ -5777,7 +5876,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 - Use first person perspective as if the user is speaking
                 - Make each option distinct and useful for communication
                 - Focus on natural, conversational language
-
+${getTapLanguageDirective()}
                 Return ONLY a valid JSON array of strings with exactly ${optionsCount} items.
                 Do not return objects, keys, markdown, or commentary.
                 Example: ["I am really enjoying this.", "Would you like to talk more about it?"]`;
@@ -6023,6 +6122,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
         function renderCategoryOptions(options, deferImages = false) {
             console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0, 'Defer Images:', deferImages);
             console.log('renderCategoryOptions called with:', options);
+
+            // Grid-style partner-language pre-conversion to reduce click-to-speech latency.
+            warmTapPartnerTranslationCacheForOptions(options).catch(() => {});
             console.log('llmStaticOptions element:', llmStaticOptions);
             clearPreviewSelection();
             
@@ -8214,9 +8316,12 @@ Avoid phrases that are literally about the home as a building or location. Keep 
         }
         
         // Modified announce function to record chat history for personal messages
+        // Capture reference BEFORE overwriting window.announce to avoid infinite recursion
+        // (top-level function declarations are window properties in browser scope)
+        const _coreAnnounce = announce;
         window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
-            // Call the local announce() which handles translation and language routing
-            await announce(textToAnnounce, announcementType, recordHistory, options);
+            // Call the core announce() which handles translation and language routing
+            await _coreAnnounce(textToAnnounce, announcementType, recordHistory, options);
             
             // Record chat history for personal announcements (user selections)
             if (recordHistory && announcementType === "personal" && textToAnnounce && textToAnnounce.trim()) {
