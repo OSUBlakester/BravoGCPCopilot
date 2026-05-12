@@ -504,8 +504,10 @@ async def get_current_account_and_user_ids(
             has_access = False
             if is_admin and target_account_data.get("allow_admin_access", True):
                 has_access = True
-            elif is_therapist and target_account_data.get("therapist_email") == user_email:
-                has_access = True
+            elif is_therapist:
+                # Therapists can access their own account or client accounts where they're listed as therapist_email
+                if x_admin_target_account == account_id or target_account_data.get("therapist_email") == user_email:
+                    has_access = True
             
             if not has_access:
                 logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
@@ -626,8 +628,11 @@ async def get_target_account_id(
             # Check access permissions
             if is_admin and target_account_data.get("allow_admin_access", True):
                 pass  # Admin access allowed
-            elif is_therapist and target_account_data.get("therapist_email") == user_email:
-                pass  # Therapist access to their assigned account
+            elif is_therapist:
+                # Therapists can access their own account or client accounts where they're listed as therapist_email
+                if not (x_admin_target_account == account_id or target_account_data.get("therapist_email") == user_email):
+                    logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
+                    raise HTTPException(status_code=403, detail="Access denied to target account")
             else:
                 logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
                 raise HTTPException(status_code=403, detail="Access denied to target account")
@@ -1353,6 +1358,7 @@ class FreestyleWordOptionsRequest(BaseModel):
     originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
     current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
     max_options: Optional[int] = Field(None, description="Override the user's FreestyleOptions setting for this request", ge=1, le=50)
+    target_locale: Optional[str] = Field(None, description="Optional locale override for generated words (e.g., es-US)")
 
 @app.post("/api/generate-llm-prompt")
 async def generate_llm_prompt(payload: GeneratePromptRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
@@ -9163,9 +9169,17 @@ async def get_accessible_accounts(current_account: Annotated[Dict[str, str], Dep
                         "account_name": account_data.get("account_name", ""),
                         "email": account_data.get("email", "")
                     })
-            # Therapists can access accounts where they're listed as therapist_email
+            # Therapists can access their own account and accounts where they're listed as therapist_email
             elif is_therapist:
-                if account_data.get("therapist_email") == user_email:
+                # Include therapist's own account
+                if account_doc.id == account_id:
+                    accessible_accounts.append({
+                        "account_id": account_doc.id,
+                        "account_name": account_data.get("account_name", ""),
+                        "email": account_data.get("email", "")
+                    })
+                # Also include accounts where they're listed as therapist_email (client accounts)
+                elif account_data.get("therapist_email") == user_email:
                     accessible_accounts.append({
                         "account_id": account_doc.id,
                         "account_name": account_data.get("account_name", ""),
@@ -9222,8 +9236,10 @@ async def select_account_for_access(
         has_access = False
         if is_admin and target_account_data.get("allow_admin_access", True):
             has_access = True
-        elif is_therapist and target_account_data.get("therapist_email") == user_email:
-            has_access = True
+        elif is_therapist:
+            # Therapists can access their own account or client accounts where they're listed as therapist_email
+            if target_account_id == current_account_id or target_account_data.get("therapist_email") == user_email:
+                has_access = True
         
         if not has_access:
             raise HTTPException(status_code=403, detail="Access denied to this account")
@@ -9283,8 +9299,10 @@ async def get_admin_account_users(
         has_access = False
         if is_admin and target_account_data.get("allow_admin_access", True):
             has_access = True
-        elif is_therapist and target_account_data.get("therapist_email") == user_email:
-            has_access = True
+        elif is_therapist:
+            # Therapists can access their own account or client accounts where they're listed as therapist_email
+            if admin_firebase_uid == account_id or target_account_data.get("therapist_email") == user_email:
+                has_access = True
         
         if not has_access:
             raise HTTPException(status_code=403, detail="Access denied to this account")
@@ -12592,12 +12610,7 @@ async def get_freestyle_word_options(
         settings = await load_settings_from_file(account_id, aac_user_id)
         # Use max_options from request if provided, otherwise use user's FreestyleOptions setting
         freestyle_options = request.max_options if request.max_options else settings.get("FreestyleOptions", 20)
-        user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
-        language_instruction = (
-            f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All words and phrases you return must be in that language. Do not use English unless '{user_language}' is English."
-            if not user_language.lower().startswith("en")
-            else ""
-        )
+        configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
         
         # Load user context
         user_info = await load_firestore_document(
@@ -12612,6 +12625,15 @@ async def get_freestyle_word_options(
             aac_user_id=aac_user_id,
             doc_subpath="info/current_state",
             default_data=DEFAULT_USER_CURRENT.copy()
+        )
+
+        requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
+        location_override_locale = _normalize_locale_tag(str(user_current.get("locationLanguageOverride") or "").strip())
+        user_language = requested_target_locale or location_override_locale or configured_user_language
+        language_instruction = (
+            f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All words and phrases you return must be in that language. Do not use English unless '{user_language}' is English."
+            if not user_language.lower().startswith("en")
+            else ""
         )
         
         # Create context-aware prompt
@@ -12941,6 +12963,7 @@ Context for word selection: {contextual_info}"""
 
 class FreestyleCleanupRequest(BaseModel):
     text_to_cleanup: str = Field(..., min_length=1, description="Text to clean up and improve")
+    target_locale: Optional[str] = Field(None, description="Optional locale override for cleaned output (e.g., es-US)")
 
 @app.post("/api/freestyle/cleanup-text")
 async def cleanup_freestyle_text(
@@ -12955,6 +12978,26 @@ async def cleanup_freestyle_text(
     account_id = current_ids["account_id"]
     
     try:
+        settings, user_current = await asyncio.gather(
+            load_settings_from_file(account_id, aac_user_id),
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/current_state",
+                default_data=DEFAULT_USER_CURRENT.copy()
+            )
+        )
+
+        configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
+        location_override_locale = _normalize_locale_tag(str(user_current.get("locationLanguageOverride") or "").strip())
+        cleanup_locale = requested_target_locale or location_override_locale or configured_user_language
+        language_instruction = (
+            f"\n8. Return the improved text ONLY in locale '{cleanup_locale}'. Do not translate to English unless '{cleanup_locale}' is English."
+            if cleanup_locale
+            else ""
+        )
+
         # Create lightweight user query for the caching function
         user_query_only = f"""Clean up and improve this text while preserving the original meaning and intent. Use my personal context to make the cleanup more personalized and appropriate.
 
@@ -12968,6 +13011,7 @@ Please:
 5. Keep it concise and clear
 6. The phrase should be structured like it is coming from me
 7. Consider my current situation, recent activities, and personal context when cleaning up
+{language_instruction}
 
 For example:
 - "dad beekeeping" → "My dad is a beekeeper"
@@ -16774,6 +16818,7 @@ class FreestyleCategoryWordsRequest(BaseModel):
     is_llm_generated: bool = Field(default=False, description="Whether the source page was LLM-generated")
     originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
     prefer_generic_fast: bool = Field(default=False, description="When true and no custom prompt is provided, return fast generic category words without LLM generation")
+    target_locale: Optional[str] = Field(None, description="Optional locale override for generated words (e.g., es-US)")
 
 
 def build_category_fallback_word_objects(
@@ -16848,7 +16893,10 @@ async def generate_category_words(
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
         freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
         vocabulary_level = settings.get("vocabularyLevel", "functional")
-        user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
+        location_override_locale = _normalize_locale_tag(str(user_current.get("locationLanguageOverride") or "").strip())
+        user_language = requested_target_locale or location_override_locale or configured_user_language
         language_instruction = (
             f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All text values must be in that language. Do not use English unless '{user_language}' is English."
             if not user_language.lower().startswith("en")
@@ -16966,6 +17014,7 @@ async def generate_category_words(
             "category": request.category,
             "build_space": build_space_text,
             "exclude": sorted(excluded_words),
+            "target_locale": user_language,
             "current_mood": request.current_mood or "",
             "custom_prompt": instruction_text,
             "context": request.context or "",
