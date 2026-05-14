@@ -5153,7 +5153,15 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     }
 
     ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
-    final_user_query = f"{user_prompt_content}\n\n{ai_override_prompt_block}\n\n{json_format_instructions}"
+    llm_user_language = _normalize_locale_tag(str(user_settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+    llm_language_suffix = (
+        f"\n\n⚠️ FINAL LANGUAGE OVERRIDE: Every string you generate MUST be in the language with locale tag '{llm_user_language}'. "
+        f"The English-language examples in the formatting instructions above are structural examples only — they do NOT determine the output language. "
+        f"Generate ALL output in '{llm_user_language}'. Do NOT use English."
+        if not llm_user_language.lower().startswith("en")
+        else ""
+    )
+    final_user_query = f"{user_prompt_content}\n\n{ai_override_prompt_block}\n\n{json_format_instructions}{llm_language_suffix}"
 
     compose_body_hash = hashlib.sha1((request_data.compose_body or "").encode("utf-8")).hexdigest()[:10]
     prompt_hash = hashlib.sha1(user_prompt_content.encode("utf-8")).hexdigest()[:16]

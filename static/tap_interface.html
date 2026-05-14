@@ -253,11 +253,14 @@
                 inset 0 1px 0 rgba(255, 255, 255, 0.95);
         }
 
-        /* Make first two action buttons 50% wider than standard control buttons */
+        /* Keep all top-row action buttons the same width as Home */
         #speak-build-btn,
-        #speak-build-autoclean-btn {
-            flex: 1.5 1 0;
-            min-width: 60px;
+        #speak-build-autoclean-btn,
+        #backspace-build-btn,
+        #clear-text-btn,
+        #preview-toggle-btn {
+            flex: 0 0 72px;
+            min-width: 72px;
         }
 
         .option-button.preview-selected {
@@ -540,8 +543,8 @@
         }
 
         .speech-reset-btn {
-            flex: 0 0 60px;
-            min-width: 60px;
+            flex: 0 0 72px;
+            min-width: 72px;
         }
 
         /* Categories Modal */
@@ -1634,6 +1637,12 @@
                 || 'en-US';
         }
 
+        function getEffectiveTapWordLocale() {
+            return normalizeLocaleTag(currentLocationLanguageOverride)
+                || normalizeLocaleTag(tapTargetLocale)
+                || 'en-US';
+        }
+
         function getEffectiveTapPartnerVoice() {
             const effectiveLocale = getEffectiveTapPartnerLocale();
             const localeVoice = locationOverrideVoicesMap && typeof locationOverrideVoicesMap === 'object'
@@ -2030,6 +2039,8 @@
         let isAnnouncingNow = false;
         let speechSynthesisEnabled = false;
         let audioContextInitialized = false;
+        let activeAnnouncementAudioContext = null;
+        let activeAnnouncementAudioSource = null;
 
         // DOM Elements
         const authOverlay = document.getElementById('authOverlay');
@@ -2197,12 +2208,12 @@
         const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         const CACHE_KEYS = {
             get INITIAL_PHRASES() { return `tap_initial_phrases_${tapTargetLocale || 'en-US'}`; },
-            INITIAL_WORDS: 'tap_initial_words'
+            get INITIAL_WORDS() { return `tap_initial_words_${getEffectiveTapWordLocale()}`; }
         };
 
         // Returns a human-readable language name for LLM prompts from a BCP-47 locale tag
-        function getTapTargetLanguageName() {
-            const locale = String(tapTargetLocale || 'en-US').toLowerCase();
+        function getTapTargetLanguageName(localeOverride) {
+            const locale = String(localeOverride || tapTargetLocale || 'en-US').toLowerCase();
             if (locale.startsWith('es')) return 'Spanish';
             if (locale.startsWith('fr')) return 'French';
             if (locale.startsWith('pt')) return 'Portuguese';
@@ -2216,12 +2227,14 @@
             return 'English';
         }
 
-        // Returns a language directive line to append to LLM prompts when user language is non-English
+        // Returns a language directive line to append to LLM prompts when user language is non-English.
+        // Uses the effective locale (location override takes precedence over user language setting).
         function getTapLanguageDirective() {
-            const locale = String(tapTargetLocale || 'en-US').toLowerCase();
+            const effectiveLocale = getEffectiveTapWordLocale();
+            const locale = String(effectiveLocale || 'en-US').toLowerCase();
             if (locale.startsWith('en')) return '';
-            const langName = getTapTargetLanguageName();
-            return `\nCRITICAL: Generate ALL phrases entirely in ${langName} (locale: ${tapTargetLocale}). Do NOT use English.`;
+            const langName = getTapTargetLanguageName(effectiveLocale);
+            return `\nCRITICAL LANGUAGE REQUIREMENT: You MUST generate ALL text entirely in ${langName} (locale: ${effectiveLocale}). Every phrase, word, and sentence must be in ${langName}. Do NOT use English under any circumstances. Any English-language examples appearing in the formatting instructions above are structural examples only — they do NOT indicate the output language.`;
         }
 
         function getCachedData(key) {
@@ -3823,6 +3836,7 @@
                         build_space_content: buildSpace.value || '',
                         count: wordsCount,
                         exclude_words: excludedWords,
+                        target_locale: getEffectiveTapWordLocale(),
                         custom_prompt: wordsPrompt || null, // Use custom_prompt for server priority
                         current_mood: currentMood
                     };
@@ -3854,6 +3868,7 @@
                 const requestBody = {
                     "speech_history": buildSpace.value || '',
                     "count": wordsCount,
+                    "target_locale": getEffectiveTapWordLocale(),
                     "exclude_words": excludedWords
                 };
                 
@@ -4354,6 +4369,7 @@ VARIETY RULES:
                     category: 'Home',
                     build_space_content: '',
                     exclude_words: [],
+                    target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
                     custom_prompt: getDefaultHomeStarterPrompt(desiredCount),
                     context: 'home starters',
@@ -4496,7 +4512,11 @@ VARIETY RULES:
             if (!terms || terms.length === 0) return {};
             
             // Normalize all terms for locale-specific inflection matching
-            const normalizedTerms = terms.map(term => normalizeTermForLocale(term, tapTargetLocale));
+            // Terms may be plain strings or {text, keywords} objects — extract text either way
+            const normalizedTerms = terms.map(term => {
+                const termText = typeof term === 'object' && term !== null ? String(term.text || '') : String(term || '');
+                return normalizeTermForLocale(termText, tapTargetLocale);
+            });
             
             try {
                 const response = await authenticatedFetch('/api/symbols/batch-search', {
@@ -6054,6 +6074,7 @@ ${getTapLanguageDirective()}
                             category: category.label,
                             build_space_content: buildSpace.value || "",
                             exclude_words: [],
+                            target_locale: getEffectiveTapWordLocale(),
                             current_mood: currentMood,
                             custom_prompt: wordsPrompt || null
                         })
@@ -6082,6 +6103,7 @@ ${getTapLanguageDirective()}
                         source_page: "tap_interface",
                         is_llm_generated: false,
                         originating_button_text: "",
+                        target_locale: getEffectiveTapWordLocale(),
                         build_space_text: buildSpace.value || "",
                         single_words_only: false,
                         request_different_options: false,
@@ -6479,6 +6501,13 @@ ${getTapLanguageDirective()}
                             } else {
                                 console.warn('TAP: No follow-up options after filtering');
                             }
+
+                            // Also refresh Words section to reflect updated Speech History
+                            try {
+                                await updateFreestyleOptionsWithSelectedWord(speechText);
+                            } catch (wordsRefreshError) {
+                                console.warn('TAP: Error refreshing words after phrase selection:', wordsRefreshError);
+                            }
                             
                             } catch (error) {
                                 console.error('TAP: Error generating follow-up options:', error);
@@ -6669,6 +6698,7 @@ ${getTapLanguageDirective()}
                     max_options: desiredCount,
                     build_space_content: buildSpaceContent,
                     exclude_words: [],
+                    target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
                     custom_prompt: effectiveCustomPrompt,
                     prefer_generic_fast: preferGenericFast
@@ -6756,6 +6786,7 @@ ${getTapLanguageDirective()}
                     context: null,  // Let the backend determine context from build_space_text
                     source_page: null,  // Keep it simple like freestyle.js
                     is_llm_generated: false,
+                    target_locale: getEffectiveTapWordLocale(),
                     originating_button_text: null,  // Don't confuse the backend with extra context
                     current_mood: currentMood,
                     max_options: count,
@@ -6834,6 +6865,7 @@ ${getTapLanguageDirective()}
                     context: null,  // Keep simple like freestyle.js
                     source_page: null,  // Keep simple like freestyle.js
                     is_llm_generated: false,
+                    target_locale: getEffectiveTapWordLocale(),
                     originating_button_text: null
                 };
                 
@@ -6873,6 +6905,7 @@ ${getTapLanguageDirective()}
                     source_page: null,
                     is_llm_generated: false,
                     originating_button_text: null,
+                    target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
                     max_options: count,
                     single_words_only: false
@@ -8034,46 +8067,119 @@ ${getTapLanguageDirective()}
         }
 
         async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, volumeMultiplier = 1.0) {
+            let audioContext;
+            let source;
+            let playbackTimeoutId = null;
+
+            const clearPlaybackTimeout = () => {
+                if (playbackTimeoutId) {
+                    clearTimeout(playbackTimeoutId);
+                    playbackTimeoutId = null;
+                }
+            };
+
+            const closeAudioContextSafely = async () => {
+                if (audioContext && audioContext.state !== 'closed') {
+                    try {
+                        await audioContext.close();
+                    } catch (_closeError) {
+                        // ignore close errors
+                    }
+                }
+            };
+
+            const stopActiveAnnouncementIfAny = () => {
+                if (activeAnnouncementAudioSource) {
+                    try {
+                        activeAnnouncementAudioSource.onended = null;
+                        activeAnnouncementAudioSource.stop(0);
+                    } catch (_stopError) {
+                        // ignore
+                    }
+                    try {
+                        activeAnnouncementAudioSource.disconnect();
+                    } catch (_disconnectError) {
+                        // ignore
+                    }
+                    activeAnnouncementAudioSource = null;
+                }
+
+                if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+                    activeAnnouncementAudioContext.close().catch(() => {});
+                }
+                activeAnnouncementAudioContext = null;
+            };
+
             try {
+                // Prevent accumulation of audio contexts/sources from previous announcements.
+                stopActiveAnnouncementIfAny();
+
                 console.log(`🔊 Creating audio context for playback...`);
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
                 console.log(`🔊 Audio context state: ${audioContext.state}`);
                 if (audioContext.state === 'suspended') {
                     console.log(`🔊 Resuming suspended audio context...`);
-                    await audioContext.resume();
+                    try {
+                        await audioContext.resume();
+                    } catch (resumeError) {
+                        console.warn('🔊 Audio context resume failed:', resumeError);
+                    }
                     console.log(`🔊 Audio context resumed, new state: ${audioContext.state}`);
                 }
 
                 console.log(`🔊 Decoding audio data (${audioDataArrayBuffer.byteLength} bytes)...`);
                 const audioBuffer = await audioContext.decodeAudioData(audioDataArrayBuffer);
                 console.log(`🔊 Audio decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels} channels`);
-                
-                const source = audioContext.createBufferSource();
+
+                source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
                 const gainNode = audioContext.createGain();
                 const normalizedApplicationVolume = Math.max(0, Math.min(1, Number(applicationVolume || 8) / 10));
                 const normalizedMultiplier = Math.max(0, Number(volumeMultiplier || 1));
                 gainNode.gain.value = normalizedApplicationVolume * normalizedMultiplier;
-                
-                // Connect to appropriate output (system or personal speaker like gridpage)
-                const destination = audioContext.destination;
+
                 source.connect(gainNode);
-                gainNode.connect(destination);
-                
+                gainNode.connect(audioContext.destination);
+
+                activeAnnouncementAudioContext = audioContext;
+                activeAnnouncementAudioSource = source;
+
                 console.log(`🔊 Starting audio playback...`);
-                return new Promise((resolve, reject) => {
-                    source.onended = () => {
+                return await new Promise((resolve) => {
+                    const finishPlayback = () => {
+                        clearPlaybackTimeout();
+                        activeAnnouncementAudioSource = null;
+                        if (activeAnnouncementAudioContext === audioContext) {
+                            activeAnnouncementAudioContext = null;
+                        }
+                        closeAudioContextSafely();
                         console.log(`🔊 Audio playback ended normally`);
                         resolve();
                     };
-                    source.onerror = (error) => {
-                        console.error(`🔊 Audio playback error:`, error);
-                        reject(error);
-                    };
+
+                    source.onended = finishPlayback;
                     source.start(0);
+
+                    // Failsafe so queue never deadlocks if onended does not fire.
+                    const durationMs = Math.max(1500, Math.ceil((audioBuffer.duration || 0) * 1000) + 2000);
+                    playbackTimeoutId = setTimeout(() => {
+                        console.warn(`🔊 Audio playback timeout (${durationMs}ms). Forcing completion.`);
+                        try {
+                            source.stop(0);
+                        } catch (_stopError) {
+                            // ignore
+                        }
+                        finishPlayback();
+                    }, durationMs);
                 });
             } catch (error) {
+                clearPlaybackTimeout();
+                await closeAudioContextSafely();
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                    activeAnnouncementAudioSource = null;
+                }
                 console.error('🔊 Error in playAudioToDevice:', error);
                 throw error;
             }
@@ -8174,7 +8280,8 @@ ${getTapLanguageDirective()}
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        text_to_cleanup: text
+                        text_to_cleanup: text,
+                        target_locale: getEffectiveTapWordLocale()
                     })
                 });
 
@@ -9148,8 +9255,12 @@ ${getTapLanguageDirective()}
                     const loadTimestamp = new Date().toISOString();
                     const saveData = {
                         location: scheduledFavoriteToLoad.location || '',
+                        locationLanguageOverride: normalizeLocaleTag(scheduledFavoriteToLoad.locationLanguageOverride || ''),
                         people: scheduledFavoriteToLoad.people || '',
                         activity: scheduledFavoriteToLoad.activity || '',
+                        topicTitle: scheduledFavoriteToLoad.topicTitle || '',
+                        focusChapters: scheduledFavoriteToLoad.focusChapters || '',
+                        topicSummary: scheduledFavoriteToLoad.topicSummary || scheduledFavoriteToLoad.focusPlotPoints || '',
                         loaded_at: loadTimestamp,
                         favorite_name: scheduledFavoriteToLoad.name,
                         saved_at: loadTimestamp

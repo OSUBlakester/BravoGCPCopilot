@@ -95,6 +95,28 @@ function getSelectedLocationOverrideLocale() {
     return normalizeLocaleTag(raw);
 }
 
+function applyLocationOverrideSelection(value) {
+    if (!locationLanguageOverrideSelect) return;
+    const normalizedValue = normalizeLocaleTag(value);
+    if (!normalizedValue) {
+        locationLanguageOverrideSelect.value = '';
+        return;
+    }
+
+    const optionExists = Array.from(locationLanguageOverrideSelect.options || []).some(
+        option => normalizeLocaleTag(option.value) === normalizedValue
+    );
+
+    if (!optionExists) {
+        const option = document.createElement('option');
+        option.value = normalizedValue;
+        option.textContent = formatLocaleForDisplay(normalizedValue);
+        locationLanguageOverrideSelect.appendChild(option);
+    }
+
+    locationLanguageOverrideSelect.value = normalizedValue;
+}
+
 async function loadLocationOverrideLanguageOptions(selectedValue = '') {
     if (!locationLanguageOverrideSelect) return;
     try {
@@ -242,9 +264,7 @@ async function loadSelectedFavorite() {
         
         // Update the form fields
         locationInput.value = favorite.location || '';
-        if (locationLanguageOverrideSelect) {
-            locationLanguageOverrideSelect.value = favorite.locationLanguageOverride || '';
-        }
+        applyLocationOverrideSelection(favorite.locationLanguageOverride);
         peopleInput.value = favorite.people || '';
         activityInput.value = favorite.activity || '';
         topicTitleInput.value = favorite.topicTitle || '';
@@ -547,9 +567,7 @@ async function editFavorite(favoriteName) {
     // Ideally, we should have separate inputs in the modal for editing these values, 
     // but reusing the "Add" modal structure implies we use the page inputs.
     locationInput.value = favorite.location || '';
-    if (locationLanguageOverrideSelect) {
-        locationLanguageOverrideSelect.value = favorite.locationLanguageOverride || '';
-    }
+    applyLocationOverrideSelection(favorite.locationLanguageOverride);
     peopleInput.value = favorite.people || '';
     activityInput.value = favorite.activity || '';
     topicTitleInput.value = favorite.topicTitle || '';
