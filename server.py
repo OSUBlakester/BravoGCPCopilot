@@ -20697,6 +20697,16 @@ async def batch_symbol_search(
         data = await request.json()
         terms = data.get('terms', [])
         locale = str(data.get('locale') or 'en-US').strip().lower()
+        locale_base = locale.split('-')[0] if '-' in locale else locale
+
+        def _normalize_term(v):
+            return str(v or '').strip().lower()
+
+        def _allowed_locale_keys():
+            keys = {"en", "en-us", locale, locale_base}
+            return {k for k in keys if k}
+
+        allowed_locale_keys = _allowed_locale_keys()
         
         logging.info(f"🔍 BATCH SEARCH: Received request with {len(terms) if terms else 0} terms")
         if terms:
@@ -20728,16 +20738,24 @@ async def batch_symbol_search(
                 return (text, None)
             
             logging.info(f"🔍 BATCH: Searching for '{text}' with keywords {keywords}")
-                
-            query_lower = text.lower()
 
-            def _normalize_term(v):
-                return str(v or '').strip().lower()
+            query_lower = _normalize_term(text)
+            normalized_query = query_lower
+            if locale_base and locale_base != "en":
+                try:
+                    from aac_inflection_utils import normalize_search_term
+                    inflection_normalized = _normalize_term(normalize_search_term(query_lower, locale_base))
+                    if inflection_normalized:
+                        normalized_query = inflection_normalized
+                except Exception as inflection_error:
+                    logging.debug(f"🔍 BATCH: inflection normalization skipped for '{query_lower}': {inflection_error}")
 
             def _search_terms_for_item():
                 out = []
                 if query_lower:
                     out.append(query_lower)
+                    if normalized_query and normalized_query != query_lower:
+                        out.append(normalized_query)
                     for part in query_lower.split():
                         part = part.strip().lower()
                         if len(part) >= 3:
@@ -20766,35 +20784,110 @@ async def batch_symbol_search(
 
             best_url = None
             best_score = -1
+            candidate_docs = {}
+
+            def _extract_localized_terms_for_doc(doc_data):
+                localized_terms = []
+                localized_tags_raw = doc_data.get('localized_tags')
+                localized_labels_raw = doc_data.get('localized_labels')
+
+                if isinstance(localized_tags_raw, dict):
+                    for locale_key, locale_tags in localized_tags_raw.items():
+                        locale_key_norm = _normalize_term(locale_key)
+                        if locale_key_norm not in allowed_locale_keys:
+                            continue
+                        if isinstance(locale_tags, list):
+                            localized_terms.extend([_normalize_term(tag) for tag in locale_tags if _normalize_term(tag)])
+
+                if isinstance(localized_labels_raw, dict):
+                    for locale_key, locale_label in localized_labels_raw.items():
+                        locale_key_norm = _normalize_term(locale_key)
+                        if locale_key_norm not in allowed_locale_keys:
+                            continue
+                        label_norm = _normalize_term(locale_label)
+                        if label_norm:
+                            localized_terms.append(label_norm)
+
+                return localized_terms
 
             for idx, term in enumerate(search_terms):
                 try:
-                    matches = list(images_ref.where("search_terms", "array_contains", term).limit(6).stream())
-                    for doc in matches:
-                        image = doc.to_dict() or {}
-                        if image.get('source') != 'bravo_images':
-                            continue
-                        image_url = image.get('image_url')
-                        if not image_url:
-                            continue
+                    term_norm = _normalize_term(term)
+                    if not term_norm:
+                        continue
 
-                        score = 100 - (idx * 5)
-                        tags = [str(t).strip().lower() for t in image.get('tags', []) if str(t).strip()]
-                        if term in tags:
-                            score += 20
-                            if tags and tags[0] == term:
-                                score += 10
-                        if query_lower == str(image.get('subconcept', '')).strip().lower():
-                            score += 25
-                        if query_lower == str(image.get('concept', '')).strip().lower():
-                            score += 20
+                    # Preferred path: precomputed normalized search terms
+                    search_term_docs = list(images_ref.where("search_terms", "array_contains", term_norm).limit(8).stream())
+                    for doc in search_term_docs:
+                        candidate_docs[doc.id] = doc
 
-                        if score > best_score:
-                            best_score = score
-                            best_url = image_url
+                    # Locale-aware path: localized tags / labels
+                    if locale_base and locale_base != "en":
+                        localized_tags_field = f"localized_tags.{locale_base}"
+                        localized_labels_field = f"localized_labels.{locale_base}"
+
+                        locale_tag_docs = list(
+                            images_ref.where("source", "==", "bravo_images").where(localized_tags_field, "array_contains", term_norm).limit(6).stream()
+                        )
+                        for doc in locale_tag_docs:
+                            candidate_docs[doc.id] = doc
+
+                        locale_label_docs = list(
+                            images_ref.where("source", "==", "bravo_images").where(localized_labels_field, "==", term_norm).limit(4).stream()
+                        )
+                        for doc in locale_label_docs:
+                            candidate_docs[doc.id] = doc
+
+                    # Legacy fallback path: original tags field
+                    legacy_docs = list(
+                        images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", term_norm).limit(6).stream()
+                    )
+                    for doc in legacy_docs:
+                        candidate_docs[doc.id] = doc
                 except Exception as e:
                     logging.error(f"🔍 BATCH: Query failed for term '{term}': {e}")
                     continue
+
+            for doc in candidate_docs.values():
+                image = doc.to_dict() or {}
+                if image.get('source') != 'bravo_images':
+                    continue
+
+                image_url = image.get('image_url')
+                if not image_url:
+                    continue
+
+                tags = [_normalize_term(t) for t in image.get('tags', []) if _normalize_term(t)]
+                concept = _normalize_term(image.get('concept'))
+                subconcept = _normalize_term(image.get('subconcept'))
+                localized_terms = _extract_localized_terms_for_doc(image)
+                searchable_terms = set([*tags, concept, subconcept, *localized_terms])
+
+                score = 0
+
+                # Highest confidence: direct concept/subconcept matches.
+                if query_lower and query_lower == subconcept:
+                    score += 45
+                if normalized_query and normalized_query == subconcept:
+                    score += 45
+                if query_lower and query_lower == concept:
+                    score += 35
+                if normalized_query and normalized_query == concept:
+                    score += 35
+
+                # Weighted by search-term priority.
+                for idx, term in enumerate(search_terms):
+                    term_norm = _normalize_term(term)
+                    if not term_norm:
+                        continue
+                    if term_norm in searchable_terms:
+                        score += max(12, 30 - (idx * 3))
+                    if tags and tags[0] == term_norm:
+                        score += 10
+
+                if score > best_score:
+                    best_score = score
+                    best_url = image_url
 
             if best_url:
                 logging.info(f"🔍 BATCH: ✅ Found image for '{text}' via search_terms")
@@ -20805,15 +20898,16 @@ async def batch_symbol_search(
             # If BravoImages didn't match, try custom images
             try:
                 custom_ref = firestore_db.collection("accounts").document(account_id).collection("profiles").document(aac_user_id).collection("custom_images")
-                custom_query = custom_ref.where("active", "==", True).where("tags", "array_contains", query_lower).limit(1)
+                custom_query = custom_ref.where("active", "==", True).where("tags", "array_contains", query_lower).limit(3)
                 custom_docs = list(custom_query.stream())
                 
                 if custom_docs:
-                    custom_image = custom_docs[0].to_dict()
-                    image_url = custom_image.get('image_url')
-                    if image_url:
-                        logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
-                        return (text, image_url)
+                    for custom_doc in custom_docs:
+                        custom_image = custom_doc.to_dict() or {}
+                        image_url = custom_image.get('image_url')
+                        if image_url:
+                            logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
+                            return (text, image_url)
             except Exception as e:
                 logging.error(f"🔍 BATCH: Custom search failed for '{query_lower}': {e}")
             

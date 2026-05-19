@@ -4511,11 +4511,25 @@ VARIETY RULES:
         async function batchLoadImages(terms) {
             if (!terms || terms.length === 0) return {};
             
-            // Normalize all terms for locale-specific inflection matching
-            // Terms may be plain strings or {text, keywords} objects — extract text either way
+            // Normalize all terms for locale-specific inflection matching.
+            // Preserve object payloads so keyword hints still reach the batch endpoint.
             const normalizedTerms = terms.map(term => {
-                const termText = typeof term === 'object' && term !== null ? String(term.text || '') : String(term || '');
-                return normalizeTermForLocale(termText, tapTargetLocale);
+                if (typeof term === 'object' && term !== null) {
+                    const originalText = String(term.text || '').trim();
+                    const normalizedText = normalizeTermForLocale(originalText, tapTargetLocale);
+                    return {
+                        ...term,
+                        text: normalizedText
+                    };
+                }
+
+                const plainText = String(term || '').trim();
+                return normalizeTermForLocale(plainText, tapTargetLocale);
+            }).filter(term => {
+                if (typeof term === 'object' && term !== null) {
+                    return String(term.text || '').trim() !== '';
+                }
+                return String(term || '').trim() !== '';
             });
             
             try {
