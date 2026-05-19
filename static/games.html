@@ -539,8 +539,9 @@
                 </div>
                 <div id="storyReadText" class="story-read-text"></div>
                 <div id="storyReadActions" class="game-grid" style="margin-top: 1rem;">
-                    <button class="game-button" onclick="readSelectedStoryAgain()"><i class="fas fa-volume-up"></i>Read Again</button>
-                    <button class="game-button" onclick="exportStoryAudio(false)"><i class="fas fa-file-audio"></i>Export Audio</button>
+                    <button id="story-read-again-btn" class="game-button" onclick="readSelectedStoryAgain()"><i class="fas fa-volume-up"></i>Read Again</button>
+                    <button id="story-export-audio-read-btn" class="game-button" onclick="exportStoryAudio(false)"><i class="fas fa-file-audio"></i>Export Audio</button>
+                    <button id="story-export-pdf-read-btn" class="game-button" onclick="exportStoryPDF(false)"><i class="fas fa-file-pdf"></i>Export PDF</button>
                     <button id="createIllustrationReadButton" class="game-button" onclick="createStoryIllustration(false)"><i class="fas fa-image"></i>Create Illustration</button>
                     <button id="regenerateIllustrationReadButton" class="game-button" onclick="createStoryIllustration(true)"><i class="fas fa-sync"></i>Regenerate Illustration</button>
                     <button class="game-button" onclick="backToStoryReadList()"><i class="fas fa-arrow-left"></i>Back to Stories</button>
@@ -558,9 +559,10 @@
                     </div>
                 </div>
                 <div id="storyDetailActions" class="game-grid" style="margin-top: 1rem;">
-                    <button class="game-button" onclick="readCurrentStory()"><i class="fas fa-volume-up"></i>Read Story</button>
-                    <button class="game-button" onclick="exportStoryAudio(true)"><i class="fas fa-file-audio"></i>Export Audio</button>
-                    <button class="game-button" onclick="saveCurrentStoryEdits()"><i class="fas fa-save"></i>Save Edits</button>
+                    <button id="story-read-btn" class="game-button" onclick="readCurrentStory()"><i class="fas fa-volume-up"></i>Read Story</button>
+                    <button id="story-export-audio-btn" class="game-button" onclick="exportStoryAudio(true)"><i class="fas fa-file-audio"></i>Export Audio</button>
+                    <button id="story-export-pdf-btn" class="game-button" onclick="exportStoryPDF(true)"><i class="fas fa-file-pdf"></i>Export PDF</button>
+                    <button id="story-save-edits-btn" class="game-button" onclick="saveCurrentStoryEdits()"><i class="fas fa-save"></i>Save Edits</button>
                     <button id="createIllustrationButton" class="game-button" onclick="createStoryIllustration(false)"><i class="fas fa-image"></i>Create Illustration</button>
                     <button id="regenerateIllustrationButton" class="game-button" onclick="createStoryIllustration(true)"><i class="fas fa-sync"></i>Regenerate Illustration</button>
                     <button class="game-button" onclick="deleteCurrentStory()" style="background-color: #dc2626; color: white;"><i class="fas fa-trash"></i>Delete Story</button>
@@ -625,6 +627,255 @@
             awaitingAnswerType: null // 'question' or 'guess'
         };
 
+        const GAMES_HUB_UI_TEXT_DEFAULTS = {
+            gamesHubTitle: 'Games',
+            loadingGames: 'Loading Games...',
+            menuHome: 'Home',
+            menu20Questions: '20 Questions',
+            menuGuessWho: 'Guess Who',
+            menuGuessWhere: 'Guess Where',
+            menuGuessWhat: 'Guess What',
+            menuHangman: 'Hangman',
+            menuStoryBuilder: 'Story Builder',
+            statusChooseHowToPlay: 'Choose how you want to play:',
+            roleAsk: 'I ask the questions',
+            roleAnswer: 'They ask the questions',
+            categoryPerson: 'Person',
+            categoryPlace: 'Place',
+            categoryThing: 'Thing',
+            questionsAsked: 'Questions Asked:',
+            listening: 'Listening...',
+            generatingOptions: 'Generating options...',
+            oops: 'Oops!',
+            genericError: 'Something went wrong. Please try again.',
+            askAnotherQuestion: 'Ask Another Question',
+            makeGuess: 'Make a Guess',
+            exitGame: 'Exit Game',
+            storyQa: 'Story Q&A',
+            savedStories: 'Saved Stories',
+            readAgain: 'Read Again',
+            exportAudio: 'Export Audio',
+            exportPDF: 'Export PDF',
+            createIllustration: 'Create Illustration',
+            regenerateIllustration: 'Regenerate Illustration',
+            backToStories: 'Back to Stories',
+            storyDetail: 'Story Detail',
+            storyTitlePlaceholder: 'Story title',
+            storyTextPlaceholder: 'Story text',
+            noIllustrationYet: 'No illustration yet.',
+            readStory: 'Read Story',
+            saveEdits: 'Save Edits',
+            deleteStory: 'Delete Story',
+            backToBuilder: 'Back to Builder',
+            deleteStories: 'Delete Stories',
+            close: 'Close',
+            selectStoriesToDelete: 'Select stories to delete.',
+            cancel: 'Cancel',
+            deleteSelected: 'Delete Selected',
+            storyWakePrompt: 'Say the wake word to ask the next question or complete the story.',
+            noSavedStoriesYet: 'No saved stories yet.',
+            statusSayReadySelected: 'Say "ready" when you have selected something for me to guess',
+            statusWhatTypeThing: 'What type of thing are you thinking of?',
+            statusSayReadySelectedYour: 'Say "ready" when you have selected your',
+            statusThinkingQuestions: 'Let me think of some questions...',
+            statusQuestionsRemaining: 'Questions remaining:',
+            statusGuessesRemaining: 'Guesses remaining:',
+            statusChooseYour: 'Choose your',
+            statusReadyWithWakeWord: 'I\'m ready. To ask a question or make a guess, start with',
+            statusListeningNext: 'Listening for next question or guess...',
+            statusWhatNext: 'What would you like to do next?',
+            failedLoadOptions: 'Failed to load options. Please try again.',
+            failedLoadQuestions: 'Failed to load questions. Please try again.',
+            failedLoadGuesses: 'Failed to load guesses. Please try again.',
+            failedLoadDifferentOptions: 'Failed to load different options. Please try again.',
+            somethingElse: 'Something Else',
+            isItPrefix: 'Is it',
+            qPrefix: 'Q:',
+            aPrefix: 'A:'
+        };
+        let gamesHubUiText = { ...GAMES_HUB_UI_TEXT_DEFAULTS };
+        let gamesHubTargetLocale = 'en-US';
+        let gamesHubPartnerLocale = 'en-US';
+        const gamesHubRuntimeTranslationCache = new Map();
+
+        function getGamesHubLocalizedText(key, fallback) {
+            const candidate = String(gamesHubUiText[key] || '').trim();
+            return candidate || fallback;
+        }
+
+        async function translateGamesHubRuntimeLine(line, locale) {
+            const source = String(line || '').trim();
+            if (!source) {
+                return source;
+            }
+            const targetLocale = locale || gamesHubTargetLocale;
+            if (!targetLocale || targetLocale.toLowerCase() === 'en-us') {
+                return source;
+            }
+            const cacheKey = `${targetLocale}:${source}`;
+            if (gamesHubRuntimeTranslationCache.has(cacheKey)) {
+                return gamesHubRuntimeTranslationCache.get(cacheKey);
+            }
+
+            try {
+                const response = await authenticatedFetch('/api/translate-lines', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        lines: [source],
+                        source_locale: 'en-US',
+                        target_locale: targetLocale
+                    })
+                });
+
+                if (response.ok) {
+                    const payload = await response.json();
+                    const translated = String(payload?.translated_lines?.[0] || '').trim() || source;
+                    gamesHubRuntimeTranslationCache.set(cacheKey, translated);
+                    return translated;
+                }
+            } catch (error) {
+                console.warn('[GAMES HUB I18N] Runtime line translation failed:', error);
+            }
+
+            gamesHubRuntimeTranslationCache.set(cacheKey, source);
+            return source;
+        }
+
+        async function localizeGamesHubOptionLabel(labelText) {
+            const source = String(labelText || '').trim();
+            if (!source) {
+                return source;
+            }
+            return translateGamesHubRuntimeLine(source, gamesHubTargetLocale);
+        }
+
+        function setLocalizedStatusText(text) {
+            const statusEl = document.getElementById('statusText');
+            if (!statusEl) {
+                return;
+            }
+            if (!gamesHubTargetLocale || gamesHubTargetLocale.toLowerCase() === 'en-us') {
+                statusEl.textContent = text;
+                return;
+            }
+            translateGamesHubRuntimeLine(text).then((translated) => {
+                statusEl.textContent = translated;
+            }).catch(() => {
+                statusEl.textContent = text;
+            });
+        }
+
+        function applyGamesHubLocalization() {
+            const splashTitle = document.getElementById('games-splash-title');
+            if (splashTitle) {
+                splashTitle.textContent = getGamesHubLocalizedText('loadingGames', 'Loading Games...');
+            }
+
+            const pageTitle = document.getElementById('pageTitle');
+            if (pageTitle) {
+                pageTitle.textContent = `🎮 ${getGamesHubLocalizedText('gamesHubTitle', 'Games')}`;
+            }
+
+            const gameTitle = document.getElementById('gameTitle');
+            if (gameTitle) {
+                gameTitle.textContent = getGamesHubLocalizedText('menu20Questions', '20 Questions');
+            }
+
+            const statusText = document.getElementById('statusText');
+            if (statusText) {
+                statusText.textContent = getGamesHubLocalizedText('statusChooseHowToPlay', 'Choose how you want to play:');
+            }
+
+            const roleAsk = document.getElementById('role-ask-btn');
+            if (roleAsk) {
+                roleAsk.innerHTML = `<i class="fas fa-user-friends"></i>${getGamesHubLocalizedText('roleAsk', 'I ask the questions')}`;
+            }
+            const roleAnswer = document.getElementById('role-answer-btn');
+            if (roleAnswer) {
+                roleAnswer.innerHTML = `<i class="fas fa-lightbulb"></i>${getGamesHubLocalizedText('roleAnswer', 'They ask the questions')}`;
+            }
+
+            const categoryPerson = document.getElementById('category-person-btn');
+            if (categoryPerson) {
+                categoryPerson.innerHTML = `<i class="fas fa-user"></i>${getGamesHubLocalizedText('categoryPerson', 'Person')}`;
+            }
+            const categoryPlace = document.getElementById('category-place-btn');
+            if (categoryPlace) {
+                categoryPlace.innerHTML = `<i class="fas fa-map-marker-alt"></i>${getGamesHubLocalizedText('categoryPlace', 'Place')}`;
+            }
+            const categoryThing = document.getElementById('category-thing-btn');
+            if (categoryThing) {
+                categoryThing.innerHTML = `<i class="fas fa-cube"></i>${getGamesHubLocalizedText('categoryThing', 'Thing')}`;
+            }
+
+            const setText = (id, key, fallback) => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.textContent = getGamesHubLocalizedText(key, fallback);
+                }
+            };
+
+            setText('questions-asked-title', 'questionsAsked', 'Questions Asked:');
+            setText('listening-indicator-text', 'listening', 'Listening...');
+            setText('loading-state-text', 'generatingOptions', 'Generating options...');
+            setText('error-title', 'oops', 'Oops!');
+            setText('errorMessage', 'genericError', 'Something went wrong. Please try again.');
+            setText('ask-another-label', 'askAnotherQuestion', 'Ask Another Question');
+            setText('make-guess-label', 'makeGuess', 'Make a Guess');
+            setText('exit-game-label', 'exitGame', 'Exit Game');
+            setText('story-qa-title', 'storyQa', 'Story Q&A');
+            setText('saved-stories-title', 'savedStories', 'Saved Stories');
+            setText('story-detail-title', 'storyDetail', 'Story Detail');
+            setText('story-delete-modal-title', 'deleteStories', 'Delete Stories');
+            setText('storyDeleteModalMessage', 'selectStoriesToDelete', 'Select stories to delete.');
+            setText('storyStatusMessage', 'storyWakePrompt', 'Say the wake word to ask the next question or complete the story.');
+
+            const storyTitleInput = document.getElementById('storyTitleInput');
+            if (storyTitleInput) {
+                storyTitleInput.placeholder = getGamesHubLocalizedText('storyTitlePlaceholder', 'Story title');
+            }
+            const storyTextInput = document.getElementById('storyTextInput');
+            if (storyTextInput) {
+                storyTextInput.placeholder = getGamesHubLocalizedText('storyTextPlaceholder', 'Story text');
+            }
+            const storyIllustrationStatus = document.getElementById('storyIllustrationStatus');
+            if (storyIllustrationStatus && String(storyIllustrationStatus.textContent || '').trim().toLowerCase() === 'no illustration yet.') {
+                storyIllustrationStatus.textContent = getGamesHubLocalizedText('noIllustrationYet', 'No illustration yet.');
+            }
+
+            const setButtonLabel = (id, iconClass, key, fallback) => {
+                const button = document.getElementById(id);
+                if (button) {
+                    button.innerHTML = `<i class="${iconClass}"></i>${getGamesHubLocalizedText(key, fallback)}`;
+                }
+            };
+            setButtonLabel('story-read-again-btn', 'fas fa-volume-up', 'readAgain', 'Read Again');
+            setButtonLabel('story-export-audio-read-btn', 'fas fa-file-audio', 'exportAudio', 'Export Audio');
+            setButtonLabel('story-export-pdf-read-btn', 'fas fa-file-pdf', 'exportPDF', 'Export PDF');
+            setButtonLabel('createIllustrationReadButton', 'fas fa-image', 'createIllustration', 'Create Illustration');
+            setButtonLabel('regenerateIllustrationReadButton', 'fas fa-sync', 'regenerateIllustration', 'Regenerate Illustration');
+            setButtonLabel('story-back-to-stories-btn', 'fas fa-arrow-left', 'backToStories', 'Back to Stories');
+            setButtonLabel('story-read-btn', 'fas fa-volume-up', 'readStory', 'Read Story');
+            setButtonLabel('story-export-audio-btn', 'fas fa-file-audio', 'exportAudio', 'Export Audio');
+            setButtonLabel('story-export-pdf-btn', 'fas fa-file-pdf', 'exportPDF', 'Export PDF');
+            setButtonLabel('story-save-edits-btn', 'fas fa-save', 'saveEdits', 'Save Edits');
+            setButtonLabel('createIllustrationButton', 'fas fa-image', 'createIllustration', 'Create Illustration');
+            setButtonLabel('regenerateIllustrationButton', 'fas fa-sync', 'regenerateIllustration', 'Regenerate Illustration');
+            setButtonLabel('story-delete-btn', 'fas fa-trash', 'deleteStory', 'Delete Story');
+            setButtonLabel('story-back-to-builder-btn', 'fas fa-arrow-left', 'backToBuilder', 'Back to Builder');
+            setButtonLabel('storyDeleteStoriesButton', 'fas fa-trash', 'deleteStories', 'Delete Stories');
+            setButtonLabel('story-delete-modal-close-btn', 'fas fa-times', 'close', 'Close');
+
+            const cancelDeleteBtn = document.getElementById('story-delete-modal-cancel-btn');
+            if (cancelDeleteBtn) {
+                cancelDeleteBtn.textContent = getGamesHubLocalizedText('cancel', 'Cancel');
+            }
+            const confirmDeleteBtn = document.getElementById('storyConfirmDeleteButton');
+            if (confirmDeleteBtn) {
+                confirmDeleteBtn.textContent = getGamesHubLocalizedText('deleteSelected', 'Delete Selected');
+            }
+        }
         let storyState = {
             transcript: [],
             pendingQuestion: '',
@@ -2036,6 +2287,78 @@
                 hideLoading();
                 showError(String(error?.message || 'Failed to export story audio.'));
             }
+        }
+
+        async function exportStoryPDF(fromDetailView = false) {
+            if (!storyState.selectedStoryId) {
+                showError('No story selected.');
+                return;
+            }
+
+            try {
+                const titleFromInput = document.getElementById('storyTitleInput')?.value || '';
+                const textFromInput = document.getElementById('storyTextInput')?.value || '';
+
+                const untitledStory = getGamesHubLocalizedText('untitledStory', 'Untitled Story');
+                const selectedTitle = (fromDetailView ? titleFromInput : storyState.currentStoryTitle) || titleFromInput || storyState.currentStoryTitle || untitledStory;
+                const selectedText = (fromDetailView ? textFromInput : storyState.currentStoryText) || textFromInput || storyState.currentStoryText || '';
+
+                if (!String(selectedText).trim()) {
+                    showError('Story text is empty. Add story text before exporting PDF.');
+                    return;
+                }
+
+                showLoading();
+                const response = await authenticatedFetch(`/api/games/story/${storyState.selectedStoryId}/export-pdf`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        title: selectedTitle,
+                        story_text: selectedText
+                    })
+                });
+
+                if (!response.ok) {
+                    let backendError = '';
+                    try {
+                        const errorData = await response.json();
+                        backendError = String(errorData?.error || errorData?.detail || '').trim();
+                    } catch (parseError) {
+                        backendError = '';
+                    }
+                    const combinedError = backendError
+                        ? `HTTP ${response.status}: ${backendError}`
+                        : `HTTP ${response.status}: ${response.statusText}`;
+                    throw new Error(combinedError);
+                }
+
+                const pdfBlob = await response.blob();
+                const contentDisposition = response.headers.get('Content-Disposition') || '';
+                const quotedFilenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+                const bareFilenameMatch = contentDisposition.match(/filename=([^;]+)/i);
+                const serverFilename = quotedFilenameMatch?.[1] || bareFilenameMatch?.[1]?.trim();
+                const filename = serverFilename || buildStoryPDFExportFilename(selectedTitle);
+
+                const blobUrl = URL.createObjectURL(pdfBlob);
+                const downloadLink = document.createElement('a');
+                downloadLink.href = blobUrl;
+                downloadLink.download = filename;
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                downloadLink.remove();
+                URL.revokeObjectURL(blobUrl);
+
+                hideLoading();
+                setStoryStatusMessage(`Story PDF exported as ${filename}.`);
+            } catch (error) {
+                console.error('Error exporting story PDF:', error);
+                hideLoading();
+                showError(String(error?.message || 'Failed to export story PDF.'));
+            }
+        }
+
+        function buildStoryPDFExportFilename(title = '') {
+            const sanitized = String(title || 'story').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'story';
+            return `${sanitized}.pdf`;
         }
 
         function updateStoryBottomControls({ showDeleteStories = false } = {}) {

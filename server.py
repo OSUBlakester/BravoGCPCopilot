@@ -15485,6 +15485,114 @@ async def export_story_builder_audio(
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/api/games/story/{story_id}/export-pdf")
+async def export_story_builder_pdf(
+    story_id: str,
+    request: StoryBuilderExportAudioRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Export a story to PDF with text and illustration (if available)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        import io
+
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        stored_title = str(story_data.get("title", "Untitled Story")).strip() or "Untitled Story"
+        stored_text = str(story_data.get("story_text", "")).strip()
+        illustration_url = str(story_data.get("illustration_url", "")).strip()
+
+        requested_title = str(request.title or "").strip()
+        safe_title = re.sub(r"\s+", " ", requested_title or stored_title) or "Untitled Story"
+        story_text = str(request.story_text or "").strip() if request.story_text else stored_text
+
+        if not story_text:
+            return JSONResponse(content={"success": False, "error": "Story text is empty"}, status_code=400)
+
+        # Prepare PDF
+        pdf_buffer = io.BytesIO()
+        doc_pdf = SimpleDocTemplate(
+            pdf_buffer,
+            pagesize=letter,
+            leftMargin=0.75*inch,
+            rightMargin=0.75*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
+        )
+
+        story_elements = []
+
+        # Add title
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=(0, 0, 0),
+            spaceAfter=12,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        story_elements.append(Paragraph(safe_title, title_style))
+        story_elements.append(Spacer(1, 0.2*inch))
+
+        # Fetch and add illustration if available
+        if illustration_url:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(illustration_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            image_data = await resp.read()
+                            image_buffer = io.BytesIO(image_data)
+                            img = Image(image_buffer, width=4.5*inch, height=3*inch)
+                            story_elements.append(img)
+                            story_elements.append(Spacer(1, 0.2*inch))
+            except Exception as img_error:
+                logging.warning(f"Failed to fetch illustration for story {story_id}: {img_error}")
+
+        # Add story text
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['BodyText'],
+            fontSize=11,
+            leading=14,
+            alignment=TA_LEFT,
+            spaceAfter=12
+        )
+        # Replace newlines with <br/> for proper paragraph breaks
+        story_text_html = story_text.replace("\n", "<br/><br/>")
+        story_elements.append(Paragraph(story_text_html, body_style))
+
+        # Build PDF
+        await asyncio.to_thread(doc_pdf.build, story_elements)
+
+        safe_filename_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", safe_title).strip("_") or "story"
+        filename = f"{safe_filename_base}.pdf"
+
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store"
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error exporting Story Builder PDF for {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
 @app.delete("/api/games/story/{story_id}")
 async def delete_story_builder_story(
     story_id: str,
