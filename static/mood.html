@@ -210,6 +210,23 @@
         const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
         
         let moodOptions = [];
+        let userLanguageLocale = 'en-US';
+        let moodDisplayTextMap = new Map();
+        const moodUiText = {
+            pageTitle: 'How are you feeling?',
+            loadingMood: 'Loading mood options...',
+            errorLoad: "Sorry, we couldn't load the mood options. Please try again.",
+            retry: 'Retry',
+            back: 'Back',
+            current: 'Current',
+            setting: 'Setting...',
+            moodCleared: 'Mood cleared!',
+            moodSetPrefix: 'Mood set to',
+            takingBack: 'Taking you back...',
+            initFailed: 'Failed to initialize mood selection. Please refresh the page.',
+            loadFailed: 'Failed to load mood options. Please try again.',
+            setFailed: 'Failed to set mood. Please try again.'
+        };
 
         // Mood icons mapping
         const moodIcons = {
@@ -304,6 +321,8 @@
                 if (!userReady) {
                     return; // Redirection already handled
                 }
+
+                await loadMoodLocalizationFromSettings();
                 
                 // Load mood options
                 await loadMoodOptions();
@@ -313,9 +332,125 @@
                 
             } catch (error) {
                 console.error('Error initializing mood page:', error);
-                showError('Failed to initialize mood selection. Please refresh the page.');
+                showError(moodUiText.initFailed);
                 hideSplashScreen();
             }
+        }
+
+        async function loadMoodLocalizationFromSettings() {
+            try {
+                const response = await authenticatedFetch('/api/settings', { method: 'GET' });
+                if (response.ok) {
+                    const settings = await response.json();
+                    userLanguageLocale = String(settings?.userLanguage || 'en-US').trim() || 'en-US';
+                }
+            } catch (error) {
+                console.warn('Unable to load mood localization settings:', error);
+            }
+
+            if (String(userLanguageLocale).toLowerCase() !== 'en-us') {
+                try {
+                    const keys = Object.keys(moodUiText);
+                    const lines = keys.map((key) => moodUiText[key]);
+                    const response = await authenticatedFetch('/api/translate-lines', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            lines,
+                            source_locale: 'en-US',
+                            target_locale: userLanguageLocale
+                        })
+                    });
+
+                    if (response.ok) {
+                        const payload = await response.json();
+                        const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines : [];
+                        keys.forEach((key, index) => {
+                            const translatedValue = String(translated[index] || '').trim();
+                            if (translatedValue) {
+                                moodUiText[key] = translatedValue;
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.warn('Unable to localize mood static UI text:', error);
+                }
+            }
+
+            applyMoodLocalizedUiText();
+        }
+
+        function applyMoodLocalizedUiText() {
+            const pageTitle = document.querySelector('.page-banner h1');
+            if (pageTitle) {
+                pageTitle.innerHTML = `<i class="fas fa-smile"></i> ${moodUiText.pageTitle}`;
+            }
+
+            const loadingState = document.getElementById('loadingState');
+            if (loadingState) {
+                loadingState.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${moodUiText.loadingMood}`;
+            }
+
+            const errorState = document.getElementById('errorState');
+            if (errorState) {
+                const errorParagraph = errorState.querySelector('p');
+                if (errorParagraph) {
+                    errorParagraph.textContent = moodUiText.errorLoad;
+                }
+                const retryButton = errorState.querySelector('button');
+                if (retryButton) {
+                    retryButton.textContent = moodUiText.retry;
+                }
+            }
+
+            const backButton = document.querySelector('.back-button');
+            if (backButton) {
+                backButton.innerHTML = `<i class="fas fa-arrow-left"></i> ${moodUiText.back}`;
+            }
+        }
+
+        async function localizeMoodOptionLabels() {
+            moodDisplayTextMap = new Map();
+            if (!Array.isArray(moodOptions) || moodOptions.length === 0) {
+                return;
+            }
+
+            if (String(userLanguageLocale).toLowerCase() === 'en-us') {
+                moodOptions.forEach((mood) => {
+                    if (mood?.text) {
+                        moodDisplayTextMap.set(mood.text, mood.text);
+                    }
+                });
+                return;
+            }
+
+            const uniqueMoodTexts = [...new Set(moodOptions
+                .map((mood) => String(mood?.text || '').trim())
+                .filter(Boolean))];
+
+            try {
+                const response = await authenticatedFetch('/api/translate-lines', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        lines: uniqueMoodTexts,
+                        source_locale: 'en-US',
+                        target_locale: userLanguageLocale
+                    })
+                });
+
+                if (response.ok) {
+                    const payload = await response.json();
+                    const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines : [];
+                    uniqueMoodTexts.forEach((sourceText, index) => {
+                        const translatedText = String(translated[index] || '').trim() || sourceText;
+                        moodDisplayTextMap.set(sourceText, translatedText);
+                    });
+                    return;
+                }
+            } catch (error) {
+                console.warn('Unable to localize mood option labels:', error);
+            }
+
+            uniqueMoodTexts.forEach((sourceText) => moodDisplayTextMap.set(sourceText, sourceText));
         }
 
         // Load available mood options from the API
@@ -335,11 +470,12 @@
                 console.log('Mood options loaded:', data);
                 
                 moodOptions = data.mood_options || [];
+                await localizeMoodOptionLabels();
                 renderMoodOptions();
                 
             } catch (error) {
                 console.error('Error loading mood options:', error);
-                showError('Failed to load mood options. Please try again.');
+                showError(moodUiText.loadFailed);
             }
         }
 
@@ -360,16 +496,18 @@
             moodOptions.forEach(mood => {
                 const button = document.createElement('button');
                 button.className = `mood-button ${mood.current ? 'current' : ''}`;
+                button.dataset.sourceMoodText = mood.text;
                 button.onclick = () => selectMood(mood.text);
                 
                 const icon = moodIcons[mood.text] || 'fa-circle';
+                const displayText = moodDisplayTextMap.get(mood.text) || mood.text;
                 
                 button.innerHTML = `
                     <div class="mood-icon">
                         <i class="fas ${icon}"></i>
                     </div>
-                    <div class="mood-text">${mood.text}</div>
-                    ${mood.current ? '<div style="font-size: 12px; margin-top: 4px; color: rgba(255,255,255,0.9);">Current</div>' : ''}
+                    <div class="mood-text">${displayText}</div>
+                    ${mood.current ? `<div style="font-size: 12px; margin-top: 4px; color: rgba(255,255,255,0.9);">${moodUiText.current}</div>` : ''}
                 `;
                 
                 container.appendChild(button);
@@ -388,8 +526,8 @@
                 // Show loading state on the selected button
                 const buttons = document.querySelectorAll('.mood-button');
                 buttons.forEach(btn => {
-                    if (btn.textContent.includes(moodText)) {
-                        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><br>Setting...';
+                    if (btn.dataset.sourceMoodText === moodText) {
+                        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i><br>${moodUiText.setting}`;
                         btn.disabled = true;
                     }
                 });
@@ -407,9 +545,15 @@
 
                 const result = await response.json();
                 console.log('Mood set successfully:', result);
+
+                const displayMoodText = moodDisplayTextMap.get(moodText) || moodText;
                 
                 // Show success message and redirect after delay
-                showSuccessMessage(moodText === 'Clear Mood' ? 'Mood cleared!' : `Mood set to ${moodText}!`);
+                showSuccessMessage(
+                    moodText === 'Clear Mood'
+                        ? moodUiText.moodCleared
+                        : `${moodUiText.moodSetPrefix} ${displayMoodText}!`
+                );
                 
                 setTimeout(() => {
                     goBack();
@@ -417,7 +561,7 @@
                 
             } catch (error) {
                 console.error('Error setting mood:', error);
-                showError('Failed to set mood. Please try again.');
+                showError(moodUiText.setFailed);
                 
                 // Restore buttons
                 await loadMoodOptions();
@@ -436,7 +580,7 @@
                         ${message}
                     </div>
                     <div style="font-size: 16px; margin-top: 10px; color: #666;">
-                        Taking you back...
+                        ${moodUiText.takingBack}
                     </div>
                 </div>
             `;

@@ -533,6 +533,7 @@ RULES FOR GENERATION:
 
 ${latestFocusLine}
 ${exclusionLine}
+${typeof getTapLanguageDirective === 'function' ? getTapLanguageDirective() : ''}
 Return ONLY a valid JSON array of strings with exactly ${LLMOptions} items.
 Each string should be a full option the user can speak next.
 Do not return objects, keys, markdown, or commentary.

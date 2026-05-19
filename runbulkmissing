@@ -1,4 +1,0 @@
-#!/usr/bin/env zsh
-set -euo pipefail
-ROOT_DIR="/Users/blakethomas/Documents/Documents_Macbook_Air/BravoGCPCopilot"
-"$ROOT_DIR/venv/bin/python3" "$ROOT_DIR/bulk_import_bravo_images.py" --path "$ROOT_DIR/BravoImages/batch_missing_images/Categories" --replace --no-ai-tags

@@ -162,3 +162,21 @@ custom_images_schema.json
 GUESS_WHO_*.md
 check_guess_who_setup.sh
 copy_jokes_to_test.py
+
+# Local-only admin and content pipeline scripts
+picom_database_schema.json
+run_missing_images_free.sh
+bulk_import_bravo_images.py
+bulk_import_jokes.py
+convert_images_to_png.py
+extend_symbol_database.py
+generate_missing_images_free.py
+picom_ai_processor.py
+process_and_upload_images.py
+process_chat_history.py
+process_images_to_3x4.py
+repair_bravo_images.py
+reprocess_gcs_transparency.py
+run_ai_processing.py
+standardize_aspect_ratio.py
+trim_image_whitespace.py
