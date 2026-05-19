@@ -20071,6 +20071,17 @@ async def button_symbol_search(
         locale_norm = str(locale or "en-US").strip().lower()
         locale_base = locale_norm.split('-')[0] if '-' in locale_norm else locale_norm
 
+        # Normalize inflected forms (e.g., "quiero" -> "querer") for locale-aware lookup.
+        normalized_query = query_lower
+        if locale_base and locale_base != "en":
+            try:
+                from aac_inflection_utils import normalize_search_term
+                inflection_normalized = str(normalize_search_term(query_lower, locale_base) or "").strip().lower()
+                if inflection_normalized:
+                    normalized_query = inflection_normalized
+            except Exception as inflection_error:
+                logging.debug(f"Inflection normalization skipped for '{query_lower}' ({locale_base}): {inflection_error}")
+
         def _allowed_locale_keys():
             keys = {"en", "en-us", locale_norm, locale_base}
             return {k for k in keys if k}
@@ -20158,6 +20169,8 @@ async def button_symbol_search(
         search_terms_for_images = []
         if query_lower:
             search_terms_for_images.append(query_lower)
+        if normalized_query and normalized_query != query_lower:
+            search_terms_for_images.append(normalized_query)
         search_terms_for_images.extend(keyword_list[:3])  # Add up to 3 keywords
         search_terms_for_images = list(dict.fromkeys(search_terms_for_images))  # Remove duplicates
         
@@ -20184,13 +20197,36 @@ async def button_symbol_search(
                 image_docs = []
                 for variation in unique_variations:
                     try:
+                        variation_lower = variation.lower().strip()
+                        if not variation_lower:
+                            continue
+
                         # Preferred path: language-friendly array field
-                        variation_query = images_ref.where("search_terms", "array_contains", variation.lower()).limit(max(30, limit * 8))
+                        variation_query = images_ref.where("search_terms", "array_contains", variation_lower).limit(max(30, limit * 8))
                         variation_docs = list(variation_query.stream())
                         for d in variation_docs:
                             data = d.to_dict() or {}
                             if data.get("source") == "bravo_images":
                                 image_docs.append(d)
+
+                        # Locale-aware fallback path for migrated data where localized tags/labels exist
+                        # but search_terms may be incomplete/stale.
+                        if locale_base and locale_base != "en":
+                            localized_tags_field = f"localized_tags.{locale_base}"
+                            localized_labels_field = f"localized_labels.{locale_base}"
+
+                            localized_tag_query = images_ref.where("source", "==", "bravo_images").where(
+                                localized_tags_field, "array_contains", variation_lower
+                            ).limit(max(20, limit * 5))
+                            image_docs.extend(list(localized_tag_query.stream()))
+
+                            for label_candidate in [variation.strip(), variation_lower]:
+                                if not label_candidate:
+                                    continue
+                                localized_label_query = images_ref.where("source", "==", "bravo_images").where(
+                                    localized_labels_field, "==", label_candidate
+                                ).limit(max(10, limit * 3))
+                                image_docs.extend(list(localized_label_query.stream()))
 
                         # Legacy fallback path
                         if not variation_docs:
@@ -20202,9 +20238,13 @@ async def button_symbol_search(
                     except Exception as e:
                         logging.debug(f"Query failed for variation '{variation}': {e}")
                         continue
-                # Process all collected docs
+                # Process all collected docs (dedupe by document id first)
+                deduped_docs = {}
+                for d in image_docs:
+                    deduped_docs[d.id] = d
+
                 weight = 1.0 if i == 0 else 0.8
-                for doc in image_docs:
+                for doc in deduped_docs.values():
                     image = doc.to_dict()
                     image_id = doc.id
                     
@@ -20529,8 +20569,10 @@ async def button_symbol_search(
             except Exception as e:
                 logging.debug(f"Tag search failed for term '{term}': {e}")
         
-        # Phase 3: If we still don't have results, do comprehensive fallback search
-        if len(matched_symbols) == 0:
+        # Phase 3: If we still don't have results, do comprehensive fallback search.
+        # Skip this expensive path for limit=1 lookups (Tap/Games single-symbol fetches)
+        # to prevent timeout/abort cascades under load.
+        if len(matched_symbols) == 0 and limit > 1:
             logging.info(f"No matches found for '{query_lower}', doing comprehensive search")
             try:
                 # Get a larger sample for thorough matching
