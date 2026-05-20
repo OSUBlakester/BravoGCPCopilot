@@ -5963,6 +5963,25 @@ def initialize_backend_services():
 
 
 # --- Firestore Helper Functions ---
+
+# Short-lived in-memory cache for frequently-read per-user documents (settings,
+# user_narrative, current_state).  Documents that users rarely change mid-session
+# (e.g. app_settings) are safe to cache for 60 s; high-churn paths (config/pages_list)
+# are deliberately excluded below.
+_FIRESTORE_DOC_CACHE: dict = {}
+_FIRESTORE_DOC_CACHE_TTL = 60  # seconds
+
+# Paths that must always be read fresh (mutable mid-session data).
+_FIRESTORE_DOC_CACHE_SKIP = {
+    "config/pages_list",
+    "config/tap_config",
+}
+
+def _invalidate_firestore_doc_cache(account_id: str, aac_user_id: str, doc_subpath: str) -> None:
+    """Call this whenever a document is written so the cache stays coherent."""
+    key = f"{account_id}/{aac_user_id}/{doc_subpath}"
+    _FIRESTORE_DOC_CACHE.pop(key, None)
+
 async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath: str, default_data: Any) -> Any:
     """
     Loads a document from Firestore for a specific AAC user under an account,
@@ -5975,6 +5994,14 @@ async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath
         return default_data.copy() if isinstance(default_data, (dict, list)) else default_data
 
     full_path = f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/{doc_subpath}"
+
+    # Serve from short-TTL cache for high-frequency, low-churn documents.
+    if doc_subpath not in _FIRESTORE_DOC_CACHE_SKIP:
+        _cache_key = f"{account_id}/{aac_user_id}/{doc_subpath}"
+        _cached = _FIRESTORE_DOC_CACHE.get(_cache_key)
+        if _cached and (time.time() - _cached[1]) < _FIRESTORE_DOC_CACHE_TTL:
+            return copy.deepcopy(_cached[0])
+
     doc_ref = firestore_db.document(full_path)
     try:
         doc = await asyncio.to_thread(doc_ref.get)
@@ -5996,12 +6023,22 @@ async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath
             if isinstance(default_data, dict) and isinstance(data_from_db, dict):
                 merged_data = default_data.copy()
                 merged_data.update(data_from_db) # Merge with defaults
-                return merged_data
+                result = merged_data
             elif isinstance(default_data, list) and isinstance(data_from_db, list):
-                return data_from_db # Return the list as is
+                result = data_from_db
             else:
                 logging.warning(f"Type mismatch for Firestore document at {full_path} for AAC user {aac_user_id}. Expected {type(default_data)}, got {type(data_from_db)}. Returning default.")
                 return default_data.copy() if isinstance(default_data, (dict, list)) else default_data
+
+            # Store result in cache (skip high-churn paths)
+            if doc_subpath not in _FIRESTORE_DOC_CACHE_SKIP:
+                _FIRESTORE_DOC_CACHE[_cache_key] = (copy.deepcopy(result), time.time())
+                # Evict oldest entries if cache grows too large
+                if len(_FIRESTORE_DOC_CACHE) > 1000:
+                    oldest = sorted(_FIRESTORE_DOC_CACHE.items(), key=lambda x: x[1][1])[:200]
+                    for k, _ in oldest:
+                        del _FIRESTORE_DOC_CACHE[k]
+            return result
         else:
             logging.warning(f"Firestore document at {full_path} not found for AAC user {aac_user_id}. Using and saving defaults.")
             await save_firestore_document(account_id, aac_user_id, doc_subpath, default_data)
@@ -6034,6 +6071,9 @@ async def save_firestore_document(account_id: str, aac_user_id: str, doc_subpath
     Saves data to a Firestore document for a specific AAC user under an account.
     doc_subpath example: "settings/app_settings", "info/birthdays"
     """
+    # Invalidate the read cache so the next load reflects the new write.
+    _invalidate_firestore_doc_cache(account_id, aac_user_id, doc_subpath)
+
     global firestore_db
     if not firestore_db:
         logging.error(f"Firestore DB client not initialized. Cannot save document for AAC user {aac_user_id}.")
