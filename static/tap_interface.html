@@ -1903,6 +1903,73 @@
             return translateTapRuntimeLine(source, tapTargetLocale);
         }
 
+        const TAP_SPECIAL_BUTTON_CONFIG = {
+            'something-else': {
+                sourceLabel: 'Something Else',
+                imageLookupText: 'Something Else',
+                imageKeywords: ['refresh', 'more', 'other']
+            }
+        };
+
+        function getTapSpecialButtonConfig(specialButtonId) {
+            return TAP_SPECIAL_BUTTON_CONFIG[specialButtonId] || null;
+        }
+
+        function getTapSpecialButtonLabelSync(specialButtonId) {
+            const config = getTapSpecialButtonConfig(specialButtonId);
+            if (!config) {
+                return '';
+            }
+
+            const targetLocale = normalizeLocaleTag(tapTargetLocale || 'en-US') || 'en-US';
+            if (targetLocale.toLowerCase() === 'en-us') {
+                return config.sourceLabel;
+            }
+
+            const cached = tapRuntimeTranslationCache.get(`${targetLocale}:${config.sourceLabel}`);
+            return String(cached || config.sourceLabel).trim() || config.sourceLabel;
+        }
+
+        function setTapSpecialButtonLabel(btn, labelText) {
+            if (!btn) {
+                return;
+            }
+
+            const label = String(labelText || '').trim();
+            if (!label) {
+                return;
+            }
+
+            btn.dataset.localizedLabel = label;
+
+            const footer = btn.querySelector('div:last-child');
+            if (footer && btn.querySelector('img')) {
+                footer.textContent = label;
+            } else {
+                btn.textContent = label;
+            }
+
+            const image = btn.querySelector('img');
+            if (image) {
+                image.alt = label;
+            }
+        }
+
+        async function localizeTapSpecialButton(btn) {
+            if (!btn) {
+                return;
+            }
+
+            const specialButtonId = String(btn.dataset.specialButton || '').trim();
+            const config = getTapSpecialButtonConfig(specialButtonId);
+            if (!config) {
+                return;
+            }
+
+            const localizedLabel = await localizeTapOptionLabel(config.sourceLabel);
+            setTapSpecialButtonLabel(btn, localizedLabel || config.sourceLabel);
+        }
+
         function getTapDisplayLabel(item) {
             if (!item || typeof item !== 'object') {
                 return '';
@@ -4685,21 +4752,25 @@ VARIETY RULES:
             const imagePromises = [];
             const buttonMappings = [];
             
-            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
-                const option = options[i];
+            for (let i = 0; i < buttons.length; i++) {
                 const btn = buttons[i];
                 
                 // Skip if button already has an image
                 if (btn.querySelector('img')) continue;
                 
                 // Handle "Something Else" button specially
-                if (btn.textContent === 'Something Else') {
+                if (btn.dataset.specialButton === 'something-else') {
+                    const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                    const specialButtonLabel = btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else');
                     console.log('📦 Loading image for Something Else button in Phrases');
                     const cacheOnly = initialLoad;
-                    imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
-                    buttonMappings.push({ btn, text: 'Something Else' });
+                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, cacheOnly));
+                    buttonMappings.push({ btn, text: specialButtonLabel });
                     continue;
                 }
+
+                const option = options[i];
+                if (!option) continue;
                 
                 const speechText = typeof option === 'object' ? option.option : option;
                 const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
@@ -4840,10 +4911,12 @@ VARIETY RULES:
 
                 // Handle "Something Else" button specially
                 if (btn.dataset.specialButton === 'something-else') {
+                    const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                    const specialButtonLabel = btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else');
                     console.log('📦 Loading image for Something Else button in Words');
                     const cacheOnly = initialLoad;
-                    imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
-                    buttonMappings.push({ btn, text: 'Something Else' });
+                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, cacheOnly));
+                    buttonMappings.push({ btn, text: specialButtonLabel });
                     continue;
                 }
 
@@ -6312,58 +6385,19 @@ ${getTapLanguageDirective()}
                 if (i === actualOptionsCount - 1) {
                     console.log('🚨 CREATING PHRASE SOMETHING ELSE BUTTON - SLOT', i, 'of', actualOptionsCount);
                     btn.className = 'option-button';
-                    btn.textContent = 'Something Else';
+                    btn.dataset.specialButton = 'something-else';
+                    setTapSpecialButtonLabel(btn, getTapSpecialButtonLabelSync('something-else'));
+                    localizeTapSpecialButton(btn).catch(() => {});
                     
                     // Apply image matching like other buttons - skip when deferring
                     if (!deferImages) {
-                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
-                        if (imageUrl) {
-                            // Create image + text layout like other buttons
-                            btn.innerHTML = '';
-                            const buttonContent = document.createElement('div');
-                            buttonContent.style.position = 'relative';
-                            buttonContent.style.width = '100%';
-                            buttonContent.style.height = '100%';
-                            buttonContent.style.display = 'flex';
-                            buttonContent.style.flexDirection = 'column';
-                            
-                            const imageContainer = document.createElement('div');
-                            imageContainer.style.flex = '1';
-                            imageContainer.style.width = '100%';
-                            imageContainer.style.overflow = 'hidden';
-                            imageContainer.style.borderRadius = '8px 8px 0 0';
-                            imageContainer.style.display = 'flex';
-                            imageContainer.style.alignItems = 'center';
-                            imageContainer.style.justifyContent = 'center';
-                            
-                            const imageElement = document.createElement('img');
-                            imageElement.src = imageUrl;
-                            imageElement.alt = 'Something Else';
-                            imageElement.style.width = '100%';
-                            imageElement.style.height = '100%';
-                            imageElement.style.objectFit = 'cover';
-                            
-                            const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '14px';
-                            textFooter.style.width = '100%';
-                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-                            textFooter.style.backdropFilter = 'blur(4px)';
-                            textFooter.style.color = 'white';
-                            textFooter.style.display = 'flex';
-                            textFooter.style.alignItems = 'center';
-                            textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '0 3px';
-                            textFooter.style.fontSize = '8px';
-                            textFooter.style.lineHeight = '1.0';
-                            textFooter.style.fontWeight = '600';
-                            textFooter.textContent = 'Something Else';
-                            
-                            imageContainer.appendChild(imageElement);
-                            buttonContent.appendChild(imageContainer);
-                            buttonContent.appendChild(textFooter);
-                            btn.appendChild(buttonContent);
-                        }
-                    });
+                        const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                        getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords).then(imageUrl => {
+                            if (imageUrl) {
+                                applyImageToButton(btn, imageUrl, btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else'));
+                                localizeTapSpecialButton(btn).catch(() => {});
+                            }
+                        });
                     } // End if (!deferImages)
                     
                     btn.onclick = async () => {
@@ -7756,59 +7790,19 @@ ${getTapLanguageDirective()}
                 if (i === totalWordSlots - 1) {
                     console.log('🚨 CREATING WORD SOMETHING ELSE BUTTON - SLOT', i, 'of', FreestyleWordOptions);
                     btn.className = 'option-button freestyle-button';
-                        btn.dataset.specialButton = 'something-else';
-                    btn.textContent = 'Something Else';
+                    btn.dataset.specialButton = 'something-else';
+                    setTapSpecialButtonLabel(btn, getTapSpecialButtonLabelSync('something-else'));
+                    localizeTapSpecialButton(btn).catch(() => {});
                     
                     // Apply image matching like other buttons - skip when deferring
                     if (!deferImages) {
-                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
-                        if (imageUrl) {
-                            // Create image + text layout like other buttons
-                            btn.innerHTML = '';
-                            const buttonContent = document.createElement('div');
-                            buttonContent.style.position = 'relative';
-                            buttonContent.style.width = '100%';
-                            buttonContent.style.height = '100%';
-                            buttonContent.style.display = 'flex';
-                            buttonContent.style.flexDirection = 'column';
-                            
-                            const imageContainer = document.createElement('div');
-                            imageContainer.style.flex = '1';
-                            imageContainer.style.width = '100%';
-                            imageContainer.style.overflow = 'hidden';
-                            imageContainer.style.borderRadius = '8px 8px 0 0';
-                            imageContainer.style.display = 'flex';
-                            imageContainer.style.alignItems = 'center';
-                            imageContainer.style.justifyContent = 'center';
-                            
-                            const imageElement = document.createElement('img');
-                            imageElement.src = imageUrl;
-                            imageElement.alt = 'Something Else';
-                            imageElement.style.width = '100%';
-                            imageElement.style.height = '100%';
-                            imageElement.style.objectFit = 'cover';
-                            
-                            const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '14px';
-                            textFooter.style.width = '100%';
-                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-                            textFooter.style.backdropFilter = 'blur(4px)';
-                            textFooter.style.color = 'white';
-                            textFooter.style.display = 'flex';
-                            textFooter.style.alignItems = 'center';
-                            textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '0 3px';
-                            textFooter.style.fontSize = '8px';
-                            textFooter.style.lineHeight = '1.0';
-                            textFooter.style.fontWeight = '600';
-                            textFooter.textContent = 'Something Else';
-                            
-                            imageContainer.appendChild(imageElement);
-                            buttonContent.appendChild(imageContainer);
-                            buttonContent.appendChild(textFooter);
-                            btn.appendChild(buttonContent);
-                        }
-                    });
+                        const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                        getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords).then(imageUrl => {
+                            if (imageUrl) {
+                                applyImageToButton(btn, imageUrl, btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else'));
+                                localizeTapSpecialButton(btn).catch(() => {});
+                            }
+                        });
                     } // End if (!deferImages)
                     
                     btn.onclick = async () => {
