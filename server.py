@@ -20683,6 +20683,12 @@ async def button_symbol_search(
         })
 
 
+# Module-level in-memory cache for batch symbol lookups.
+# Key: "{locale_base}:{normalized_term}" → (image_url_or_None, expires_epoch)
+_batch_search_cache: dict = {}
+_BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
+
+
 @app.post("/api/symbols/batch-search")
 async def batch_symbol_search(
     request: Request,
@@ -20807,6 +20813,29 @@ async def batch_symbol_search(
 
         if not request_items:
             return JSONResponse(content={"results": {}})
+
+        # --- Serve cached results without hitting Firestore ---
+        now_ts = time.time()
+        cached_results = {}
+        uncached_items = []
+        for item_rec in request_items:
+            cache_key = f"{locale_base}:{item_rec['query_lower']}"
+            cached_entry = _batch_search_cache.get(cache_key)
+            if cached_entry and cached_entry[1] > now_ts:
+                cached_results[item_rec["text"]] = cached_entry[0]
+            else:
+                uncached_items.append(item_rec)
+
+        if not uncached_items:
+            logging.info(f"🔍 BATCH SEARCH: All {len(request_items)} terms served from cache (no Firestore)")
+            return JSONResponse(content={"results": cached_results})
+
+        # Narrow Firestore search to only the terms we don't have cached yet
+        all_search_terms = set()
+        for item_rec in uncached_items:
+            for term in item_rec["search_terms"]:
+                if term:
+                    all_search_terms.add(term)
 
         images_ref = firestore_db.collection("aac_images")
         candidate_docs = {}
@@ -20967,8 +20996,9 @@ async def batch_symbol_search(
                     score += 10
             return score
 
-        results = {}
-        for item_rec in request_items:
+        results = {**cached_results}  # start with cache hits
+        expires_at = time.time() + _BATCH_SEARCH_CACHE_TTL
+        for item_rec in uncached_items:
             text = item_rec["text"]
 
             candidate_ids = set()
@@ -21001,8 +21031,17 @@ async def batch_symbol_search(
                         best_url = cand["url"]
 
             results[text] = best_url
+            # Store in TTL cache (None results too, to avoid repeated Firestore misses)
+            _batch_search_cache[f"{locale_base}:{item_rec['query_lower']}"] = (best_url, expires_at)
+
+        # Evict stale entries periodically to prevent unbounded memory growth
+        if len(_batch_search_cache) > 2000:
+            now_ts2 = time.time()
+            stale_keys = [k for k, v in _batch_search_cache.items() if v[1] <= now_ts2]
+            for k in stale_keys:
+                del _batch_search_cache[k]
         
-        logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results out of {len(terms)} terms")
+        logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results ({len(cached_results)} from cache, {len(uncached_items)} from Firestore)")
         logging.info(f"🔍 BATCH SEARCH: Results summary: {list(results.keys())[:10]}")
         return JSONResponse(content={"results": results})
         

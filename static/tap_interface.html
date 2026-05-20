@@ -2642,9 +2642,14 @@
                     
                     // Try each search term (important words first)
                     for (const term of searchTerms) {
+                        const termLower = term.toLowerCase();
+                        const localizedTerm = (typeof normalizeTermForLocale === 'function')
+                            ? normalizeTermForLocale(termLower, tapTargetLocale)
+                            : termLower;
                         const searchVariations = [
                             normalizeSearchText(term),
-                            term.toLowerCase(),
+                            termLower,
+                            ...(localizedTerm && localizedTerm !== termLower ? [localizedTerm] : []),
                             term.charAt(0).toUpperCase() + term.slice(1)
                         ];
                         
