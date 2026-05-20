@@ -5637,41 +5637,65 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     wordsPromise = generateFreestyleOptionsForCategory(category.label || category, FreestyleWordOptions, category.words_prompt, category.llm_prompt, isCategoryAiBoard);
                 }
 
-                console.log('⏱️ Waiting for both fetches at:', Date.now());
-                // Wait for both to complete in parallel
-                const [phrasesOptions, wordsOptions] = await Promise.all([phrasesPromise, wordsPromise]);
+                // Progressive rendering: do not block words UI on phrase generation latency.
+                const loadRequestKey = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                window.activeTapCategoryLoadKey = loadRequestKey;
 
-                let finalPhrasesOptions = Array.isArray(phrasesOptions) ? phrasesOptions : [];
-                if (LLMOptions > 0 && finalPhrasesOptions.length === 0) {
-                    console.warn('[Tap] Phrase generation returned empty array, applying deterministic fallback phrases.', {
-                        category: category.label,
-                        llmOptions: LLMOptions,
-                        wordsCount: Array.isArray(wordsOptions) ? wordsOptions.length : 0
-                    });
-                    finalPhrasesOptions = buildTapFallbackPhrases(category.label, wordsOptions, LLMOptions);
-                }
+                console.log('⏱️ Starting progressive render for words + phrases at:', Date.now());
 
-                console.log('⏱️ Both fetches completed at:', Date.now());
-                console.log('Final phrases options:', finalPhrasesOptions);
-                console.log('Final words options:', wordsOptions);
-                
-                // Render both sections with deferred images for batch loading
-                if (phraseSectionEnabled) {
-                    renderCategoryOptions(finalPhrasesOptions, true); // true = defer images
-                }
-                if (wordsOptions) {
+                let latestWordsOptions = [];
+
+                const wordsRenderPromise = Promise.resolve(wordsPromise).then((wordsOptionsRaw) => {
+                    if (window.activeTapCategoryLoadKey !== loadRequestKey) {
+                        return [];
+                    }
+
+                    const wordsOptions = Array.isArray(wordsOptionsRaw) ? wordsOptionsRaw : [];
+                    latestWordsOptions = wordsOptions;
+
+                    console.log('⏱️ Words ready at:', Date.now(), 'count:', wordsOptions.length);
                     renderFreestyleOptions(wordsOptions, true); // true = defer images
-                }
-                
-                // Load images for both phrases and words in parallel
-                setTimeout(() => {
-                    Promise.all([
-                        phraseSectionEnabled ? loadImagesForPhrases(finalPhrasesOptions, true) : Promise.resolve(),
-                        wordsOptions ? loadImagesForWords(wordsOptions, true) : Promise.resolve()
-                    ]);
-                }, 50);
-                
-                console.log('⏱️ Rendering completed at:', Date.now());
+                    setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+
+                    return wordsOptions;
+                });
+
+                const phrasesRenderPromise = Promise.resolve(phrasesPromise).then(async (phrasesOptionsRaw) => {
+                    if (window.activeTapCategoryLoadKey !== loadRequestKey) {
+                        return [];
+                    }
+
+                    let finalPhrasesOptions = Array.isArray(phrasesOptionsRaw) ? phrasesOptionsRaw : [];
+                    if (LLMOptions > 0 && finalPhrasesOptions.length === 0) {
+                        const fallbackWords = latestWordsOptions.length > 0
+                            ? latestWordsOptions
+                            : (await Promise.resolve(wordsPromise).catch(() => []));
+                        console.warn('[Tap] Phrase generation returned empty array, applying deterministic fallback phrases.', {
+                            category: category.label,
+                            llmOptions: LLMOptions,
+                            wordsCount: Array.isArray(fallbackWords) ? fallbackWords.length : 0
+                        });
+                        finalPhrasesOptions = buildTapFallbackPhrases(category.label, fallbackWords, LLMOptions);
+                    }
+
+                    if (phraseSectionEnabled) {
+                        console.log('⏱️ Phrases ready at:', Date.now(), 'count:', finalPhrasesOptions.length);
+                        renderCategoryOptions(finalPhrasesOptions, true); // true = defer images
+                        setTimeout(() => loadImagesForPhrases(finalPhrasesOptions, true), 50);
+                    }
+
+                    return finalPhrasesOptions;
+                });
+
+                const [finalWordsOptions, finalPhrasesOptions] = await Promise.all([
+                    wordsRenderPromise,
+                    phrasesRenderPromise
+                ]);
+
+                console.log('⏱️ Progressive rendering completed at:', Date.now(), {
+                    wordsCount: Array.isArray(finalWordsOptions) ? finalWordsOptions.length : 0,
+                    phrasesCount: Array.isArray(finalPhrasesOptions) ? finalPhrasesOptions.length : 0
+                });
             } catch (error) {
                 console.error('Error loading category options:', error);
                 renderCategoryOptions([]);
