@@ -4585,8 +4585,10 @@ VARIETY RULES:
                 });
             }
             
-            // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
-            if (phraseTexts.length > 0) {
+            // 🚀 Batch prefetch from local IndexedDB library.
+            // Run this only on the initial pass; the background pass should use cache misses
+            // + one server batch call to avoid duplicate IndexedDB work.
+            if (phraseTexts.length > 0 && initialLoad) {
                 try {
                     // Ensure cache is initialized
                     if (!window.symbolImageCache) {
@@ -4613,28 +4615,29 @@ VARIETY RULES:
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
 
-                    // For background pass, do one server batch fetch for remaining misses (avoid per-button API fan-out)
-                    if (!initialLoad) {
-                        const missingEntries = [];
-                        for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
-                            const option = options[i];
-                            const speechText = typeof option === 'object' ? option.option : option;
-                            const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
-                            if (!speechText || speechText === 'Something Else') continue;
-                            const cacheKey = `tap_${String(speechText).trim().toLowerCase()}`;
-                            const cached = window.symbolImageCache.get(cacheKey);
-                            if (!cached || !cached.imageUrl) {
-                                missingEntries.push({ text: speechText, keywords: phraseKeywords });
-                            }
-                        }
-
-                        if (missingEntries.length > 0) {
-                            console.log(`📦 Batch server searching ${missingEntries.length} phrase misses...`);
-                            await batchLoadImages(missingEntries);
-                        }
-                    }
                 } catch (error) {
                     console.error('Error batch searching local library:', error);
+                }
+            }
+
+            // Background pass: do one server batch fetch for remaining misses.
+            if (!initialLoad) {
+                const missingEntries = [];
+                for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                    const option = options[i];
+                    const speechText = typeof option === 'object' ? option.option : option;
+                    const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    if (!speechText || speechText === 'Something Else') continue;
+                    const cacheKey = `tap_${String(speechText).trim().toLowerCase()}`;
+                    const cached = window.symbolImageCache.get(cacheKey);
+                    if (!cached || !cached.imageUrl) {
+                        missingEntries.push({ text: speechText, keywords: phraseKeywords });
+                    }
+                }
+
+                if (missingEntries.length > 0) {
+                    console.log(`📦 Batch server searching ${missingEntries.length} phrase misses...`);
+                    await batchLoadImages(missingEntries);
                 }
             }
             
@@ -4692,8 +4695,10 @@ VARIETY RULES:
                 });
             }
             
-            // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
-            if (wordTexts.length > 0) {
+            // 🚀 Batch prefetch from local IndexedDB library.
+            // Run this only on the initial pass; the background pass should use cache misses
+            // + one server batch call to avoid duplicate IndexedDB work.
+            if (wordTexts.length > 0 && initialLoad) {
                 try {
                     // Ensure cache is initialized
                     if (!window.symbolImageCache) {
@@ -4720,31 +4725,32 @@ VARIETY RULES:
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
 
-                    // For background pass, do one server batch fetch for remaining misses (avoid per-button API fan-out)
-                    if (!initialLoad) {
-                        const missingEntries = [];
-                        for (const btn of buttons) {
-                            if (btn.dataset.specialButton === 'something-else') continue;
-                            const optionIndex = Number(btn.dataset.optionIndex);
-                            if (Number.isNaN(optionIndex) || optionIndex < 0 || optionIndex >= options.length) continue;
-                            const option = options[optionIndex];
-                            const text = typeof option === 'object' ? (option.text || option.option) : option;
-                            const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
-                            if (!text) continue;
-                            const cacheKey = `tap_${String(text).trim().toLowerCase()}`;
-                            const cached = window.symbolImageCache.get(cacheKey);
-                            if (!cached || !cached.imageUrl) {
-                                missingEntries.push({ text, keywords });
-                            }
-                        }
-
-                        if (missingEntries.length > 0) {
-                            console.log(`📦 Batch server searching ${missingEntries.length} word misses...`);
-                            await batchLoadImages(missingEntries);
-                        }
-                    }
                 } catch (error) {
                     console.error('Error batch searching local library:', error);
+                }
+            }
+
+            // Background pass: do one server batch fetch for remaining misses.
+            if (!initialLoad) {
+                const missingEntries = [];
+                for (const btn of buttons) {
+                    if (btn.dataset.specialButton === 'something-else') continue;
+                    const optionIndex = Number(btn.dataset.optionIndex);
+                    if (Number.isNaN(optionIndex) || optionIndex < 0 || optionIndex >= options.length) continue;
+                    const option = options[optionIndex];
+                    const text = typeof option === 'object' ? (option.text || option.option) : option;
+                    const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    if (!text) continue;
+                    const cacheKey = `tap_${String(text).trim().toLowerCase()}`;
+                    const cached = window.symbolImageCache.get(cacheKey);
+                    if (!cached || !cached.imageUrl) {
+                        missingEntries.push({ text, keywords });
+                    }
+                }
+
+                if (missingEntries.length > 0) {
+                    console.log(`📦 Batch server searching ${missingEntries.length} word misses...`);
+                    await batchLoadImages(missingEntries);
                 }
             }
             
