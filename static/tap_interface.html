@@ -1926,7 +1926,8 @@
                 return config.sourceLabel;
             }
 
-            const cached = tapRuntimeTranslationCache.get(`${targetLocale}:${config.sourceLabel}`);
+            // Key format must match what translateTapRuntimeLine stores: `${source}->${target}:${text}`
+            const cached = tapRuntimeTranslationCache.get(`en-US->${targetLocale}:${config.sourceLabel}`);
             return String(cached || config.sourceLabel).trim() || config.sourceLabel;
         }
 
@@ -1942,7 +1943,9 @@
 
             btn.dataset.localizedLabel = label;
 
-            const footer = btn.querySelector('div:last-child');
+            // Use 'div > div:last-child' to target the text footer inside buttonContent,
+            // not the outer buttonContent div itself (which would overwrite the image).
+            const footer = btn.querySelector('div > div:last-child');
             if (footer && btn.querySelector('img')) {
                 footer.textContent = label;
             } else {
@@ -1966,7 +1969,9 @@
                 return;
             }
 
-            const localizedLabel = await localizeTapOptionLabel(config.sourceLabel);
+            // Must supply 'en-US' as the source locale explicitly; otherwise translateTapRuntimeLine
+            // defaults sourceLocale to tapTargetLocale and short-circuits as a no-op.
+            const localizedLabel = await translateTapRuntimeLine(config.sourceLabel, tapTargetLocale, 'en-US');
             setTapSpecialButtonLabel(btn, localizedLabel || config.sourceLabel);
         }
 
@@ -4763,8 +4768,9 @@ VARIETY RULES:
                     const specialButtonConfig = getTapSpecialButtonConfig('something-else');
                     const specialButtonLabel = btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else');
                     console.log('📦 Loading image for Something Else button in Phrases');
-                    const cacheOnly = initialLoad;
-                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, cacheOnly));
+                    // Never use cacheOnly for Something Else — it is excluded from the pre-warm
+                    // batch so it must always be allowed to hit the server on a cache miss.
+                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, false));
                     buttonMappings.push({ btn, text: specialButtonLabel });
                     continue;
                 }
@@ -4789,6 +4795,11 @@ VARIETY RULES:
             for (let i = 0; i < imageUrls.length; i++) {
                 if (imageUrls[i]) {
                     applyImageToButton(buttonMappings[i].btn, imageUrls[i], buttonMappings[i].text);
+                    // Re-apply localized label for special buttons — translation may have resolved
+                    // after the image fetch, so the footer text needs to be corrected.
+                    if (buttonMappings[i].btn.dataset.specialButton) {
+                        localizeTapSpecialButton(buttonMappings[i].btn).catch(() => {});
+                    }
                 }
             }
         }
@@ -4914,8 +4925,9 @@ VARIETY RULES:
                     const specialButtonConfig = getTapSpecialButtonConfig('something-else');
                     const specialButtonLabel = btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else');
                     console.log('📦 Loading image for Something Else button in Words');
-                    const cacheOnly = initialLoad;
-                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, cacheOnly));
+                    // Never use cacheOnly for Something Else — it is excluded from the pre-warm
+                    // batch so it must always be allowed to hit the server on a cache miss.
+                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, false));
                     buttonMappings.push({ btn, text: specialButtonLabel });
                     continue;
                 }
@@ -4946,6 +4958,11 @@ VARIETY RULES:
             for (let i = 0; i < imageUrls.length; i++) {
                 if (imageUrls[i]) {
                     applyImageToButton(buttonMappings[i].btn, imageUrls[i], buttonMappings[i].text);
+                    // Re-apply localized label for special buttons — translation may have resolved
+                    // after the image fetch, so the footer text needs to be corrected.
+                    if (buttonMappings[i].btn.dataset.specialButton) {
+                        localizeTapSpecialButton(buttonMappings[i].btn).catch(() => {});
+                    }
                 }
             }
         }
