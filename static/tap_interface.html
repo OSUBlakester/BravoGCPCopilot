@@ -3562,7 +3562,7 @@
                 
                 currentPhraseOptions = options;
                 renderCategoryOptions(options, true); // Defer images
-                setTimeout(() => loadImagesForPhrases(options), 50);
+                setTimeout(() => loadImagesForPhrases(options, true), 50);
                 
             } catch (error) {
                 console.error('Error regenerating phrase options:', error);
@@ -4141,7 +4141,7 @@
 
             renderFreestyleOptions(renderedOptions, true);
             setTimeout(() => {
-                loadImagesForWords(renderedOptions);
+                loadImagesForWords(renderedOptions, true);
             }, 50);
         }
 
@@ -5666,8 +5666,8 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 // Load images for both phrases and words in parallel
                 setTimeout(() => {
                     Promise.all([
-                        phraseSectionEnabled ? loadImagesForPhrases(finalPhrasesOptions) : Promise.resolve(),
-                        wordsOptions ? loadImagesForWords(wordsOptions) : Promise.resolve()
+                        phraseSectionEnabled ? loadImagesForPhrases(finalPhrasesOptions, true) : Promise.resolve(),
+                        wordsOptions ? loadImagesForWords(wordsOptions, true) : Promise.resolve()
                     ]);
                 }, 50);
                 
@@ -5868,7 +5868,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 
                 // Batch load phrase images after render
                 if (phraseSectionEnabled) {
-                    setTimeout(() => loadImagesForPhrases(options), 50);
+                    setTimeout(() => loadImagesForPhrases(options, true), 50);
                 }
 
                 // Also update freestyle options with the selected category context 
@@ -6593,7 +6593,7 @@ ${getTapLanguageDirective()}
                             if (finalOptions && finalOptions.length > 0) {
                                 currentPhraseOptions = finalOptions;
                                 renderCategoryOptions(finalOptions, true); // Defer images
-                                setTimeout(() => loadImagesForPhrases(finalOptions), 50);
+                                setTimeout(() => loadImagesForPhrases(finalOptions, true), 50);
                             } else {
                                 console.warn('TAP: No follow-up options after filtering');
                             }
@@ -6709,14 +6709,14 @@ ${getTapLanguageDirective()}
                     const isAiBoard = resolvedParentBoardType === 'ai';
                     const options = await generateFreestyleOptionsForCategory(categoryPath, FreestyleWordOptions, wordsPrompt, instructionPrompt, isAiBoard);
                     renderFreestyleOptions(options, true); // Defer images for batch loading
-                    setTimeout(() => loadImagesForWords(options), 50);
+                    setTimeout(() => loadImagesForWords(options, true), 50);
                     return;
                 }
 
                 // Otherwise use the freestyle /word-options endpoint which uses navigation/build-space context
                 const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, FreestyleWordOptions, wordsPrompt);
                 renderFreestyleOptions(options, true); // Defer images for batch loading
-                setTimeout(() => loadImagesForWords(options), 50);
+                setTimeout(() => loadImagesForWords(options, true), 50);
             } catch (error) {
                 console.error('Error updating freestyle options with context:', error);
             }
