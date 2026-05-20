@@ -20721,219 +20721,286 @@ async def batch_symbol_search(
         
         aac_user_id = current_ids["aac_user_id"]
         account_id = current_ids["account_id"]
-        
-        logging.info(f"🔍 BATCH SEARCH: User ID: {aac_user_id}, Account ID: {account_id}")
-        
-        # Function to search for a single term (will be run in parallel)
-        def search_single_term(item):
-            if isinstance(item, dict):
-                text = item.get('text', '').strip()
-                keywords = item.get('keywords', [])
-            else:
-                text = str(item).strip()
-                keywords = []
-            
-            if not text:
-                logging.debug(f"🔍 BATCH: Empty text, skipping")
-                return (text, None)
-            
-            logging.info(f"🔍 BATCH: Searching for '{text}' with keywords {keywords}")
 
-            query_lower = _normalize_term(text)
+        logging.info(f"🔍 BATCH SEARCH: User ID: {aac_user_id}, Account ID: {account_id}")
+
+        normalize_search_term = None
+        if locale_base and locale_base != "en":
+            try:
+                from aac_inflection_utils import normalize_search_term as _normalize_search_term
+                normalize_search_term = _normalize_search_term
+            except Exception as inflection_import_error:
+                logging.debug(f"🔍 BATCH: inflection module unavailable: {inflection_import_error}")
+
+        def _chunked(values, size=10):
+            values_list = list(values)
+            for i in range(0, len(values_list), size):
+                chunk = values_list[i:i + size]
+                if chunk:
+                    yield chunk
+
+        def _expand_terms(text_value, keywords_value):
+            query_lower = _normalize_term(text_value)
             normalized_query = query_lower
-            if locale_base and locale_base != "en":
+            if normalize_search_term and query_lower:
                 try:
-                    from aac_inflection_utils import normalize_search_term
                     inflection_normalized = _normalize_term(normalize_search_term(query_lower, locale_base))
                     if inflection_normalized:
                         normalized_query = inflection_normalized
                 except Exception as inflection_error:
                     logging.debug(f"🔍 BATCH: inflection normalization skipped for '{query_lower}': {inflection_error}")
 
-            def _search_terms_for_item():
-                out = []
-                if query_lower:
-                    out.append(query_lower)
-                    if normalized_query and normalized_query != query_lower:
-                        out.append(normalized_query)
-                    for part in query_lower.split():
-                        part = part.strip().lower()
-                        if len(part) >= 3:
-                            out.append(part)
-                for kw in (keywords or [])[:3]:
-                    kw_norm = _normalize_term(kw)
-                    if kw_norm:
-                        out.append(kw_norm)
-                        for part in kw_norm.split():
-                            part = part.strip().lower()
-                            if len(part) >= 3:
-                                out.append(part)
-                deduped = []
-                seen = set()
-                for term in out:
-                    if term and term not in seen:
-                        seen.add(term)
-                        deduped.append(term)
-                return deduped[:8]
+            out = []
+            if query_lower:
+                out.append(query_lower)
+                if normalized_query and normalized_query != query_lower:
+                    out.append(normalized_query)
+                for part in query_lower.split():
+                    part = part.strip().lower()
+                    if len(part) >= 3:
+                        out.append(part)
 
-            search_terms = _search_terms_for_item()
-            
-            # Search BravoImages first using precomputed search_terms
-            images_ref = firestore_db.collection("aac_images")
-            logging.info(f"🔍 BATCH: Trying terms for '{text}': {search_terms}")
+            for kw in (keywords_value or [])[:3]:
+                kw_norm = _normalize_term(kw)
+                if not kw_norm:
+                    continue
+                out.append(kw_norm)
+                for part in kw_norm.split():
+                    part = part.strip().lower()
+                    if len(part) >= 3:
+                        out.append(part)
 
-            best_url = None
-            best_score = -1
-            candidate_docs = {}
+            deduped = []
+            seen = set()
+            for term in out:
+                if term and term not in seen:
+                    seen.add(term)
+                    deduped.append(term)
+            return query_lower, normalized_query, deduped[:10]
 
-            def _extract_localized_terms_for_doc(doc_data):
-                localized_terms = []
-                localized_tags_raw = doc_data.get('localized_tags')
-                localized_labels_raw = doc_data.get('localized_labels')
+        request_items = []
+        all_search_terms = set()
+        for item in terms:
+            if isinstance(item, dict):
+                text = str(item.get('text', '')).strip()
+                keywords = item.get('keywords', [])
+            else:
+                text = str(item).strip()
+                keywords = []
 
-                if isinstance(localized_tags_raw, dict):
-                    for locale_key, locale_tags in localized_tags_raw.items():
-                        locale_key_norm = _normalize_term(locale_key)
-                        if locale_key_norm not in allowed_locale_keys:
-                            continue
-                        if isinstance(locale_tags, list):
-                            localized_terms.extend([_normalize_term(tag) for tag in locale_tags if _normalize_term(tag)])
+            if not text:
+                continue
 
-                if isinstance(localized_labels_raw, dict):
-                    for locale_key, locale_label in localized_labels_raw.items():
-                        locale_key_norm = _normalize_term(locale_key)
-                        if locale_key_norm not in allowed_locale_keys:
-                            continue
-                        label_norm = _normalize_term(locale_label)
-                        if label_norm:
-                            localized_terms.append(label_norm)
+            query_lower, normalized_query, search_terms = _expand_terms(text, keywords)
+            if not search_terms and query_lower:
+                search_terms = [query_lower]
 
-                return localized_terms
+            request_items.append({
+                "text": text,
+                "query_lower": query_lower,
+                "normalized_query": normalized_query,
+                "search_terms": search_terms,
+            })
+            for term in search_terms:
+                if term:
+                    all_search_terms.add(term)
 
-            for idx, term in enumerate(search_terms):
+        if not request_items:
+            return JSONResponse(content={"results": {}})
+
+        images_ref = firestore_db.collection("aac_images")
+        candidate_docs = {}
+
+        # Grouped query path 1: precomputed normalized search terms.
+        for chunk in _chunked(all_search_terms, 10):
+            try:
+                docs = list(images_ref.where("search_terms", "array_contains_any", chunk).limit(300).stream())
+                for doc in docs:
+                    data = doc.to_dict() or {}
+                    if data.get("source") == "bravo_images" and data.get("image_url"):
+                        candidate_docs[doc.id] = data
+            except Exception as chunk_error:
+                logging.debug(f"🔍 BATCH: search_terms chunk query failed ({chunk_error})")
+
+        # Grouped query path 2: localized tags fallback.
+        if locale_base and locale_base != "en":
+            localized_tags_field = f"localized_tags.{locale_base}"
+            for chunk in _chunked(all_search_terms, 10):
                 try:
-                    term_norm = _normalize_term(term)
-                    if not term_norm:
-                        continue
-
-                    # Preferred path: precomputed normalized search terms
-                    search_term_docs = list(images_ref.where("search_terms", "array_contains", term_norm).limit(8).stream())
-                    for doc in search_term_docs:
-                        candidate_docs[doc.id] = doc
-
-                    # Locale-aware path: localized tags / labels
-                    if locale_base and locale_base != "en":
-                        localized_tags_field = f"localized_tags.{locale_base}"
-                        localized_labels_field = f"localized_labels.{locale_base}"
-
-                        locale_tag_docs = list(
-                            images_ref.where("source", "==", "bravo_images").where(localized_tags_field, "array_contains", term_norm).limit(6).stream()
-                        )
-                        for doc in locale_tag_docs:
-                            candidate_docs[doc.id] = doc
-
-                        locale_label_docs = list(
-                            images_ref.where("source", "==", "bravo_images").where(localized_labels_field, "==", term_norm).limit(4).stream()
-                        )
-                        for doc in locale_label_docs:
-                            candidate_docs[doc.id] = doc
-
-                    # Legacy fallback path: original tags field
-                    legacy_docs = list(
-                        images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", term_norm).limit(6).stream()
+                    docs = list(
+                        images_ref.where("source", "==", "bravo_images").where(
+                            localized_tags_field, "array_contains_any", chunk
+                        ).limit(250).stream()
                     )
-                    for doc in legacy_docs:
-                        candidate_docs[doc.id] = doc
-                except Exception as e:
-                    logging.error(f"🔍 BATCH: Query failed for term '{term}': {e}")
-                    continue
+                    for doc in docs:
+                        data = doc.to_dict() or {}
+                        if data.get("image_url"):
+                            candidate_docs[doc.id] = data
+                except Exception as chunk_error:
+                    logging.debug(f"🔍 BATCH: localized_tags chunk query failed ({chunk_error})")
 
-            for doc in candidate_docs.values():
-                image = doc.to_dict() or {}
-                if image.get('source') != 'bravo_images':
-                    continue
+        # Grouped query path 3: legacy tags fallback.
+        for chunk in _chunked(all_search_terms, 10):
+            try:
+                docs = list(
+                    images_ref.where("source", "==", "bravo_images").where(
+                        "tags", "array_contains_any", chunk
+                    ).limit(250).stream()
+                )
+                for doc in docs:
+                    data = doc.to_dict() or {}
+                    if data.get("image_url"):
+                        candidate_docs[doc.id] = data
+            except Exception as chunk_error:
+                logging.debug(f"🔍 BATCH: legacy tags chunk query failed ({chunk_error})")
 
-                image_url = image.get('image_url')
+        def _extract_localized_terms_for_doc(doc_data):
+            localized_terms = []
+            localized_tags_raw = doc_data.get('localized_tags')
+            localized_labels_raw = doc_data.get('localized_labels')
+
+            if isinstance(localized_tags_raw, dict):
+                for locale_key, locale_tags in localized_tags_raw.items():
+                    locale_key_norm = _normalize_term(locale_key)
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    if isinstance(locale_tags, list):
+                        localized_terms.extend([_normalize_term(tag) for tag in locale_tags if _normalize_term(tag)])
+
+            if isinstance(localized_labels_raw, dict):
+                for locale_key, locale_label in localized_labels_raw.items():
+                    locale_key_norm = _normalize_term(locale_key)
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    label_norm = _normalize_term(locale_label)
+                    if label_norm:
+                        localized_terms.append(label_norm)
+
+            return localized_terms
+
+        processed_candidates = []
+        term_index = {}
+        for image_id, image in candidate_docs.items():
+            tags = [_normalize_term(t) for t in image.get('tags', []) if _normalize_term(t)]
+            concept = _normalize_term(image.get('concept'))
+            subconcept = _normalize_term(image.get('subconcept'))
+            localized_terms = _extract_localized_terms_for_doc(image)
+            searchable_terms = set([*tags, concept, subconcept, *localized_terms])
+
+            record = {
+                "id": image_id,
+                "url": image.get("image_url"),
+                "tags": tags,
+                "concept": concept,
+                "subconcept": subconcept,
+                "searchable_terms": searchable_terms,
+            }
+            processed_candidates.append(record)
+
+            for term in searchable_terms:
+                if not term:
+                    continue
+                if term not in term_index:
+                    term_index[term] = set()
+                term_index[term].add(image_id)
+
+        candidate_by_id = {c["id"]: c for c in processed_candidates}
+
+        # Load active custom images once, then score in-memory as fallback.
+        custom_candidates = []
+        custom_term_index = {}
+        try:
+            custom_ref = firestore_db.collection("accounts").document(account_id).collection("profiles").document(aac_user_id).collection("custom_images")
+            custom_docs = list(custom_ref.where("active", "==", True).limit(500).stream())
+            for doc in custom_docs:
+                custom_image = doc.to_dict() or {}
+                image_url = custom_image.get('image_url')
                 if not image_url:
                     continue
 
-                tags = [_normalize_term(t) for t in image.get('tags', []) if _normalize_term(t)]
-                concept = _normalize_term(image.get('concept'))
-                subconcept = _normalize_term(image.get('subconcept'))
-                localized_terms = _extract_localized_terms_for_doc(image)
-                searchable_terms = set([*tags, concept, subconcept, *localized_terms])
+                tags = [_normalize_term(t) for t in custom_image.get('tags', []) if _normalize_term(t)]
+                concept = _normalize_term(custom_image.get('concept'))
+                subconcept = _normalize_term(custom_image.get('subconcept'))
+                aliases = [_normalize_term(a) for a in custom_image.get('aliases', []) if _normalize_term(a)]
+                localized_terms = _extract_localized_terms_for_doc(custom_image)
+                searchable_terms = set([*tags, *aliases, concept, subconcept, *localized_terms])
 
-                score = 0
-
-                # Highest confidence: direct concept/subconcept matches.
-                if query_lower and query_lower == subconcept:
-                    score += 45
-                if normalized_query and normalized_query == subconcept:
-                    score += 45
-                if query_lower and query_lower == concept:
-                    score += 35
-                if normalized_query and normalized_query == concept:
-                    score += 35
-
-                # Weighted by search-term priority.
-                for idx, term in enumerate(search_terms):
-                    term_norm = _normalize_term(term)
-                    if not term_norm:
+                rec = {
+                    "id": doc.id,
+                    "url": image_url,
+                    "tags": tags,
+                    "concept": concept,
+                    "subconcept": subconcept,
+                    "searchable_terms": searchable_terms,
+                }
+                custom_candidates.append(rec)
+                for term in searchable_terms:
+                    if not term:
                         continue
-                    if term_norm in searchable_terms:
-                        score += max(12, 30 - (idx * 3))
-                    if tags and tags[0] == term_norm:
-                        score += 10
+                    if term not in custom_term_index:
+                        custom_term_index[term] = set()
+                    custom_term_index[term].add(doc.id)
+        except Exception as custom_load_error:
+            logging.debug(f"🔍 BATCH: failed to preload custom images ({custom_load_error})")
 
+        custom_by_id = {c["id"]: c for c in custom_candidates}
+
+        def _score_candidate(item_rec, cand):
+            score = 0
+            query_lower = item_rec["query_lower"]
+            normalized_query = item_rec["normalized_query"]
+            search_terms = item_rec["search_terms"]
+
+            if query_lower and query_lower == cand["subconcept"]:
+                score += 45
+            if normalized_query and normalized_query == cand["subconcept"]:
+                score += 45
+            if query_lower and query_lower == cand["concept"]:
+                score += 35
+            if normalized_query and normalized_query == cand["concept"]:
+                score += 35
+
+            for idx, term in enumerate(search_terms):
+                if term in cand["searchable_terms"]:
+                    score += max(12, 30 - (idx * 3))
+                if cand["tags"] and cand["tags"][0] == term:
+                    score += 10
+            return score
+
+        results = {}
+        for item_rec in request_items:
+            text = item_rec["text"]
+
+            candidate_ids = set()
+            for term in item_rec["search_terms"]:
+                candidate_ids.update(term_index.get(term, set()))
+
+            best_url = None
+            best_score = -1
+            for candidate_id in candidate_ids:
+                cand = candidate_by_id.get(candidate_id)
+                if not cand:
+                    continue
+                score = _score_candidate(item_rec, cand)
                 if score > best_score:
                     best_score = score
-                    best_url = image_url
+                    best_url = cand["url"]
 
-            if best_url:
-                logging.info(f"🔍 BATCH: ✅ Found image for '{text}' via search_terms")
-                return (text, best_url)
-            
-            logging.info(f"🔍 BATCH: ❌ No image found for '{text}' in BravoImages")
-            
-            # If BravoImages didn't match, try custom images
-            try:
-                custom_ref = firestore_db.collection("accounts").document(account_id).collection("profiles").document(aac_user_id).collection("custom_images")
-                custom_query = custom_ref.where("active", "==", True).where("tags", "array_contains", query_lower).limit(3)
-                custom_docs = list(custom_query.stream())
-                
-                if custom_docs:
-                    for custom_doc in custom_docs:
-                        custom_image = custom_doc.to_dict() or {}
-                        image_url = custom_image.get('image_url')
-                        if image_url:
-                            logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
-                            return (text, image_url)
-            except Exception as e:
-                logging.error(f"🔍 BATCH: Custom search failed for '{query_lower}': {e}")
-            
-            logging.info(f"🔍 BATCH: ❌ No custom image found for '{text}'")
-            return (text, None)
-        
-        # Run all searches in parallel using ThreadPoolExecutor
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import asyncio
-        
-        results = {}
-        
-        # Use ThreadPoolExecutor to parallelize Firestore queries
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            # Submit all tasks
-            future_to_term = {executor.submit(search_single_term, item): item for item in terms}
-            
-            # Collect results as they complete
-            for future in as_completed(future_to_term):
-                try:
-                    text, image_url = future.result()
-                    if text:
-                        results[text] = image_url
-                except Exception as e:
-                    logging.error(f"Error in batch search task: {e}")
+            # Custom image fallback for unmatched terms.
+            if not best_url and custom_candidates:
+                custom_ids = set()
+                for term in item_rec["search_terms"]:
+                    custom_ids.update(custom_term_index.get(term, set()))
+                for custom_id in custom_ids:
+                    cand = custom_by_id.get(custom_id)
+                    if not cand:
+                        continue
+                    score = _score_candidate(item_rec, cand)
+                    if score > best_score:
+                        best_score = score
+                        best_url = cand["url"]
+
+            results[text] = best_url
         
         logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results out of {len(terms)} terms")
         logging.info(f"🔍 BATCH SEARCH: Results summary: {list(results.keys())[:10]}")
