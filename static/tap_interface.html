@@ -4620,6 +4620,41 @@ VARIETY RULES:
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
 
+                    // 🚀 Pre-warm server cache for terms that missed locally.
+                    // Fire this non-blocking so images appear as soon as the server responds
+                    // instead of waiting for the 2-3 second background pass setTimeout.
+                    const serverMisses = [];
+                    for (let i = 0; i < options.length; i++) {
+                        const option = options[i];
+                        const speechText = typeof option === 'object' ? option.option : option;
+                        if (!speechText || speechText === 'Something Else') continue;
+                        const ck = `tap_${String(speechText).trim().toLowerCase()}`;
+                        const hit = window.symbolImageCache.get(ck);
+                        if (!hit || !hit.imageUrl) {
+                            const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                            serverMisses.push({ text: speechText, keywords: phraseKeywords });
+                        }
+                    }
+                    if (serverMisses.length > 0) {
+                        console.log(`🌐 Pre-warming server for ${serverMisses.length} phrase misses (non-blocking)...`);
+                        batchLoadImages(serverMisses).then(() => {
+                            // Apply newly-fetched images directly to already-rendered buttons
+                            const currentButtons = llmStaticOptions.querySelectorAll('.option-button');
+                            for (let i = 0; i < Math.min(options.length, currentButtons.length); i++) {
+                                const btn = currentButtons[i];
+                                if (btn.querySelector('img')) continue;
+                                const option = options[i];
+                                const speechText = typeof option === 'object' ? option.option : option;
+                                if (!speechText) continue;
+                                const ck = `tap_${String(speechText).trim().toLowerCase()}`;
+                                const cached = window.symbolImageCache.get(ck);
+                                if (cached && cached.imageUrl) {
+                                    applyImageToButton(btn, cached.imageUrl, btn.textContent.trim());
+                                }
+                            }
+                        }).catch(() => {});
+                    }
+
                 } catch (error) {
                     console.error('Error batch searching local library:', error);
                 }
@@ -4729,6 +4764,42 @@ VARIETY RULES:
                         }
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
+
+                    // 🚀 Pre-warm server cache for terms that missed locally.
+                    // Fire this non-blocking so images appear as soon as the server responds
+                    // instead of waiting for the 2-3 second background pass setTimeout.
+                    const serverMisses = [];
+                    for (const option of options) {
+                        const text = typeof option === 'object' ? (option.text || option.option) : option;
+                        if (!text || text === 'Something Else') continue;
+                        const ck = `tap_${String(text).trim().toLowerCase()}`;
+                        const hit = window.symbolImageCache.get(ck);
+                        if (!hit || !hit.imageUrl) {
+                            const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                            serverMisses.push({ text, keywords });
+                        }
+                    }
+                    if (serverMisses.length > 0) {
+                        console.log(`🌐 Pre-warming server for ${serverMisses.length} word misses (non-blocking)...`);
+                        batchLoadImages(serverMisses).then(() => {
+                            // Apply newly-fetched images directly to already-rendered buttons
+                            const currentButtons = Array.from(freestyleOptions.querySelectorAll('.freestyle-button'));
+                            for (const btn of currentButtons) {
+                                if (btn.querySelector('img') || btn.classList.contains('sight-word-button')) continue;
+                                if (btn.dataset.specialButton === 'something-else') continue;
+                                const optIdx = Number(btn.dataset.optionIndex);
+                                if (Number.isNaN(optIdx) || optIdx < 0 || optIdx >= options.length) continue;
+                                const option = options[optIdx];
+                                const text = typeof option === 'object' ? (option.text || option.option) : option;
+                                if (!text) continue;
+                                const ck = `tap_${String(text).trim().toLowerCase()}`;
+                                const cached = window.symbolImageCache.get(ck);
+                                if (cached && cached.imageUrl) {
+                                    applyImageToButton(btn, cached.imageUrl, btn.textContent.trim());
+                                }
+                            }
+                        }).catch(() => {});
+                    }
 
                 } catch (error) {
                     console.error('Error batch searching local library:', error);
