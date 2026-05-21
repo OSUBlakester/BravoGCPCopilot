@@ -9900,6 +9900,96 @@ async def translate_pages_endpoint(
     ]):
         raise HTTPException(status_code=400, detail="Select at least one field to translate")
 
+    if request_data.scope == "tap_boards":
+        if not request_data.include_llm_query:
+            raise HTTPException(status_code=400, detail="Tap boards translation requires AI query prompts")
+
+        tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not isinstance(tap_config_data, dict):
+            raise HTTPException(status_code=404, detail="Tap interface configuration not found")
+
+        tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
+        tap_config_data, _ = ensure_tap_boards_structure(tap_config_data)
+
+        boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
+        prompt_jobs: List[Dict[str, Any]] = []
+        for board in boards:
+            if not isinstance(board, dict):
+                continue
+
+            llm_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+            if llm_prompt:
+                prompt_jobs.append({
+                    "board": board,
+                    "text": llm_prompt,
+                })
+
+        if not prompt_jobs:
+            return JSONResponse(content={
+                "message": "No Tap board prompts found.",
+                "scope": request_data.scope,
+                "pages_processed": 0,
+                "strings_seen": 0,
+                "unique_strings": 0,
+                "strings_changed": 0,
+                "tap_boards_prompts_changed": 0,
+                "special_pages_changed": 0,
+            })
+
+        unique_prompts: List[str] = []
+        prompt_to_index: Dict[str, int] = {}
+        for job in prompt_jobs:
+            key = job["text"]
+            if key not in prompt_to_index:
+                prompt_to_index[key] = len(unique_prompts)
+                unique_prompts.append(key)
+            job["unique_index"] = prompt_to_index[key]
+
+        translated_prompts: List[str] = [""] * len(unique_prompts)
+        batch_size = 60
+        try:
+            for start_idx in range(0, len(unique_prompts), batch_size):
+                batch = unique_prompts[start_idx:start_idx + batch_size]
+                translated_batch = await _translate_lines_with_models(
+                    lines=batch,
+                    source_locale=source_locale,
+                    target_locale=target_locale
+                )
+                if len(translated_batch) != len(batch):
+                    raise ValueError("Tap board prompt translation returned unexpected line count")
+
+                for offset, translated_text in enumerate(translated_batch):
+                    translated_prompts[start_idx + offset] = str(translated_text or "").strip()
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error(f"Error translating tap board prompts for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to translate tap board prompts")
+
+        tap_boards_prompts_changed = 0
+        for job in prompt_jobs:
+            translated_value = _sanitize_translated_text(translated_prompts[job["unique_index"]])
+            if translated_value and translated_value != job["text"]:
+                board = job["board"]
+                board["llm_prompt"] = translated_value
+                if "llm_query" in board:
+                    board["llm_query"] = translated_value
+                tap_boards_prompts_changed += 1
+
+        tap_config_data["updated_at"] = dt.now().isoformat()
+        await save_tap_nav_config(account_id, aac_user_id, tap_config_data)
+
+        return JSONResponse(content={
+            "message": "Tap board prompt translation complete.",
+            "scope": request_data.scope,
+            "pages_processed": 0,
+            "strings_seen": len(prompt_jobs),
+            "unique_strings": len(unique_prompts),
+            "strings_changed": tap_boards_prompts_changed,
+            "tap_boards_prompts_changed": tap_boards_prompts_changed,
+            "special_pages_changed": 0,
+        })
+
     pages = await load_pages_from_file(account_id, aac_user_id)
     if not isinstance(pages, list):
         raise HTTPException(status_code=500, detail="Invalid pages data")

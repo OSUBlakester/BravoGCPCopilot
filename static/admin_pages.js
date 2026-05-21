@@ -1474,11 +1474,16 @@ async function runPageTranslation() {
         return;
     }
 
+    if (scope === 'tap_boards' && !includeLlmQuery) {
+        setTranslateStatus('Tap boards translation requires AI query prompts to be selected.', 'error');
+        return;
+    }
+
     const payload = {
         source_locale: sourceLocaleRaw || null,
         target_locale: targetLocale,
-        scope: scope === 'all' ? 'all' : 'current',
-        page_name: scope === 'all' ? null : selectPage.value,
+        scope: scope === 'tap_boards' ? 'tap_boards' : (scope === 'all' ? 'all' : 'current'),
+        page_name: scope === 'all' || scope === 'tap_boards' ? null : selectPage.value,
         include_display_name: includeDisplayName,
         include_button_text: includeButtonText,
         include_speech_phrase: includeSpeechPhrase,
@@ -1515,7 +1520,10 @@ async function runPageTranslation() {
         const specialPagesSuffix = specialPagesChanged > 0
             ? ` Included ${specialPagesChanged} special page bundle(s).`
             : '';
-        setTranslateStatus(`Translation complete. Updated ${changed} field(s) across ${pagesProcessed} page(s).${specialPagesSuffix}`, 'success');
+        const tapBoardsSuffix = Number(result?.tap_boards_prompts_changed || 0) > 0
+            ? ` Updated ${Number(result.tap_boards_prompts_changed)} Tap board prompt(s).`
+            : '';
+        setTranslateStatus(`Translation complete. Updated ${changed} field(s) across ${pagesProcessed} page(s).${specialPagesSuffix}${tapBoardsSuffix}`, 'success');
 
         setTimeout(() => {
             closeTranslatePagesModal();
