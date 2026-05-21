@@ -5361,7 +5361,6 @@ VARIETY RULES:
 
             const wordsPrompt = category.words_prompt
                 || linkedBoard?.words_prompt
-                || llmPrompt
                 || null;
 
             const boardType = String(
@@ -5380,6 +5379,22 @@ VARIETY RULES:
                 words_prompt: wordsPrompt,
                 board_word_options: boardWordOptions,
             };
+        }
+
+        function isInstructionStyleWordsPrompt(prompt) {
+            const normalized = String(prompt || '').trim();
+            if (!normalized) return false;
+            const lowered = normalized.toLowerCase();
+            return (
+                normalized.length > 70
+                || lowered.includes('generate ')
+                || lowered.includes('include ')
+                || lowered.includes('return only')
+                || lowered.includes('json array')
+                || lowered.includes('exactly ')
+                || lowered.includes('llm')
+                || lowered.includes('options')
+            );
         }
 
         function isStartupEligibleCategory(category) {
@@ -7740,7 +7755,7 @@ ${getTapLanguageDirective()}
                                 if (!announcementText && isNavigationButton) {
                                     phraseToAdd = '';
                                     phraseToAnnounce = '';
-                                } else if (currentWordsPrompt) {
+                                } else if (currentWordsPrompt && !isInstructionStyleWordsPrompt(currentWordsPrompt)) {
                                     phraseToAdd = `${currentWordsPrompt} ${text}`;
                                     phraseToAnnounce = phraseToAdd;
                                 } else {
@@ -8023,7 +8038,7 @@ ${getTapLanguageDirective()}
                             if (!announcementText && isNavigationButton) {
                                 phraseToAdd = '';
                                 phraseToAnnounce = '';
-                            } else if (currentWordsPrompt) {
+                            } else if (currentWordsPrompt && !isInstructionStyleWordsPrompt(currentWordsPrompt)) {
                                 phraseToAdd = `${currentWordsPrompt} ${text}`;
                                 phraseToAnnounce = phraseToAdd;
                                 console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
