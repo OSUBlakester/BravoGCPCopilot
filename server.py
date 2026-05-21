@@ -10042,6 +10042,75 @@ async def translate_pages_endpoint(
 
     await save_pages_to_file(account_id, aac_user_id, pages)
 
+    tap_boards_prompts_changed = 0
+    selected_page_token = str(selected_page_name or "").strip().lower()
+    should_translate_tap_board_prompts = (
+        request_data.include_llm_query and (
+            request_data.scope == "all"
+            or selected_page_token in {"tap", "tap interface", "tap_interface", "tap boards", "tap board"}
+        )
+    )
+    if should_translate_tap_board_prompts:
+        tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if isinstance(tap_config_data, dict):
+            tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
+            tap_config_data, _ = ensure_tap_boards_structure(tap_config_data)
+
+            boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
+            prompt_jobs: List[Dict[str, Any]] = []
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+
+                llm_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+                if llm_prompt:
+                    prompt_jobs.append({
+                        "board": board,
+                        "text": llm_prompt,
+                    })
+
+            if prompt_jobs:
+                unique_prompts: List[str] = []
+                prompt_to_index: Dict[str, int] = {}
+                for job in prompt_jobs:
+                    key = job["text"]
+                    if key not in prompt_to_index:
+                        prompt_to_index[key] = len(unique_prompts)
+                        unique_prompts.append(key)
+                    job["unique_index"] = prompt_to_index[key]
+
+                translated_prompts: List[str] = [""] * len(unique_prompts)
+                for start_idx in range(0, len(unique_prompts), batch_size):
+                    batch = unique_prompts[start_idx:start_idx + batch_size]
+                    translated_batch = await _translate_lines_with_models(
+                        lines=batch,
+                        source_locale=source_locale,
+                        target_locale=target_locale
+                    )
+                    if len(translated_batch) != len(batch):
+                        raise ValueError("Tap board prompt translation returned unexpected line count")
+
+                    for offset, translated_text in enumerate(translated_batch):
+                        translated_prompts[start_idx + offset] = str(translated_text or "").strip()
+
+                for job in prompt_jobs:
+                    translated_value = _sanitize_translated_text(translated_prompts[job["unique_index"]])
+                    if not translated_value:
+                        continue
+
+                    board = job["board"]
+                    previous_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+                    if translated_value != previous_prompt:
+                        board["llm_prompt"] = translated_value
+                        if "llm_query" in board:
+                            board["llm_query"] = translated_value
+                        tap_boards_prompts_changed += 1
+
+                if tap_boards_prompts_changed > 0:
+                    tap_config_data["updated_at"] = dt.now().isoformat()
+                    await save_tap_nav_config(account_id, aac_user_id, tap_config_data)
+                    strings_changed += tap_boards_prompts_changed
+
     special_pages_changed = 0
     should_translate_freestyle_ui = request_data.scope == "all" or selected_page_name == "freestyle"
     if should_translate_freestyle_ui:
@@ -10078,7 +10147,6 @@ async def translate_pages_endpoint(
             "specialPageTranslations": existing_special
         })
 
-    selected_page_token = str(selected_page_name or "").strip().lower()
     should_translate_games_ui = (
         request_data.scope == "all"
         or selected_page_token in {"games", "guess who", "guess where", "guess what"}
@@ -10158,6 +10226,7 @@ async def translate_pages_endpoint(
         "strings_seen": len(translation_jobs),
         "unique_strings": len(unique_texts),
         "strings_changed": strings_changed,
+        "tap_boards_prompts_changed": tap_boards_prompts_changed,
         "special_pages_changed": special_pages_changed
     })
     
@@ -22033,6 +22102,7 @@ def ensure_tap_boards_structure(
     previous_menu = config_data.get('boards_menu')
     previous_settings = config_data.get('board_settings')
     previous_version = config_data.get('boards_schema_version')
+    previous_buttons = config_data.get('buttons')
 
     existing_boards = previous_boards
     if not isinstance(existing_boards, list) and isinstance(existing_config, dict):
@@ -22310,6 +22380,13 @@ def ensure_tap_boards_structure(
         'home_board_id': home_board_id,
     }
 
+    # Keep legacy buttons synchronized to the canonical boards/menu structure so persisted
+    # tap_interface_config remains consistent regardless of menu depth.
+    canonical_buttons = compose_legacy_buttons_from_boards_menu({
+        'boards': merged_boards,
+        'boards_menu': merged_menu,
+    })
+
     changed = False
     if previous_boards != merged_boards:
         config_data['boards'] = merged_boards
@@ -22322,6 +22399,9 @@ def ensure_tap_boards_structure(
         changed = True
     if previous_version != 1:
         config_data['boards_schema_version'] = 1
+        changed = True
+    if previous_buttons != canonical_buttons:
+        config_data['buttons'] = canonical_buttons
         changed = True
 
     return config_data, changed
