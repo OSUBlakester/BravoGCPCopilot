@@ -6812,11 +6812,12 @@ ${getTapLanguageDirective()}
                 // Prepare build space content
                 let buildSpaceContent = buildSpace.value || "";
 
-                // Check cache — use category path + build space as cache key
-                // Only cache when build space is empty (category-level browsing, not mid-sentence)
-                const cacheKey = `${categoryFullPath}::${count}::${wordsPrompt || ''}::${instructionPrompt || ''}::${currentMood || ''}`;
-                if (!buildSpaceContent && categoryWordsCache[cacheKey]) {
-                    const cachedWords = categoryWordsCache[cacheKey];
+                // Check cache for pure category browsing (empty build-space only).
+                // Use a stable key so harmless prompt/mood variance does not fragment cache hits.
+                const normalizedCategoryKey = String(categoryFullPath || '').trim().toLowerCase();
+                const browseCacheKey = `${getEffectiveTapWordLocale()}::${normalizedCategoryKey}::${desiredCount}`;
+                if (!buildSpaceContent && categoryWordsCache[browseCacheKey]) {
+                    const cachedWords = categoryWordsCache[browseCacheKey];
                     if (Array.isArray(cachedWords) && cachedWords.length >= desiredCount) {
                         console.log('⚡ Category words cache hit for:', categoryFullPath);
                         return cachedWords;
@@ -6828,7 +6829,7 @@ ${getTapLanguageDirective()}
                             ...cachedWords,
                             ...getCategoryFallbackWords(categoryFullPath, desiredCount * 2)
                         ]).slice(0, desiredCount);
-                        categoryWordsCache[cacheKey] = toppedUp;
+                        categoryWordsCache[browseCacheKey] = toppedUp;
                         return toppedUp;
                     }
                 }
@@ -6913,7 +6914,7 @@ ${getTapLanguageDirective()}
                         }
                         // Cache when build space was empty (pure category browsing)
                         if (!buildSpaceContent && words.length > 0) {
-                            categoryWordsCache[cacheKey] = words;
+                            categoryWordsCache[browseCacheKey] = words;
                             console.log('⚡ Category words cached for:', categoryFullPath);
                         }
                         return words;
