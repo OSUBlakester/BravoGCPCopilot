@@ -5337,6 +5337,51 @@ VARIETY RULES:
             return findCategoryByLabel('Home', categories);
         }
 
+        function getEffectiveCategoryConfig(category, fallbackBoardType = null) {
+            if (!category || typeof category !== 'object') {
+                return category;
+            }
+
+            const boardId = String(category.board_id || category.id || '').trim();
+            const linkedBoard = boardId ? boardsById[boardId] : null;
+
+            const boardWordOptions = (Array.isArray(category.board_word_options) && category.board_word_options.length > 0)
+                ? category.board_word_options
+                : buildWordOptionsFromBoard(linkedBoard);
+
+            const staticOptions = category.static_options
+                || linkedBoard?.static_options
+                || (boardWordOptions.length > 0 ? boardWordOptions.map(opt => opt.text).filter(Boolean).join(', ') : null)
+                || null;
+
+            const llmPrompt = category.llm_prompt
+                || category.llm_query
+                || linkedBoard?.llm_prompt
+                || null;
+
+            const wordsPrompt = category.words_prompt
+                || linkedBoard?.words_prompt
+                || llmPrompt
+                || null;
+
+            const boardType = String(
+                category.board_type
+                || linkedBoard?.board_type
+                || fallbackBoardType
+                || ''
+            ).toLowerCase() || null;
+
+            return {
+                ...category,
+                board_id: category.board_id || linkedBoard?.id || null,
+                board_type: boardType,
+                static_options: staticOptions,
+                llm_prompt: llmPrompt,
+                words_prompt: wordsPrompt,
+                board_word_options: boardWordOptions,
+            };
+        }
+
         function isStartupEligibleCategory(category) {
             if (!category || typeof category !== 'object') {
                 return false;
@@ -5629,7 +5674,7 @@ VARIETY RULES:
                 event.target.classList.add('active');
             }
             
-            currentCategory = category;
+            currentCategory = getEffectiveCategoryConfig(category);
             
             // If category has children, show modal (pass parent path so nested selection builds full path)
             if (category.children && category.children.length > 0) {
@@ -5671,27 +5716,27 @@ VARIETY RULES:
 
             try {
                 // Store the words prompt and instruction prompt globally for word selection
-                currentWordsPrompt = category.words_prompt || null;
-                currentInstructionPrompt = category.llm_prompt || null;
+                currentWordsPrompt = currentCategory.words_prompt || null;
+                currentInstructionPrompt = currentCategory.llm_prompt || null;
 
                 console.log('⏱️ Starting parallel fetch at:', Date.now());
 
                 // Resolve board_type up front — needed by both phrases and words sections
                 const resolvedBoardType = String(
-                    category.board_type
-                    || (category.board_id && boardsById[String(category.board_id)]?.board_type)
+                    currentCategory.board_type
+                    || (currentCategory.board_id && boardsById[String(currentCategory.board_id)]?.board_type)
                     || ''
                 ).toLowerCase();
                 const isCategoryAiBoard = resolvedBoardType === 'ai';
-                const isCategoryHomeAiBoard = shouldUseDefaultHomeStarterWords(category) && isCategoryAiBoard;
+                const isCategoryHomeAiBoard = shouldUseDefaultHomeStarterWords(currentCategory) && isCategoryAiBoard;
 
                 // Start both promises immediately - they will execute concurrently
                 let phrasesPromise, wordsPromise;
                 
                 // PHRASES SECTION LOGIC
-                if (phraseSectionEnabled && category.llm_prompt) {
+                if (phraseSectionEnabled && currentCategory.llm_prompt) {
                     console.log('⏱️ Starting phrases fetch with prompt at:', Date.now());
-                    phrasesPromise = generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
+                    phrasesPromise = generateGridpageLLMOptions(currentCategory.llm_prompt, LLMOptions);
                 } else if (phraseSectionEnabled && isCategoryHomeAiBoard) {
                     // AI-defined Home board with no explicit llm_prompt — use communication-starter prompt
                     // rather than the literal "Generate phrases related to Home" fallback which produces house nouns
@@ -5704,7 +5749,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     phrasesPromise = generateGridpageLLMOptions(homeStarterPhrasesPrompt, LLMOptions);
                 } else if (phraseSectionEnabled) {
                     console.log('⏱️ Starting phrases fetch with fallback prompt at:', Date.now());
-                    const fallbackPrompt = `Generate phrases related to ${category.label}`;
+                    const fallbackPrompt = `Generate phrases related to ${currentCategory.label}`;
                     phrasesPromise = generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
                 } else {
                     phrasesPromise = Promise.resolve([]);
@@ -5712,19 +5757,19 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
                 // WORDS SECTION LOGIC
                 console.log('⏱️ Starting words fetch at:', Date.now());
-                console.log('[DEBUG] board_type resolved:', resolvedBoardType, 'board_id:', category.board_id, 'isAiBoard:', isCategoryAiBoard);
-                if (Array.isArray(category.board_word_options) && category.board_word_options.length > 0 && !isCategoryAiBoard) {
-                    console.log('Using structured board word options for Words section:', category.board_word_options);
-                    wordsPromise = Promise.resolve(category.board_word_options);
-                } else if (category.static_options && !isCategoryAiBoard) {
-                    console.log('Using static options for Words section:', category.static_options);
-                    const staticWords = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                console.log('[DEBUG] board_type resolved:', resolvedBoardType, 'board_id:', currentCategory.board_id, 'isAiBoard:', isCategoryAiBoard);
+                if (Array.isArray(currentCategory.board_word_options) && currentCategory.board_word_options.length > 0 && !isCategoryAiBoard) {
+                    console.log('Using structured board word options for Words section:', currentCategory.board_word_options);
+                    wordsPromise = Promise.resolve(currentCategory.board_word_options);
+                } else if (currentCategory.static_options && !isCategoryAiBoard) {
+                    console.log('Using static options for Words section:', currentCategory.static_options);
+                    const staticWords = currentCategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
-                } else if (shouldUseDefaultHomeStarterWords(category) && isCategoryAiBoard) {
+                } else if (shouldUseDefaultHomeStarterWords(currentCategory) && isCategoryAiBoard) {
                     console.log('Using default Home starter prompt for Words section');
                     wordsPromise = generateDefaultHomeStarterWords(FreestyleWordOptions);
                 } else {
-                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, FreestyleWordOptions, category.words_prompt, category.llm_prompt, isCategoryAiBoard);
+                    wordsPromise = generateFreestyleOptionsForCategory(currentCategory.label || currentCategory, FreestyleWordOptions, currentCategory.words_prompt, currentCategory.llm_prompt, isCategoryAiBoard);
                 }
 
                 // Progressive rendering: do not block words UI on phrase generation latency.
@@ -5761,11 +5806,11 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                             ? latestWordsOptions
                             : (await Promise.resolve(wordsPromise).catch(() => []));
                         console.warn('[Tap] Phrase generation returned empty array, applying deterministic fallback phrases.', {
-                            category: category.label,
+                            category: currentCategory.label,
                             llmOptions: LLMOptions,
                             wordsCount: Array.isArray(fallbackWords) ? fallbackWords.length : 0
                         });
-                        finalPhrasesOptions = buildTapFallbackPhrases(category.label, fallbackWords, LLMOptions);
+                        finalPhrasesOptions = buildTapFallbackPhrases(currentCategory.label, fallbackWords, LLMOptions);
                     }
 
                     if (phraseSectionEnabled) {
@@ -5955,11 +6000,20 @@ Avoid phrases that are literally about the home as a building or location. Keep 
             }
 
             try {
+                const parentBoardType = currentCategory?.board_type || null;
+                const effectiveSubcategory = getEffectiveCategoryConfig(
+                    {
+                        ...subcategory,
+                        label: fullParentPath,
+                    },
+                    parentBoardType
+                );
+
                 let options = [];
 
-                if (subcategory.static_options) {
+                if (effectiveSubcategory.static_options) {
                     // Use static options - format as structured options with full phrases
-                    const staticTexts = subcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    const staticTexts = effectiveSubcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     options = staticTexts.map(text => ({
                         option: text,
                         summary: text.length > 20 ? text.substring(0, 17) + '...' : text,
@@ -5967,12 +6021,12 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     }));
                     currentPhrasePrompt = null;
                     currentPhraseContext = null;
-                } else if (subcategory.llm_prompt) {
+                } else if (effectiveSubcategory.llm_prompt) {
                     // Generate full phrases using gridpage-style LLM and store context for regeneration
-                    currentPhrasePrompt = subcategory.llm_prompt;
-                    currentPhraseContext = subcategory;
+                    currentPhrasePrompt = effectiveSubcategory.llm_prompt;
+                    currentPhraseContext = effectiveSubcategory;
                     if (phraseSectionEnabled) {
-                        options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
+                        options = await generateGridpageLLMOptions(effectiveSubcategory.llm_prompt, LLMOptions);
                     }
                 }
 
@@ -5989,20 +6043,37 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 // IMPORTANT: Use just the subcategory name for API calls, not the full path
                 // This ensures "Insects" is sent instead of "Animals, Insects" which matches server expectations
                 const categoryForApi = subcategory.label; // Just "Insects", not "Animals, Insects"
-                const fullPath = fullParentPath; // Keep full path for display/context
                 // Set currentCategory to preserve context for future freestyle calls
-                // Preserve board_type from parent so AI/Static distinction flows into subcategory word generation
-                currentCategory = { label: fullPath, board_type: currentCategory?.board_type || null };
-                console.log('Subcategory has words_prompt:', subcategory.words_prompt);
-                console.log('Using category for API:', categoryForApi, 'vs full path:', fullPath);
+                // Preserve board_id/board_word_options so child buttons behave like root board buttons.
+                currentCategory = effectiveSubcategory;
+                console.log('Subcategory effective words_prompt:', effectiveSubcategory.words_prompt);
+                console.log('Using category for API:', categoryForApi, 'vs full path:', fullParentPath);
                 // Store the words prompt and instruction prompt globally for word selection
-                currentWordsPrompt = subcategory.words_prompt || null;
-                currentInstructionPrompt = subcategory.llm_prompt || null;
+                currentWordsPrompt = effectiveSubcategory.words_prompt || null;
+                currentInstructionPrompt = effectiveSubcategory.llm_prompt || null;
+
+                const resolvedSubBoardType = String(
+                    effectiveSubcategory.board_type
+                    || (effectiveSubcategory.board_id && boardsById[String(effectiveSubcategory.board_id)]?.board_type)
+                    || ''
+                ).toLowerCase();
+                const isSubcategoryAiBoard = resolvedSubBoardType === 'ai';
                 
                 // DEBUG: Log what we are about to send
-                console.log(`[DEBUG] Calling updateFreestyleOptionsWithContext with prompt:`, currentWordsPrompt, 'and instruction:', subcategory.llm_prompt);
-                
-                await updateFreestyleOptionsWithContext(categoryForApi, true, subcategory.words_prompt, subcategory.llm_prompt);
+                console.log(`[DEBUG] Subcategory board_type resolved:`, resolvedSubBoardType, 'isAiBoard:', isSubcategoryAiBoard, 'prompt:', currentWordsPrompt, 'instruction:', currentInstructionPrompt);
+
+                if (Array.isArray(effectiveSubcategory.board_word_options) && effectiveSubcategory.board_word_options.length > 0 && !isSubcategoryAiBoard) {
+                    const wordsOptions = effectiveSubcategory.board_word_options;
+                    renderFreestyleOptions(wordsOptions, true);
+                    setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+                } else if (effectiveSubcategory.static_options && !isSubcategoryAiBoard) {
+                    const staticWords = effectiveSubcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    const wordsOptions = staticWords.map(text => ({ text: text, keywords: [] }));
+                    renderFreestyleOptions(wordsOptions, true);
+                    setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+                } else {
+                    await updateFreestyleOptionsWithContext(categoryForApi, true, currentWordsPrompt, currentInstructionPrompt);
+                }
             } catch (error) {
                 console.error('Error loading subcategory options:', error);
                 renderCategoryOptions([]);
