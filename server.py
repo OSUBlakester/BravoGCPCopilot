@@ -9444,7 +9444,7 @@ class TranslateLinesRequest(BaseModel):
 class TranslatePagesRequest(BaseModel):
     source_locale: Optional[str] = None
     target_locale: str
-    scope: Literal["current", "all"] = "current"
+    scope: Literal["current", "all", "tap_boards"] = "current"
     page_name: Optional[str] = None
     include_display_name: bool = True
     include_button_text: bool = True

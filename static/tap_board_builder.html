@@ -1206,7 +1206,7 @@
 
                 const payload = await response.json().catch(() => ({}));
                 if (!response.ok) {
-                    throw new Error(payload?.detail || `HTTP ${response.status}`);
+                    throw new Error(formatApiErrorDetail(payload, response.status));
                 }
 
                 const changed = Number(payload?.tap_boards_prompts_changed || payload?.strings_changed || 0);
@@ -1231,6 +1231,27 @@
                 runCurrentBtn.disabled = !hasLocale;
                 runAllBtn.disabled = !hasLocale;
             }
+        }
+
+        function formatApiErrorDetail(payload, status) {
+            const detail = payload?.detail;
+            if (Array.isArray(detail)) {
+                const first = detail[0] || {};
+                const loc = Array.isArray(first.loc) ? first.loc.join('.') : 'request';
+                const msg = first.msg || 'Validation error';
+                return `${msg} (${loc})`;
+            }
+            if (detail && typeof detail === 'object') {
+                try {
+                    return JSON.stringify(detail);
+                } catch (_) {
+                    return `HTTP ${status}`;
+                }
+            }
+            if (typeof detail === 'string' && detail.trim()) {
+                return detail;
+            }
+            return `HTTP ${status}`;
         }
 
         function displayTranslationResults(translations, textMap, targetLanguage) {
