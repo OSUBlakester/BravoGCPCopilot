@@ -17166,22 +17166,44 @@ async def generate_category_words(
         build_space_text = str(request.build_space_content or "").strip()
         exclude_words_text = ", ".join(sorted(excluded_words)) if excluded_words else "none"
 
-        cache_payload = {
-            "category": request.category,
-            "build_space": build_space_text,
-            "exclude": sorted(excluded_words),
-            "target_locale": user_language,
-            "current_mood": request.current_mood or "",
-            "custom_prompt": instruction_text,
-            "context": request.context or "",
-            "source_page": request.source_page or "",
-            "originating_button_text": request.originating_button_text or "",
-            "is_llm_generated": bool(request.is_llm_generated),
-            "freestyle_options": freestyle_options,
-            "vocabulary_level": vocabulary_level,
-            "noun_only": is_noun_category,
-            "adjective_only": is_adjective_category,
-        }
+        # For pure category browsing (no build_space, no custom context), use a simplified cache key
+        # that ignores volatile navigation state. This ensures all subcategories of "Things" (and similar)
+        # share the same cache entry, even if they have different words_prompt values.
+        is_pure_category_browse = (
+            not build_space_text
+            and not request.custom_prompt
+            and (request.source_page or "").lower() in ("tap_interface", "")
+        )
+
+        if is_pure_category_browse:
+            # Simplified cache key for category browsing: only the deterministic parts
+            cache_payload = {
+                "category": request.category,
+                "target_locale": user_language,
+                "freestyle_options": freestyle_options,
+                "vocabulary_level": vocabulary_level,
+                "noun_only": is_noun_category,
+                "adjective_only": is_adjective_category,
+            }
+        else:
+            # Full cache key for freestyle/custom contexts (includes all request parameters)
+            cache_payload = {
+                "category": request.category,
+                "build_space": build_space_text,
+                "exclude": sorted(excluded_words),
+                "target_locale": user_language,
+                "current_mood": request.current_mood or "",
+                "custom_prompt": instruction_text,
+                "context": request.context or "",
+                "source_page": request.source_page or "",
+                "originating_button_text": request.originating_button_text or "",
+                "is_llm_generated": bool(request.is_llm_generated),
+                "freestyle_options": freestyle_options,
+                "vocabulary_level": vocabulary_level,
+                "noun_only": is_noun_category,
+                "adjective_only": is_adjective_category,
+            }
+        
         quick_cache_key = (
             f"{account_id}|{aac_user_id}|cw|"
             f"{hashlib.sha1(json.dumps(cache_payload, sort_keys=True).encode('utf-8')).hexdigest()[:24]}"
@@ -17200,10 +17222,11 @@ async def generate_category_words(
         cached_response_entry = category_words_quick_response_cache.get(quick_cache_key)
         if cached_response_entry and (now_ts - float(cached_response_entry.get("created_at", 0))) < CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS:
             cached_words = copy.deepcopy(cached_response_entry.get("response", []))
+            cache_type = "simplified" if is_pure_category_browse else "full"
             total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
             logging.info(
-                f"⚡ /api/freestyle/category-words quick-cache HIT for {account_id}/{aac_user_id} "
-                f"key={quick_cache_key[-24:]} in {total_elapsed_ms:.1f}ms"
+                f"⚡ /api/freestyle/category-words quick-cache HIT ({cache_type}) for {account_id}/{aac_user_id} "
+                f"category={request.category} in {total_elapsed_ms:.1f}ms"
             )
             return JSONResponse(
                 content={"words": cached_words},
@@ -17378,6 +17401,7 @@ Return only JSON array of objects with text and keywords."""
             )
 
         final_words = normalized_words[:freestyle_options]
+        cache_type = "simplified" if is_pure_category_browse else "full"
         category_words_quick_response_cache[quick_cache_key] = {
             "created_at": time.time(),
             "response": copy.deepcopy(final_words),
@@ -17385,9 +17409,9 @@ Return only JSON array of objects with text and keywords."""
 
         total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
         logging.info(
-            f"⏱️ /api/freestyle/category-words total: {total_elapsed_ms:.1f}ms "
+            f"⏱️ /api/freestyle/category-words generated ({cache_type} cache key): {total_elapsed_ms:.1f}ms "
             f"(prep={prep_elapsed_ms:.1f}ms, generate={llm_generate_elapsed_ms:.1f}ms) "
-            f"for {account_id}/{aac_user_id}"
+            f"for {account_id}/{aac_user_id} category={request.category}"
         )
         return JSONResponse(
             content={"words": final_words},
