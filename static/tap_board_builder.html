@@ -62,9 +62,10 @@
             <button onclick="window.location.href='tap_boards_menu_admin.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full transition-colors duration-200 text-sm hover:bg-orange-100" title="Open Boards Menu Admin">
                 <i class="fas fa-sitemap mr-2"></i>Boards Menu
             </button>
-            <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
-            <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
-                    <button id="translateBoardBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-language mr-1"></i>Translate Board</button>
+                <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
+                <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
+                <button id="translateBoardBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-language mr-1"></i>Translate Board</button>
+                <button id="translateAllAiBoardsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-globe mr-1"></i>Translate All AI Boards</button>
         </div>
     </div>
 
@@ -313,7 +314,8 @@
             </div>
             <div class="flex justify-end gap-2 mt-4">
                 <button id="cancelTranslateModal" class="px-4 py-2 bg-gray-300 rounded-md hover:bg-gray-400">Close</button>
-                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate</button>
+                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate Current Board</button>
+                <button id="performTranslateAllAiBoardsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700" disabled>Translate All AI Boards</button>
             </div>
         </div>
     </div>
@@ -350,13 +352,17 @@
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
             document.getElementById('boardType').addEventListener('change', updateBoardModeUI);
-                        document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
-                        document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
-                        document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
-                        document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
-                        document.getElementById('translateTargetLanguage').addEventListener('change', () => {
-                            document.getElementById('performTranslationBtn').disabled = !document.getElementById('translateTargetLanguage').value;
-                        });
+            document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
+            document.getElementById('translateAllAiBoardsBtn').addEventListener('click', openTranslateModal);
+            document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
+            document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
+            document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
+            document.getElementById('performTranslateAllAiBoardsBtn').addEventListener('click', performAllAiBoardsTranslation);
+            document.getElementById('translateTargetLanguage').addEventListener('change', () => {
+                const hasLocale = !!document.getElementById('translateTargetLanguage').value;
+                document.getElementById('performTranslationBtn').disabled = !hasLocale;
+                document.getElementById('performTranslateAllAiBoardsBtn').disabled = !hasLocale;
+            });
             document.getElementById('aiBulkBuildBtn').addEventListener('click', openAIBulkBuilderModal);
             document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
             document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
@@ -1072,8 +1078,26 @@
             document.getElementById('translateBoardModal').classList.add('hidden');
         }
 
+        function getBoardTranslateTargetLocale() {
+            const raw = String(document.getElementById('translateTargetLanguage').value || '').trim().toLowerCase();
+            const localeMap = {
+                es: 'es-US',
+                fr: 'fr-FR',
+                de: 'de-DE',
+                it: 'it-IT',
+                pt: 'pt-BR',
+                ar: 'ar-XA',
+                ja: 'ja-JP',
+                zh: 'zh-CN',
+                ko: 'ko-KR',
+                ru: 'ru-RU',
+                en: 'en-US',
+            };
+            return localeMap[raw] || raw;
+        }
+
         async function performBoardTranslation() {
-            const targetLanguage = document.getElementById('translateTargetLanguage').value;
+            const targetLanguage = getBoardTranslateTargetLocale();
             if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
             if (!currentBoardData) { showNotification('No board selected', 'error'); return; }
             
@@ -1146,6 +1170,66 @@
                 document.getElementById('translateLoadingSpinner').classList.add('hidden');
             } finally {
                 document.getElementById('performTranslationBtn').disabled = false;
+            }
+        }
+
+        async function performAllAiBoardsTranslation() {
+            const targetLanguage = getBoardTranslateTargetLocale();
+            if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
+
+            const runAllBtn = document.getElementById('performTranslateAllAiBoardsBtn');
+            const runCurrentBtn = document.getElementById('performTranslationBtn');
+            const loadingSpinner = document.getElementById('translateLoadingSpinner');
+            const resultsContainer = document.getElementById('translateResultsContainer');
+            const resultsEl = document.getElementById('translateResults');
+
+            runAllBtn.disabled = true;
+            runCurrentBtn.disabled = true;
+            loadingSpinner.classList.remove('hidden');
+            resultsContainer.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/admin/translate-pages', {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_locale: null,
+                        target_locale: targetLanguage,
+                        scope: 'tap_boards',
+                        page_name: null,
+                        include_display_name: false,
+                        include_button_text: false,
+                        include_speech_phrase: false,
+                        include_llm_query: true,
+                    }),
+                });
+
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload?.detail || `HTTP ${response.status}`);
+                }
+
+                const changed = Number(payload?.tap_boards_prompts_changed || payload?.strings_changed || 0);
+                const unique = Number(payload?.unique_strings || 0);
+                resultsEl.innerHTML = `
+                    <div class="mb-3 p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded">
+                        <p class="font-semibold text-indigo-900 text-sm">Tap AI Boards Translation Complete</p>
+                        <p class="text-sm text-gray-700 mt-1">Target locale: <span class="font-medium">${escapeHtml(targetLanguage)}</span></p>
+                        <p class="text-sm text-gray-700">Unique prompts found: <span class="font-medium">${unique}</span></p>
+                        <p class="text-sm text-gray-700">Prompts updated: <span class="font-medium">${changed}</span></p>
+                    </div>
+                `;
+                resultsContainer.classList.remove('hidden');
+                showNotification(`Translated ${changed} AI board prompt(s)`, 'success');
+                await loadBoards();
+            } catch (error) {
+                console.error(error);
+                showNotification('Translate All AI Boards failed: ' + error.message, 'error');
+            } finally {
+                loadingSpinner.classList.add('hidden');
+                const hasLocale = !!document.getElementById('translateTargetLanguage').value;
+                runCurrentBtn.disabled = !hasLocale;
+                runAllBtn.disabled = !hasLocale;
             }
         }
 
