@@ -22220,16 +22220,23 @@ def ensure_tap_boards_structure(
     ]
 
     legacy_menu_by_source_button: Dict[str, Dict[str, Any]] = {}
-    def _collect_legacy_menu_items(items: Any) -> None:
+    legacy_menu_by_path: Dict[str, Dict[str, Any]] = {}
+
+    def _collect_legacy_menu_items(items: Any, parent_path: Tuple[int, ...] = ()) -> None:
         if not isinstance(items, list):
             return
-        for legacy_item in items:
+        for item_index, legacy_item in enumerate(items):
             if not isinstance(legacy_item, dict):
                 continue
+
+            current_path = parent_path + (item_index,)
+            path_key = '/'.join(str(part) for part in current_path)
+            legacy_menu_by_path[path_key] = legacy_item
+
             key = str(legacy_item.get('source_button_id') or '').strip()
             if key:
                 legacy_menu_by_source_button[key] = legacy_item
-            _collect_legacy_menu_items(legacy_item.get('children'))
+            _collect_legacy_menu_items(legacy_item.get('children'), current_path)
 
     _collect_legacy_menu_items(legacy_menu_items)
 
@@ -22346,10 +22353,14 @@ def ensure_tap_boards_structure(
     def _build_legacy_menu_node(
         button_node: Dict[str, Any],
         sort_order: int,
+        path: Tuple[int, ...] = (),
     ) -> Dict[str, Any]:
         source_button_id = button_node.get('id')
         source_button_key = str(source_button_id or '').strip()
+        path_key = '/'.join(str(part) for part in path)
         existing_legacy_menu_item = legacy_menu_by_source_button.get(source_button_key) if source_button_key else None
+        if not isinstance(existing_legacy_menu_item, dict):
+            existing_legacy_menu_item = legacy_menu_by_path.get(path_key)
         derived_board_id = legacy_board_id_by_source_button.get(source_button_key) if source_button_key else None
 
         menu_node = {
@@ -22390,7 +22401,7 @@ def ensure_tap_boards_structure(
             for child_index, child_node in enumerate(raw_children):
                 if not isinstance(child_node, dict):
                     continue
-                built_children.append(_build_legacy_menu_node(child_node, child_index))
+                built_children.append(_build_legacy_menu_node(child_node, child_index, path + (child_index,)))
             menu_node['children'] = built_children
 
         # Enforce leaf-only board target assignment.
@@ -22402,7 +22413,7 @@ def ensure_tap_boards_structure(
     for index, button in enumerate(buttons):
         if not isinstance(button, dict):
             continue
-        menu_item = _build_legacy_menu_node(button, index)
+        menu_item = _build_legacy_menu_node(button, index, (index,))
         derived_menu_items.append(menu_item)
 
     merged_boards = custom_boards + derived_boards
