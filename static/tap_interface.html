@@ -2057,12 +2057,19 @@
                 if (!node || typeof node !== 'object') {
                     return;
                 }
+                const labelSource = String(node.label || '').trim();
+                if (labelSource) {
+                    sourceLines.push(labelSource);
+                }
                 if (Array.isArray(node.board_word_options)) {
                     node.board_word_options.forEach((opt) => {
                         if (opt && typeof opt === 'object' && opt.text) {
                             sourceLines.push(opt.text);
                         }
                     });
+                }
+                if (Array.isArray(node.children)) {
+                    node.children.forEach(collect);
                 }
             };
 
@@ -2078,6 +2085,10 @@
                 if (!node || typeof node !== 'object') {
                     return;
                 }
+                const labelSource = String(node.label || '').trim();
+                if (labelSource) {
+                    node.localized_label = lineMap.get(labelSource) || labelSource;
+                }
                 if (Array.isArray(node.board_word_options)) {
                     node.board_word_options.forEach((opt) => {
                         if (!opt || typeof opt !== 'object' || !opt.text) {
@@ -2086,6 +2097,9 @@
                         const source = String(opt.text).trim();
                         opt.localized_text = lineMap.get(source) || source;
                     });
+                }
+                if (Array.isArray(node.children)) {
+                    node.children.forEach(applyLocalized);
                 }
             };
 
@@ -5476,7 +5490,7 @@ VARIETY RULES:
                     if (button.hidden) return;
 
                     const rawLabel = String(button.label || '').trim();
-                    const displayLabel = rawLabel;
+                    const displayLabel = getTapDisplayLabel(button) || rawLabel;
 
                     const modalBtn = document.createElement('button');
                     modalBtn.className = 'categories-modal-button';
@@ -5862,7 +5876,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 return;
             }
             
-            modalTitle.textContent = String(category.label || '').trim();
+            modalTitle.textContent = getTapDisplayLabel(category) || String(category.label || '').trim();
             modalGrid.innerHTML = '';
             const basePath = parentPath ? parentPath : category.label;
 
@@ -5878,7 +5892,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 }
 
                 const rawChildLabel = String(child.label || '').trim();
-                const displayChildLabel = rawChildLabel;
+                const displayChildLabel = getTapDisplayLabel(child) || rawChildLabel;
 
                 console.log('Adding child option:', displayChildLabel);
                 const categoryBtn = document.createElement('button');
