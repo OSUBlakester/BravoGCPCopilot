@@ -99,7 +99,7 @@ docker run -d --name bravo-dev -p 8000:8080 \
   -e GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json \
   -e GOOGLE_API_KEY="$GOOGLE_API_KEY" \
   -e GEMINI_PRIMARY_MODEL=gemini-2.5-flash-lite \
-  -e GEMINI_FALLBACK_MODEL=gemini-2.0-flash-lite \
+  -e GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite \
   -e K_SERVICE=bravo-aac-api-dev \
   -v "$HOME/.config/gcloud:/root/.config/gcloud:ro" \
   bravo-local

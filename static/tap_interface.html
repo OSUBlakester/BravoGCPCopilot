@@ -253,11 +253,14 @@
                 inset 0 1px 0 rgba(255, 255, 255, 0.95);
         }
 
-        /* Make first two action buttons 50% wider than standard control buttons */
+        /* Keep all top-row action buttons the same width as Home */
         #speak-build-btn,
-        #speak-build-autoclean-btn {
-            flex: 1.5 1 0;
-            min-width: 60px;
+        #speak-build-autoclean-btn,
+        #backspace-build-btn,
+        #clear-text-btn,
+        #preview-toggle-btn {
+            flex: 0 0 72px;
+            min-width: 72px;
         }
 
         .option-button.preview-selected {
@@ -540,8 +543,8 @@
         }
 
         .speech-reset-btn {
-            flex: 0 0 60px;
-            min-width: 60px;
+            flex: 0 0 72px;
+            min-width: 72px;
         }
 
         /* Categories Modal */
@@ -1592,11 +1595,521 @@
         let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
         let currentSpeechRate = 180; // Default words-per-minute
         let applicationVolume = 8; // Default application volume (0-10 scale)
+        let tapTargetLocale = 'en-US'; // User-facing locale for Tap labels/options
+        let tapPartnerLocale = 'en-US'; // Partner-heard locale for Tap announcements
+        let defaultPartnerVoiceName = 'en-US-Neural2-A';
+        let locationOverrideVoicesMap = {};
+        let currentLocationLanguageOverride = '';
+        const tapRuntimeTranslationCache = new Map();
+        const tapRuntimeTranslationInFlight = new Map();
+        const perfMetrics = {
+            symbolLookups: [],
+            totalServerFallbacks: 0,
+            totalCustomIndexHits: 0,
+            totalLocalDBHits: 0,
+            totalMemoryCacheHits: 0,
+            indexBuildTime: null,
+        };
         const SYSTEM_PREVIEW_VOICE_NAME = 'en-US-Neural2-A';
+
+        function normalizeLocaleTag(value) {
+            if (typeof value !== 'string') return '';
+            const cleaned = value.trim().replace(/_/g, '-');
+            if (!cleaned) return '';
+
+            const parts = cleaned.split('-');
+            if (parts.length === 1) {
+                const lang = parts[0].toLowerCase();
+                return /^[a-z]{2}$/.test(lang) ? lang : '';
+            }
+
+            const lang = String(parts[0] || '').toLowerCase();
+            const region = String(parts[1] || '').toUpperCase();
+            if (!/^[a-z]{2}$/.test(lang) || !/^[A-Z]{2,3}$/.test(region)) {
+                return '';
+            }
+            return `${lang}-${region}`;
+        }
+
+        function getEffectiveTapPartnerLocale() {
+            return normalizeLocaleTag(currentLocationLanguageOverride)
+                || normalizeLocaleTag(tapPartnerLocale)
+                || 'en-US';
+        }
+
+        function getEffectiveTapWordLocale() {
+            return normalizeLocaleTag(currentLocationLanguageOverride)
+                || normalizeLocaleTag(tapTargetLocale)
+                || 'en-US';
+        }
+
+        function getEffectiveTapPartnerVoice() {
+            const effectiveLocale = getEffectiveTapPartnerLocale();
+            const localeVoice = locationOverrideVoicesMap && typeof locationOverrideVoicesMap === 'object'
+                ? String(locationOverrideVoicesMap[effectiveLocale] || '').trim()
+                : '';
+            return localeVoice || String(defaultPartnerVoiceName || currentTtsVoiceName || '').trim();
+        }
+
+        async function refreshTapLocationLanguageOverride() {
+            try {
+                const response = await authenticatedFetch('/get-user-current', { method: 'GET' });
+                if (!response.ok) return;
+                const state = await response.json();
+                currentLocationLanguageOverride = normalizeLocaleTag(state?.locationLanguageOverride || '');
+                if (currentLocationLanguageOverride) {
+                    console.log('Tap location language override active:', currentLocationLanguageOverride);
+                }
+            } catch (error) {
+                console.warn('Unable to load Tap location language override:', error);
+            }
+        }
+
+        /**
+         * AAC inflection-to-base-form lookup table for query normalization.
+         * Maps inflected word forms to their infinitive/base forms for locale-aware search.
+         * Enables matching "quieres" → "querer" without storing all conjugations in Firestore.
+         */
+        const aacInflectionLookup = {
+            'es': {
+                'quiero': 'querer', 'quieres': 'querer', 'quiere': 'querer', 'queremos': 'querer',
+                'queréis': 'querer', 'quieren': 'querer', 'quise': 'querer', 'quisiste': 'querer',
+                'quiso': 'querer', 'quisimos': 'querer', 'quisisteis': 'querer', 'quisieron': 'querer',
+                'quería': 'querer', 'querías': 'querer', 'queríamos': 'querer', 'queríais': 'querer',
+                'querían': 'querer', 'querré': 'querer', 'querrás': 'querer', 'querrá': 'querer',
+                'querremos': 'querer', 'querréis': 'querer', 'querrán': 'querer', 'querría': 'querer',
+                'querrías': 'querer', 'querríamos': 'querer', 'querríais': 'querer', 'querrían': 'querer',
+                'voy': 'ir', 'vas': 'ir', 'va': 'ir', 'vamos': 'ir', 'vais': 'ir', 'van': 'ir',
+                'fui': 'ir', 'fuiste': 'ir', 'fue': 'ir', 'fuimos': 'ir', 'fuisteis': 'ir', 'fueron': 'ir',
+                'iba': 'ir', 'ibas': 'ir', 'íbamos': 'ir', 'ibais': 'ir', 'iban': 'ir',
+                'iré': 'ir', 'irás': 'ir', 'irá': 'ir', 'iremos': 'ir', 'iréis': 'ir', 'irán': 'ir',
+                'iría': 'ir', 'irías': 'ir', 'iríamos': 'ir', 'iríais': 'ir', 'irían': 'ir',
+                'como': 'comer', 'comes': 'comer', 'come': 'comer', 'comemos': 'comer',
+                'coméis': 'comer', 'comen': 'comer', 'comí': 'comer', 'comiste': 'comer',
+                'comió': 'comer', 'comimos': 'comer', 'comisteis': 'comer', 'comieron': 'comer',
+                'comía': 'comer', 'comías': 'comer', 'comíamos': 'comer', 'comíais': 'comer',
+                'comían': 'comer', 'comeré': 'comer', 'comerás': 'comer', 'comerá': 'comer',
+                'comeremos': 'comer', 'comeréis': 'comer', 'comerán': 'comer', 'comería': 'comer',
+                'comerías': 'comer', 'comeríamos': 'comer', 'comeríais': 'comer', 'comerían': 'comer',
+                'bebo': 'beber', 'bebes': 'beber', 'bebe': 'beber', 'bebemos': 'beber',
+                'bebéis': 'beber', 'beben': 'beber', 'bebí': 'beber', 'bebiste': 'beber',
+                'bebió': 'beber', 'bebimos': 'beber', 'bebisteis': 'beber', 'bebieron': 'beber',
+                'bebía': 'beber', 'bebías': 'beber', 'bebíamos': 'beber', 'bebíais': 'beber',
+                'bebían': 'beber', 'beberé': 'beber', 'beberás': 'beber', 'beberá': 'beber',
+                'beberemos': 'beber', 'beberéis': 'beber', 'beberán': 'beber', 'bebería': 'beber',
+                'beberías': 'beber', 'beberíamos': 'beber', 'beberíais': 'beber', 'beberían': 'beber',
+                'juego': 'jugar', 'juegas': 'jugar', 'juega': 'jugar', 'jugamos': 'jugar',
+                'jugáis': 'jugar', 'juegan': 'jugar', 'jugué': 'jugar', 'jugaste': 'jugar',
+                'jugó': 'jugar', 'jugasteis': 'jugar', 'jugaron': 'jugar', 'jugaba': 'jugar',
+                'jugabas': 'jugar', 'jugábamos': 'jugar', 'jugabais': 'jugar', 'jugaban': 'jugar',
+                'jugaré': 'jugar', 'jugarás': 'jugar', 'jugará': 'jugar', 'jugaremos': 'jugar',
+                'jugaréis': 'jugar', 'jugarán': 'jugar', 'jugaría': 'jugar', 'jugarías': 'jugar',
+                'jugaríamos': 'jugar', 'jugaríais': 'jugar', 'jugarían': 'jugar',
+                'necesito': 'necesitar', 'necesitas': 'necesitar', 'necesita': 'necesitar',
+                'necesitamos': 'necesitar', 'necesitáis': 'necesitar', 'necesitan': 'necesitar',
+                'necesité': 'necesitar', 'necesitaste': 'necesitar', 'necesitó': 'necesitar',
+                'necesitasteis': 'necesitar', 'necesitaron': 'necesitar', 'necesitaba': 'necesitar',
+                'necesitabas': 'necesitar', 'necesitábamos': 'necesitar', 'necesitabais': 'necesitar',
+                'necesitaban': 'necesitar', 'necesitaré': 'necesitar', 'necesitarás': 'necesitar',
+                'necesitará': 'necesitar', 'necesitaremos': 'necesitar', 'necesitaréis': 'necesitar',
+                'necesitarán': 'necesitar', 'necesitaría': 'necesitar', 'necesitarías': 'necesitar',
+                'necesitaríamos': 'necesitar', 'necesitaríais': 'necesitar', 'necesitarían': 'necesitar',
+                'tengo': 'tener', 'tienes': 'tener', 'tiene': 'tener', 'tenemos': 'tener',
+                'tenéis': 'tener', 'tienen': 'tener', 'tuve': 'tener', 'tuviste': 'tener',
+                'tuvo': 'tener', 'tuvimos': 'tener', 'tuvisteis': 'tener', 'tuvieron': 'tener',
+                'tenía': 'tener', 'tenías': 'tener', 'teníamos': 'tener', 'teníais': 'tener',
+                'tenían': 'tener', 'tendré': 'tener', 'tendrás': 'tener', 'tendrá': 'tener',
+                'tendremos': 'tener', 'tendréis': 'tener', 'tendrán': 'tener', 'tendría': 'tener',
+                'tendrías': 'tener', 'tendríamos': 'tener', 'tendríais': 'tener', 'tendrían': 'tener',
+                'gusta': 'gustar', 'gusto': 'gustar', 'gustas': 'gustar', 'gustamos': 'gustar',
+                'gustáis': 'gustar', 'gustan': 'gustar', 'gusté': 'gustar', 'gustaste': 'gustar',
+                'gustó': 'gustar', 'gustasteis': 'gustar', 'gustaron': 'gustar', 'gustaba': 'gustar',
+                'gustabas': 'gustar', 'gustábamos': 'gustar', 'gustabais': 'gustar', 'gustaban': 'gustar',
+                'gustaré': 'gustar', 'gustarás': 'gustar', 'gustará': 'gustar', 'gustaremos': 'gustar',
+                'gustaréis': 'gustar', 'gustarán': 'gustar', 'gustaría': 'gustar', 'gustarías': 'gustar',
+                'gustaríamos': 'gustar', 'gustaríais': 'gustar', 'gustarían': 'gustar',
+                'amo': 'amar', 'amas': 'amar', 'ama': 'amar', 'amamos': 'amar', 'amáis': 'amar',
+                'aman': 'amar', 'amé': 'amar', 'amaste': 'amar', 'amó': 'amar', 'amasteis': 'amar',
+                'amaron': 'amar', 'amaba': 'amar', 'amabas': 'amar', 'amábamos': 'amar',
+                'amabais': 'amar', 'amaban': 'amar', 'amaré': 'amar', 'amarás': 'amar',
+                'amará': 'amar', 'amaremos': 'amar', 'amaréis': 'amar', 'amarán': 'amar',
+                'amaría': 'amar', 'amarías': 'amar', 'amaríamos': 'amar', 'amaríais': 'amar',
+                'amarían': 'amar'
+            }
+        };
+
+        /**
+         * Normalize a search term to its base form for the given locale.
+         * Uses the inflection lookup table to convert conjugated forms to their infinitive/base form.
+         * Example: normalizeTermForLocale('quieres', 'es') → 'querer'
+         */
+        function normalizeTermForLocale(term, locale = 'es') {
+            if (!term || term.trim() === '') {
+                return term;
+            }
+            const termLower = term.toLowerCase().trim();
+            
+            // Try exact locale match first (e.g., 'es-US')
+            if (aacInflectionLookup[locale] && aacInflectionLookup[locale][termLower]) {
+                return aacInflectionLookup[locale][termLower];
+            }
+            
+            // Fall back to base language code (e.g., 'es' from 'es-US')
+            const baseLang = locale.split('-')[0];
+            if (aacInflectionLookup[baseLang] && aacInflectionLookup[baseLang][termLower]) {
+                return aacInflectionLookup[baseLang][termLower];
+            }
+            
+            // No mapping found, return original term
+            return term;
+        }
         const PREVIEW_OPTION_SELECTED_CLASS = 'preview-selected';
         let previewModeEnabled = false;
         let previewPendingButton = null;
         let previewPendingKey = null;
+
+        async function translateTapRuntimeLine(line, locale, sourceLocaleOverride = null) {
+            const source = String(line || '').trim();
+            if (!source) {
+                return source;
+            }
+
+            const targetLocale = String(locale || tapTargetLocale || 'en-US').trim() || 'en-US';
+            const sourceLocale = String(sourceLocaleOverride || tapTargetLocale || 'en-US').trim() || 'en-US';
+            if (sourceLocale.toLowerCase() === targetLocale.toLowerCase()) {
+                return source;
+            }
+
+            const cacheKey = `${sourceLocale}->${targetLocale}:${source}`;
+            if (tapRuntimeTranslationCache.has(cacheKey)) {
+                return tapRuntimeTranslationCache.get(cacheKey);
+            }
+            if (tapRuntimeTranslationInFlight.has(cacheKey)) {
+                return tapRuntimeTranslationInFlight.get(cacheKey);
+            }
+
+            const translationPromise = (async () => {
+                try {
+                    const requestTranslation = async (sourceLocaleArg) => {
+                        const response = await authenticatedFetch('/api/translate-lines', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                lines: [source],
+                                source_locale: sourceLocaleArg || undefined,
+                                target_locale: targetLocale
+                            })
+                        });
+
+                        if (!response.ok) {
+                            return '';
+                        }
+
+                        const payload = await response.json();
+                        return String(payload?.translated_lines?.[0] || '').trim();
+                    };
+
+                    let translated = await requestTranslation(sourceLocale);
+                    if (!translated || translated.toLowerCase() === source.toLowerCase()) {
+                        translated = await requestTranslation(null);
+                    }
+
+                    const finalText = translated || source;
+                    tapRuntimeTranslationCache.set(cacheKey, finalText);
+                    return finalText;
+                } catch (error) {
+                    console.warn('[TAP I18N] Runtime line translation failed:', error);
+                    tapRuntimeTranslationCache.set(cacheKey, source);
+                    return source;
+                } finally {
+                    tapRuntimeTranslationInFlight.delete(cacheKey);
+                }
+            })();
+
+            tapRuntimeTranslationInFlight.set(cacheKey, translationPromise);
+            return translationPromise;
+        }
+
+        async function warmTapPartnerTranslationCacheForOptions(options) {
+            const partnerLocale = normalizeLocaleTag(getEffectiveTapPartnerLocale()) || 'en-US';
+            const userLocale = normalizeLocaleTag(tapTargetLocale || 'en-US') || 'en-US';
+            if (partnerLocale.toLowerCase() === userLocale.toLowerCase()) {
+                return;
+            }
+
+            const list = Array.isArray(options) ? options : [];
+            if (!list.length) {
+                return;
+            }
+
+            const uniqueTexts = [];
+            const seen = new Set();
+            for (const opt of list.slice(0, 12)) {
+                const text = typeof opt === 'object'
+                    ? String(opt.option || opt.summary || '').trim()
+                    : String(opt || '').trim();
+                if (!text || seen.has(text)) {
+                    continue;
+                }
+                seen.add(text);
+                uniqueTexts.push(text);
+            }
+
+            if (!uniqueTexts.length) {
+                return;
+            }
+
+            const missing = [];
+            uniqueTexts.forEach((text) => {
+                const cacheKey = `${userLocale}->${partnerLocale}:${text}`;
+                if (tapRuntimeTranslationCache.has(cacheKey) || tapRuntimeTranslationInFlight.has(cacheKey)) {
+                    return;
+                }
+                missing.push(text);
+            });
+
+            if (!missing.length) {
+                return;
+            }
+
+            const response = await authenticatedFetch('/api/translate-lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lines: missing,
+                    source_locale: userLocale,
+                    target_locale: partnerLocale
+                })
+            });
+
+            if (!response.ok) {
+                return;
+            }
+
+            const payload = await response.json();
+            const translatedLines = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+            missing.forEach((sourceText, index) => {
+                const translated = String(translatedLines[index] || '').trim() || sourceText;
+                const cacheKey = `${userLocale}->${partnerLocale}:${sourceText}`;
+                tapRuntimeTranslationCache.set(cacheKey, translated);
+            });
+        }
+
+        async function localizeTapOptionLabel(labelText) {
+            const source = String(labelText || '').trim();
+            if (!source) {
+                return source;
+            }
+            return translateTapRuntimeLine(source, tapTargetLocale);
+        }
+
+        const TAP_SPECIAL_BUTTON_CONFIG = {
+            'something-else': {
+                sourceLabel: 'Something Else',
+                imageLookupText: 'Something Else',
+                imageKeywords: ['refresh', 'more', 'other']
+            }
+        };
+
+        function getTapSpecialButtonConfig(specialButtonId) {
+            return TAP_SPECIAL_BUTTON_CONFIG[specialButtonId] || null;
+        }
+
+        function getTapSpecialButtonLabelSync(specialButtonId) {
+            const config = getTapSpecialButtonConfig(specialButtonId);
+            if (!config) {
+                return '';
+            }
+
+            const targetLocale = normalizeLocaleTag(tapTargetLocale || 'en-US') || 'en-US';
+            if (targetLocale.toLowerCase() === 'en-us') {
+                return config.sourceLabel;
+            }
+
+            // Key format must match what translateTapRuntimeLine stores: `${source}->${target}:${text}`
+            const cached = tapRuntimeTranslationCache.get(`en-US->${targetLocale}:${config.sourceLabel}`);
+            return String(cached || config.sourceLabel).trim() || config.sourceLabel;
+        }
+
+        function setTapSpecialButtonLabel(btn, labelText) {
+            if (!btn) {
+                return;
+            }
+
+            const label = String(labelText || '').trim();
+            if (!label) {
+                return;
+            }
+
+            btn.dataset.localizedLabel = label;
+
+            // Use 'div > div:last-child' to target the text footer inside buttonContent,
+            // not the outer buttonContent div itself (which would overwrite the image).
+            const footer = btn.querySelector('div > div:last-child');
+            if (footer && btn.querySelector('img')) {
+                footer.textContent = label;
+            } else {
+                btn.textContent = label;
+            }
+
+            const image = btn.querySelector('img');
+            if (image) {
+                image.alt = label;
+            }
+        }
+
+        async function localizeTapSpecialButton(btn) {
+            if (!btn) {
+                return;
+            }
+
+            const specialButtonId = String(btn.dataset.specialButton || '').trim();
+            const config = getTapSpecialButtonConfig(specialButtonId);
+            if (!config) {
+                return;
+            }
+
+            // Must supply 'en-US' as the source locale explicitly; otherwise translateTapRuntimeLine
+            // defaults sourceLocale to tapTargetLocale and short-circuits as a no-op.
+            const localizedLabel = await translateTapRuntimeLine(config.sourceLabel, tapTargetLocale, 'en-US');
+            setTapSpecialButtonLabel(btn, localizedLabel || config.sourceLabel);
+        }
+
+        function getTapDisplayLabel(item) {
+            if (!item || typeof item !== 'object') {
+                return '';
+            }
+            return String(item.localized_label || item.label || '').trim();
+        }
+
+        async function translateTapLinesBatch(lines, locale) {
+            const targetLocale = String(locale || tapTargetLocale || 'en-US').trim() || 'en-US';
+            const unique = [];
+            const seen = new Set();
+
+            (Array.isArray(lines) ? lines : []).forEach((line) => {
+                const text = String(line || '').trim();
+                if (!text || seen.has(text)) {
+                    return;
+                }
+                seen.add(text);
+                unique.push(text);
+            });
+
+            const resultMap = new Map();
+            if (unique.length === 0 || targetLocale.toLowerCase() === 'en-us') {
+                unique.forEach((text) => resultMap.set(text, text));
+                return resultMap;
+            }
+
+            const missing = [];
+            unique.forEach((text) => {
+                const cacheKey = `${targetLocale}:${text}`;
+                if (tapRuntimeTranslationCache.has(cacheKey)) {
+                    resultMap.set(text, tapRuntimeTranslationCache.get(cacheKey));
+                } else {
+                    missing.push(text);
+                }
+            });
+
+            if (missing.length > 0) {
+                try {
+                    const response = await authenticatedFetch('/api/translate-lines', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lines: missing,
+                            source_locale: 'en-US',
+                            target_locale: targetLocale
+                        })
+                    });
+
+                    if (response.ok) {
+                        const payload = await response.json();
+                        const translatedLines = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+                        missing.forEach((text, index) => {
+                            const translated = String(translatedLines[index] || '').trim() || text;
+                            const cacheKey = `${targetLocale}:${text}`;
+                            tapRuntimeTranslationCache.set(cacheKey, translated);
+                            resultMap.set(text, translated);
+                        });
+                    }
+                } catch (error) {
+                    console.warn('[TAP I18N] Batch label translation failed:', error);
+                }
+            }
+
+            unique.forEach((text) => {
+                if (!resultMap.has(text)) {
+                    resultMap.set(text, text);
+                }
+            });
+            return resultMap;
+        }
+
+        async function localizeTapConfigLabels(config) {
+            if (!config || typeof config !== 'object') {
+                return;
+            }
+
+            const sourceLines = [];
+            const collect = (node) => {
+                if (!node || typeof node !== 'object') {
+                    return;
+                }
+                const labelSource = String(node.label || '').trim();
+                if (labelSource) {
+                    sourceLines.push(labelSource);
+                }
+                if (Array.isArray(node.board_word_options)) {
+                    node.board_word_options.forEach((opt) => {
+                        if (opt && typeof opt === 'object' && opt.text) {
+                            sourceLines.push(opt.text);
+                        }
+                    });
+                }
+                if (Array.isArray(node.children)) {
+                    node.children.forEach(collect);
+                }
+            };
+
+            if (Array.isArray(config.buttons)) {
+                config.buttons.forEach(collect);
+            }
+            if (Array.isArray(config.boards)) {
+                config.boards.forEach(collect);
+            }
+
+            const lineMap = await translateTapLinesBatch(sourceLines, tapTargetLocale);
+            const applyLocalized = (node) => {
+                if (!node || typeof node !== 'object') {
+                    return;
+                }
+                const labelSource = String(node.label || '').trim();
+                if (labelSource) {
+                    node.localized_label = lineMap.get(labelSource) || labelSource;
+                }
+                if (Array.isArray(node.board_word_options)) {
+                    node.board_word_options.forEach((opt) => {
+                        if (!opt || typeof opt !== 'object' || !opt.text) {
+                            return;
+                        }
+                        const source = String(opt.text).trim();
+                        opt.localized_text = lineMap.get(source) || source;
+                    });
+                }
+                if (Array.isArray(node.children)) {
+                    node.children.forEach(applyLocalized);
+                }
+            };
+
+            if (Array.isArray(config.buttons)) {
+                config.buttons.forEach(applyLocalized);
+            }
+            if (Array.isArray(config.boards)) {
+                config.boards.forEach(applyLocalized);
+            }
+        }
 
         // Note: Using Firestore image lookup instead of emoji pictograms
 
@@ -1612,6 +2125,8 @@
         let isAnnouncingNow = false;
         let speechSynthesisEnabled = false;
         let audioContextInitialized = false;
+        let activeAnnouncementAudioContext = null;
+        let activeAnnouncementAudioSource = null;
 
         // DOM Elements
         const authOverlay = document.getElementById('authOverlay');
@@ -1778,9 +2293,35 @@
         // ============ CACHE MANAGEMENT ============
         const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
         const CACHE_KEYS = {
-            INITIAL_PHRASES: 'tap_initial_phrases',
-            INITIAL_WORDS: 'tap_initial_words'
+            get INITIAL_PHRASES() { return `tap_initial_phrases_${tapTargetLocale || 'en-US'}`; },
+            get INITIAL_WORDS() { return `tap_initial_words_${getEffectiveTapWordLocale()}`; }
         };
+
+        // Returns a human-readable language name for LLM prompts from a BCP-47 locale tag
+        function getTapTargetLanguageName(localeOverride) {
+            const locale = String(localeOverride || tapTargetLocale || 'en-US').toLowerCase();
+            if (locale.startsWith('es')) return 'Spanish';
+            if (locale.startsWith('fr')) return 'French';
+            if (locale.startsWith('pt')) return 'Portuguese';
+            if (locale.startsWith('de')) return 'German';
+            if (locale.startsWith('it')) return 'Italian';
+            if (locale.startsWith('zh')) return 'Chinese';
+            if (locale.startsWith('ja')) return 'Japanese';
+            if (locale.startsWith('ko')) return 'Korean';
+            if (locale.startsWith('ar')) return 'Arabic';
+            if (locale.startsWith('ru')) return 'Russian';
+            return 'English';
+        }
+
+        // Returns a language directive line to append to LLM prompts when user language is non-English.
+        // Uses the effective locale (location override takes precedence over user language setting).
+        function getTapLanguageDirective() {
+            const effectiveLocale = getEffectiveTapWordLocale();
+            const locale = String(effectiveLocale || 'en-US').toLowerCase();
+            if (locale.startsWith('en')) return '';
+            const langName = getTapTargetLanguageName(effectiveLocale);
+            return `\nCRITICAL LANGUAGE REQUIREMENT: You MUST generate ALL text entirely in ${langName} (locale: ${effectiveLocale}). Every phrase, word, and sentence must be in ${langName}. Do NOT use English under any circumstances. Any English-language examples appearing in the formatting instructions above are structural examples only — they do NOT indicate the output language.`;
+        }
 
         function getCachedData(key) {
             try {
@@ -1838,6 +2379,9 @@
          * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
          */
         async function getSymbolImageForText(text, keywords = null, cacheOnly = false) {
+            const startTime = performance.now();
+            const lookupId = Math.random().toString(36).substr(2, 9);
+            
             if (!text || text.trim() === '') {
                 return null;
             }
@@ -1873,53 +2417,62 @@
                 window.MAX_CONCURRENT_REQUESTS = 10; // Max 10 simultaneous requests
             }
             
-            const normalizedText = text.trim().toLowerCase();
+            // Normalize the search term for locale-aware matching (e.g., 'quieres' → 'querer' for Spanish)
+            const normalizedSearchTerm = normalizeTermForLocale(text, tapTargetLocale);
+            const normalizedText = normalizedSearchTerm.trim().toLowerCase();
             const cacheKey = `tap_${normalizedText}`;
             
             // PRIORITY 1: Check preloaded custom images cache first
             if (window.customImageMatches.has(normalizedText)) {
                 const customImageUrl = window.customImageMatches.get(normalizedText);
-                console.log(`⚡ Using preloaded custom image for "${text}"`);
+                const elapsed = (performance.now() - startTime).toFixed(2);
+                console.log(`⚡ P1 (${elapsed}ms): Using preloaded custom image for "${text}"`);
+                perfMetrics.totalMemoryCacheHits++;
+                perfMetrics.symbolLookups.push({ text, method: 'P1-custom-preload', time: elapsed, lookupId });
                 return customImageUrl;
             }
             
-            // PRIORITY 2: Check individual custom image lookup (not preloaded yet)
-            if (window.customImagesCache && window.customImagesCache.length > 0) {
-                for (const image of window.customImagesCache) {
-                    if (matchesQuery(image, text)) {
-                        const customImageUrl = image.image_url;
-                        // Cache the match for future lookups
-                        window.customImageMatches.set(normalizedText, customImageUrl);
-                        console.log(`⚡ Found custom image match for "${text}": ${customImageUrl}`);
-                        return customImageUrl;
-                    }
+            // PRIORITY 2: Fast custom image index lookup
+            if (window.customImageTermIndex && window.customImageTermIndex.has(normalizedText)) {
+                const customImageUrl = window.customImageTermIndex.get(normalizedText);
+                if (customImageUrl) {
+                    window.customImageMatches.set(normalizedText, customImageUrl);
+                    const elapsed = (performance.now() - startTime).toFixed(2);
+                    console.log(`⚡ P2 (${elapsed}ms): Found indexed custom image match for "${text}"`);
+                    perfMetrics.totalCustomIndexHits++;
+                    perfMetrics.symbolLookups.push({ text, method: 'P2-custom-index', time: elapsed, lookupId });
+                    return customImageUrl;
                 }
             }
-            
+
             // PRIORITY 3: Check global library cache (localStorage + memory)
             if (window.symbolImageCache.has(cacheKey)) {
                 const cached = window.symbolImageCache.get(cacheKey);
-                console.log(`🎯 Cache HIT for "${text}" (key: ${cacheKey}):`, cached);
-                if (cached.timestamp > Date.now() - 300000) { // Cache for 5 minutes
+                if (cached && cached.imageUrl) {
+                    const elapsed = (performance.now() - startTime).toFixed(2);
+                    console.log(`⚡ P3 (${elapsed}ms): Memory cache hit for "${text}"`);
+                    perfMetrics.totalMemoryCacheHits++;
+                    perfMetrics.symbolLookups.push({ text, method: 'P3-memory-cache', time: elapsed, lookupId });
                     return cached.imageUrl;
-                } else {
-                    console.log(`⏰ Cache expired for "${text}"`);
                 }
-            } else {
-                console.log(`❌ Cache MISS for "${text}" (key: ${cacheKey}). Cache has ${window.symbolImageCache.size} entries`);
             }
             
             // PRIORITY 4: Search local IndexedDB library (instant, no network!)
             if (window.searchLocalImageLibrary) {
                 try {
+                    const p4Start = performance.now();
                     const localResult = await window.searchLocalImageLibrary(text);
+                    const p4Time = (performance.now() - p4Start).toFixed(2);
                     if (localResult) {
                         // Cache the result for even faster future lookups
                         window.symbolImageCache.set(cacheKey, {
                             imageUrl: localResult,
                             timestamp: Date.now()
                         });
-                        console.log(`📚 Local library found image for "${text}"`);
+                        const elapsed = (performance.now() - startTime).toFixed(2);
+                        console.log(`📚 P4 (${p4Time}ms, total ${elapsed}ms): Local DB found image for "${text}"`);
+                        perfMetrics.totalLocalDBHits++;
+                        perfMetrics.symbolLookups.push({ text, method: 'P4-local-db', time: elapsed, dbTime: p4Time, lookupId });
                         return localResult;
                     }
                 } catch (error) {
@@ -1937,13 +2490,15 @@
                 // Wait for available slot in request queue
                 await waitForRequestSlot();
                 
+                const p5Start = performance.now();
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => {
                     controller.abort();
                 }, 10000); // 10 second timeout to handle server load
                 
                 // Use unified button-search that searches Firestore collections with keywords support
-                let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`;
+                // Use the normalized term for server search
+                let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(normalizedSearchTerm.trim())}&limit=1&locale=${encodeURIComponent(tapTargetLocale || 'en-US')}`;
                 if (keywords && keywords.length > 0) {
                     symbolsUrl += `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
                 }
@@ -1951,12 +2506,16 @@
                 const response = await authenticatedFetch(symbolsUrl, {
                     signal: controller.signal
                 });
+                const p5Time = (performance.now() - p5Start).toFixed(2);
                 
                 clearTimeout(timeoutId);
                 releaseRequestSlot();
                 
                 if (!response.ok) {
-                    console.warn(`Symbol search failed for "${text}": ${response.status}`);
+                    const elapsed = (performance.now() - startTime).toFixed(2);
+                    console.warn(`P5 (${p5Time}ms, total ${elapsed}ms): Symbol search failed for "${text}": ${response.status}`);
+                    perfMetrics.totalServerFallbacks++;
+                    perfMetrics.symbolLookups.push({ text, method: 'P5-server-fail', time: elapsed, serverTime: p5Time, lookupId });
                     return null;
                 }
                 
@@ -1971,7 +2530,10 @@
                     });
                     // Persist to localStorage
                     saveGlobalCacheToLocalStorage();
-                    console.log(`✅ Found Firestore image for "${text}": ${symbolUrl}`);
+                    const elapsed = (performance.now() - startTime).toFixed(2);
+                    console.log(`✅ P5 (${p5Time}ms, total ${elapsed}ms): Found Firestore image for "${text}"`);
+                    perfMetrics.totalServerFallbacks++;
+                    perfMetrics.symbolLookups.push({ text, method: 'P5-server-hit', time: elapsed, serverTime: p5Time, lookupId });
                     return symbolUrl;
                 } else {
                     // Cache null result to avoid repeated failed requests
@@ -1981,7 +2543,10 @@
                     });
                     // Persist to localStorage
                     saveGlobalCacheToLocalStorage();
-                    console.log(`❌ No Firestore image found for "${text}"`);
+                    const elapsed = (performance.now() - startTime).toFixed(2);
+                    console.log(`❌ P5 (${p5Time}ms, total ${elapsed}ms): No Firestore image found for "${text}"`);
+                    perfMetrics.totalServerFallbacks++;
+                    perfMetrics.symbolLookups.push({ text, method: 'P5-server-miss', time: elapsed, serverTime: p5Time, lookupId });
                     return null;
                 }
             } catch (error) {
@@ -2070,6 +2635,61 @@
             
             return words;
         }
+
+        function normalizeSearchText(text) {
+            return String(text || '')
+                .toLowerCase()
+                .replace(/[.,!?;:\"'()\[\]{}]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function rankImageCandidate(candidate, normalizedQuery) {
+            if (!candidate || !candidate.image_url || !normalizedQuery) return 0;
+
+            const concept = normalizeSearchText(candidate.concept || '');
+            const subconcept = normalizeSearchText(candidate.subconcept || '');
+            const tags = Array.isArray(candidate.tags) ? candidate.tags.map(normalizeSearchText) : [];
+            const aliases = Array.isArray(candidate.aliases) ? candidate.aliases.map(normalizeSearchText) : [];
+            const terms = Array.isArray(candidate.search_terms) ? candidate.search_terms.map(normalizeSearchText) : [];
+
+            let score = 0;
+            if (subconcept === normalizedQuery) score += 240;
+            if (concept === normalizedQuery) score += 220;
+            if (tags.includes(normalizedQuery)) score += 200;
+            if (aliases.includes(normalizedQuery)) score += 180;
+            if (terms.includes(normalizedQuery)) score += 160;
+
+            if (subconcept.startsWith(normalizedQuery)) score += 90;
+            if (concept.startsWith(normalizedQuery)) score += 80;
+            if (tags.some(t => t.startsWith(normalizedQuery))) score += 70;
+            if (aliases.some(t => t.startsWith(normalizedQuery))) score += 60;
+            if (terms.some(t => t.startsWith(normalizedQuery))) score += 50;
+
+            if (subconcept.includes(normalizedQuery)) score += 35;
+            if (concept.includes(normalizedQuery)) score += 30;
+            if (tags.some(t => t.includes(normalizedQuery))) score += 25;
+            if (aliases.some(t => t.includes(normalizedQuery))) score += 20;
+            if (terms.some(t => t.includes(normalizedQuery))) score += 15;
+
+            return score;
+        }
+
+        function pickBestImageCandidate(candidates, searchText) {
+            const normalizedQuery = normalizeSearchText(searchText);
+            let best = null;
+            let bestScore = -1;
+
+            for (const candidate of (candidates || [])) {
+                const score = rankImageCandidate(candidate, normalizedQuery);
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = candidate;
+                }
+            }
+
+            return best && best.image_url ? best.image_url : null;
+        }
         
         /**
          * Batch search local IndexedDB image library for multiple words at once (MUCH faster!)
@@ -2079,7 +2699,7 @@
             try {
                 // Initialize IndexedDB if needed
                 if (!window.imageLibraryDB) {
-                    const request = indexedDB.open('BravoImageLibrary', 1);
+                    const request = indexedDB.open('BravoImageLibrary', 3);
                     window.imageLibraryDB = await new Promise((resolve, reject) => {
                         request.onsuccess = () => resolve(request.result);
                         request.onerror = () => reject(request.error);
@@ -2089,7 +2709,7 @@
                 const results = new Map();
                 const transaction = window.imageLibraryDB.transaction(['images'], 'readonly');
                 const store = transaction.objectStore('images');
-                const tagsIndex = store.index('tags');
+                const searchIndex = store.index('search_terms');
                 
                 // Search all texts in parallel
                 const searchPromises = searchTexts.map(async (searchText) => {
@@ -2108,22 +2728,29 @@
                     
                     // Try each search term (important words first)
                     for (const term of searchTerms) {
+                        const termLower = term.toLowerCase();
+                        const localizedTerm = (typeof normalizeTermForLocale === 'function')
+                            ? normalizeTermForLocale(termLower, tapTargetLocale)
+                            : termLower;
                         const searchVariations = [
-                            term.toLowerCase(),
-                            term.charAt(0).toUpperCase() + term.slice(1),
-                            term.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-                            term.toUpperCase()
+                            normalizeSearchText(term),
+                            termLower,
+                            ...(localizedTerm && localizedTerm !== termLower ? [localizedTerm] : []),
+                            term.charAt(0).toUpperCase() + term.slice(1)
                         ];
                         
                         for (const variation of searchVariations) {
-                            const request = tagsIndex.get(variation);
-                            const result = await new Promise((resolve, reject) => {
+                            const normalizedVariation = normalizeSearchText(variation);
+                            if (!normalizedVariation) continue;
+                            const request = searchIndex.getAll(normalizedVariation, 20);
+                            const candidates = await new Promise((resolve, reject) => {
                                 request.onsuccess = () => resolve(request.result);
                                 request.onerror = () => reject(request.error);
                             });
-                            
-                            if (result && result.image_url) {
-                                results.set(searchText, result.image_url);
+
+                            const bestUrl = pickBestImageCandidate(candidates, searchText);
+                            if (bestUrl) {
+                                results.set(searchText, bestUrl);
                                 return; // Found match, move to next search text
                             }
                         }
@@ -2559,7 +3186,28 @@
             if (!query || query.trim() === '') return true;
             
             const lowerQuery = query.toLowerCase().trim();
-            const searchText = `${customImage.concept || ''} ${customImage.subconcept || ''} ${(customImage.tags || []).join(' ')}`.toLowerCase().trim();
+            const localizedTags = customImage?.localized_tags;
+            const localizedLabels = customImage?.localized_labels;
+            const aliases = customImage?.aliases;
+            const localizedTagsText = Array.isArray(localizedTags)
+                ? localizedTags.join(' ')
+                : (localizedTags && typeof localizedTags === 'object')
+                    ? Object.values(localizedTags).flat().join(' ')
+                    : '';
+            const localizedLabelsText = Array.isArray(localizedLabels)
+                ? localizedLabels.join(' ')
+                : (localizedLabels && typeof localizedLabels === 'object')
+                    ? Object.values(localizedLabels).flat().join(' ')
+                    : '';
+            const aliasesText = Array.isArray(aliases) ? aliases.join(' ') : '';
+            const searchText = [
+                customImage.concept || '',
+                customImage.subconcept || '',
+                ...(Array.isArray(customImage.tags) ? customImage.tags : []),
+                aliasesText,
+                localizedTagsText,
+                localizedLabelsText
+            ].join(' ').toLowerCase().trim();
             
             // For single character queries, be strict to avoid false positives
             if (lowerQuery.length === 1) {
@@ -2577,6 +3225,67 @@
             return searchText.includes(lowerQuery);
         }
         
+        function normalizeCustomMatchText(text) {
+            return String(text || '')
+                .toLowerCase()
+                .replace(/[.,!?;:\"'()\[\]{}]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function flattenCustomMatchValues(value) {
+            if (value === null || value === undefined) return [];
+            if (typeof value === 'string' || typeof value === 'number') {
+                const normalized = normalizeCustomMatchText(value);
+                return normalized ? [normalized] : [];
+            }
+            if (Array.isArray(value)) {
+                const out = [];
+                for (const item of value) out.push(...flattenCustomMatchValues(item));
+                return out;
+            }
+            if (typeof value === 'object') {
+                const out = [];
+                for (const item of Object.values(value)) out.push(...flattenCustomMatchValues(item));
+                return out;
+            }
+            return [];
+        }
+
+        function buildCustomImageTermIndex() {
+            const buildStart = performance.now();
+            
+            if (!window.customImagesCache || window.customImagesCache.length === 0) {
+                window.customImageTermIndex = new Map();
+                return;
+            }
+
+            const index = new Map();
+            for (const image of window.customImagesCache) {
+                const url = image?.image_url;
+                if (!url) continue;
+
+                const terms = [
+                    ...flattenCustomMatchValues(image?.concept),
+                    ...flattenCustomMatchValues(image?.subconcept),
+                    ...flattenCustomMatchValues(image?.tags),
+                    ...flattenCustomMatchValues(image?.aliases),
+                    ...flattenCustomMatchValues(image?.localized_tags),
+                    ...flattenCustomMatchValues(image?.localized_labels),
+                ];
+
+                for (const term of terms) {
+                    if (term && !index.has(term)) {
+                        index.set(term, url);
+                    }
+                }
+            }
+
+            window.customImageTermIndex = index;
+            perfMetrics.indexBuildTime = (performance.now() - buildStart).toFixed(2);
+            console.log(`🧭 Built custom image term index: ${index.size} terms in ${perfMetrics.indexBuildTime}ms`);
+        }
+
         /**
          * Preload all custom images for the current user (called once on initialization)
          */
@@ -2602,14 +3311,17 @@
                 
                 if (data.success && data.images && Array.isArray(data.images)) {
                     window.customImagesCache = data.images;
+                    buildCustomImageTermIndex();
                     console.log(`✅ Preloaded ${window.customImagesCache.length} custom images`);
                 } else {
                     console.warn('No custom images found or invalid response');
                     window.customImagesCache = [];
+                    window.customImageTermIndex = new Map();
                 }
             } catch (error) {
                 console.error('Error preloading custom images:', error);
                 window.customImagesCache = [];
+                window.customImageTermIndex = new Map();
             }
         }
         
@@ -2625,27 +3337,46 @@
             if (!window.customImageMatches) {
                 window.customImageMatches = new Map();
             }
+            if (!window.customImageTermIndex) {
+                window.customImageTermIndex = new Map();
+            }
             
             if (window.customImagesCache.length === 0) {
                 return;
             }
             
-            console.log(`🔍 Building match cache for ${buttonTexts.length} buttons from ${window.customImagesCache.length} custom images`);
-            
+            if (window.customImageTermIndex.size === 0) {
+                buildCustomImageTermIndex();
+            }
+
             let matchCount = 0;
             for (const buttonText of buttonTexts) {
-                // Skip if already cached
-                if (window.customImageMatches.has(buttonText.toLowerCase())) {
+                const normalized = normalizeCustomMatchText(buttonText);
+                if (!normalized || window.customImageMatches.has(normalized)) {
                     continue;
                 }
-                
-                // Find first matching custom image
-                for (const image of window.customImagesCache) {
-                    if (matchesQuery(image, buttonText)) {
-                        window.customImageMatches.set(buttonText.toLowerCase(), image.image_url);
-                        matchCount++;
-                        break; // Use first match
+
+                const directMatch = window.customImageTermIndex.get(normalized);
+                if (directMatch) {
+                    window.customImageMatches.set(normalized, directMatch);
+                    matchCount++;
+                    continue;
+                }
+
+                const words = normalized.split(' ').filter(Boolean);
+                let fallbackMatch = null;
+                for (const word of words) {
+                    if (word.length < 3) continue;
+                    const candidate = window.customImageTermIndex.get(word);
+                    if (candidate) {
+                        fallbackMatch = candidate;
+                        break;
                     }
+                }
+
+                if (fallbackMatch) {
+                    window.customImageMatches.set(normalized, fallbackMatch);
+                    matchCount++;
                 }
             }
             
@@ -2673,6 +3404,26 @@
                 // The user prefers summaries on this interface regardless of global setting
                 SummaryOff = false; 
                 console.log('SummaryOff setting (FORCED FALSE for Tap):', SummaryOff);
+
+                // Load multilingual locale split (same pattern as games/grid)
+                tapTargetLocale = normalizeLocaleTag(String(settings?.userLanguage || 'en-US')) || 'en-US';
+                tapPartnerLocale = normalizeLocaleTag(String(settings?.defaultPartnerLanguage || 'en-US')) || 'en-US';
+                console.log('Tap target locale (user display):', tapTargetLocale);
+                console.log('Tap partner locale (announcements):', tapPartnerLocale);
+
+                defaultPartnerVoiceName = String(settings?.defaultPartnerVoice || settings?.selected_tts_voice_name || currentTtsVoiceName || SYSTEM_PREVIEW_VOICE_NAME).trim() || SYSTEM_PREVIEW_VOICE_NAME;
+                const rawOverrideVoices = settings?.locationOverrideVoices;
+                const normalizedOverrideVoices = {};
+                if (rawOverrideVoices && typeof rawOverrideVoices === 'object') {
+                    Object.entries(rawOverrideVoices).forEach(([localeKey, voiceName]) => {
+                        const normalizedLocale = normalizeLocaleTag(localeKey);
+                        const normalizedVoice = String(voiceName || '').trim();
+                        if (normalizedLocale && normalizedVoice) {
+                            normalizedOverrideVoices[normalizedLocale] = normalizedVoice;
+                        }
+                    });
+                }
+                locationOverrideVoicesMap = normalizedOverrideVoices;
                 
                 // Load Pictogram setting
                 disableTapPictograms = settings.disableTapPictograms === true;
@@ -2690,6 +3441,8 @@
                     currentTtsVoiceName = settings.selected_tts_voice_name;
                     console.log(`TTS Voice Name loaded: "${currentTtsVoiceName}"`);
                 }
+
+                await refreshTapLocationLanguageOverride();
 
                 if (settings && typeof settings.applicationVolume === 'number' && !isNaN(settings.applicationVolume)) {
                     applicationVolume = Math.max(0, Math.min(10, Number(settings.applicationVolume)));
@@ -2895,7 +3648,7 @@
                 
                 currentPhraseOptions = options;
                 renderCategoryOptions(options, true); // Defer images
-                setTimeout(() => loadImagesForPhrases(options), 50);
+                setTimeout(() => loadImagesForPhrases(options, true), 50);
                 
             } catch (error) {
                 console.error('Error regenerating phrase options:', error);
@@ -3174,6 +3927,7 @@
                         build_space_content: buildSpace.value || '',
                         count: wordsCount,
                         exclude_words: excludedWords,
+                        target_locale: getEffectiveTapWordLocale(),
                         custom_prompt: wordsPrompt || null, // Use custom_prompt for server priority
                         current_mood: currentMood
                     };
@@ -3205,6 +3959,7 @@
                 const requestBody = {
                     "speech_history": buildSpace.value || '',
                     "count": wordsCount,
+                    "target_locale": getEffectiveTapWordLocale(),
                     "exclude_words": excludedWords
                 };
                 
@@ -3472,7 +4227,7 @@
 
             renderFreestyleOptions(renderedOptions, true);
             setTimeout(() => {
-                loadImagesForWords(renderedOptions);
+                loadImagesForWords(renderedOptions, true);
             }, 50);
         }
 
@@ -3705,6 +4460,7 @@ VARIETY RULES:
                     category: 'Home',
                     build_space_content: '',
                     exclude_words: [],
+                    target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
                     custom_prompt: getDefaultHomeStarterPrompt(desiredCount),
                     context: 'home starters',
@@ -3752,6 +4508,7 @@ VARIETY RULES:
 
                 if (response.ok) {
                     tapConfig = await response.json();
+                    await localizeTapConfigLabels(tapConfig);
                     console.log('Loaded tap config:', tapConfig);
                     // Debug: Check for words_prompt in buttons
                     if (tapConfig.buttons) {
@@ -3845,13 +4602,37 @@ VARIETY RULES:
         async function batchLoadImages(terms) {
             if (!terms || terms.length === 0) return {};
             
+            // Normalize all terms for locale-specific inflection matching.
+            // Preserve object payloads so keyword hints still reach the batch endpoint.
+            const normalizedTerms = terms.map(term => {
+                if (typeof term === 'object' && term !== null) {
+                    const originalText = String(term.text || '').trim();
+                    const normalizedText = normalizeTermForLocale(originalText, tapTargetLocale);
+                    return {
+                        ...term,
+                        text: normalizedText
+                    };
+                }
+
+                const plainText = String(term || '').trim();
+                return normalizeTermForLocale(plainText, tapTargetLocale);
+            }).filter(term => {
+                if (typeof term === 'object' && term !== null) {
+                    return String(term.text || '').trim() !== '';
+                }
+                return String(term || '').trim() !== '';
+            });
+            
             try {
                 const response = await authenticatedFetch('/api/symbols/batch-search', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ terms: terms })
+                    body: JSON.stringify({
+                        terms: normalizedTerms,
+                        locale: tapTargetLocale || 'en-US'
+                    })
                 });
                 
                 if (!response.ok) {
@@ -3895,8 +4676,10 @@ VARIETY RULES:
                 });
             }
             
-            // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
-            if (phraseTexts.length > 0) {
+            // 🚀 Batch prefetch from local IndexedDB library.
+            // Run this only on the initial pass; the background pass should use cache misses
+            // + one server batch call to avoid duplicate IndexedDB work.
+            if (phraseTexts.length > 0 && initialLoad) {
                 try {
                     // Ensure cache is initialized
                     if (!window.symbolImageCache) {
@@ -3922,8 +4705,65 @@ VARIETY RULES:
                         }
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
+
+                    // 🚀 Pre-warm server cache for terms that missed locally.
+                    // Fire this non-blocking so images appear as soon as the server responds
+                    // instead of waiting for the 2-3 second background pass setTimeout.
+                    const serverMisses = [];
+                    for (let i = 0; i < options.length; i++) {
+                        const option = options[i];
+                        const speechText = typeof option === 'object' ? option.option : option;
+                        if (!speechText || speechText === 'Something Else') continue;
+                        const ck = `tap_${String(speechText).trim().toLowerCase()}`;
+                        const hit = window.symbolImageCache.get(ck);
+                        if (!hit || !hit.imageUrl) {
+                            const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                            serverMisses.push({ text: speechText, keywords: phraseKeywords });
+                        }
+                    }
+                    if (serverMisses.length > 0) {
+                        console.log(`🌐 Pre-warming server for ${serverMisses.length} phrase misses (non-blocking)...`);
+                        batchLoadImages(serverMisses).then(() => {
+                            // Apply newly-fetched images directly to already-rendered buttons
+                            const currentButtons = llmStaticOptions.querySelectorAll('.option-button');
+                            for (let i = 0; i < Math.min(options.length, currentButtons.length); i++) {
+                                const btn = currentButtons[i];
+                                if (btn.querySelector('img')) continue;
+                                const option = options[i];
+                                const speechText = typeof option === 'object' ? option.option : option;
+                                if (!speechText) continue;
+                                const ck = `tap_${String(speechText).trim().toLowerCase()}`;
+                                const cached = window.symbolImageCache.get(ck);
+                                if (cached && cached.imageUrl) {
+                                    applyImageToButton(btn, cached.imageUrl, btn.textContent.trim());
+                                }
+                            }
+                        }).catch(() => {});
+                    }
+
                 } catch (error) {
                     console.error('Error batch searching local library:', error);
+                }
+            }
+
+            // Background pass: do one server batch fetch for remaining misses.
+            if (!initialLoad) {
+                const missingEntries = [];
+                for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                    const option = options[i];
+                    const speechText = typeof option === 'object' ? option.option : option;
+                    const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    if (!speechText || speechText === 'Something Else') continue;
+                    const cacheKey = `tap_${String(speechText).trim().toLowerCase()}`;
+                    const cached = window.symbolImageCache.get(cacheKey);
+                    if (!cached || !cached.imageUrl) {
+                        missingEntries.push({ text: speechText, keywords: phraseKeywords });
+                    }
+                }
+
+                if (missingEntries.length > 0) {
+                    console.log(`📦 Batch server searching ${missingEntries.length} phrase misses...`);
+                    await batchLoadImages(missingEntries);
                 }
             }
             
@@ -3931,27 +4771,33 @@ VARIETY RULES:
             const imagePromises = [];
             const buttonMappings = [];
             
-            for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
-                const option = options[i];
+            for (let i = 0; i < buttons.length; i++) {
                 const btn = buttons[i];
                 
                 // Skip if button already has an image
                 if (btn.querySelector('img')) continue;
                 
                 // Handle "Something Else" button specially
-                if (btn.textContent === 'Something Else') {
+                if (btn.dataset.specialButton === 'something-else') {
+                    const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                    const specialButtonLabel = btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else');
                     console.log('📦 Loading image for Something Else button in Phrases');
-                    const cacheOnly = initialLoad;
-                    imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
-                    buttonMappings.push({ btn, text: 'Something Else' });
+                    // Never use cacheOnly for Something Else — it is excluded from the pre-warm
+                    // batch so it must always be allowed to hit the server on a cache miss.
+                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, false));
+                    buttonMappings.push({ btn, text: specialButtonLabel });
                     continue;
                 }
+
+                const option = options[i];
+                if (!option) continue;
                 
                 const speechText = typeof option === 'object' ? option.option : option;
                 const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
                 
                 // On initial load: cache only. Background: fetch if needed.
-                const cacheOnly = initialLoad;
+                // After batch fetch, avoid per-button server fallback (keeps UI responsive)
+                const cacheOnly = true;
                 imagePromises.push(getSymbolImageForText(speechText, phraseKeywords, cacheOnly));
                 buttonMappings.push({ btn, text: btn.textContent });
             }
@@ -3963,6 +4809,11 @@ VARIETY RULES:
             for (let i = 0; i < imageUrls.length; i++) {
                 if (imageUrls[i]) {
                     applyImageToButton(buttonMappings[i].btn, imageUrls[i], buttonMappings[i].text);
+                    // Re-apply localized label for special buttons — translation may have resolved
+                    // after the image fetch, so the footer text needs to be corrected.
+                    if (buttonMappings[i].btn.dataset.specialButton) {
+                        localizeTapSpecialButton(buttonMappings[i].btn).catch(() => {});
+                    }
                 }
             }
         }
@@ -3980,8 +4831,10 @@ VARIETY RULES:
                 });
             }
             
-            // 🚀 NEW: Batch prefetch from local IndexedDB library (INSTANT, NO NETWORK!)
-            if (wordTexts.length > 0) {
+            // 🚀 Batch prefetch from local IndexedDB library.
+            // Run this only on the initial pass; the background pass should use cache misses
+            // + one server batch call to avoid duplicate IndexedDB work.
+            if (wordTexts.length > 0 && initialLoad) {
                 try {
                     // Ensure cache is initialized
                     if (!window.symbolImageCache) {
@@ -4007,8 +4860,69 @@ VARIETY RULES:
                         }
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
+
+                    // 🚀 Pre-warm server cache for terms that missed locally.
+                    // Fire this non-blocking so images appear as soon as the server responds
+                    // instead of waiting for the 2-3 second background pass setTimeout.
+                    const serverMisses = [];
+                    for (const option of options) {
+                        const text = typeof option === 'object' ? (option.text || option.option) : option;
+                        if (!text || text === 'Something Else') continue;
+                        const ck = `tap_${String(text).trim().toLowerCase()}`;
+                        const hit = window.symbolImageCache.get(ck);
+                        if (!hit || !hit.imageUrl) {
+                            const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                            serverMisses.push({ text, keywords });
+                        }
+                    }
+                    if (serverMisses.length > 0) {
+                        console.log(`🌐 Pre-warming server for ${serverMisses.length} word misses (non-blocking)...`);
+                        batchLoadImages(serverMisses).then(() => {
+                            // Apply newly-fetched images directly to already-rendered buttons
+                            const currentButtons = Array.from(freestyleOptions.querySelectorAll('.freestyle-button'));
+                            for (const btn of currentButtons) {
+                                if (btn.querySelector('img') || btn.classList.contains('sight-word-button')) continue;
+                                if (btn.dataset.specialButton === 'something-else') continue;
+                                const optIdx = Number(btn.dataset.optionIndex);
+                                if (Number.isNaN(optIdx) || optIdx < 0 || optIdx >= options.length) continue;
+                                const option = options[optIdx];
+                                const text = typeof option === 'object' ? (option.text || option.option) : option;
+                                if (!text) continue;
+                                const ck = `tap_${String(text).trim().toLowerCase()}`;
+                                const cached = window.symbolImageCache.get(ck);
+                                if (cached && cached.imageUrl) {
+                                    applyImageToButton(btn, cached.imageUrl, btn.textContent.trim());
+                                }
+                            }
+                        }).catch(() => {});
+                    }
+
                 } catch (error) {
                     console.error('Error batch searching local library:', error);
+                }
+            }
+
+            // Background pass: do one server batch fetch for remaining misses.
+            if (!initialLoad) {
+                const missingEntries = [];
+                for (const btn of buttons) {
+                    if (btn.dataset.specialButton === 'something-else') continue;
+                    const optionIndex = Number(btn.dataset.optionIndex);
+                    if (Number.isNaN(optionIndex) || optionIndex < 0 || optionIndex >= options.length) continue;
+                    const option = options[optionIndex];
+                    const text = typeof option === 'object' ? (option.text || option.option) : option;
+                    const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    if (!text) continue;
+                    const cacheKey = `tap_${String(text).trim().toLowerCase()}`;
+                    const cached = window.symbolImageCache.get(cacheKey);
+                    if (!cached || !cached.imageUrl) {
+                        missingEntries.push({ text, keywords });
+                    }
+                }
+
+                if (missingEntries.length > 0) {
+                    console.log(`📦 Batch server searching ${missingEntries.length} word misses...`);
+                    await batchLoadImages(missingEntries);
                 }
             }
             
@@ -4022,10 +4936,13 @@ VARIETY RULES:
 
                 // Handle "Something Else" button specially
                 if (btn.dataset.specialButton === 'something-else') {
+                    const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                    const specialButtonLabel = btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else');
                     console.log('📦 Loading image for Something Else button in Words');
-                    const cacheOnly = initialLoad;
-                    imagePromises.push(getSymbolImageForText('Something Else', ['refresh', 'more', 'other'], cacheOnly));
-                    buttonMappings.push({ btn, text: 'Something Else' });
+                    // Never use cacheOnly for Something Else — it is excluded from the pre-warm
+                    // batch so it must always be allowed to hit the server on a cache miss.
+                    imagePromises.push(getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords, false));
+                    buttonMappings.push({ btn, text: specialButtonLabel });
                     continue;
                 }
 
@@ -4038,7 +4955,8 @@ VARIETY RULES:
                 const configuredImageUrl = (typeof option === 'object' && option.image_url) ? option.image_url : null;
                 
                 // On initial load: cache only. Background: fetch if needed.
-                const cacheOnly = initialLoad;
+                // After batch fetch, avoid per-button server fallback (keeps UI responsive)
+                const cacheOnly = true;
                 imagePromises.push(
                     configuredImageUrl
                         ? Promise.resolve(configuredImageUrl)
@@ -4054,6 +4972,11 @@ VARIETY RULES:
             for (let i = 0; i < imageUrls.length; i++) {
                 if (imageUrls[i]) {
                     applyImageToButton(buttonMappings[i].btn, imageUrls[i], buttonMappings[i].text);
+                    // Re-apply localized label for special buttons — translation may have resolved
+                    // after the image fetch, so the footer text needs to be corrected.
+                    if (buttonMappings[i].btn.dataset.specialButton) {
+                        localizeTapSpecialButton(buttonMappings[i].btn).catch(() => {});
+                    }
                 }
             }
         }
@@ -4182,6 +5105,9 @@ VARIETY RULES:
                     return;
                 }
 
+                const rawLabel = String(button.label || '').trim();
+                const displayLabel = rawLabel;
+
                 const categoryBtn = document.createElement('button');
                 categoryBtn.className = 'category-button';
                 if (button.board_id) {
@@ -4189,7 +5115,7 @@ VARIETY RULES:
                 }
                 
                 // Check if this is a sight word - if so, apply special styling and skip images
-                const isSightWord = isTapSightWord(button.label);
+                const isSightWord = isTapSightWord(displayLabel);
                 
                 // Only apply custom background if specified in config, otherwise let CSS handle it
                 if (button.background_color && button.background_color !== '#FFFFFF') {
@@ -4202,7 +5128,7 @@ VARIETY RULES:
                 
                 // Add Firestore image support for categories (like gridpage) - skip for sight words
                 if (!isSightWord) {
-                    getSymbolImageForText(button.label).then(imageUrl => {
+                    getSymbolImageForText(rawLabel || displayLabel).then(imageUrl => {
                         if (imageUrl) {
                             // Create image + text layout like gridpage
                             categoryBtn.innerHTML = '';
@@ -4226,7 +5152,7 @@ VARIETY RULES:
                             
                             const imageElement = document.createElement('img');
                             imageElement.src = imageUrl;
-                            imageElement.alt = button.label;
+                            imageElement.alt = displayLabel;
                             imageElement.style.width = '100%';
                             imageElement.style.height = '100%';
                             imageElement.style.objectFit = 'cover';
@@ -4249,7 +5175,7 @@ VARIETY RULES:
                             textFooter.style.right = '0';
                             
                             const textSpan = document.createElement('span');
-                            textSpan.textContent = button.label;
+                            textSpan.textContent = displayLabel;
                             textSpan.style.fontSize = '0.54em';
                             textSpan.style.fontWeight = '600';
                             textSpan.style.textAlign = 'center';
@@ -4269,16 +5195,16 @@ VARIETY RULES:
                 // Set initial text (will be replaced by image if found)
                 // For sight words, apply special styling
                 if (isSightWord) {
-                    console.log('[SIGHT WORD] Rendering text-only button for:', button.label);
+                    console.log('[SIGHT WORD] Rendering text-only button for:', displayLabel);
                     categoryBtn.classList.add('sight-word-button');
                     const textSpan = document.createElement('span');
-                    textSpan.textContent = button.label;
+                    textSpan.textContent = displayLabel;
                     textSpan.style.fontSize = '1.25em';
                     textSpan.style.fontWeight = '900';
                     textSpan.style.color = '#dc2626';
                     categoryBtn.appendChild(textSpan);
                 } else {
-                    categoryBtn.textContent = button.label;
+                    categoryBtn.textContent = displayLabel;
                 }
                 
                 categoryBtn.addEventListener('click', async (event) => {
@@ -4425,6 +5351,66 @@ VARIETY RULES:
             return findCategoryByLabel('Home', categories);
         }
 
+        function getEffectiveCategoryConfig(category, fallbackBoardType = null) {
+            if (!category || typeof category !== 'object') {
+                return category;
+            }
+
+            const boardId = String(category.board_id || category.id || '').trim();
+            const linkedBoard = boardId ? boardsById[boardId] : null;
+
+            const boardWordOptions = (Array.isArray(category.board_word_options) && category.board_word_options.length > 0)
+                ? category.board_word_options
+                : buildWordOptionsFromBoard(linkedBoard);
+
+            const staticOptions = category.static_options
+                || linkedBoard?.static_options
+                || (boardWordOptions.length > 0 ? boardWordOptions.map(opt => opt.text).filter(Boolean).join(', ') : null)
+                || null;
+
+            const llmPrompt = category.llm_prompt
+                || category.llm_query
+                || linkedBoard?.llm_prompt
+                || null;
+
+            const wordsPrompt = category.words_prompt
+                || linkedBoard?.words_prompt
+                || null;
+
+            const boardType = String(
+                category.board_type
+                || linkedBoard?.board_type
+                || fallbackBoardType
+                || ''
+            ).toLowerCase() || null;
+
+            return {
+                ...category,
+                board_id: category.board_id || linkedBoard?.id || null,
+                board_type: boardType,
+                static_options: staticOptions,
+                llm_prompt: llmPrompt,
+                words_prompt: wordsPrompt,
+                board_word_options: boardWordOptions,
+            };
+        }
+
+        function isInstructionStyleWordsPrompt(prompt) {
+            const normalized = String(prompt || '').trim();
+            if (!normalized) return false;
+            const lowered = normalized.toLowerCase();
+            return (
+                normalized.length > 70
+                || lowered.includes('generate ')
+                || lowered.includes('include ')
+                || lowered.includes('return only')
+                || lowered.includes('json array')
+                || lowered.includes('exactly ')
+                || lowered.includes('llm')
+                || lowered.includes('options')
+            );
+        }
+
         function isStartupEligibleCategory(category) {
             if (!category || typeof category !== 'object') {
                 return false;
@@ -4489,7 +5475,10 @@ VARIETY RULES:
             } else {
                 const buttonLabels = tapConfig.buttons
                     .filter(button => !button.hidden)
-                    .map(button => button.label);
+                    .flatMap(button => {
+                        const rawLabel = String(button?.label || '').trim();
+                        return [rawLabel].filter(Boolean);
+                    });
 
                 if (buttonLabels.length > 0) {
                     batchPreloadCustomImageMatches(buttonLabels).catch(error => {
@@ -4500,9 +5489,12 @@ VARIETY RULES:
                 tapConfig.buttons.forEach(button => {
                     if (button.hidden) return;
 
+                    const rawLabel = String(button.label || '').trim();
+                    const displayLabel = getTapDisplayLabel(button) || rawLabel;
+
                     const modalBtn = document.createElement('button');
                     modalBtn.className = 'categories-modal-button';
-                    const isSightWord = isTapSightWord(button.label);
+                    const isSightWord = isTapSightWord(displayLabel);
 
                     if (button.background_color && button.background_color !== '#FFFFFF') {
                         modalBtn.style.background = button.background_color;
@@ -4510,7 +5502,7 @@ VARIETY RULES:
 
                     if (!isSightWord) {
                         modalBtn.style.color = button.text_color || '#000000';
-                        getSymbolImageForText(button.label).then(imageUrl => {
+                        getSymbolImageForText(rawLabel || displayLabel).then(imageUrl => {
                             if (!imageUrl) {
                                 return;
                             }
@@ -4534,7 +5526,7 @@ VARIETY RULES:
 
                             const imageElement = document.createElement('img');
                             imageElement.src = imageUrl;
-                            imageElement.alt = button.label;
+                            imageElement.alt = displayLabel;
                             imageElement.style.width = '100%';
                             imageElement.style.height = '100%';
                             imageElement.style.objectFit = 'cover';
@@ -4553,7 +5545,7 @@ VARIETY RULES:
                             textFooter.style.fontSize = '8px';
                             textFooter.style.lineHeight = '1.0';
                             textFooter.style.fontWeight = '600';
-                            textFooter.textContent = button.label;
+                            textFooter.textContent = displayLabel;
 
                             imageContainer.appendChild(imageElement);
                             buttonContent.appendChild(imageContainer);
@@ -4567,13 +5559,13 @@ VARIETY RULES:
                     if (isSightWord) {
                         modalBtn.classList.add('sight-word-button');
                         const textSpan = document.createElement('span');
-                        textSpan.textContent = button.label;
+                        textSpan.textContent = displayLabel;
                         textSpan.style.fontSize = '1.25em';
                         textSpan.style.fontWeight = '900';
                         textSpan.style.color = '#dc2626';
                         modalBtn.appendChild(textSpan);
                     } else {
-                        modalBtn.textContent = button.label;
+                        modalBtn.textContent = displayLabel;
                     }
 
                     if (currentCategory && currentCategory.label === button.label) {
@@ -4711,7 +5703,7 @@ VARIETY RULES:
                 event.target.classList.add('active');
             }
             
-            currentCategory = category;
+            currentCategory = getEffectiveCategoryConfig(category);
             
             // If category has children, show modal (pass parent path so nested selection builds full path)
             if (category.children && category.children.length > 0) {
@@ -4753,27 +5745,27 @@ VARIETY RULES:
 
             try {
                 // Store the words prompt and instruction prompt globally for word selection
-                currentWordsPrompt = category.words_prompt || null;
-                currentInstructionPrompt = category.llm_prompt || null;
+                currentWordsPrompt = currentCategory.words_prompt || null;
+                currentInstructionPrompt = currentCategory.llm_prompt || null;
 
                 console.log('⏱️ Starting parallel fetch at:', Date.now());
 
                 // Resolve board_type up front — needed by both phrases and words sections
                 const resolvedBoardType = String(
-                    category.board_type
-                    || (category.board_id && boardsById[String(category.board_id)]?.board_type)
+                    currentCategory.board_type
+                    || (currentCategory.board_id && boardsById[String(currentCategory.board_id)]?.board_type)
                     || ''
                 ).toLowerCase();
                 const isCategoryAiBoard = resolvedBoardType === 'ai';
-                const isCategoryHomeAiBoard = shouldUseDefaultHomeStarterWords(category) && isCategoryAiBoard;
+                const isCategoryHomeAiBoard = shouldUseDefaultHomeStarterWords(currentCategory) && isCategoryAiBoard;
 
                 // Start both promises immediately - they will execute concurrently
                 let phrasesPromise, wordsPromise;
                 
                 // PHRASES SECTION LOGIC
-                if (phraseSectionEnabled && category.llm_prompt) {
+                if (phraseSectionEnabled && currentCategory.llm_prompt) {
                     console.log('⏱️ Starting phrases fetch with prompt at:', Date.now());
-                    phrasesPromise = generateGridpageLLMOptions(category.llm_prompt, LLMOptions);
+                    phrasesPromise = generateGridpageLLMOptions(currentCategory.llm_prompt, LLMOptions);
                 } else if (phraseSectionEnabled && isCategoryHomeAiBoard) {
                     // AI-defined Home board with no explicit llm_prompt — use communication-starter prompt
                     // rather than the literal "Generate phrases related to Home" fallback which produces house nouns
@@ -4786,7 +5778,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     phrasesPromise = generateGridpageLLMOptions(homeStarterPhrasesPrompt, LLMOptions);
                 } else if (phraseSectionEnabled) {
                     console.log('⏱️ Starting phrases fetch with fallback prompt at:', Date.now());
-                    const fallbackPrompt = `Generate phrases related to ${category.label}`;
+                    const fallbackPrompt = `Generate phrases related to ${currentCategory.label}`;
                     phrasesPromise = generateGridpageLLMOptions(fallbackPrompt, LLMOptions);
                 } else {
                     phrasesPromise = Promise.resolve([]);
@@ -4794,56 +5786,80 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
                 // WORDS SECTION LOGIC
                 console.log('⏱️ Starting words fetch at:', Date.now());
-                console.log('[DEBUG] board_type resolved:', resolvedBoardType, 'board_id:', category.board_id, 'isAiBoard:', isCategoryAiBoard);
-                if (Array.isArray(category.board_word_options) && category.board_word_options.length > 0 && !isCategoryAiBoard) {
-                    console.log('Using structured board word options for Words section:', category.board_word_options);
-                    wordsPromise = Promise.resolve(category.board_word_options);
-                } else if (category.static_options && !isCategoryAiBoard) {
-                    console.log('Using static options for Words section:', category.static_options);
-                    const staticWords = category.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                console.log('[DEBUG] board_type resolved:', resolvedBoardType, 'board_id:', currentCategory.board_id, 'isAiBoard:', isCategoryAiBoard);
+                if (Array.isArray(currentCategory.board_word_options) && currentCategory.board_word_options.length > 0 && !isCategoryAiBoard) {
+                    console.log('Using structured board word options for Words section:', currentCategory.board_word_options);
+                    wordsPromise = Promise.resolve(currentCategory.board_word_options);
+                } else if (currentCategory.static_options && !isCategoryAiBoard) {
+                    console.log('Using static options for Words section:', currentCategory.static_options);
+                    const staticWords = currentCategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
-                } else if (shouldUseDefaultHomeStarterWords(category) && isCategoryAiBoard) {
+                } else if (shouldUseDefaultHomeStarterWords(currentCategory) && isCategoryAiBoard) {
                     console.log('Using default Home starter prompt for Words section');
                     wordsPromise = generateDefaultHomeStarterWords(FreestyleWordOptions);
                 } else {
-                    wordsPromise = generateFreestyleOptionsForCategory(category.label || category, FreestyleWordOptions, category.words_prompt, category.llm_prompt, isCategoryAiBoard);
+                    wordsPromise = generateFreestyleOptionsForCategory(currentCategory.label || currentCategory, FreestyleWordOptions, currentCategory.words_prompt, currentCategory.llm_prompt, isCategoryAiBoard);
                 }
 
-                console.log('⏱️ Waiting for both fetches at:', Date.now());
-                // Wait for both to complete in parallel
-                const [phrasesOptions, wordsOptions] = await Promise.all([phrasesPromise, wordsPromise]);
+                // Progressive rendering: do not block words UI on phrase generation latency.
+                const loadRequestKey = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+                window.activeTapCategoryLoadKey = loadRequestKey;
 
-                let finalPhrasesOptions = Array.isArray(phrasesOptions) ? phrasesOptions : [];
-                if (LLMOptions > 0 && finalPhrasesOptions.length === 0) {
-                    console.warn('[Tap] Phrase generation returned empty array, applying deterministic fallback phrases.', {
-                        category: category.label,
-                        llmOptions: LLMOptions,
-                        wordsCount: Array.isArray(wordsOptions) ? wordsOptions.length : 0
-                    });
-                    finalPhrasesOptions = buildTapFallbackPhrases(category.label, wordsOptions, LLMOptions);
-                }
+                console.log('⏱️ Starting progressive render for words + phrases at:', Date.now());
 
-                console.log('⏱️ Both fetches completed at:', Date.now());
-                console.log('Final phrases options:', finalPhrasesOptions);
-                console.log('Final words options:', wordsOptions);
-                
-                // Render both sections with deferred images for batch loading
-                if (phraseSectionEnabled) {
-                    renderCategoryOptions(finalPhrasesOptions, true); // true = defer images
-                }
-                if (wordsOptions) {
+                let latestWordsOptions = [];
+
+                const wordsRenderPromise = Promise.resolve(wordsPromise).then((wordsOptionsRaw) => {
+                    if (window.activeTapCategoryLoadKey !== loadRequestKey) {
+                        return [];
+                    }
+
+                    const wordsOptions = Array.isArray(wordsOptionsRaw) ? wordsOptionsRaw : [];
+                    latestWordsOptions = wordsOptions;
+
+                    console.log('⏱️ Words ready at:', Date.now(), 'count:', wordsOptions.length);
                     renderFreestyleOptions(wordsOptions, true); // true = defer images
-                }
-                
-                // Load images for both phrases and words in parallel
-                setTimeout(() => {
-                    Promise.all([
-                        phraseSectionEnabled ? loadImagesForPhrases(finalPhrasesOptions) : Promise.resolve(),
-                        wordsOptions ? loadImagesForWords(wordsOptions) : Promise.resolve()
-                    ]);
-                }, 50);
-                
-                console.log('⏱️ Rendering completed at:', Date.now());
+                    setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+
+                    return wordsOptions;
+                });
+
+                const phrasesRenderPromise = Promise.resolve(phrasesPromise).then(async (phrasesOptionsRaw) => {
+                    if (window.activeTapCategoryLoadKey !== loadRequestKey) {
+                        return [];
+                    }
+
+                    let finalPhrasesOptions = Array.isArray(phrasesOptionsRaw) ? phrasesOptionsRaw : [];
+                    if (LLMOptions > 0 && finalPhrasesOptions.length === 0) {
+                        const fallbackWords = latestWordsOptions.length > 0
+                            ? latestWordsOptions
+                            : (await Promise.resolve(wordsPromise).catch(() => []));
+                        console.warn('[Tap] Phrase generation returned empty array, applying deterministic fallback phrases.', {
+                            category: currentCategory.label,
+                            llmOptions: LLMOptions,
+                            wordsCount: Array.isArray(fallbackWords) ? fallbackWords.length : 0
+                        });
+                        finalPhrasesOptions = buildTapFallbackPhrases(currentCategory.label, fallbackWords, LLMOptions);
+                    }
+
+                    if (phraseSectionEnabled) {
+                        console.log('⏱️ Phrases ready at:', Date.now(), 'count:', finalPhrasesOptions.length);
+                        renderCategoryOptions(finalPhrasesOptions, true); // true = defer images
+                        setTimeout(() => loadImagesForPhrases(finalPhrasesOptions, true), 50);
+                    }
+
+                    return finalPhrasesOptions;
+                });
+
+                const [finalWordsOptions, finalPhrasesOptions] = await Promise.all([
+                    wordsRenderPromise,
+                    phrasesRenderPromise
+                ]);
+
+                console.log('⏱️ Progressive rendering completed at:', Date.now(), {
+                    wordsCount: Array.isArray(finalWordsOptions) ? finalWordsOptions.length : 0,
+                    phrasesCount: Array.isArray(finalPhrasesOptions) ? finalPhrasesOptions.length : 0
+                });
             } catch (error) {
                 console.error('Error loading category options:', error);
                 renderCategoryOptions([]);
@@ -4860,7 +5876,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 return;
             }
             
-            modalTitle.textContent = category.label;
+            modalTitle.textContent = getTapDisplayLabel(category) || String(category.label || '').trim();
             modalGrid.innerHTML = '';
             const basePath = parentPath ? parentPath : category.label;
 
@@ -4875,16 +5891,19 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     return;
                 }
 
-                console.log('Adding child option:', child.label);
+                const rawChildLabel = String(child.label || '').trim();
+                const displayChildLabel = getTapDisplayLabel(child) || rawChildLabel;
+
+                console.log('Adding child option:', displayChildLabel);
                 const categoryBtn = document.createElement('button');
                 categoryBtn.className = 'modal-option category-button';
                 categoryBtn.style.background = child.background_color || '#FFFFFF';
                 categoryBtn.style.color = child.text_color || '#000000';
                 
                 // Add image support for child categories (same as main categories)
-                console.log(`🔍 Attempting image load for child category: "${child.label}"`);
-                getSymbolImageForText(child.label).then(imageUrl => {
-                    console.log(`🎯 Image result for "${child.label}": ${imageUrl ? 'Found' : 'Not found'}`);
+                console.log(`🔍 Attempting image load for child category: "${displayChildLabel}"`);
+                getSymbolImageForText(rawChildLabel || displayChildLabel).then(imageUrl => {
+                    console.log(`🎯 Image result for "${displayChildLabel}": ${imageUrl ? 'Found' : 'Not found'}`);
                     if (imageUrl) {
                         // Create image + text layout like main categories
                         categoryBtn.innerHTML = '';
@@ -4907,7 +5926,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         
                         const imageElement = document.createElement('img');
                         imageElement.src = imageUrl;
-                        imageElement.alt = child.label;
+                        imageElement.alt = displayChildLabel;
                         imageElement.style.width = '100%';
                         imageElement.style.height = '100%';
                         imageElement.style.objectFit = 'cover';
@@ -4930,7 +5949,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         textFooter.style.right = '0';
                         
                         const textSpan = document.createElement('span');
-                        textSpan.textContent = child.label;
+                        textSpan.textContent = displayChildLabel;
                         textSpan.style.fontSize = '0.54em';
                         textSpan.style.fontWeight = '600';
                         textSpan.style.textAlign = 'center';
@@ -4947,7 +5966,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 });
                 
                 // Set initial text (will be replaced by image if found)
-                categoryBtn.textContent = child.label;
+                categoryBtn.textContent = displayChildLabel;
                 
                 categoryBtn.addEventListener('click', async () => {
                     await runTapActionOnce(categoryBtn, async () => {
@@ -5010,11 +6029,20 @@ Avoid phrases that are literally about the home as a building or location. Keep 
             }
 
             try {
+                const parentBoardType = currentCategory?.board_type || null;
+                const effectiveSubcategory = getEffectiveCategoryConfig(
+                    {
+                        ...subcategory,
+                        label: fullParentPath,
+                    },
+                    parentBoardType
+                );
+
                 let options = [];
 
-                if (subcategory.static_options) {
+                if (effectiveSubcategory.static_options) {
                     // Use static options - format as structured options with full phrases
-                    const staticTexts = subcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    const staticTexts = effectiveSubcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     options = staticTexts.map(text => ({
                         option: text,
                         summary: text.length > 20 ? text.substring(0, 17) + '...' : text,
@@ -5022,12 +6050,12 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     }));
                     currentPhrasePrompt = null;
                     currentPhraseContext = null;
-                } else if (subcategory.llm_prompt) {
+                } else if (effectiveSubcategory.llm_prompt) {
                     // Generate full phrases using gridpage-style LLM and store context for regeneration
-                    currentPhrasePrompt = subcategory.llm_prompt;
-                    currentPhraseContext = subcategory;
+                    currentPhrasePrompt = effectiveSubcategory.llm_prompt;
+                    currentPhraseContext = effectiveSubcategory;
                     if (phraseSectionEnabled) {
-                        options = await generateGridpageLLMOptions(subcategory.llm_prompt, LLMOptions);
+                        options = await generateGridpageLLMOptions(effectiveSubcategory.llm_prompt, LLMOptions);
                     }
                 }
 
@@ -5037,27 +6065,44 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 
                 // Batch load phrase images after render
                 if (phraseSectionEnabled) {
-                    setTimeout(() => loadImagesForPhrases(options), 50);
+                    setTimeout(() => loadImagesForPhrases(options, true), 50);
                 }
 
                 // Also update freestyle options with the selected category context 
                 // IMPORTANT: Use just the subcategory name for API calls, not the full path
                 // This ensures "Insects" is sent instead of "Animals, Insects" which matches server expectations
                 const categoryForApi = subcategory.label; // Just "Insects", not "Animals, Insects"
-                const fullPath = fullParentPath; // Keep full path for display/context
                 // Set currentCategory to preserve context for future freestyle calls
-                // Preserve board_type from parent so AI/Static distinction flows into subcategory word generation
-                currentCategory = { label: fullPath, board_type: currentCategory?.board_type || null };
-                console.log('Subcategory has words_prompt:', subcategory.words_prompt);
-                console.log('Using category for API:', categoryForApi, 'vs full path:', fullPath);
+                // Preserve board_id/board_word_options so child buttons behave like root board buttons.
+                currentCategory = effectiveSubcategory;
+                console.log('Subcategory effective words_prompt:', effectiveSubcategory.words_prompt);
+                console.log('Using category for API:', categoryForApi, 'vs full path:', fullParentPath);
                 // Store the words prompt and instruction prompt globally for word selection
-                currentWordsPrompt = subcategory.words_prompt || null;
-                currentInstructionPrompt = subcategory.llm_prompt || null;
+                currentWordsPrompt = effectiveSubcategory.words_prompt || null;
+                currentInstructionPrompt = effectiveSubcategory.llm_prompt || null;
+
+                const resolvedSubBoardType = String(
+                    effectiveSubcategory.board_type
+                    || (effectiveSubcategory.board_id && boardsById[String(effectiveSubcategory.board_id)]?.board_type)
+                    || ''
+                ).toLowerCase();
+                const isSubcategoryAiBoard = resolvedSubBoardType === 'ai';
                 
                 // DEBUG: Log what we are about to send
-                console.log(`[DEBUG] Calling updateFreestyleOptionsWithContext with prompt:`, currentWordsPrompt, 'and instruction:', subcategory.llm_prompt);
-                
-                await updateFreestyleOptionsWithContext(categoryForApi, true, subcategory.words_prompt, subcategory.llm_prompt);
+                console.log(`[DEBUG] Subcategory board_type resolved:`, resolvedSubBoardType, 'isAiBoard:', isSubcategoryAiBoard, 'prompt:', currentWordsPrompt, 'instruction:', currentInstructionPrompt);
+
+                if (Array.isArray(effectiveSubcategory.board_word_options) && effectiveSubcategory.board_word_options.length > 0 && !isSubcategoryAiBoard) {
+                    const wordsOptions = effectiveSubcategory.board_word_options;
+                    renderFreestyleOptions(wordsOptions, true);
+                    setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+                } else if (effectiveSubcategory.static_options && !isSubcategoryAiBoard) {
+                    const staticWords = effectiveSubcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
+                    const wordsOptions = staticWords.map(text => ({ text: text, keywords: [] }));
+                    renderFreestyleOptions(wordsOptions, true);
+                    setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+                } else {
+                    await updateFreestyleOptionsWithContext(categoryForApi, true, currentWordsPrompt, currentInstructionPrompt);
+                }
             } catch (error) {
                 console.error('Error loading subcategory options:', error);
                 renderCategoryOptions([]);
@@ -5089,7 +6134,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 - Use first person perspective as if the user is speaking
                 - Make each option distinct and useful for communication
                 - Focus on natural, conversational language
-
+${getTapLanguageDirective()}
                 Return ONLY a valid JSON array of strings with exactly ${optionsCount} items.
                 Do not return objects, keys, markdown, or commentary.
                 Example: ["I am having a great day.", "Can we do something fun together?"]`;
@@ -5161,7 +6206,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 - Use first person perspective as if the user is speaking
                 - Make each option distinct and useful for communication
                 - Focus on natural, conversational language
-
+${getTapLanguageDirective()}
                 Return ONLY a valid JSON array of strings with exactly ${optionsCount} items.
                 Do not return objects, keys, markdown, or commentary.
                 Example: ["I am really enjoying this.", "Would you like to talk more about it?"]`;
@@ -5339,6 +6384,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                             category: category.label,
                             build_space_content: buildSpace.value || "",
                             exclude_words: [],
+                            target_locale: getEffectiveTapWordLocale(),
                             current_mood: currentMood,
                             custom_prompt: wordsPrompt || null
                         })
@@ -5367,6 +6413,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         source_page: "tap_interface",
                         is_llm_generated: false,
                         originating_button_text: "",
+                        target_locale: getEffectiveTapWordLocale(),
                         build_space_text: buildSpace.value || "",
                         single_words_only: false,
                         request_different_options: false,
@@ -5407,6 +6454,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
         function renderCategoryOptions(options, deferImages = false) {
             console.log('🚨 RENDER CATEGORY OPTIONS CALLED - OPTIONS COUNT:', options ? options.length : 0, 'Defer Images:', deferImages);
             console.log('renderCategoryOptions called with:', options);
+
+            // Grid-style partner-language pre-conversion to reduce click-to-speech latency.
+            warmTapPartnerTranslationCacheForOptions(options).catch(() => {});
             console.log('llmStaticOptions element:', llmStaticOptions);
             clearPreviewSelection();
             
@@ -5452,58 +6502,19 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 if (i === actualOptionsCount - 1) {
                     console.log('🚨 CREATING PHRASE SOMETHING ELSE BUTTON - SLOT', i, 'of', actualOptionsCount);
                     btn.className = 'option-button';
-                    btn.textContent = 'Something Else';
+                    btn.dataset.specialButton = 'something-else';
+                    setTapSpecialButtonLabel(btn, getTapSpecialButtonLabelSync('something-else'));
+                    localizeTapSpecialButton(btn).catch(() => {});
                     
                     // Apply image matching like other buttons - skip when deferring
                     if (!deferImages) {
-                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
-                        if (imageUrl) {
-                            // Create image + text layout like other buttons
-                            btn.innerHTML = '';
-                            const buttonContent = document.createElement('div');
-                            buttonContent.style.position = 'relative';
-                            buttonContent.style.width = '100%';
-                            buttonContent.style.height = '100%';
-                            buttonContent.style.display = 'flex';
-                            buttonContent.style.flexDirection = 'column';
-                            
-                            const imageContainer = document.createElement('div');
-                            imageContainer.style.flex = '1';
-                            imageContainer.style.width = '100%';
-                            imageContainer.style.overflow = 'hidden';
-                            imageContainer.style.borderRadius = '8px 8px 0 0';
-                            imageContainer.style.display = 'flex';
-                            imageContainer.style.alignItems = 'center';
-                            imageContainer.style.justifyContent = 'center';
-                            
-                            const imageElement = document.createElement('img');
-                            imageElement.src = imageUrl;
-                            imageElement.alt = 'Something Else';
-                            imageElement.style.width = '100%';
-                            imageElement.style.height = '100%';
-                            imageElement.style.objectFit = 'cover';
-                            
-                            const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '14px';
-                            textFooter.style.width = '100%';
-                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-                            textFooter.style.backdropFilter = 'blur(4px)';
-                            textFooter.style.color = 'white';
-                            textFooter.style.display = 'flex';
-                            textFooter.style.alignItems = 'center';
-                            textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '0 3px';
-                            textFooter.style.fontSize = '8px';
-                            textFooter.style.lineHeight = '1.0';
-                            textFooter.style.fontWeight = '600';
-                            textFooter.textContent = 'Something Else';
-                            
-                            imageContainer.appendChild(imageElement);
-                            buttonContent.appendChild(imageContainer);
-                            buttonContent.appendChild(textFooter);
-                            btn.appendChild(buttonContent);
-                        }
-                    });
+                        const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                        getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords).then(imageUrl => {
+                            if (imageUrl) {
+                                applyImageToButton(btn, imageUrl, btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else'));
+                                localizeTapSpecialButton(btn).catch(() => {});
+                            }
+                        });
                     } // End if (!deferImages)
                     
                     btn.onclick = async () => {
@@ -5757,9 +6768,16 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                             if (finalOptions && finalOptions.length > 0) {
                                 currentPhraseOptions = finalOptions;
                                 renderCategoryOptions(finalOptions, true); // Defer images
-                                setTimeout(() => loadImagesForPhrases(finalOptions), 50);
+                                setTimeout(() => loadImagesForPhrases(finalOptions, true), 50);
                             } else {
                                 console.warn('TAP: No follow-up options after filtering');
+                            }
+
+                            // Also refresh Words section to reflect updated Speech History
+                            try {
+                                await updateFreestyleOptionsWithSelectedWord(speechText);
+                            } catch (wordsRefreshError) {
+                                console.warn('TAP: Error refreshing words after phrase selection:', wordsRefreshError);
                             }
                             
                             } catch (error) {
@@ -5866,14 +6884,14 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     const isAiBoard = resolvedParentBoardType === 'ai';
                     const options = await generateFreestyleOptionsForCategory(categoryPath, FreestyleWordOptions, wordsPrompt, instructionPrompt, isAiBoard);
                     renderFreestyleOptions(options, true); // Defer images for batch loading
-                    setTimeout(() => loadImagesForWords(options), 50);
+                    setTimeout(() => loadImagesForWords(options, true), 50);
                     return;
                 }
 
                 // Otherwise use the freestyle /word-options endpoint which uses navigation/build-space context
                 const options = await generateFreestyleLLMOptions(typeof categoryOrPath === 'string' ? { label: categoryOrPath } : categoryOrPath, FreestyleWordOptions, wordsPrompt);
                 renderFreestyleOptions(options, true); // Defer images for batch loading
-                setTimeout(() => loadImagesForWords(options), 50);
+                setTimeout(() => loadImagesForWords(options, true), 50);
             } catch (error) {
                 console.error('Error updating freestyle options with context:', error);
             }
@@ -5894,11 +6912,12 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 // Prepare build space content
                 let buildSpaceContent = buildSpace.value || "";
 
-                // Check cache — use category path + build space as cache key
-                // Only cache when build space is empty (category-level browsing, not mid-sentence)
-                const cacheKey = `${categoryFullPath}::${count}::${wordsPrompt || ''}::${instructionPrompt || ''}::${currentMood || ''}`;
-                if (!buildSpaceContent && categoryWordsCache[cacheKey]) {
-                    const cachedWords = categoryWordsCache[cacheKey];
+                // Check cache for pure category browsing (empty build-space only).
+                // Use a stable key so harmless prompt/mood variance does not fragment cache hits.
+                const normalizedCategoryKey = String(categoryFullPath || '').trim().toLowerCase();
+                const browseCacheKey = `${getEffectiveTapWordLocale()}::${normalizedCategoryKey}::${desiredCount}`;
+                if (!buildSpaceContent && categoryWordsCache[browseCacheKey]) {
+                    const cachedWords = categoryWordsCache[browseCacheKey];
                     if (Array.isArray(cachedWords) && cachedWords.length >= desiredCount) {
                         console.log('⚡ Category words cache hit for:', categoryFullPath);
                         return cachedWords;
@@ -5910,7 +6929,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                             ...cachedWords,
                             ...getCategoryFallbackWords(categoryFullPath, desiredCount * 2)
                         ]).slice(0, desiredCount);
-                        categoryWordsCache[cacheKey] = toppedUp;
+                        categoryWordsCache[browseCacheKey] = toppedUp;
                         return toppedUp;
                     }
                 }
@@ -5951,6 +6970,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     max_options: desiredCount,
                     build_space_content: buildSpaceContent,
                     exclude_words: [],
+                    target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
                     custom_prompt: effectiveCustomPrompt,
                     prefer_generic_fast: preferGenericFast
@@ -5994,7 +7014,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         }
                         // Cache when build space was empty (pure category browsing)
                         if (!buildSpaceContent && words.length > 0) {
-                            categoryWordsCache[cacheKey] = words;
+                            categoryWordsCache[browseCacheKey] = words;
                             console.log('⚡ Category words cached for:', categoryFullPath);
                         }
                         return words;
@@ -6038,6 +7058,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     context: null,  // Let the backend determine context from build_space_text
                     source_page: null,  // Keep it simple like freestyle.js
                     is_llm_generated: false,
+                    target_locale: getEffectiveTapWordLocale(),
                     originating_button_text: null,  // Don't confuse the backend with extra context
                     current_mood: currentMood,
                     max_options: count,
@@ -6116,6 +7137,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     context: null,  // Keep simple like freestyle.js
                     source_page: null,  // Keep simple like freestyle.js
                     is_llm_generated: false,
+                    target_locale: getEffectiveTapWordLocale(),
                     originating_button_text: null
                 };
                 
@@ -6155,6 +7177,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     source_page: null,
                     is_llm_generated: false,
                     originating_button_text: null,
+                    target_locale: getEffectiveTapWordLocale(),
                     current_mood: currentMood,
                     max_options: count,
                     single_words_only: false
@@ -6635,6 +7658,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         }
 
                         const text = option.text || '';
+                        const displayText = String(option.localized_text || text || '').trim();
                         const hasExplicitSpeech = typeof option.speech_text === 'string' && option.speech_text.trim() !== '';
                         const isNavigationButton = option.action_type === 'navigate' && !!option.target_board_id;
                         const announcementText = hasExplicitSpeech ? option.speech_text : (isNavigationButton ? '' : text);
@@ -6643,7 +7667,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         const optionTemporaryNavigation = !!option.temporary_navigation;
                         const optionModifierTriggerId = option.modifier_trigger_id;
                         const configuredImageUrl = option.image_url || null;
-                        const isSightWord = isTapSightWord(text);
+                        const isSightWord = isTapSightWord(displayText);
                         const optionIndex = options.findIndex(candidate => candidate === rawOption);
                         if (optionIndex >= 0) {
                             btn.dataset.optionIndex = String(optionIndex);
@@ -6678,7 +7702,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
                                     const imageElement = document.createElement('img');
                                     imageElement.src = imageUrl;
-                                    imageElement.alt = text;
+                                    imageElement.alt = displayText;
                                     imageElement.style.width = '100%';
                                     imageElement.style.height = '100%';
                                     imageElement.style.objectFit = 'cover';
@@ -6697,7 +7721,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                                     textFooter.style.boxSizing = 'border-box';
 
                                     const textSpan = document.createElement('span');
-                                    textSpan.textContent = text;
+                                    textSpan.textContent = displayText;
                                     textSpan.style.fontSize = '0.54em';
                                     textSpan.style.fontWeight = 'bold';
                                     textSpan.style.textAlign = 'center';
@@ -6717,13 +7741,13 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         if (isSightWord) {
                             btn.classList.add('sight-word-button');
                             const textSpan = document.createElement('span');
-                            textSpan.textContent = text;
+                            textSpan.textContent = displayText;
                             textSpan.style.fontSize = '1.25em';
                             textSpan.style.fontWeight = '900';
                             textSpan.style.color = '#dc2626';
                             btn.appendChild(textSpan);
                         } else {
-                            btn.textContent = text;
+                            btn.textContent = displayText;
                         }
 
                         btn.addEventListener('click', async () => {
@@ -6745,7 +7769,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                                 if (!announcementText && isNavigationButton) {
                                     phraseToAdd = '';
                                     phraseToAnnounce = '';
-                                } else if (currentWordsPrompt) {
+                                } else if (currentWordsPrompt && !isInstructionStyleWordsPrompt(currentWordsPrompt)) {
                                     phraseToAdd = `${currentWordsPrompt} ${text}`;
                                     phraseToAnnounce = phraseToAdd;
                                 } else {
@@ -6884,59 +7908,19 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 if (i === totalWordSlots - 1) {
                     console.log('🚨 CREATING WORD SOMETHING ELSE BUTTON - SLOT', i, 'of', FreestyleWordOptions);
                     btn.className = 'option-button freestyle-button';
-                        btn.dataset.specialButton = 'something-else';
-                    btn.textContent = 'Something Else';
+                    btn.dataset.specialButton = 'something-else';
+                    setTapSpecialButtonLabel(btn, getTapSpecialButtonLabelSync('something-else'));
+                    localizeTapSpecialButton(btn).catch(() => {});
                     
                     // Apply image matching like other buttons - skip when deferring
                     if (!deferImages) {
-                        getSymbolImageForText('Something Else', ['refresh', 'more', 'other']).then(imageUrl => {
-                        if (imageUrl) {
-                            // Create image + text layout like other buttons
-                            btn.innerHTML = '';
-                            const buttonContent = document.createElement('div');
-                            buttonContent.style.position = 'relative';
-                            buttonContent.style.width = '100%';
-                            buttonContent.style.height = '100%';
-                            buttonContent.style.display = 'flex';
-                            buttonContent.style.flexDirection = 'column';
-                            
-                            const imageContainer = document.createElement('div');
-                            imageContainer.style.flex = '1';
-                            imageContainer.style.width = '100%';
-                            imageContainer.style.overflow = 'hidden';
-                            imageContainer.style.borderRadius = '8px 8px 0 0';
-                            imageContainer.style.display = 'flex';
-                            imageContainer.style.alignItems = 'center';
-                            imageContainer.style.justifyContent = 'center';
-                            
-                            const imageElement = document.createElement('img');
-                            imageElement.src = imageUrl;
-                            imageElement.alt = 'Something Else';
-                            imageElement.style.width = '100%';
-                            imageElement.style.height = '100%';
-                            imageElement.style.objectFit = 'cover';
-                            
-                            const textFooter = document.createElement('div');
-                            textFooter.style.minHeight = '14px';
-                            textFooter.style.width = '100%';
-                            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
-                            textFooter.style.backdropFilter = 'blur(4px)';
-                            textFooter.style.color = 'white';
-                            textFooter.style.display = 'flex';
-                            textFooter.style.alignItems = 'center';
-                            textFooter.style.justifyContent = 'center';
-                            textFooter.style.padding = '0 3px';
-                            textFooter.style.fontSize = '8px';
-                            textFooter.style.lineHeight = '1.0';
-                            textFooter.style.fontWeight = '600';
-                            textFooter.textContent = 'Something Else';
-                            
-                            imageContainer.appendChild(imageElement);
-                            buttonContent.appendChild(imageContainer);
-                            buttonContent.appendChild(textFooter);
-                            btn.appendChild(buttonContent);
-                        }
-                    });
+                        const specialButtonConfig = getTapSpecialButtonConfig('something-else');
+                        getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords).then(imageUrl => {
+                            if (imageUrl) {
+                                applyImageToButton(btn, imageUrl, btn.dataset.localizedLabel || getTapSpecialButtonLabelSync('something-else'));
+                                localizeTapSpecialButton(btn).catch(() => {});
+                            }
+                        });
                     } // End if (!deferImages)
                     
                     btn.onclick = async () => {
@@ -6956,6 +7940,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     const option = options[i];
                     // Handle freestyle word format {text: "word", speech_text?: "announcement", keywords: []}
                     const text = option.text || option;
+                    const displayText = String((typeof option === 'object' ? option.localized_text : '') || text || '').trim();
                     const hasExplicitSpeech = (typeof option === 'object' && typeof option.speech_text === 'string' && option.speech_text.trim() !== '');
                     const isNavigationButton = (typeof option === 'object' && option.action_type === 'navigate' && !!option.target_board_id);
                     const announcementText = hasExplicitSpeech ? option.speech_text : (isNavigationButton ? '' : text);
@@ -6966,16 +7951,16 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     btn.dataset.optionIndex = String(i);
                     
                     // Check if this is a sight word - if so, skip image loading
-                    const isSightWord = isTapSightWord(text);
+                    const isSightWord = isTapSightWord(displayText);
                     
                     // Add Firestore image support for words (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
-                        console.log(`🔍 Attempting image load for word: "${text}"`);
+                        console.log(`🔍 Attempting image load for word: "${displayText}"`);
                         const imagePromise = configuredImageUrl
                             ? Promise.resolve(configuredImageUrl)
                             : getSymbolImageForText(extractKeywordForImage(text));
                         imagePromise.then(imageUrl => {
-                            console.log(`🎯 Image result for "${text}": ${imageUrl ? 'Found' : 'Not found'}`);
+                            console.log(`🎯 Image result for "${displayText}": ${imageUrl ? 'Found' : 'Not found'}`);
                             if (imageUrl) {
                                 // Create image + text layout like gridpage
                                 btn.innerHTML = '';
@@ -6997,7 +7982,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                                 
                                 const imageElement = document.createElement('img');
                                 imageElement.src = imageUrl;
-                                imageElement.alt = text;
+                                imageElement.alt = displayText;
                                 imageElement.style.width = '100%';
                                 imageElement.style.height = '100%';
                                 imageElement.style.objectFit = 'cover';
@@ -7016,7 +8001,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                                 textFooter.style.boxSizing = 'border-box';
                                 
                                 const textSpan = document.createElement('span');
-                                textSpan.textContent = text;
+                                textSpan.textContent = displayText;
                                 textSpan.style.fontSize = '0.54em';
                                 textSpan.style.fontWeight = 'bold';
                                 textSpan.style.textAlign = 'center';
@@ -7036,16 +8021,16 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     // Set initial text (will be replaced by image if found)
                     // For sight words, apply special styling
                     if (isSightWord) {
-                        console.log('[SIGHT WORD] Rendering text-only freestyle button for:', text);
+                        console.log('[SIGHT WORD] Rendering text-only freestyle button for:', displayText);
                         btn.classList.add('sight-word-button');
                         const textSpan = document.createElement('span');
-                        textSpan.textContent = text;
+                        textSpan.textContent = displayText;
                         textSpan.style.fontSize = '1.25em';
                         textSpan.style.fontWeight = '900';
                         textSpan.style.color = '#dc2626';
                         btn.appendChild(textSpan);
                     } else {
-                        btn.textContent = text;
+                        btn.textContent = displayText;
                     }
                     
                     btn.addEventListener('click', async () => {
@@ -7067,7 +8052,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                             if (!announcementText && isNavigationButton) {
                                 phraseToAdd = '';
                                 phraseToAnnounce = '';
-                            } else if (currentWordsPrompt) {
+                            } else if (currentWordsPrompt && !isInstructionStyleWordsPrompt(currentWordsPrompt)) {
                                 phraseToAdd = `${currentWordsPrompt} ${text}`;
                                 phraseToAnnounce = phraseToAdd;
                                 console.log('🎯 Combining words prompt + selection:', currentWordsPrompt, '+', text, '=', phraseToAdd);
@@ -7207,7 +8192,8 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
         // TTS Announcement System (from gridpage)
         async function announceText(textToAnnounce, announcementType = "system") {
-            console.log(`🔊 ANNOUNCE: "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
+            const localizedText = await translateTapRuntimeLine(textToAnnounce, tapPartnerLocale);
+            console.log(`🔊 ANNOUNCE: "${localizedText.substring(0, 50)}..." (Type: ${announcementType})`);
             
             // Initialize audio context if not already done
             if (!audioContextInitialized) {
@@ -7217,10 +8203,11 @@ Avoid phrases that are literally about the home as a building or location. Keep 
             
             return new Promise((resolve, reject) => {
                 announcementQueue.push({
-                    textToAnnounce,
+                    textToAnnounce: localizedText,
                     announcementType,
                     voiceNameOverride: null,
                     speechRateOverride: null,
+                    languageCodeOverride: tapPartnerLocale,
                     volumeMultiplier: 1.0,
                     resolve,
                     reject
@@ -7242,6 +8229,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 announcementType,
                 voiceNameOverride,
                 speechRateOverride,
+                languageCodeOverride,
                 volumeMultiplier,
                 resolve,
                 reject
@@ -7251,6 +8239,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
             try {
                 // Fetch audio data from server using authenticatedFetch (like gridpage)
+                const effectiveLanguageCode = normalizeLocaleTag(languageCodeOverride || getEffectiveTapPartnerLocale()) || 'en-US';
+                const effectiveVoiceOverride = String(voiceNameOverride || getEffectiveTapPartnerVoice() || '').trim() || null;
+
                 console.log(`🔊 Fetching TTS audio from /play-audio...`);
                 const response = await authenticatedFetch(`/play-audio`, {
                     method: 'POST',
@@ -7258,8 +8249,9 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     body: JSON.stringify({
                         text: textToAnnounce,
                         routing_target: announcementType,
-                        voice_name_override: voiceNameOverride,
-                        speech_rate_override: speechRateOverride
+                        voice_name_override: effectiveVoiceOverride,
+                        speech_rate_override: speechRateOverride,
+                        language_code_override: effectiveLanguageCode
                     }),
                 });
 
@@ -7307,46 +8299,119 @@ Avoid phrases that are literally about the home as a building or location. Keep 
         }
 
         async function playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType, volumeMultiplier = 1.0) {
+            let audioContext;
+            let source;
+            let playbackTimeoutId = null;
+
+            const clearPlaybackTimeout = () => {
+                if (playbackTimeoutId) {
+                    clearTimeout(playbackTimeoutId);
+                    playbackTimeoutId = null;
+                }
+            };
+
+            const closeAudioContextSafely = async () => {
+                if (audioContext && audioContext.state !== 'closed') {
+                    try {
+                        await audioContext.close();
+                    } catch (_closeError) {
+                        // ignore close errors
+                    }
+                }
+            };
+
+            const stopActiveAnnouncementIfAny = () => {
+                if (activeAnnouncementAudioSource) {
+                    try {
+                        activeAnnouncementAudioSource.onended = null;
+                        activeAnnouncementAudioSource.stop(0);
+                    } catch (_stopError) {
+                        // ignore
+                    }
+                    try {
+                        activeAnnouncementAudioSource.disconnect();
+                    } catch (_disconnectError) {
+                        // ignore
+                    }
+                    activeAnnouncementAudioSource = null;
+                }
+
+                if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+                    activeAnnouncementAudioContext.close().catch(() => {});
+                }
+                activeAnnouncementAudioContext = null;
+            };
+
             try {
+                // Prevent accumulation of audio contexts/sources from previous announcements.
+                stopActiveAnnouncementIfAny();
+
                 console.log(`🔊 Creating audio context for playback...`);
-                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
                 console.log(`🔊 Audio context state: ${audioContext.state}`);
                 if (audioContext.state === 'suspended') {
                     console.log(`🔊 Resuming suspended audio context...`);
-                    await audioContext.resume();
+                    try {
+                        await audioContext.resume();
+                    } catch (resumeError) {
+                        console.warn('🔊 Audio context resume failed:', resumeError);
+                    }
                     console.log(`🔊 Audio context resumed, new state: ${audioContext.state}`);
                 }
 
                 console.log(`🔊 Decoding audio data (${audioDataArrayBuffer.byteLength} bytes)...`);
                 const audioBuffer = await audioContext.decodeAudioData(audioDataArrayBuffer);
                 console.log(`🔊 Audio decoded: ${audioBuffer.duration.toFixed(2)}s, ${audioBuffer.numberOfChannels} channels`);
-                
-                const source = audioContext.createBufferSource();
+
+                source = audioContext.createBufferSource();
                 source.buffer = audioBuffer;
                 const gainNode = audioContext.createGain();
                 const normalizedApplicationVolume = Math.max(0, Math.min(1, Number(applicationVolume || 8) / 10));
                 const normalizedMultiplier = Math.max(0, Number(volumeMultiplier || 1));
                 gainNode.gain.value = normalizedApplicationVolume * normalizedMultiplier;
-                
-                // Connect to appropriate output (system or personal speaker like gridpage)
-                const destination = audioContext.destination;
+
                 source.connect(gainNode);
-                gainNode.connect(destination);
-                
+                gainNode.connect(audioContext.destination);
+
+                activeAnnouncementAudioContext = audioContext;
+                activeAnnouncementAudioSource = source;
+
                 console.log(`🔊 Starting audio playback...`);
-                return new Promise((resolve, reject) => {
-                    source.onended = () => {
+                return await new Promise((resolve) => {
+                    const finishPlayback = () => {
+                        clearPlaybackTimeout();
+                        activeAnnouncementAudioSource = null;
+                        if (activeAnnouncementAudioContext === audioContext) {
+                            activeAnnouncementAudioContext = null;
+                        }
+                        closeAudioContextSafely();
                         console.log(`🔊 Audio playback ended normally`);
                         resolve();
                     };
-                    source.onerror = (error) => {
-                        console.error(`🔊 Audio playback error:`, error);
-                        reject(error);
-                    };
+
+                    source.onended = finishPlayback;
                     source.start(0);
+
+                    // Failsafe so queue never deadlocks if onended does not fire.
+                    const durationMs = Math.max(1500, Math.ceil((audioBuffer.duration || 0) * 1000) + 2000);
+                    playbackTimeoutId = setTimeout(() => {
+                        console.warn(`🔊 Audio playback timeout (${durationMs}ms). Forcing completion.`);
+                        try {
+                            source.stop(0);
+                        } catch (_stopError) {
+                            // ignore
+                        }
+                        finishPlayback();
+                    }, durationMs);
                 });
             } catch (error) {
+                clearPlaybackTimeout();
+                await closeAudioContextSafely();
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                    activeAnnouncementAudioSource = null;
+                }
                 console.error('🔊 Error in playAudioToDevice:', error);
                 throw error;
             }
@@ -7447,7 +8512,8 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        text_to_cleanup: text
+                        text_to_cleanup: text,
+                        target_locale: getEffectiveTapWordLocale()
                     })
                 });
 
@@ -7589,11 +8655,12 @@ Avoid phrases that are literally about the home as a building or location. Keep 
         }
         
         // Modified announce function to record chat history for personal messages
-        const originalAnnounce = window.announce;
+        // Capture reference BEFORE overwriting window.announce to avoid infinite recursion
+        // (top-level function declarations are window properties in browser scope)
+        const _coreAnnounce = announce;
         window.announce = async function(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
-            if (originalAnnounce) {
-                await originalAnnounce(textToAnnounce, announcementType, recordHistory, options);
-            }
+            // Call the core announce() which handles translation and language routing
+            await _coreAnnounce(textToAnnounce, announcementType, recordHistory, options);
             
             // Record chat history for personal announcements (user selections)
             if (recordHistory && announcementType === "personal" && textToAnnounce && textToAnnounce.trim()) {
@@ -7986,7 +9053,10 @@ Avoid phrases that are literally about the home as a building or location. Keep 
 
         // Proper announcement system (from gridpage)
         async function announce(textToAnnounce, announcementType = "system", recordHistory = true, options = {}) {
-            console.log(`🔊 ANNOUNCE: "${textToAnnounce.substring(0, 50)}..." (Type: ${announcementType})`);
+            const languageCodeOverride = normalizeLocaleTag(String(options.languageCodeOverride || getEffectiveTapPartnerLocale() || 'en-US')) || 'en-US';
+            const sourceLocaleOverride = normalizeLocaleTag(String(options.sourceLocaleOverride || tapTargetLocale || 'en-US')) || 'en-US';
+            const localizedText = await translateTapRuntimeLine(textToAnnounce, languageCodeOverride, sourceLocaleOverride);
+            console.log(`🔊 ANNOUNCE: "${localizedText.substring(0, 50)}..." (Type: ${announcementType})`);
             
             // Initialize audio context if not already done
             if (!audioContextInitialized) {
@@ -7996,10 +9066,11 @@ Avoid phrases that are literally about the home as a building or location. Keep 
             
             return new Promise((resolve, reject) => {
                 announcementQueue.push({
-                    textToAnnounce,
+                    textToAnnounce: localizedText,
                     announcementType,
-                    voiceNameOverride: options.voiceNameOverride || null,
+                    voiceNameOverride: options.voiceNameOverride || getEffectiveTapPartnerVoice() || null,
                     speechRateOverride: options.speechRateOverride || null,
+                    languageCodeOverride,
                     volumeMultiplier: typeof options.volumeMultiplier === 'number' ? options.volumeMultiplier : 1.0,
                     resolve,
                     reject
@@ -8416,8 +9487,12 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     const loadTimestamp = new Date().toISOString();
                     const saveData = {
                         location: scheduledFavoriteToLoad.location || '',
+                        locationLanguageOverride: normalizeLocaleTag(scheduledFavoriteToLoad.locationLanguageOverride || ''),
                         people: scheduledFavoriteToLoad.people || '',
                         activity: scheduledFavoriteToLoad.activity || '',
+                        topicTitle: scheduledFavoriteToLoad.topicTitle || '',
+                        focusChapters: scheduledFavoriteToLoad.focusChapters || '',
+                        topicSummary: scheduledFavoriteToLoad.topicSummary || scheduledFavoriteToLoad.focusPlotPoints || '',
                         loaded_at: loadTimestamp,
                         favorite_name: scheduledFavoriteToLoad.name,
                         saved_at: loadTimestamp

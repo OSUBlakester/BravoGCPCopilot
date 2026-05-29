@@ -14,6 +14,12 @@ let updatePageBtn = null;
 let revertPageBtn = null;
 let saveButtonsBtn = null; // New button for saving changes
 let helpWizardBtn = null;
+let translatePagesBtn = null;
+
+let translatePagesModal = null;
+let runTranslatePagesBtn = null;
+let closeTranslatePagesModalBtn = null;
+let cancelTranslatePagesBtn = null;
 
 // Modal Elements
 let buttonEditorModal = null;
@@ -27,6 +33,16 @@ let currentPageData = null;
 let initialPageDataString = '';
 let currentEditingButton = null; // {row, col} of button being edited
 let draggedButton = null;
+
+const TRANSLATE_LOCALE_OPTIONS = [
+    { value: 'en-US', label: 'English (US)' },
+    { value: 'es-US', label: 'Spanish (US)' },
+    { value: 'fr-FR', label: 'French (France)' },
+    { value: 'de-DE', label: 'German (Germany)' },
+    { value: 'it-IT', label: 'Italian (Italy)' },
+    { value: 'pt-BR', label: 'Portuguese (Brazil)' },
+    { value: 'ar-XA', label: 'Arabic' }
+];
 
 const UNSAVED_SCOPE_PAGE_SETTINGS = 'page-settings';
 const UNSAVED_SCOPE_BUTTON_GRID = 'button-grid';
@@ -109,11 +125,16 @@ function assignDOMElements() {
     revertPageBtn = document.getElementById('revertPageBtn');
     saveButtonsBtn = document.getElementById('saveButtonsBtn');
     helpWizardBtn = document.getElementById('helpWizardBtn');
+    translatePagesBtn = document.getElementById('translatePagesBtn');
 
     // Modal elements
     buttonEditorModal = document.getElementById('buttonEditorModal');
     helpWizardModal = document.getElementById('helpWizardModal');
     imagePickerModal = document.getElementById('imagePickerModal');
+    translatePagesModal = document.getElementById('translatePagesModal');
+    runTranslatePagesBtn = document.getElementById('runTranslatePagesBtn');
+    closeTranslatePagesModalBtn = document.getElementById('closeTranslatePagesModal');
+    cancelTranslatePagesBtn = document.getElementById('cancelTranslatePagesBtn');
 
     if (pageForm) {
         pageForm.setAttribute('data-unsaved-scope', UNSAVED_SCOPE_PAGE_SETTINGS);
@@ -154,6 +175,18 @@ function setupEventListeners() {
     // Button grid controls
     saveButtonsBtn.addEventListener('click', () => updatePage(UNSAVED_SCOPE_BUTTON_GRID));
     helpWizardBtn.addEventListener('click', startComprehensiveGuide);
+    if (translatePagesBtn) {
+        translatePagesBtn.addEventListener('click', openTranslatePagesModal);
+    }
+    if (closeTranslatePagesModalBtn) {
+        closeTranslatePagesModalBtn.addEventListener('click', closeTranslatePagesModal);
+    }
+    if (cancelTranslatePagesBtn) {
+        cancelTranslatePagesBtn.addEventListener('click', closeTranslatePagesModal);
+    }
+    if (runTranslatePagesBtn) {
+        runTranslatePagesBtn.addEventListener('click', runPageTranslation);
+    }
     
     // Button Editor Modal
     document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
@@ -1332,6 +1365,174 @@ function revertPage() {
         renderButtonGrid();
         markAdminSaved();
         alert('Changes reverted.');
+    }
+}
+
+function openTranslatePagesModal() {
+    if (!translatePagesModal) return;
+    const scopeSelect = document.getElementById('translateScope');
+    if (scopeSelect) {
+        scopeSelect.value = 'current';
+    }
+    populateTranslateLocaleDropdowns().catch(error => {
+        console.warn('Failed to initialize translate locale dropdowns:', error);
+    });
+    setTranslateStatus('', 'hidden');
+    translatePagesModal.classList.remove('hidden');
+}
+
+async function populateTranslateLocaleDropdowns() {
+    const sourceSelect = document.getElementById('translateSourceLocale');
+    const targetSelect = document.getElementById('translateTargetLocale');
+    if (!sourceSelect || !targetSelect) return;
+
+    const sourceSelectedBefore = sourceSelect.value;
+    const targetSelectedBefore = targetSelect.value;
+
+    sourceSelect.innerHTML = '';
+    targetSelect.innerHTML = '';
+
+    TRANSLATE_LOCALE_OPTIONS.forEach(locale => {
+        const sourceOption = document.createElement('option');
+        sourceOption.value = locale.value;
+        sourceOption.textContent = `${locale.label} (${locale.value})`;
+        sourceSelect.appendChild(sourceOption);
+
+        const targetOption = document.createElement('option');
+        targetOption.value = locale.value;
+        targetOption.textContent = `${locale.label} (${locale.value})`;
+        targetSelect.appendChild(targetOption);
+    });
+
+    let userLanguage = '';
+    try {
+        const response = await window.authenticatedFetch('/api/settings');
+        if (response.ok) {
+            const settings = await response.json();
+            userLanguage = String(settings?.userLanguage || '').trim();
+        }
+    } catch (error) {
+        console.warn('Unable to load user language for translate modal:', error);
+    }
+
+    const validLocaleValues = new Set(TRANSLATE_LOCALE_OPTIONS.map(locale => locale.value));
+    const fallbackTarget = validLocaleValues.has(userLanguage) ? userLanguage : 'en-US';
+
+    sourceSelect.value = validLocaleValues.has(sourceSelectedBefore) ? sourceSelectedBefore : 'en-US';
+    targetSelect.value = validLocaleValues.has(targetSelectedBefore) ? targetSelectedBefore : fallbackTarget;
+}
+
+function closeTranslatePagesModal() {
+    if (!translatePagesModal) return;
+    translatePagesModal.classList.add('hidden');
+}
+
+function setTranslateStatus(message, tone = 'info') {
+    const statusEl = document.getElementById('translatePagesStatus');
+    if (!statusEl) return;
+
+    if (!message) {
+        statusEl.textContent = '';
+        statusEl.className = 'hidden text-sm rounded-md px-3 py-2';
+        return;
+    }
+
+    statusEl.classList.remove('hidden');
+    statusEl.textContent = message;
+
+    if (tone === 'success') {
+        statusEl.className = 'text-sm rounded-md px-3 py-2 bg-green-100 text-green-800';
+    } else if (tone === 'error') {
+        statusEl.className = 'text-sm rounded-md px-3 py-2 bg-red-100 text-red-800';
+    } else {
+        statusEl.className = 'text-sm rounded-md px-3 py-2 bg-blue-100 text-blue-800';
+    }
+}
+
+async function runPageTranslation() {
+    const scope = (document.getElementById('translateScope')?.value || 'current').trim();
+    const sourceLocaleRaw = (document.getElementById('translateSourceLocale')?.value || '').trim();
+    const targetLocale = (document.getElementById('translateTargetLocale')?.value || '').trim();
+
+    const includeDisplayName = Boolean(document.getElementById('translateIncludeDisplayName')?.checked);
+    const includeButtonText = Boolean(document.getElementById('translateIncludeButtonText')?.checked);
+    const includeSpeechPhrase = Boolean(document.getElementById('translateIncludeSpeechPhrase')?.checked);
+    const includeLlmQuery = Boolean(document.getElementById('translateIncludeLlmQuery')?.checked);
+
+    if (!targetLocale) {
+        setTranslateStatus('Please provide a target locale, for example es-US.', 'error');
+        return;
+    }
+
+    if (!includeDisplayName && !includeButtonText && !includeSpeechPhrase && !includeLlmQuery) {
+        setTranslateStatus('Select at least one field to translate.', 'error');
+        return;
+    }
+
+    if (scope === 'current' && !selectPage?.value) {
+        setTranslateStatus('Please select a page first.', 'error');
+        return;
+    }
+
+    if (scope === 'tap_boards' && !includeLlmQuery) {
+        setTranslateStatus('Tap boards translation requires AI query prompts to be selected.', 'error');
+        return;
+    }
+
+    const payload = {
+        source_locale: sourceLocaleRaw || null,
+        target_locale: targetLocale,
+        scope: scope === 'tap_boards' ? 'tap_boards' : (scope === 'all' ? 'all' : 'current'),
+        page_name: scope === 'all' || scope === 'tap_boards' ? null : selectPage.value,
+        include_display_name: includeDisplayName,
+        include_button_text: includeButtonText,
+        include_speech_phrase: includeSpeechPhrase,
+        include_llm_query: includeLlmQuery
+    };
+
+    const selectedPageBeforeRefresh = selectPage?.value || '';
+
+    try {
+        if (runTranslatePagesBtn) runTranslatePagesBtn.disabled = true;
+        setTranslateStatus('Translating content. This can take a moment for larger boards...', 'info');
+
+        const response = await window.authenticatedFetch('/api/admin/translate-pages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const errorMessage = result?.detail || `Translation failed (${response.status})`;
+            throw new Error(errorMessage);
+        }
+
+        await loadPages();
+        if (selectedPageBeforeRefresh) {
+            selectPage.value = selectedPageBeforeRefresh;
+            handlePageSelected();
+        }
+
+        const changed = Number(result?.strings_changed || 0);
+        const pagesProcessed = Number(result?.pages_processed || 0);
+        const specialPagesChanged = Number(result?.special_pages_changed || 0);
+        const specialPagesSuffix = specialPagesChanged > 0
+            ? ` Included ${specialPagesChanged} special page bundle(s).`
+            : '';
+        const tapBoardsSuffix = Number(result?.tap_boards_prompts_changed || 0) > 0
+            ? ` Updated ${Number(result.tap_boards_prompts_changed)} Tap board prompt(s).`
+            : '';
+        setTranslateStatus(`Translation complete. Updated ${changed} field(s) across ${pagesProcessed} page(s).${specialPagesSuffix}${tapBoardsSuffix}`, 'success');
+
+        setTimeout(() => {
+            closeTranslatePagesModal();
+        }, 800);
+    } catch (error) {
+        console.error('Error translating pages:', error);
+        setTranslateStatus(`Translation failed: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+        if (runTranslatePagesBtn) runTranslatePagesBtn.disabled = false;
     }
 }
 

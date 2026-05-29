@@ -48,6 +48,7 @@ google-cloud-texttospeech==2.27.0
 google-crc32c==1.7.1
 google-resumable-media==2.7.2
 googleapis-common-protos==1.70.0
+reportlab>=4.0.0  # For PDF generation (story export)
 grpcio==1.71.0
 grpcio-status==1.71.0
 gunicorn==23.0.0
