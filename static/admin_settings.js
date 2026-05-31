@@ -107,7 +107,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-const llmProviderSelect = document.getElementById('llmProvider'); // Updated for provider selection
 const emailProviderStatusEl = document.getElementById('email-provider-status');
 const emailServerPrereqEl = document.getElementById('email-server-prereq');
 const refreshEmailStatusButton = document.getElementById('refreshEmailStatusButton');
@@ -589,13 +588,6 @@ async function loadSettings() {
             if (gridColumnsValue) gridColumnsValue.textContent = 6;
             console.log("Using default gridColumns value: 6");
         }
-         // Load LLM provider setting
-        if (llmProviderSelect) {
-            // Set to saved value or default to 'gemini'
-            const providerValue = currentSettings.llm_provider || 'gemini';
-            llmProviderSelect.value = providerValue;
-        }
-
         // Load toolbar PIN (account level)
         await loadToolbarPIN();
         await loadEmailProviderStatus();
@@ -889,10 +881,6 @@ async function saveSettings() {
         - gridColumnsSlider.value: ${gridColumnsSlider ? gridColumnsSlider.value : 'N/A'}
         - newGridColumns (parsed): ${newGridColumns}`);
 
-
-    const newLlmProvider = llmProviderSelect ? llmProviderSelect.value : 'gemini';
-
-
     // Validation
     if (!newDelay || isNaN(parseInt(newDelay)) || parseInt(newDelay) < 100) {
          settingsStatus.textContent = 'Invalid delay value. Must be >= 100 ms.';
@@ -986,7 +974,6 @@ async function saveSettings() {
         defaultPartnerVoice: newDefaultPartnerVoice,
         locationOverrideLanguages: newLocationOverrideLanguages,
         locationOverrideVoices: newLocationOverrideVoices,
-        llm_provider: newLlmProvider, // Updated to use provider instead of specific model
         gridColumns: newGridColumns, // Add gridColumns to save payload
         spellLetterOrder: newSpellLetterOrder, // Add spell letter order setting
         vocabularyLevel: newVocabularyLevel // Add vocabulary level setting
@@ -1062,8 +1049,6 @@ async function saveSettings() {
             gridColumnsSlider.value = currentSettings.gridColumns;
             if (gridColumnsValue) gridColumnsValue.textContent = currentSettings.gridColumns;
         }
-        // Update LLM provider select
-        if (llmProviderSelect) llmProviderSelect.value = currentSettings.llm_provider || 'gemini';
         // Update spellLetterOrder select
         if (spellLetterOrderSelect) {
             const savedValue = currentSettings.spellLetterOrder || 'alphabetical';

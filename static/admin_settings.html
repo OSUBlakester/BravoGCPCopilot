@@ -493,23 +493,6 @@
                 </div>
             </div>
             
-            <div class="mt-6 pt-4 border-t border-gray-200">
-                <h4 class="text-lg font-semibold text-gray-700 mb-4">AI Provider Configuration</h4>
-                <div class="grid grid-cols-1 gap-4">
-                    <div>
-                        <label for="llmProvider" class="block text-sm font-medium text-gray-700 mb-2">AI Provider:</label>
-                        <select id="llmProvider" name="llmProvider" class="w-full" aria-describedby="llmProviderHelp">
-                            <option value="gemini" selected>Google Gemini</option>
-                            <option value="chatgpt">OpenAI ChatGPT</option>
-                        </select>
-                        <small id="llmProviderHelp" class="text-xs text-gray-500 mt-1 block">
-                            Choose your preferred AI provider. The specific models used are configured by your system administrator.
-                            Both providers offer high-quality responses with different strengths and capabilities.
-                        </small>
-                    </div>
-                </div>
-            </div>
-
         </div>
 
         <!-- Audio Settings Section -->
@@ -1000,7 +983,6 @@
                                         <p><strong>Enable Mood Selection:</strong> Shows a mood selection screen at session start to personalize AI responses based on the user's current emotional state.</p>
                                         <p><strong>Location:</strong> Set the 2-letter country code (e.g., US, UK, CA) to provide location-relevant information.</p>
                                         <p><strong>Vocabulary Level:</strong> Controls the complexity of AI-generated vocabulary (Emergent = basic words, Functional = practical daily vocabulary, Developing = academic terms, Proficient = sophisticated language).</p>
-                                        <p><strong>AI Provider:</strong> Choose between Google Gemini or OpenAI ChatGPT for AI-generated responses.</p>
                                     </div>
                                 </div>
                             </div>
@@ -1347,22 +1329,6 @@
                     if (select) select.classList.remove('guide-highlight-target');
                 }
             },
-            {
-                title: 'AI Provider',
-                content: 'Choose between Google Gemini or OpenAI ChatGPT for AI responses. Both provide high-quality results with different strengths.',
-                highlight: '#llmProvider',
-                action: function() {
-                    const select = document.getElementById('llmProvider');
-                    if (select) {
-                        select.classList.add('guide-highlight-target');
-                        select.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const select = document.getElementById('llmProvider');
-                    if (select) select.classList.remove('guide-highlight-target');
-                }
-            }
         ]
     };
     

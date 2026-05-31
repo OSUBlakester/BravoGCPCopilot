@@ -85,10 +85,6 @@
                 <div>
                     <button id="openTouchChatMigrationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-file-import mr-1"></i>Migrate User Data</button>
                 </div>
-                <div class="flex items-center gap-2">
-                    <input type="checkbox" id="setAsHomeBoard">
-                    <label for="setAsHomeBoard" class="text-sm text-gray-700">Set as Home Board</label>
-                </div>
             </div>
             <p class="text-sm text-gray-600 mt-3">Recommended workflow: build or edit boards here first, then open Boards Menu to decide how those boards appear in Tap Interface.</p>
             <p id="readOnlyHint" class="text-sm text-amber-700 mt-2 hidden">This board is read-only because it is a standard legacy/system board.</p>
@@ -132,6 +128,21 @@
                             <input type="text" id="promptExclusions" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <div id="homeBoardAssignmentSection" class="mt-4 p-4 border border-amber-200 bg-amber-50 rounded-md">
+                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                    <div>
+                        <h4 class="font-semibold text-gray-800">Home Board Assignment</h4>
+                        <p id="homeBoardCurrentStatus" class="text-sm text-gray-700 mt-1">Current Home Board: none selected</p>
+                        <p id="homeBoardChangeStatus" class="text-sm text-amber-700 mt-1 hidden"></p>
+                        <p class="text-xs text-gray-600 mt-2">Use this to choose which board opens first in Tap Interface.</p>
+                    </div>
+                    <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <input type="checkbox" id="setAsHomeBoard" class="h-4 w-4">
+                        Set this board as Home
+                    </label>
                 </div>
             </div>
         </form>
@@ -358,6 +369,8 @@
             document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
             document.getElementById('performTranslateAllAiBoardsBtn').addEventListener('click', performAllAiBoardsTranslation);
+            document.getElementById('setAsHomeBoard').addEventListener('change', refreshHomeBoardAssignmentUI);
+            document.getElementById('boardLabel').addEventListener('input', refreshHomeBoardAssignmentUI);
             document.getElementById('translateTargetLanguage').addEventListener('change', () => {
                 const hasLocale = !!document.getElementById('translateTargetLanguage').value;
                 document.getElementById('performTranslationBtn').disabled = !hasLocale;
@@ -534,6 +547,7 @@
             document.getElementById('buttonGrid').innerHTML = '';
             document.getElementById('readOnlyHint').classList.add('hidden');
             document.getElementById('gridReadOnlyOverlay').classList.add('hidden');
+            refreshHomeBoardAssignmentUI();
         }
 
         function createNewBoardDraft() {
@@ -543,6 +557,44 @@
             renderButtonGrid();
             updateBoardModeUI();
             applyReadOnlyState();
+        }
+
+        function getCurrentHomeBoardLabel() {
+            const homeBoardId = String(boardSettings?.home_board_id || '').trim();
+            if (!homeBoardId) return '';
+            const homeBoard = Array.isArray(allBoards) ? allBoards.find(board => String(board?.id || '') === homeBoardId) : null;
+            return String(homeBoard?.label || homeBoardId).trim();
+        }
+
+        function refreshHomeBoardAssignmentUI() {
+            const currentStatusEl = document.getElementById('homeBoardCurrentStatus');
+            const changeStatusEl = document.getElementById('homeBoardChangeStatus');
+            const setAsHomeEl = document.getElementById('setAsHomeBoard');
+            if (!currentStatusEl || !changeStatusEl || !setAsHomeEl) return;
+
+            const currentHomeId = String(boardSettings?.home_board_id || '').trim();
+            const currentHomeLabel = getCurrentHomeBoardLabel();
+            const selectedBoardId = String(currentBoardData?.id || '').trim();
+            const selectedBoardLabel = String(document.getElementById('boardLabel')?.value || currentBoardData?.label || 'this board').trim() || 'this board';
+
+            currentStatusEl.textContent = currentHomeLabel
+                ? `Current Home Board: ${currentHomeLabel}`
+                : 'Current Home Board: none selected';
+
+            const isCurrentlyHome = !!selectedBoardId && selectedBoardId === currentHomeId;
+            if (setAsHomeEl.checked) {
+                if (isCurrentlyHome) {
+                    changeStatusEl.textContent = 'This board is already set as Home.';
+                } else if (currentHomeLabel) {
+                    changeStatusEl.textContent = `Saving will replace "${currentHomeLabel}" with "${selectedBoardLabel}" as Home.`;
+                } else {
+                    changeStatusEl.textContent = `Saving will set "${selectedBoardLabel}" as the Home board.`;
+                }
+                changeStatusEl.classList.remove('hidden');
+            } else {
+                changeStatusEl.classList.add('hidden');
+                changeStatusEl.textContent = '';
+            }
         }
 
         function bindBoardToForm() {
@@ -557,6 +609,7 @@
             document.getElementById('promptExamples').value = currentBoardData.prompt_examples || '';
             document.getElementById('promptExclusions').value = currentBoardData.prompt_exclusions || '';
             document.getElementById('setAsHomeBoard').checked = (currentBoardData.id && currentBoardData.id === boardSettings.home_board_id);
+            refreshHomeBoardAssignmentUI();
         }
 
         function updateBoardModeUI() {
@@ -579,6 +632,7 @@
                 const el = document.getElementById(id);
                 if (el) el.disabled = !!isReadOnly;
             });
+            refreshHomeBoardAssignmentUI();
         }
 
         function findButtonAtPosition(row, col) {
