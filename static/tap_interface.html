@@ -1638,8 +1638,7 @@
         }
 
         function getEffectiveTapWordLocale() {
-            return normalizeLocaleTag(currentLocationLanguageOverride)
-                || normalizeLocaleTag(tapTargetLocale)
+            return normalizeLocaleTag(tapTargetLocale)
                 || 'en-US';
         }
 
@@ -1979,6 +1978,16 @@
             if (!item || typeof item !== 'object') {
                 return '';
             }
+
+            const boardId = String(item.board_id || '').trim();
+            if (boardId && boardsById && typeof boardsById === 'object') {
+                const linkedBoard = boardsById[boardId];
+                const boardLabel = String(linkedBoard?.label || '').trim();
+                if (boardLabel) {
+                    return boardLabel;
+                }
+            }
+
             return String(item.localized_label || item.label || '').trim();
         }
 
@@ -2314,7 +2323,7 @@
         }
 
         // Returns a language directive line to append to LLM prompts when user language is non-English.
-        // Uses the effective locale (location override takes precedence over user language setting).
+        // The user-facing language is always the Tap target locale; announcements may use a different partner locale.
         function getTapLanguageDirective() {
             const effectiveLocale = getEffectiveTapWordLocale();
             const locale = String(effectiveLocale || 'en-US').toLowerCase();

@@ -11230,7 +11230,10 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         "userInfo": user_info_content_dict.get("narrative", ""),
         "currentMood": user_info_content_dict.get("currentMood"),
         "name": user_info_content_dict.get("name", ""),
-        "profileImageUrl": user_info_content_dict.get("profileImageUrl"),
+        "profileImageUrl": _display_image_url(
+            user_info_content_dict.get("profileImageUrl"),
+            user_info_content_dict.get("profileImageStoragePath")
+        ),
         "aiOptionOverrides": normalize_ai_option_overrides(user_info_content_dict.get("aiOptionOverrides", {}))
     }
     
@@ -11394,6 +11397,101 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         raise HTTPException(status_code=500, detail="Failed to save user info.")
 
 
+# ---------------------------------------------------------------------------
+# Custom Images helpers
+# ---------------------------------------------------------------------------
+
+def _gcs_storage_path_from_url(image_url: str) -> str | None:
+    """Extract the GCS object path from a storage.googleapis.com URL."""
+    prefix = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
+    if image_url and image_url.startswith(prefix):
+        return image_url[len(prefix):]
+    return None
+
+
+def _signed_image_url_from_path(storage_path: str) -> str:
+    """Generate a time-limited signed URL for a GCS image object."""
+    if not storage_client or not AAC_IMAGES_BUCKET_NAME:
+        return storage_path
+
+    bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+    blob = bucket.blob(storage_path)
+
+    from datetime import timedelta
+    return blob.generate_signed_url(version="v4", expiration=timedelta(hours=6), method="GET")
+
+
+def _display_image_url(image_url: str | None = None, storage_path: str | None = None) -> str | None:
+    """Return a browser-loadable image URL for stored GCS images."""
+    from urllib.parse import quote
+
+    if storage_path:
+        try:
+            return _signed_image_url_from_path(storage_path)
+        except Exception as e:
+            logging.warning(f"Failed to sign image URL for path '{storage_path}': {e}")
+            return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+
+    if not image_url:
+        return image_url
+
+    path = _gcs_storage_path_from_url(image_url)
+    if path is None:
+        return image_url
+
+    try:
+        return _signed_image_url_from_path(path)
+    except Exception as e:
+        logging.warning(f"Failed to sign image URL for '{image_url}': {e}")
+        return f"/api/image-proxy?path={quote(path, safe='')}"
+
+
+@app.get("/api/image-proxy")
+async def proxy_custom_image(
+    path: str
+):
+    """Proxy a custom-image object from GCS so browser image tags can load it."""
+    try:
+        if not storage_client or not AAC_IMAGES_BUCKET_NAME:
+            raise HTTPException(status_code=503, detail="Storage not available")
+
+        # Basic path sanity-check to prevent traversal attacks
+        import posixpath
+        normalised = posixpath.normpath(path).lstrip("/")
+        if ".." in normalised or normalised != path.lstrip("/"):
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        blob = bucket.blob(normalised)
+
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        image_bytes = blob.download_as_bytes()
+
+        # Use stored content-type if available, otherwise guess from extension
+        content_type = blob.content_type or "application/octet-stream"
+        if content_type == "application/octet-stream":
+            ext = normalised.rsplit(".", 1)[-1].lower() if "." in normalised else ""
+            content_type = {
+                "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "png": "image/png", "gif": "image/gif",
+                "webp": "image/webp"
+            }.get(ext, "application/octet-stream")
+
+        from fastapi.responses import Response
+        return Response(
+            content=image_bytes,
+            media_type=content_type,
+            headers={"Cache-Control": "private, max-age=86400"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error proxying image '{path}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch image")
+
+
 # Custom Images API Endpoints
 @app.post("/api/upload_custom_image")
 async def upload_custom_image(
@@ -11448,10 +11546,10 @@ async def upload_custom_image(
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
         
-        # Upload with proper content type
+        # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
-            content_type=image.content_type
+            content_type=image.content_type or "image/png"
         )
         
         # Construct public URL
@@ -11486,6 +11584,9 @@ async def upload_custom_image(
             doc_data["updated_at"] = doc_data["updated_at"].isoformat()
         
         logging.info(f"Custom image uploaded successfully: {doc_ref.id}")
+
+        if doc_data.get("image_url"):
+            doc_data["image_url"] = _display_image_url(doc_data["image_url"], doc_data.get("storage_path"))
         
         return JSONResponse(content={
             "success": True,
@@ -11534,6 +11635,10 @@ async def get_custom_images(
         
         # Sort by created_at in Python (newest first) to avoid needing composite index
         images.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+        # Rewrite GCS URLs to go through the authenticated proxy
+        for img in images:
+            img["image_url"] = _display_image_url(img.get("image_url"), img.get("storage_path"))
         
         logging.info(f"Found {len(images)} custom images for user")
         
@@ -11727,10 +11832,10 @@ async def upload_user_profile_image(
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
         
-        # Upload with proper content type
+        # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
-            content_type=image.content_type
+            content_type=image.content_type or "image/png"
         )
         
         # Construct public URL
@@ -11795,6 +11900,9 @@ async def upload_user_profile_image(
             "updated_at": datetime.now(timezone.utc)
         }
         profile_doc_ref.set(profile_image_data)
+
+        # Keep the canonical storage path in user info so display URLs can be regenerated later.
+        user_info_dict["profileImageStoragePath"] = storage_path
         
         # Also store in custom_images with hierarchical structure for symbol lookup
         custom_image_ref = firestore_db.collection("accounts").document(account_id)\
@@ -11819,11 +11927,14 @@ async def upload_user_profile_image(
             doc_data["updated_at"] = doc_data["updated_at"].isoformat()
         
         logging.info(f"User profile image uploaded successfully: {custom_image_ref.id} for user {user_name}")
+
+        if doc_data.get("image_url"):
+            doc_data["image_url"] = _display_image_url(doc_data["image_url"], doc_data.get("storage_path"))
         
         return JSONResponse(content={
             "success": True,
             "image_data": doc_data,
-            "profileImageUrl": image_url,
+            "profileImageUrl": _display_image_url(image_url, storage_path),
             "message": f"Profile image uploaded successfully and tagged with '{user_name}' and personal pronouns. Image will now appear when using words like 'I', 'me', 'myself', or '{user_name}'."
         })
         
@@ -11864,6 +11975,12 @@ async def get_profile_image(
             profile_image["created_at"] = profile_image["created_at"].isoformat()
         if "updated_at" in profile_image:
             profile_image["updated_at"] = profile_image["updated_at"].isoformat()
+
+        # Rewrite URL to a browser-loadable signed URL
+        profile_image["image_url"] = _display_image_url(
+            profile_image.get("image_url"),
+            profile_image.get("storage_path")
+        )
         
         return JSONResponse(content={
             "success": True,
@@ -11936,6 +12053,8 @@ async def remove_profile_image(
         
         if "profileImageUrl" in user_info_dict:
             user_info_dict["profileImageUrl"] = None
+        if "profileImageStoragePath" in user_info_dict:
+            user_info_dict["profileImageStoragePath"] = None
             await save_firestore_document(
                 account_id=account_id,
                 aac_user_id=aac_user_id,
