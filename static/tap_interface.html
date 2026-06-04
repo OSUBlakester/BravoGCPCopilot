@@ -2265,30 +2265,160 @@
             return !isTapTextOnlyMode() && typeof window.isSightWord === 'function' && window.isSightWord(text);
         }
 
+        const TAP_PHRASE_STOP_WORDS = new Set([
+            'a', 'an', 'the', 'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'from', 'into', 'onto', 'over', 'under', 'about',
+            'my', 'your', 'his', 'her', 'its', 'our', 'their', 'this', 'that', 'these', 'those',
+            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'us', 'them',
+            'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'do', 'does', 'did',
+            'will', 'would', 'should', 'could', 'can', 'may', 'might', 'must',
+            'and', 'or', 'but', 'not', 'so', 'than', 'as', 'if', 'when', 'where', 'why', 'how',
+            'please', 'just', 'really', 'very'
+        ]);
+
+        const TAP_PHRASE_LOW_PRIORITY_WORDS = new Set([
+            'want', 'wants', 'wanted', 'need', 'needs', 'needed', 'needing',
+            'like', 'likes', 'liked', 'play', 'plays', 'played', 'playing',
+            'go', 'goes', 'going', 'went', 'come', 'comes', 'coming',
+            'help', 'helps', 'helped', 'try', 'tries', 'trying',
+            'say', 'says', 'said', 'talk', 'talks', 'talking',
+            'make', 'makes', 'made', 'get', 'gets', 'got', 'getting'
+        ]);
+
+        const TAP_PHRASE_FOCUS_PREPOSITIONS = new Set(['to', 'with', 'for', 'about', 'in', 'on', 'at', 'into', 'onto']);
+
+        function tokenizeTapPhrase(text) {
+            return String(text || '')
+                .toLowerCase()
+                .replace(/[.,!?;:"'()\[\]{}]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .split(' ')
+                .filter(Boolean);
+        }
+
+        function getTapPhraseKeywordCandidates(text) {
+            const words = tokenizeTapPhrase(text);
+            if (words.length === 0) return [];
+
+            const candidates = [];
+            const seen = new Set();
+            const contentIndexes = [];
+
+            for (let i = 0; i < words.length; i++) {
+                const word = words[i];
+                if (word.length < 2 || TAP_PHRASE_STOP_WORDS.has(word)) continue;
+                contentIndexes.push(i);
+            }
+
+            const lastContentIndex = contentIndexes.length ? contentIndexes[contentIndexes.length - 1] : -1;
+
+            for (let i = 0; i < words.length; i++) {
+                const word = words[i];
+                if (word.length < 2 || TAP_PHRASE_STOP_WORDS.has(word) || seen.has(word)) continue;
+
+                let score = 10;
+                if (i === lastContentIndex) score += 65;
+                if (TAP_PHRASE_FOCUS_PREPOSITIONS.has(words[i - 1] || '')) score += 45;
+                if (word.endsWith('s')) score += 10;
+                if (TAP_PHRASE_LOW_PRIORITY_WORDS.has(word)) score -= 60;
+                if (i === 0) score -= 8;
+
+                candidates.push({ word, score, index: i });
+                seen.add(word);
+            }
+
+            candidates.sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                return b.index - a.index;
+            });
+
+            return candidates;
+        }
+
+        function getTapPhraseKeywordList(text, maxKeywords = 5) {
+            return getTapPhraseKeywordCandidates(text)
+                .slice(0, Math.max(1, maxKeywords))
+                .map(entry => entry.word);
+        }
+
+        function buildTapPhraseSummary(fullText, preferredSummary = '') {
+            const normalizedPreferred = cleanNumberedListItem(String(preferredSummary || '').trim());
+            const sourceText = cleanNumberedListItem(String(fullText || '').trim());
+            const preferredWords = tokenizeTapPhrase(normalizedPreferred);
+            const sourceWords = tokenizeTapPhrase(sourceText);
+            const preferredIsLeadingPrefix = preferredWords.length > 0
+                && sourceWords.length > preferredWords.length
+                && preferredWords.every((word, index) => sourceWords[index] === word);
+            const preferredStartsWithWeakLead = preferredWords.length > 0
+                && (TAP_PHRASE_STOP_WORDS.has(preferredWords[0]) || TAP_PHRASE_LOW_PRIORITY_WORDS.has(preferredWords[0]));
+
+            if (
+                normalizedPreferred
+                && preferredWords.length > 0
+                && preferredWords.length <= 5
+                && !preferredIsLeadingPrefix
+                && !preferredStartsWithWeakLead
+            ) {
+                return normalizedPreferred;
+            }
+
+            if (sourceWords.length === 0) return '';
+
+            const candidates = getTapPhraseKeywordCandidates(sourceText);
+            if (!candidates.length) {
+                return sourceWords.slice(0, 5).join(' ');
+            }
+
+            const primary = candidates[0];
+            const summaryWords = [];
+            const previousWord = sourceWords[primary.index - 1] || '';
+
+            if (previousWord
+                && !TAP_PHRASE_STOP_WORDS.has(previousWord)
+                && !TAP_PHRASE_LOW_PRIORITY_WORDS.has(previousWord)
+                && previousWord.length > 2) {
+                summaryWords.push(previousWord);
+            }
+
+            summaryWords.push(primary.word);
+
+            if (summaryWords.length < 5) {
+                for (const candidate of candidates.slice(1)) {
+                    if (summaryWords.length >= 5) break;
+                    if (!summaryWords.includes(candidate.word) && !TAP_PHRASE_LOW_PRIORITY_WORDS.has(candidate.word)) {
+                        summaryWords.push(candidate.word);
+                    }
+                }
+            }
+
+            return summaryWords.slice(0, 5).join(' ').trim() || sourceWords.slice(0, 5).join(' ');
+        }
+
+        function buildPhraseImageKeywords(text, existingKeywords = []) {
+            const merged = [];
+            const seen = new Set();
+
+            const pushKeyword = (keyword) => {
+                const normalized = String(keyword || '').trim().toLowerCase();
+                if (!normalized || seen.has(normalized)) return;
+                seen.add(normalized);
+                merged.push(normalized);
+            };
+
+            pushKeyword(extractKeywordForImage(text));
+            getTapPhraseKeywordList(text, 5).forEach(pushKeyword);
+            (Array.isArray(existingKeywords) ? existingKeywords : []).forEach(pushKeyword);
+
+            return merged;
+        }
+
         // Extract main keyword from a phrase for image matching
-        // Removes common stop words (articles, prepositions, etc.) to find the most meaningful word
+        // Uses phrase scoring so images represent the core concept (e.g., playground, cars).
         function extractKeywordForImage(text) {
             if (!text || typeof text !== 'string') return text;
-            
-            // Common stop words to ignore when finding the main keyword
-            const stopWords = new Set([
-                'a', 'an', 'the', 'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'from',
-                'my', 'your', 'his', 'her', 'its', 'our', 'their', 'this', 'that', 'these', 'those',
-                'i', 'you', 'he', 'she', 'it', 'we', 'they', 'am', 'is', 'are', 'was', 'were',
-                'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
-                'will', 'would', 'should', 'could', 'can', 'may', 'might', 'must',
-                'and', 'or', 'but', 'not', 'so', 'than', 'as', 'if', 'when', 'where', 'why', 'how'
-            ]);
-            
-            // Split text into words and filter
-            const words = text.toLowerCase().trim().split(/\s+/);
-            
-            // Find the first non-stop word (usually the most important)
-            const keyword = words.find(word => !stopWords.has(word));
-            
-            // If all words are stop words, return the original text
-            // Otherwise return the keyword found
-            return keyword || text;
+            const rankedKeywords = getTapPhraseKeywordList(text, 1);
+            return rankedKeywords[0] || text;
         }
 
         // Clean numbered list items from server responses
@@ -2625,24 +2755,8 @@
          * Removes filler words and returns important words
          */
         function extractKeywords(text) {
-            const fillerWords = new Set([
-                'a', 'an', 'the', 'this', 'that', 'these', 'those',
-                'i', 'me', 'my', 'you', 'your', 'we', 'our',
-                'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
-                'have', 'has', 'had', 'do', 'does', 'did',
-                'can', 'could', 'will', 'would', 'should', 'may', 'might',
-                'and', 'or', 'but', 'so', 'if', 'when', 'where', 'who', 'what', 'how',
-                'to', 'for', 'of', 'in', 'on', 'at', 'by', 'with', 'from',
-                'some', 'any', 'all', 'please', 'it', 'just', 'very'
-            ]);
-            
-            // Split and clean
-            const words = text.toLowerCase()
-                .replace(/[.,!?;:'"]/g, '') // Remove punctuation
-                .split(/\s+/)
-                .filter(word => word.length > 2 && !fillerWords.has(word));
-            
-            return words;
+            if (!text || typeof text !== 'string') return [];
+            return getTapPhraseKeywordList(text, 5);
         }
 
         function normalizeSearchText(text) {
@@ -4726,7 +4840,10 @@ VARIETY RULES:
                         const ck = `tap_${String(speechText).trim().toLowerCase()}`;
                         const hit = window.symbolImageCache.get(ck);
                         if (!hit || !hit.imageUrl) {
-                            const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                            const phraseKeywords = buildPhraseImageKeywords(
+                                speechText,
+                                (typeof option === 'object' && option.keywords) ? option.keywords : []
+                            );
                             serverMisses.push({ text: speechText, keywords: phraseKeywords });
                         }
                     }
@@ -4761,7 +4878,10 @@ VARIETY RULES:
                 for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
                     const option = options[i];
                     const speechText = typeof option === 'object' ? option.option : option;
-                    const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                    const phraseKeywords = buildPhraseImageKeywords(
+                        speechText,
+                        (typeof option === 'object' && option.keywords) ? option.keywords : []
+                    );
                     if (!speechText || speechText === 'Something Else') continue;
                     const cacheKey = `tap_${String(speechText).trim().toLowerCase()}`;
                     const cached = window.symbolImageCache.get(cacheKey);
@@ -4802,7 +4922,10 @@ VARIETY RULES:
                 if (!option) continue;
                 
                 const speechText = typeof option === 'object' ? option.option : option;
-                const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                const phraseKeywords = buildPhraseImageKeywords(
+                    speechText,
+                    (typeof option === 'object' && option.keywords) ? option.keywords : []
+                );
                 
                 // On initial load: cache only. Background: fetch if needed.
                 // After batch fetch, avoid per-button server fallback (keeps UI responsive)
@@ -5002,7 +5125,10 @@ VARIETY RULES:
                 if (btn.querySelector('img')) continue;
                 
                 const speechText = typeof option === 'object' ? option.option : option;
-                const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                const phraseKeywords = buildPhraseImageKeywords(
+                    speechText,
+                    (typeof option === 'object' && option.keywords) ? option.keywords : []
+                );
                 
                 // Load image asynchronously
                 const imageUrl = await getSymbolImageForText(speechText, phraseKeywords);
@@ -5482,7 +5608,24 @@ VARIETY RULES:
             if (!tapConfig || !tapConfig.buttons || tapConfig.buttons.length === 0) {
                 modalGrid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #666;">No categories configured</div>';
             } else {
-                const buttonLabels = tapConfig.buttons
+                // Defensive client-side dedupe to avoid displaying repeated categories
+                // if legacy config data still contains accidental duplicates.
+                const visibleButtons = [];
+                const seenButtonKeys = new Set();
+                tapConfig.buttons.forEach(button => {
+                    if (!button || button.hidden) return;
+                    const key = [
+                        String(button.board_id || '').trim(),
+                        String(button.source_button_id || '').trim(),
+                        String(button.id || '').trim(),
+                        String(button.label || '').trim().toLowerCase(),
+                    ].join('|');
+                    if (seenButtonKeys.has(key)) return;
+                    seenButtonKeys.add(key);
+                    visibleButtons.push(button);
+                });
+
+                const buttonLabels = visibleButtons
                     .filter(button => !button.hidden)
                     .flatMap(button => {
                         const rawLabel = String(button?.label || '').trim();
@@ -5495,7 +5638,7 @@ VARIETY RULES:
                     });
                 }
 
-                tapConfig.buttons.forEach(button => {
+                visibleButtons.forEach(button => {
                     if (button.hidden) return;
 
                     const rawLabel = String(button.label || '').trim();
@@ -6054,7 +6197,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     const staticTexts = effectiveSubcategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
                     options = staticTexts.map(text => ({
                         option: text,
-                        summary: text.length > 20 ? text.substring(0, 17) + '...' : text,
+                        summary: buildTapPhraseSummary(text),
                         keywords: []
                     }));
                     currentPhrasePrompt = null;
@@ -6286,7 +6429,13 @@ ${getTapLanguageDirective()}
                 if (typeof item === 'object' && item.option && item.summary) {
                     normalized.push({
                         option: cleanNumberedListItem(String(item.option).trim()),
-                        summary: cleanNumberedListItem(String(item.summary).trim()),
+                        summary: buildTapPhraseSummary(item.option, item.summary),
+                        keywords: Array.isArray(item.keywords) ? item.keywords : []
+                    });
+                } else if (typeof item === 'object' && item.option) {
+                    normalized.push({
+                        option: cleanNumberedListItem(String(item.option).trim()),
+                        summary: buildTapPhraseSummary(item.option),
                         keywords: Array.isArray(item.keywords) ? item.keywords : []
                     });
                 } else {
@@ -6548,13 +6697,14 @@ ${getTapLanguageDirective()}
                         // Structured option with summary and full option
                         fullOption = option.option;
                         speechText = option.option; // Full text for speech
+                        const normalizedSummary = buildTapPhraseSummary(option.option, option.summary);
                         
                         console.log(`[TEXT DEBUG] Option: "${option.option}", Summary: "${option.summary}", SummaryOff: ${SummaryOff}`);
 
                         // Use SummaryOff setting to determine display text (like gridpage)
                         // STRICTLY use summary if SummaryOff is false and summary exists
-                        if (!SummaryOff && option.summary) {
-                            displayText = option.summary;
+                        if (!SummaryOff && normalizedSummary) {
+                            displayText = normalizedSummary;
                         } else {
                             displayText = option.option;
                         }
@@ -6572,7 +6722,10 @@ ${getTapLanguageDirective()}
                     // Add Firestore image support (like gridpage) - skip for sight words and when deferring
                     if (!isSightWord && !deferImages) {
                         console.log(`🔍 Attempting image load for phrase: "${speechText}"`);
-                        const phraseKeywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
+                        const phraseKeywords = buildPhraseImageKeywords(
+                            speechText,
+                            (typeof option === 'object' && option.keywords) ? option.keywords : []
+                        );
                         getSymbolImageForText(speechText, phraseKeywords).then(imageUrl => {
                             console.log(`🎯 Image result for "${speechText}": ${imageUrl ? 'Found' : 'Not found'}`);
                             if (imageUrl) {

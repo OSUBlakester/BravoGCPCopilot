@@ -279,6 +279,7 @@ let scanMode = 'auto'; // auto | step
 let waitForSwitchToScan = false; // Default wait for switch state
 let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
 let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
+let playLlmOptionsChimePending = false; // One-shot guard for the next interactive LLM result set
 let suppressSwitchActivationUntil = 0; // Timestamp guard to prevent immediate button activation after starting scan
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
@@ -443,11 +444,12 @@ ${getComposePromptContext()}
 }
 
 function playPageReadyChimeIfEnabled() {
-    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime || !playLlmOptionsChimePending) {
         return;
     }
 
     hasPlayedWaitForSwitchChime = true;
+    playLlmOptionsChimePending = false;
     try {
         const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
         audio.preload = 'auto';
@@ -460,6 +462,11 @@ function playPageReadyChimeIfEnabled() {
     } catch (error) {
         console.warn('Unable to initialize page ready chime audio:', error);
     }
+}
+
+function requestLlmOptionsChime() {
+    playLlmOptionsChimePending = true;
+    hasPlayedWaitForSwitchChime = false;
 }
 
 function pruneLlmPrefetchHistory(nowTs = Date.now()) {
@@ -961,7 +968,6 @@ function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}
     if (waitForSwitchToScan) {
         window.waitingForInitialSwitch = true;
         console.log(`✋ Waiting for switch press before scanning (${source}).`);
-        playPageReadyChimeIfEnabled();
 
         const hasShownPrompt = sessionStorage.getItem(GRID_SWITCH_PROMPT_SHOWN_KEY) === 'true';
         if (allowPrompt && !hasShownPrompt) {
@@ -4279,6 +4285,7 @@ async function handleButtonClick(buttonData) {
 
             const promptForLLM = buildPromptForLLMQuery(llmQuery);
             cancelActivePrefetchRequests('user initiated LLM button click');
+            requestLlmOptionsChime();
             const tLLM0 = performance.now();
             const optionsPromise = getLLMResponse(promptForLLM);
 
@@ -4634,6 +4641,7 @@ async function handleButtonClick(buttonData) {
     } catch (error) {
         debugTimes.error = performance.now();
         console.error("Error in handleButtonClick main logic:", error);
+        playLlmOptionsChimePending = false;
         announce("Sorry, an error occurred.", "system", false);
         document.getElementById('loading-indicator').style.display = 'none';
         startAuditoryScanning(); // Restart scanning on error
@@ -5114,16 +5122,19 @@ function setupQuestionRecognition() {
                     ${getComposePromptContext()}
                 `;
                 document.getElementById('loading-indicator').style.display = 'flex';
+                requestLlmOptionsChime();
                 const options = await getLLMResponse(promptForLLM);
                 const prioritizedOptions = prioritizeContextualOptions(options, currentQuestion, LLMOptions);
                 if (Array.isArray(prioritizedOptions) && (prioritizedOptions.length === 0 || prioritizedOptions.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
                     querytype = "question"; await generateLlmButtons(prioritizedOptions);
                 } else {
                     console.error("LLM response invalid:", prioritizedOptions); announcePartnerFacingOutput("Unexpected response.", false);
+                    playLlmOptionsChimePending = false;
                     isRestartingKeyword = true; setupSpeechRecognition();
                 }
             } catch (error) {
                 console.error('Error processing question:', error); announcePartnerFacingOutput("Error processing question.", false);
+                playLlmOptionsChimePending = false;
                 isRestartingKeyword = true; setupSpeechRecognition();
             } finally {
                 //document.getElementById('loading-indicator').style.display = 'none';
@@ -6425,6 +6436,7 @@ async function generateLlmButtons(options) {
                     querytype = 'question';
 
                     document.getElementById('loading-indicator').style.display = 'flex';
+                    requestLlmOptionsChime();
                     const followUpOptions = await getLLMResponse(followUpPrompt);
                     document.getElementById('loading-indicator').style.display = 'none';
                     
@@ -6657,6 +6669,8 @@ async function generateLlmButtons(options) {
                     const prompt = buildFollowUpPrompt(excludedOptionsText);
                     console.log("Sending prompt for 'Something Else' options:", prompt);
 
+                    requestLlmOptionsChime();
+
                     const response = await getLLMResponse(prompt); // Expects an array
                     
                     console.log(`📥 Received ${Array.isArray(response) ? response.length : 0} options from LLM (Something Else)`);
@@ -6688,6 +6702,7 @@ async function generateLlmButtons(options) {
                             await generateLlmButtons(partnerQuestionPrioritizedResponse); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (array response).");
+                            playLlmOptionsChimePending = false;
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
                         }
                     } else if (typeof prioritizedResponse === 'string' && prioritizedResponse.trim() !== '') { // Fallback for older string response
@@ -6698,14 +6713,17 @@ async function generateLlmButtons(options) {
                             await generateLlmButtons(newOptionsObjects); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (string response).");
+                            playLlmOptionsChimePending = false;
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
                         }
                     } else {
                         console.error("Unexpected or empty response type from getLLMResponse for 'Something Else':", prioritizedResponse);
+                        playLlmOptionsChimePending = false;
                         announce("Sorry, I received an unexpected response for more options.", "system", false);
                     }
                     } catch (error) {
                     console.error('Error getting new LLM options for "Something Else":', error);
+                    playLlmOptionsChimePending = false;
                     announce("Sorry, an error occurred while getting more options.", "system", false);
                 } finally {
                     document.getElementById('loading-indicator').style.display = 'none';
@@ -6831,6 +6849,8 @@ async function generateLlmButtons(options) {
         window.location.href = queryString ? `freestyle.html?${queryString}` : 'freestyle.html';
     });
     gridContainer.appendChild(freeStyleButton);
+
+    playPageReadyChimeIfEnabled();
 
     if (querytype === "question") {
         const askAgainButton = document.createElement('button');

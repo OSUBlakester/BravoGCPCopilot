@@ -8831,6 +8831,25 @@ async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Di
     pages = await load_pages_from_file(account_id, aac_user_id)
     tap_interface_config = await load_tap_nav_config(account_id, aac_user_id)
 
+    tap_interface_boards: List[Dict[str, Any]] = []
+    tap_interface_boards_menu: List[Dict[str, Any]] = []
+    tap_interface_board_settings: Dict[str, Any] = {}
+    if isinstance(tap_interface_config, dict):
+        tap_interface_config, _ = normalize_compose_tap_config(tap_interface_config)
+        tap_interface_config, _ = ensure_tap_boards_structure(tap_interface_config)
+        tap_interface_boards = [
+            dict(b) for b in tap_interface_config.get("boards", [])
+            if isinstance(b, dict)
+        ]
+        tap_interface_boards_menu = dedupe_boards_menu_tree(
+            tap_interface_config.get("boards_menu") if isinstance(tap_interface_config.get("boards_menu"), list) else []
+        )
+        tap_interface_board_settings = (
+            dict(tap_interface_config.get("board_settings"))
+            if isinstance(tap_interface_config.get("board_settings"), dict)
+            else {}
+        )
+
     display_name = None
     custom_categories: Dict[str, List[str]] = {}
     try:
@@ -8860,6 +8879,11 @@ async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Di
         "favorites_config": favorites_config,
         "audio_config": audio_config,
         "pages": pages,
+        # Preferred transfer format: split tap boards/menu/settings sections.
+        "tap_interface_boards": tap_interface_boards,
+        "tap_interface_boards_menu": tap_interface_boards_menu,
+        "tap_interface_board_settings": tap_interface_board_settings,
+        # Legacy full object retained for backward compatibility with older imports.
         "tap_interface_config": tap_interface_config,
         "custom_categories": custom_categories,
     }
@@ -8958,11 +8982,70 @@ async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bund
             raise HTTPException(status_code=500, detail="Failed to import pages config.")
         imported_sections.append("pages")
 
-    if "tap_interface_config" in bundle and bundle["tap_interface_config"] is not None:
-        tap_config_data = bundle["tap_interface_config"]
-        if not isinstance(tap_config_data, dict):
+    tap_sections_present = any(
+        key in bundle
+        for key in (
+            "tap_interface_boards",
+            "tap_interface_boards_menu",
+            "tap_interface_board_settings",
+            "tap_interface_config",
+        )
+    )
+    if tap_sections_present:
+        existing_tap_config = await load_tap_nav_config(account_id, aac_user_id)
+        if not isinstance(existing_tap_config, dict):
+            existing_tap_config = create_default_tap_config(account_id, aac_user_id)
+
+        existing_tap_config, _ = normalize_compose_tap_config(existing_tap_config)
+        existing_tap_config, _ = ensure_tap_boards_structure(existing_tap_config)
+
+        # Backward compatibility: accept either split sections or legacy full object.
+        legacy_tap_payload = bundle.get("tap_interface_config")
+        if legacy_tap_payload is not None and not isinstance(legacy_tap_payload, dict):
             raise HTTPException(status_code=400, detail="Invalid tap_interface_config payload format.")
-        if not await save_tap_nav_config(account_id, aac_user_id, tap_config_data):
+
+        incoming_boards = bundle.get("tap_interface_boards")
+        incoming_menu = bundle.get("tap_interface_boards_menu")
+        incoming_settings = bundle.get("tap_interface_board_settings")
+
+        if incoming_boards is None and isinstance(legacy_tap_payload, dict):
+            incoming_boards = legacy_tap_payload.get("boards")
+        if incoming_menu is None and isinstance(legacy_tap_payload, dict):
+            incoming_menu = legacy_tap_payload.get("boards_menu")
+        if incoming_settings is None and isinstance(legacy_tap_payload, dict):
+            incoming_settings = legacy_tap_payload.get("board_settings")
+
+        merged_tap_config = dict(existing_tap_config)
+
+        if incoming_boards is not None:
+            if not isinstance(incoming_boards, list):
+                raise HTTPException(status_code=400, detail="Invalid tap_interface_boards payload format.")
+            deduped_boards, _ = dedupe_tap_boards(incoming_boards)
+            merged_tap_config["boards"] = deduped_boards
+
+        board_ids_for_menu = {
+            str(board.get("id")).strip()
+            for board in merged_tap_config.get("boards", [])
+            if isinstance(board, dict) and str(board.get("id") or "").strip()
+        }
+
+        if incoming_menu is not None:
+            if not isinstance(incoming_menu, list):
+                raise HTTPException(status_code=400, detail="Invalid tap_interface_boards_menu payload format.")
+            normalized_menu = normalize_boards_menu_items(incoming_menu, board_ids_for_menu)
+            merged_tap_config["boards_menu"] = normalized_menu
+
+        if incoming_settings is not None:
+            if not isinstance(incoming_settings, dict):
+                raise HTTPException(status_code=400, detail="Invalid tap_interface_board_settings payload format.")
+            merged_tap_config["board_settings"] = incoming_settings
+
+        merged_tap_config["boards_schema_version"] = 1
+        merged_tap_config["updated_at"] = dt.now().isoformat()
+        merged_tap_config, _ = ensure_tap_boards_structure(merged_tap_config, existing_config=existing_tap_config)
+        merged_tap_config["buttons"] = compose_legacy_buttons_from_boards_menu(merged_tap_config)
+
+        if not await save_tap_nav_config(account_id, aac_user_id, merged_tap_config):
             raise HTTPException(status_code=500, detail="Failed to import tap interface config.")
         imported_sections.append("tap_interface_config")
 
@@ -22325,18 +22408,32 @@ def ensure_tap_boards_structure(
         if isinstance(candidate, list):
             existing_menu = candidate
 
-    custom_boards = [
-        b for b in (existing_boards or [])
-        if isinstance(b, dict) and b.get('source') != 'legacy_category'
-    ]
-    custom_menu_items = [
-        m for m in (existing_menu or [])
-        if isinstance(m, dict) and m.get('source') != 'legacy_category'
-    ]
-    legacy_menu_items = [
-        m for m in (existing_menu or [])
-        if isinstance(m, dict) and m.get('source') == 'legacy_category'
-    ]
+    has_parallel_schema = (
+        int(previous_version or 0) == 1
+        and isinstance(existing_boards, list)
+        and isinstance(existing_menu, list)
+        and (len(existing_boards) > 0 or len(existing_menu) > 0)
+    )
+
+    if has_parallel_schema:
+        # Already migrated config: keep existing boards/menu as source of truth.
+        # Rebuilding legacy nodes from buttons on every request can duplicate menu entries.
+        custom_boards = [b for b in (existing_boards or []) if isinstance(b, dict)]
+        custom_menu_items = [m for m in (existing_menu or []) if isinstance(m, dict)]
+        legacy_menu_items: List[Dict[str, Any]] = []
+    else:
+        custom_boards = [
+            b for b in (existing_boards or [])
+            if isinstance(b, dict) and b.get('source') != 'legacy_category'
+        ]
+        custom_menu_items = [
+            m for m in (existing_menu or [])
+            if isinstance(m, dict) and m.get('source') != 'legacy_category'
+        ]
+        legacy_menu_items = [
+            m for m in (existing_menu or [])
+            if isinstance(m, dict) and m.get('source') == 'legacy_category'
+        ]
 
     legacy_menu_by_source_button: Dict[str, Dict[str, Any]] = {}
     legacy_menu_by_path: Dict[str, Dict[str, Any]] = {}
@@ -22357,7 +22454,8 @@ def ensure_tap_boards_structure(
                 legacy_menu_by_source_button[key] = legacy_item
             _collect_legacy_menu_items(legacy_item.get('children'), current_path)
 
-    _collect_legacy_menu_items(legacy_menu_items)
+    if not has_parallel_schema:
+        _collect_legacy_menu_items(legacy_menu_items)
 
     derived_boards: List[Dict[str, Any]] = []
     derived_menu_items: List[Dict[str, Any]] = []
@@ -22467,7 +22565,8 @@ def ensure_tap_boards_structure(
 
             _collect_derived_legacy_boards(button_node.get('children'), depth + 1)
 
-    _collect_derived_legacy_boards(buttons, 0)
+    if not has_parallel_schema:
+        _collect_derived_legacy_boards(buttons, 0)
 
     def _build_legacy_menu_node(
         button_node: Dict[str, Any],
@@ -22529,14 +22628,67 @@ def ensure_tap_boards_structure(
 
         return menu_node
 
-    for index, button in enumerate(buttons):
-        if not isinstance(button, dict):
-            continue
-        menu_item = _build_legacy_menu_node(button, index, (index,))
-        derived_menu_items.append(menu_item)
+    if not has_parallel_schema:
+        for index, button in enumerate(buttons):
+            if not isinstance(button, dict):
+                continue
+            menu_item = _build_legacy_menu_node(button, index, (index,))
+            derived_menu_items.append(menu_item)
+
+    def _dedupe_legacy_menu_siblings(menu_nodes: Any) -> Tuple[List[Dict[str, Any]], int]:
+        if not isinstance(menu_nodes, list):
+            return [], 0
+
+        deduped: List[Dict[str, Any]] = []
+        removed_count = 0
+        seen_legacy_keys: set[Tuple[str, ...]] = set()
+
+        for raw_node in menu_nodes:
+            if not isinstance(raw_node, dict):
+                continue
+
+            node = dict(raw_node)
+            child_nodes, removed_children = _dedupe_legacy_menu_siblings(node.get('children'))
+            node['children'] = child_nodes
+            removed_count += removed_children
+
+            source = str(node.get('source') or '').strip()
+            if source != 'legacy_category':
+                deduped.append(node)
+                continue
+
+            source_button_id = str(node.get('source_button_id') or '').strip()
+            label_key = str(node.get('label') or '').strip().lower()
+            child_sig = tuple(
+                f"{str(c.get('label') or '').strip().lower()}|{str(c.get('source_button_id') or '').strip()}"
+                for c in child_nodes
+                if isinstance(c, dict)
+            )
+
+            # When source_button_id is missing, repeated nodes can accumulate from
+            # legacy reconstruction; dedupe by label/children to stabilize the tree.
+            if source_button_id:
+                dedupe_key: Tuple[str, ...] = ('legacy_source_button', source_button_id)
+            else:
+                dedupe_key = ('legacy_label_children', label_key, '|'.join(child_sig))
+
+            if dedupe_key in seen_legacy_keys:
+                removed_count += 1
+                continue
+
+            seen_legacy_keys.add(dedupe_key)
+            deduped.append(node)
+
+        return deduped, removed_count
 
     merged_boards = custom_boards + derived_boards
-    merged_menu = custom_menu_items + derived_menu_items
+    merged_menu, removed_legacy_duplicates = _dedupe_legacy_menu_siblings(custom_menu_items + derived_menu_items)
+    merged_menu = dedupe_boards_menu_tree(merged_menu)
+    if removed_legacy_duplicates > 0:
+        logging.info(
+            "Removed %s duplicate legacy menu item(s) while normalizing tap boards structure",
+            removed_legacy_duplicates,
+        )
 
     settings = previous_settings
     if not isinstance(settings, dict) and isinstance(existing_config, dict):
@@ -22546,7 +22698,18 @@ def ensure_tap_boards_structure(
     if not isinstance(settings, dict):
         settings = {}
 
+    preferred_board_ids = _collect_board_ids_from_menu(merged_menu)
     existing_home_board_id = str(settings.get('home_board_id') or '').strip()
+    if existing_home_board_id:
+        preferred_board_ids.add(existing_home_board_id)
+
+    merged_boards, removed_duplicate_boards = dedupe_tap_boards(merged_boards, preferred_board_ids)
+    if removed_duplicate_boards > 0:
+        logging.info(
+            "Removed %s duplicate board definition(s) while normalizing tap boards structure",
+            removed_duplicate_boards,
+        )
+
     merged_board_ids = {
         str(board.get('id')).strip()
         for board in merged_boards
@@ -22678,7 +22841,138 @@ def normalize_boards_menu_items(
 
         return normalized_level
 
-    return _normalize_level(menu_items, 0)
+    return dedupe_boards_menu_tree(_normalize_level(menu_items, 0))
+
+
+def dedupe_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
+    """Recursively dedupe sibling menu nodes while preserving first occurrence.
+
+    Key preference:
+    1) source_button_id (stable for legacy-derived nodes)
+    2) (board_id, label) for custom nodes
+    3) id as fallback
+    """
+    if not isinstance(menu_items, list):
+        return []
+
+    deduped: List[Dict[str, Any]] = []
+    seen_keys: set[Tuple[str, ...]] = set()
+
+    for raw_item in menu_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        item['children'] = dedupe_boards_menu_tree(item.get('children'))
+
+        source_button_id = str(item.get('source_button_id') or '').strip()
+        board_id = str(item.get('board_id') or '').strip()
+        label_key = str(item.get('label') or '').strip().lower()
+        item_id = str(item.get('id') or '').strip()
+
+        if source_button_id:
+            dedupe_key: Tuple[str, ...] = ('source_button_id', source_button_id)
+        elif board_id or label_key:
+            dedupe_key = ('board_label', board_id, label_key)
+        elif item_id:
+            dedupe_key = ('id', item_id)
+        else:
+            dedupe_key = (
+                'shape',
+                str(item.get('speech_text') or ''),
+                str(item.get('image_url') or ''),
+                str(item.get('custom_audio_file') or ''),
+            )
+
+        if dedupe_key in seen_keys:
+            continue
+
+        seen_keys.add(dedupe_key)
+        item['sort_order'] = len(deduped)
+        deduped.append(item)
+
+    return deduped
+
+
+def _collect_board_ids_from_menu(menu_items: Any) -> set[str]:
+    """Collect all board_id references from a nested boards_menu tree."""
+    collected: set[str] = set()
+
+    def _walk(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            board_id = str(item.get('board_id') or '').strip()
+            if board_id:
+                collected.add(board_id)
+            _walk(item.get('children'))
+
+    _walk(menu_items)
+    return collected
+
+
+def dedupe_tap_boards(
+    boards: Any,
+    preferred_board_ids: Optional[set[str]] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Deduplicate board definitions while preserving referenced/preferred board IDs.
+
+    Priority for duplicate groups:
+    1) Board IDs present in preferred_board_ids (menu/home references)
+    2) First occurrence in list order
+    """
+    if not isinstance(boards, list):
+        return [], 0
+
+    preferred = preferred_board_ids or set()
+    deduped: List[Dict[str, Any]] = []
+    kept_index_by_key: Dict[Tuple[str, ...], int] = {}
+    removed_count = 0
+
+    def _board_dedupe_key(board: Dict[str, Any]) -> Tuple[str, ...]:
+        source = str(board.get('source') or '').strip()
+        source_button_id = str(board.get('source_button_id') or '').strip()
+        board_id = str(board.get('id') or '').strip()
+        label_key = str(board.get('label') or '').strip().lower()
+        board_type = str(board.get('board_type') or '').strip().lower()
+
+        if source == 'legacy_category' and source_button_id:
+            return ('legacy_source_button', source_button_id)
+        if source == 'legacy_category' and label_key:
+            return ('legacy_label_type', label_key, board_type)
+        if board_id:
+            return ('id', board_id)
+        return ('shape', source, label_key, board_type)
+
+    for raw_board in boards:
+        if not isinstance(raw_board, dict):
+            continue
+
+        board = dict(raw_board)
+        key = _board_dedupe_key(board)
+        board_id = str(board.get('id') or '').strip()
+
+        if key not in kept_index_by_key:
+            kept_index_by_key[key] = len(deduped)
+            deduped.append(board)
+            continue
+
+        kept_idx = kept_index_by_key[key]
+        kept_board = deduped[kept_idx]
+        kept_id = str(kept_board.get('id') or '').strip()
+
+        candidate_is_preferred = bool(board_id and board_id in preferred)
+        kept_is_preferred = bool(kept_id and kept_id in preferred)
+
+        if candidate_is_preferred and not kept_is_preferred:
+            deduped[kept_idx] = board
+            removed_count += 1
+        else:
+            removed_count += 1
+
+    return deduped, removed_count
 
 
 def sort_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
@@ -22787,7 +23081,7 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
             'children': built_children,
         }
 
-    sorted_menu = sort_boards_menu_tree(boards_menu)
+    sorted_menu = dedupe_boards_menu_tree(sort_boards_menu_tree(boards_menu))
     legacy_buttons: List[Dict[str, Any]] = []
     for index, item in enumerate(sorted_menu):
         if isinstance(item, dict):
@@ -22803,6 +23097,18 @@ TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES = 300_000
 def _tap_config_doc_ref(account_id: str, aac_user_id: str):
     return firestore_db.document(
         f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config"
+    )
+
+
+def _tap_boards_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/boards_config"
+    )
+
+
+def _tap_menu_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/menu_config"
     )
 
 
@@ -22891,6 +23197,106 @@ async def _save_chunked_tap_boards(doc_ref, boards: List[Dict[str, Any]]) -> int
     return len(chunks)
 
 
+async def _load_split_tap_docs(account_id: str, aac_user_id: str) -> Optional[Dict[str, Any]]:
+    """Load split tap config documents (boards/menu) and return merged sections."""
+    try:
+        boards_ref = _tap_boards_doc_ref(account_id, aac_user_id)
+        menu_ref = _tap_menu_doc_ref(account_id, aac_user_id)
+
+        boards_doc = await asyncio.to_thread(boards_ref.get)
+        menu_doc = await asyncio.to_thread(menu_ref.get)
+        if not boards_doc.exists and not menu_doc.exists:
+            return None
+
+        merged: Dict[str, Any] = {}
+
+        if boards_doc.exists:
+            boards_data = boards_doc.to_dict() or {}
+            if str(boards_data.get('boards_storage') or '').lower() == 'chunked':
+                merged['boards'] = await _load_chunked_tap_boards(boards_ref)
+            elif isinstance(boards_data.get('boards'), list):
+                merged['boards'] = [b for b in boards_data.get('boards', []) if isinstance(b, dict)]
+
+            if isinstance(boards_data.get('board_settings'), dict):
+                merged['board_settings'] = dict(boards_data['board_settings'])
+
+            if boards_data.get('boards_schema_version') is not None:
+                merged['boards_schema_version'] = boards_data.get('boards_schema_version')
+
+            if boards_data.get('updated_at'):
+                merged['updated_at'] = boards_data.get('updated_at')
+            if boards_data.get('created_at'):
+                merged['created_at'] = boards_data.get('created_at')
+
+        if menu_doc.exists:
+            menu_data = menu_doc.to_dict() or {}
+            if isinstance(menu_data.get('boards_menu'), list):
+                merged['boards_menu'] = dedupe_boards_menu_tree(menu_data.get('boards_menu'))
+
+            # Allow board_settings to be supplied from menu doc as a fallback.
+            if 'board_settings' not in merged and isinstance(menu_data.get('board_settings'), dict):
+                merged['board_settings'] = dict(menu_data['board_settings'])
+
+            if menu_data.get('boards_schema_version') is not None and 'boards_schema_version' not in merged:
+                merged['boards_schema_version'] = menu_data.get('boards_schema_version')
+
+        return merged
+    except Exception as e:
+        logging.error(f"Error loading split tap config docs: {e}")
+        return None
+
+
+async def _save_split_tap_docs(account_id: str, aac_user_id: str, config_data: Dict[str, Any]) -> bool:
+    """Dual-write tap boards/menu into separate docs for phase-1 migration."""
+    try:
+        now_iso = dt.now().isoformat()
+
+        boards_ref = _tap_boards_doc_ref(account_id, aac_user_id)
+        menu_ref = _tap_menu_doc_ref(account_id, aac_user_id)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        boards_schema_version = int(config_data.get('boards_schema_version') or 1)
+        created_at = config_data.get('created_at') or now_iso
+
+        boards_payload = {
+            'board_settings': board_settings,
+            'boards_schema_version': boards_schema_version,
+            'updated_at': now_iso,
+            'created_at': created_at,
+        }
+
+        estimated_boards_size = _estimate_json_size_bytes({'boards': boards})
+        if estimated_boards_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            boards_payload['boards'] = boards
+            boards_payload.pop('boards_storage', None)
+            boards_payload.pop('boards_chunk_count', None)
+            boards_payload.pop('boards_count', None)
+            await asyncio.to_thread(boards_ref.set, boards_payload)
+            await _clear_chunked_tap_boards(boards_ref)
+        else:
+            chunk_count = await _save_chunked_tap_boards(boards_ref, boards)
+            boards_payload['boards_storage'] = 'chunked'
+            boards_payload['boards_chunk_count'] = chunk_count
+            boards_payload['boards_count'] = len(boards)
+            await asyncio.to_thread(boards_ref.set, boards_payload)
+
+        boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+        menu_payload = {
+            'boards_menu': dedupe_boards_menu_tree(boards_menu),
+            'board_settings': board_settings,
+            'boards_schema_version': boards_schema_version,
+            'updated_at': now_iso,
+            'created_at': created_at,
+        }
+        await asyncio.to_thread(menu_ref.set, menu_payload)
+
+        return True
+    except Exception as e:
+        logging.error(f"Error saving split tap config docs: {e}")
+        return False
+
+
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
     """Load tap navigation configuration from Firestore"""
     global firestore_db
@@ -22901,14 +23307,45 @@ async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dic
         # Always load the single user configuration
         doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         doc = await asyncio.to_thread(doc_ref.get)
+
+        split_data = await _load_split_tap_docs(account_id, aac_user_id)
+
         if doc.exists:
             config_data = doc.to_dict() or {}
             if str(config_data.get('boards_storage') or '').lower() == 'chunked':
                 config_data['boards'] = await _load_chunked_tap_boards(doc_ref)
             elif not isinstance(config_data.get('boards'), list):
                 config_data['boards'] = []
+
+            # Phase 1: prefer split docs for boards/menu/settings when present.
+            if isinstance(split_data, dict):
+                if isinstance(split_data.get('boards'), list):
+                    config_data['boards'] = split_data.get('boards')
+                if isinstance(split_data.get('boards_menu'), list):
+                    config_data['boards_menu'] = split_data.get('boards_menu')
+                if isinstance(split_data.get('board_settings'), dict):
+                    config_data['board_settings'] = split_data.get('board_settings')
+                if split_data.get('boards_schema_version') is not None:
+                    config_data['boards_schema_version'] = split_data.get('boards_schema_version')
+
+            # Keep compatibility shape updated
+            config_data['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
             return config_data
-        
+
+        # Backward-compatible fallback: synthesize from split docs if combined doc is missing.
+        if isinstance(split_data, dict):
+            synthesized = create_default_tap_config(account_id, aac_user_id)
+            if isinstance(split_data.get('boards'), list):
+                synthesized['boards'] = split_data.get('boards')
+            if isinstance(split_data.get('boards_menu'), list):
+                synthesized['boards_menu'] = split_data.get('boards_menu')
+            if isinstance(split_data.get('board_settings'), dict):
+                synthesized['board_settings'] = split_data.get('board_settings')
+            if split_data.get('boards_schema_version') is not None:
+                synthesized['boards_schema_version'] = split_data.get('boards_schema_version')
+            synthesized['buttons'] = compose_legacy_buttons_from_boards_menu(synthesized)
+            return synthesized
+
         return None
     except Exception as e:
         logging.error(f"Error loading tap navigation config: {e}")
@@ -22921,7 +23358,10 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
         return False
     
     try:
-        # Always save to the single user configuration document
+        # Phase 1 migration strategy:
+        # - Split docs (boards_config + menu_config) are primary.
+        # - Legacy combined config doc is only mirrored if it already exists,
+        #   so deleting it does not cause recreation.
         working_config = copy.deepcopy(config_data) if isinstance(config_data, dict) else {}
         working_config['updated_at'] = dt.now().isoformat()
         if 'created_at' not in working_config:
@@ -22930,24 +23370,35 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
         doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
 
+        split_saved = await _save_split_tap_docs(account_id, aac_user_id, working_config)
+        if not split_saved:
+            return False
+
+        legacy_doc = await asyncio.to_thread(doc_ref.get)
+        if not legacy_doc.exists:
+            return True
+
         estimated_size = _estimate_json_size_bytes(working_config)
+        combined_saved = False
         if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
             working_config.pop('boards_storage', None)
             working_config.pop('boards_chunk_count', None)
             working_config.pop('boards_count', None)
             await asyncio.to_thread(doc_ref.set, working_config)
             await _clear_chunked_tap_boards(doc_ref)
-            return True
+            combined_saved = True
+        else:
+            # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
+            base_config = copy.deepcopy(working_config)
+            base_config.pop('boards', None)
+            chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
+            base_config['boards_storage'] = 'chunked'
+            base_config['boards_chunk_count'] = chunk_count
+            base_config['boards_count'] = len(boards)
+            await asyncio.to_thread(doc_ref.set, base_config)
+            combined_saved = True
 
-        # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
-        base_config = copy.deepcopy(working_config)
-        base_config.pop('boards', None)
-        chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
-        base_config['boards_storage'] = 'chunked'
-        base_config['boards_chunk_count'] = chunk_count
-        base_config['boards_count'] = len(boards)
-        await asyncio.to_thread(doc_ref.set, base_config)
-        return True
+        return combined_saved
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
         return False
@@ -24486,7 +24937,14 @@ async def get_tap_interface_config(
         else:
             config_data, was_normalized = normalize_compose_tap_config(config_data)
             config_data, boards_changed = ensure_tap_boards_structure(config_data)
-            if was_normalized or boards_changed:
+            menu_before = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+            menu_deduped = dedupe_boards_menu_tree(menu_before)
+            menu_changed = menu_before != menu_deduped
+            if menu_changed:
+                config_data['boards_menu'] = menu_deduped
+                config_data['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+
+            if was_normalized or boards_changed or menu_changed:
                 await save_tap_nav_config(account_id, aac_user_id, config_data)
         
         # DEBUG: Log words_prompt presence
