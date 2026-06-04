@@ -1289,10 +1289,7 @@
         async function warmUpTapConfig(token, aacUserId) {
             try {
                 const response = await fetch(`/api/tap-interface/config?t=${Date.now()}`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'X-User-ID': aacUserId
-                    }
+                    headers: buildAuthHeadersWithAdminContext(token, aacUserId)
                 });
                 
                 if (!response.ok) return;
@@ -1443,6 +1440,24 @@
             }
         }
 
+        function buildAuthHeadersWithAdminContext(token, aacUserId, includeJson = false) {
+            const headers = {
+                'Authorization': `Bearer ${token}`,
+                'X-User-ID': aacUserId
+            };
+
+            if (includeJson) {
+                headers['Content-Type'] = 'application/json';
+            }
+
+            const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+            if (adminTargetAccountId) {
+                headers['X-Admin-Target-Account'] = adminTargetAccountId;
+            }
+
+            return headers;
+        }
+
         async function redirectToPreferredInterface() {
             try {
                 const token = sessionStorage.getItem('firebaseIdToken');
@@ -1459,11 +1474,7 @@
                 // Check interface preference FIRST to know if we need to warm cache
                 const interfaceResponse = await fetch('/api/interface-preference', {
                     method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'X-User-ID': aacUserId,
-                        'Content-Type': 'application/json'
-                    }
+                    headers: buildAuthHeadersWithAdminContext(token, aacUserId, true)
                 });
                 
                 let useTapInterface = false;
@@ -1482,11 +1493,7 @@
                 // Now check if mood selection is enabled
                 const settingsResponse = await fetch('/api/settings', {
                     method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'X-User-ID': aacUserId,
-                        'Content-Type': 'application/json'
-                    }
+                    headers: buildAuthHeadersWithAdminContext(token, aacUserId, true)
                 });
                 
                 let shouldShowMood = false;
@@ -1544,11 +1551,7 @@
                 
                 const response = await fetch('/api/interface-preference', {
                     method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'X-User-ID': currentAacUserId,
-                        'Content-Type': 'application/json'
-                    }
+                    headers: buildAuthHeadersWithAdminContext(token, currentAacUserId, true)
                 });
                 
                 if (response.ok) {
