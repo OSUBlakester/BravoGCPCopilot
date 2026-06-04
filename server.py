@@ -594,18 +594,26 @@ async def get_target_account_id(
     try:
         id_token = token.credentials
         decoded_token = auth.verify_id_token(id_token, firebase_app)
-        
-        user_email = decoded_token.get("email", "")
+
         # Use uid as account_id (same as verify_firebase_token_only)
         account_id = decoded_token.get("uid")
-        # Check admin status by email (consistent with other endpoints)
-        is_admin = user_email == "admin@talkwithbravo.com"
-        # Also check custom claims for therapist status
-        custom_claims = decoded_token.get("custom_claims", {})
-        is_therapist = custom_claims.get("is_therapist", False)
-        
+
         if not account_id:
             raise HTTPException(status_code=403, detail="No account associated with this user")
+
+        # Resolve role from authoritative account document in Firestore.
+        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        account_doc = await asyncio.to_thread(account_doc_ref.get)
+        if not account_doc.exists:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+        account_data = account_doc.to_dict() or {}
+        user_email = account_data.get("email") or decoded_token.get("email", "")
+        is_admin = user_email == "admin@talkwithbravo.com"
+
+        # Therapist role is stored in account data; keep decoded-token fallback for compatibility.
+        token_is_therapist = bool(decoded_token.get("is_therapist", False))
+        is_therapist = bool(account_data.get("is_therapist", False) or token_is_therapist)
 
         target_account_id = account_id  # Default to the authenticated account
         
@@ -794,12 +802,12 @@ async def save_avatar_variations(payload: AvatarVariationRequest):
     
 
 @app.get("/api/account/users")
-async def get_aac_user_profiles(token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+async def get_aac_user_profiles(account_info: Annotated[Dict[str, str], Depends(get_target_account_id)]):
     """
     Returns a list of individual AAC user profiles associated with the authenticated account.
     This endpoint does NOT require an X-User-ID header as it lists users *for* the account.
     """
-    account_id = token_info["account_id"] # Get account_id from the verified token
+    account_id = account_info["account_id"]
 
     global firestore_db
     if not firestore_db:
