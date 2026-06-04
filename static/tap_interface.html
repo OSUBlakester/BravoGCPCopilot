@@ -2573,7 +2573,7 @@
             
             // PRIORITY 2: Fast custom image index lookup
             if (window.customImageTermIndex && window.customImageTermIndex.has(normalizedText)) {
-                const customImageUrl = window.customImageTermIndex.get(normalizedText);
+                const customImageUrl = getIndexedCustomImageUrl(normalizedText);
                 if (customImageUrl) {
                     window.customImageMatches.set(normalizedText, customImageUrl);
                     const elapsed = (performance.now() - startTime).toFixed(2);
@@ -3375,6 +3375,49 @@
             return [];
         }
 
+        function collectCustomTermsWithPriority(image) {
+            // Higher values win when multiple images share the same term.
+            const FIELD_PRIORITY = {
+                subconcept: 600,
+                concept: 500,
+                aliases: 420,
+                localized_labels: 360,
+                localized_tags: 300,
+                tags: 240
+            };
+
+            const sources = [
+                ['subconcept', image?.subconcept],
+                ['concept', image?.concept],
+                ['aliases', image?.aliases],
+                ['localized_labels', image?.localized_labels],
+                ['localized_tags', image?.localized_tags],
+                ['tags', image?.tags]
+            ];
+
+            const out = [];
+            for (const [field, rawValue] of sources) {
+                const terms = flattenCustomMatchValues(rawValue);
+                const basePriority = FIELD_PRIORITY[field] || 0;
+                for (const term of terms) {
+                    // Slightly boost multi-word exact metadata phrases over single tokens.
+                    const tieBreak = term.includes(' ') ? 2 : 1;
+                    out.push({ term, priority: basePriority + tieBreak });
+                }
+            }
+
+            return out;
+        }
+
+        function getIndexedCustomImageUrl(term) {
+            if (!window.customImageTermIndex) return null;
+            const hit = window.customImageTermIndex.get(term);
+            if (!hit) return null;
+            // Backward compatibility for any legacy string-only index entries.
+            if (typeof hit === 'string') return hit;
+            return hit.url || null;
+        }
+
         function buildCustomImageTermIndex() {
             const buildStart = performance.now();
             
@@ -3388,23 +3431,20 @@
                 const url = image?.image_url;
                 if (!url) continue;
 
-                const terms = [
-                    ...flattenCustomMatchValues(image?.concept),
-                    ...flattenCustomMatchValues(image?.subconcept),
-                    ...flattenCustomMatchValues(image?.tags),
-                    ...flattenCustomMatchValues(image?.aliases),
-                    ...flattenCustomMatchValues(image?.localized_tags),
-                    ...flattenCustomMatchValues(image?.localized_labels),
-                ];
+                const weightedTerms = collectCustomTermsWithPriority(image);
 
-                for (const term of terms) {
-                    if (term && !index.has(term)) {
-                        index.set(term, url);
+                for (const item of weightedTerms) {
+                    if (!item.term) continue;
+                    const existing = index.get(item.term);
+                    if (!existing || item.priority > existing.priority) {
+                        index.set(item.term, { url, priority: item.priority });
                     }
                 }
             }
 
             window.customImageTermIndex = index;
+            // Drop stale precomputed matches so new field-priority rules apply immediately.
+            window.customImageMatches = new Map();
             perfMetrics.indexBuildTime = (performance.now() - buildStart).toFixed(2);
             console.log(`🧭 Built custom image term index: ${index.size} terms in ${perfMetrics.indexBuildTime}ms`);
         }
@@ -3479,7 +3519,7 @@
                     continue;
                 }
 
-                const directMatch = window.customImageTermIndex.get(normalized);
+                const directMatch = getIndexedCustomImageUrl(normalized);
                 if (directMatch) {
                     window.customImageMatches.set(normalized, directMatch);
                     matchCount++;
@@ -3490,7 +3530,7 @@
                 let fallbackMatch = null;
                 for (const word of words) {
                     if (word.length < 3) continue;
-                    const candidate = window.customImageTermIndex.get(word);
+                    const candidate = getIndexedCustomImageUrl(word);
                     if (candidate) {
                         fallbackMatch = candidate;
                         break;
