@@ -2140,12 +2140,18 @@
 
         async function loadUserProfiles() {
             try {
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = {
+                    'Authorization': `Bearer ${window.currentIdToken}`,
+                    'Content-Type': 'application/json'
+                };
+                if (adminTargetAccountId) {
+                    headers['X-Admin-Target-Account'] = adminTargetAccountId;
+                }
+
                 const response = await fetch('/api/account/users', {
                     method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${window.currentIdToken}`,
-                        'Content-Type': 'application/json'
-                    }
+                    headers
                 });
 
                 if (response.ok) {
