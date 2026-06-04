@@ -2560,6 +2560,9 @@
             const normalizedSearchTerm = normalizeTermForLocale(text, tapTargetLocale);
             const normalizedText = normalizedSearchTerm.trim().toLowerCase();
             const cacheKey = `tap_${normalizedText}`;
+            const isSingleWordLookup = normalizedText.split(/\s+/).filter(Boolean).length === 1;
+            const shouldValidateSingleWordWithServer = !cacheOnly && isSingleWordLookup && normalizedText.length >= 2;
+            let provisionalLocalCacheUrl = null;
             
             // PRIORITY 1: Check preloaded custom images cache first
             if (window.customImageMatches.has(normalizedText)) {
@@ -2588,11 +2591,19 @@
             if (window.symbolImageCache.has(cacheKey)) {
                 const cached = window.symbolImageCache.get(cacheKey);
                 if (cached && cached.imageUrl) {
-                    const elapsed = (performance.now() - startTime).toFixed(2);
-                    console.log(`⚡ P3 (${elapsed}ms): Memory cache hit for "${text}"`);
-                    perfMetrics.totalMemoryCacheHits++;
-                    perfMetrics.symbolLookups.push({ text, method: 'P3-memory-cache', time: elapsed, lookupId });
-                    return cached.imageUrl;
+                    if (shouldValidateSingleWordWithServer) {
+                        provisionalLocalCacheUrl = cached.imageUrl;
+                        const elapsed = (performance.now() - startTime).toFixed(2);
+                        console.log(`⚡ P3 (${elapsed}ms): Provisional memory cache hit for "${text}" (validating with server)`);
+                        perfMetrics.totalMemoryCacheHits++;
+                        perfMetrics.symbolLookups.push({ text, method: 'P3-memory-cache-provisional', time: elapsed, lookupId });
+                    } else {
+                        const elapsed = (performance.now() - startTime).toFixed(2);
+                        console.log(`⚡ P3 (${elapsed}ms): Memory cache hit for "${text}"`);
+                        perfMetrics.totalMemoryCacheHits++;
+                        perfMetrics.symbolLookups.push({ text, method: 'P3-memory-cache', time: elapsed, lookupId });
+                        return cached.imageUrl;
+                    }
                 }
             }
             
@@ -2609,10 +2620,19 @@
                             timestamp: Date.now()
                         });
                         const elapsed = (performance.now() - startTime).toFixed(2);
-                        console.log(`📚 P4 (${p4Time}ms, total ${elapsed}ms): Local DB found image for "${text}"`);
-                        perfMetrics.totalLocalDBHits++;
-                        perfMetrics.symbolLookups.push({ text, method: 'P4-local-db', time: elapsed, dbTime: p4Time, lookupId });
-                        return localResult;
+                        if (shouldValidateSingleWordWithServer) {
+                            if (!provisionalLocalCacheUrl) {
+                                provisionalLocalCacheUrl = localResult;
+                            }
+                            console.log(`📚 P4 (${p4Time}ms, total ${elapsed}ms): Local DB provisional image for "${text}" (validating with server)`);
+                            perfMetrics.totalLocalDBHits++;
+                            perfMetrics.symbolLookups.push({ text, method: 'P4-local-db-provisional', time: elapsed, dbTime: p4Time, lookupId });
+                        } else {
+                            console.log(`📚 P4 (${p4Time}ms, total ${elapsed}ms): Local DB found image for "${text}"`);
+                            perfMetrics.totalLocalDBHits++;
+                            perfMetrics.symbolLookups.push({ text, method: 'P4-local-db', time: elapsed, dbTime: p4Time, lookupId });
+                            return localResult;
+                        }
                     }
                 } catch (error) {
                     console.error('Error searching local library:', error);
@@ -2655,7 +2675,7 @@
                     console.warn(`P5 (${p5Time}ms, total ${elapsed}ms): Symbol search failed for "${text}": ${response.status}`);
                     perfMetrics.totalServerFallbacks++;
                     perfMetrics.symbolLookups.push({ text, method: 'P5-server-fail', time: elapsed, serverTime: p5Time, lookupId });
-                    return null;
+                    return provisionalLocalCacheUrl;
                 }
                 
                 const data = await response.json();
@@ -2686,7 +2706,7 @@
                     console.log(`❌ P5 (${p5Time}ms, total ${elapsed}ms): No Firestore image found for "${text}"`);
                     perfMetrics.totalServerFallbacks++;
                     perfMetrics.symbolLookups.push({ text, method: 'P5-server-miss', time: elapsed, serverTime: p5Time, lookupId });
-                    return null;
+                    return provisionalLocalCacheUrl;
                 }
             } catch (error) {
                 releaseRequestSlot();
@@ -2695,7 +2715,7 @@
                 } else {
                     console.error(`Error fetching symbol for "${text}":`, error);
                 }
-                return null;
+                return provisionalLocalCacheUrl;
             }
         }
         
@@ -4869,42 +4889,39 @@ VARIETY RULES:
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
 
-                    // 🚀 Pre-warm server cache for terms that missed locally.
-                    // Fire this non-blocking so images appear as soon as the server responds
-                    // instead of waiting for the 2-3 second background pass setTimeout.
-                    const serverMisses = [];
+                    // 🚀 Refresh server-ranked cache for all phrase entries before first paint.
+                    // Use the PRIMARY keyword (e.g. "blue" from "I like blue") as the image
+                    // lookup text, so the server scores against the right concept rather than
+                    // splitting the full phrase and risking a weak word winning.
+                    const serverRefreshEntries = [];
+                    const phraseKeyToSpeechText = new Map(); // primaryKey -> original phrase
                     for (let i = 0; i < options.length; i++) {
                         const option = options[i];
                         const speechText = typeof option === 'object' ? option.option : option;
                         if (!speechText || speechText === 'Something Else') continue;
-                        const ck = `tap_${String(speechText).trim().toLowerCase()}`;
-                        const hit = window.symbolImageCache.get(ck);
-                        if (!hit || !hit.imageUrl) {
-                            const phraseKeywords = buildPhraseImageKeywords(
-                                speechText,
-                                (typeof option === 'object' && option.keywords) ? option.keywords : []
-                            );
-                            serverMisses.push({ text: speechText, keywords: phraseKeywords });
-                        }
+                        const existingKws = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                        const phraseKeywords = buildPhraseImageKeywords(speechText, existingKws);
+                        // Primary keyword is first in the ranked list; fall back to full phrase.
+                        const primaryKey = phraseKeywords[0] || speechText;
+                        phraseKeyToSpeechText.set(primaryKey.toLowerCase().trim(), speechText);
+                        serverRefreshEntries.push({ text: primaryKey, keywords: phraseKeywords });
                     }
-                    if (serverMisses.length > 0) {
-                        console.log(`🌐 Pre-warming server for ${serverMisses.length} phrase misses (non-blocking)...`);
-                        batchLoadImages(serverMisses).then(() => {
-                            // Apply newly-fetched images directly to already-rendered buttons
-                            const currentButtons = llmStaticOptions.querySelectorAll('.option-button');
-                            for (let i = 0; i < Math.min(options.length, currentButtons.length); i++) {
-                                const btn = currentButtons[i];
-                                if (btn.querySelector('img')) continue;
-                                const option = options[i];
-                                const speechText = typeof option === 'object' ? option.option : option;
-                                if (!speechText) continue;
-                                const ck = `tap_${String(speechText).trim().toLowerCase()}`;
-                                const cached = window.symbolImageCache.get(ck);
-                                if (cached && cached.imageUrl) {
-                                    applyImageToButton(btn, cached.imageUrl, btn.textContent.trim());
+                    if (serverRefreshEntries.length > 0) {
+                        console.log(`🌐 Refreshing server-ranked images for ${serverRefreshEntries.length} phrases before first paint...`);
+                        try {
+                            const batchResults = await batchLoadImages(serverRefreshEntries);
+                            // Re-map results from primaryKey -> speechText so the cache is keyed
+                            // by the full phrase (as the button uses for lookup).
+                            for (const [primaryKey, imageUrl] of Object.entries(batchResults || {})) {
+                                const origPhrase = phraseKeyToSpeechText.get(String(primaryKey).toLowerCase().trim());
+                                if (origPhrase && imageUrl) {
+                                    const ck = `tap_${origPhrase.toLowerCase().trim()}`;
+                                    window.symbolImageCache.set(ck, { imageUrl, timestamp: Date.now() });
                                 }
                             }
-                        }).catch(() => {});
+                        } catch (refreshError) {
+                            console.warn('Initial phrase server refresh failed, falling back to local cache results:', refreshError);
+                        }
                     }
 
                 } catch (error) {
@@ -4932,7 +4949,21 @@ VARIETY RULES:
 
                 if (missingEntries.length > 0) {
                     console.log(`📦 Batch server searching ${missingEntries.length} phrase misses...`);
-                    await batchLoadImages(missingEntries);
+                    // Resolve primary keywords for each missing phrase.
+                    const phraseKeyToSpeechTextBg = new Map();
+                    const missingWithPrimaryKeys = missingEntries.map(entry => {
+                        const primaryKey = (Array.isArray(entry.keywords) && entry.keywords[0]) || entry.text;
+                        phraseKeyToSpeechTextBg.set(String(primaryKey).toLowerCase().trim(), entry.text);
+                        return { text: primaryKey, keywords: entry.keywords };
+                    });
+                    const bgResults = await batchLoadImages(missingWithPrimaryKeys);
+                    for (const [primaryKey, imageUrl] of Object.entries(bgResults || {})) {
+                        const origPhrase = phraseKeyToSpeechTextBg.get(String(primaryKey).toLowerCase().trim());
+                        if (origPhrase && imageUrl) {
+                            const ck = `tap_${origPhrase.toLowerCase().trim()}`;
+                            window.symbolImageCache.set(ck, { imageUrl, timestamp: Date.now() });
+                        }
+                    }
                 }
             }
             
@@ -4966,11 +4997,22 @@ VARIETY RULES:
                     speechText,
                     (typeof option === 'object' && option.keywords) ? option.keywords : []
                 );
+                // Use the primary keyword for image lookup so "I like blue" → lookup "blue".
+                // Cache is keyed on speechText (full phrase) so we read that first; if a
+                // cache miss falls through to the server, send the primary keyword as query.
+                const primaryLookupKey = phraseKeywords[0] || speechText;
+                const ck = `tap_${String(speechText).trim().toLowerCase()}`;
+                const phraseHit = window.symbolImageCache?.get(ck);
                 
-                // On initial load: cache only. Background: fetch if needed.
-                // After batch fetch, avoid per-button server fallback (keeps UI responsive)
-                const cacheOnly = true;
-                imagePromises.push(getSymbolImageForText(speechText, phraseKeywords, cacheOnly));
+                // On initial load: cache only after server-ranked batch refresh has completed.
+                // Background pass: allow per-button server validation for remaining edge cases.
+                const cacheOnly = initialLoad;
+                if (phraseHit && phraseHit.imageUrl) {
+                    // Already in cache from batch pre-warm — use directly
+                    imagePromises.push(Promise.resolve(phraseHit.imageUrl));
+                } else {
+                    imagePromises.push(getSymbolImageForText(primaryLookupKey, phraseKeywords, cacheOnly));
+                }
                 buttonMappings.push({ btn, text: btn.textContent });
             }
             
@@ -5033,40 +5075,31 @@ VARIETY RULES:
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
 
-                    // 🚀 Pre-warm server cache for terms that missed locally.
-                    // Fire this non-blocking so images appear as soon as the server responds
-                    // instead of waiting for the 2-3 second background pass setTimeout.
-                    const serverMisses = [];
+                    // 🚀 Refresh server-ranked images for local misses AND single-word terms.
+                    // Single-word terms (like colors) are prone to stale local/tag matches,
+                    // so refresh them even when local cache has a hit.
+                    const serverRefreshEntries = [];
                     for (const option of options) {
                         const text = typeof option === 'object' ? (option.text || option.option) : option;
                         if (!text || text === 'Something Else') continue;
                         const ck = `tap_${String(text).trim().toLowerCase()}`;
                         const hit = window.symbolImageCache.get(ck);
-                        if (!hit || !hit.imageUrl) {
+                        const normalizedText = String(text).trim().toLowerCase();
+                        const isSingleWord = normalizedText.split(/\s+/).filter(Boolean).length === 1;
+                        if (!hit || !hit.imageUrl || isSingleWord) {
                             const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
-                            serverMisses.push({ text, keywords });
+                            serverRefreshEntries.push({ text, keywords });
                         }
                     }
-                    if (serverMisses.length > 0) {
-                        console.log(`🌐 Pre-warming server for ${serverMisses.length} word misses (non-blocking)...`);
-                        batchLoadImages(serverMisses).then(() => {
-                            // Apply newly-fetched images directly to already-rendered buttons
-                            const currentButtons = Array.from(freestyleOptions.querySelectorAll('.freestyle-button'));
-                            for (const btn of currentButtons) {
-                                if (btn.querySelector('img') || btn.classList.contains('sight-word-button')) continue;
-                                if (btn.dataset.specialButton === 'something-else') continue;
-                                const optIdx = Number(btn.dataset.optionIndex);
-                                if (Number.isNaN(optIdx) || optIdx < 0 || optIdx >= options.length) continue;
-                                const option = options[optIdx];
-                                const text = typeof option === 'object' ? (option.text || option.option) : option;
-                                if (!text) continue;
-                                const ck = `tap_${String(text).trim().toLowerCase()}`;
-                                const cached = window.symbolImageCache.get(ck);
-                                if (cached && cached.imageUrl) {
-                                    applyImageToButton(btn, cached.imageUrl, btn.textContent.trim());
-                                }
-                            }
-                        }).catch(() => {});
+                    if (serverRefreshEntries.length > 0) {
+                        console.log(`🌐 Refreshing server-ranked images for ${serverRefreshEntries.length} words before first paint...`);
+                        try {
+                            // Await on initial load so first-rendered images use server ranking,
+                            // not provisional local cache hits.
+                            await batchLoadImages(serverRefreshEntries);
+                        } catch (refreshError) {
+                            console.warn('Initial server refresh failed, falling back to local cache results:', refreshError);
+                        }
                     }
 
                 } catch (error) {
@@ -5087,7 +5120,9 @@ VARIETY RULES:
                     if (!text) continue;
                     const cacheKey = `tap_${String(text).trim().toLowerCase()}`;
                     const cached = window.symbolImageCache.get(cacheKey);
-                    if (!cached || !cached.imageUrl) {
+                    const normalizedText = String(text).trim().toLowerCase();
+                    const isSingleWord = normalizedText.split(/\s+/).filter(Boolean).length === 1;
+                    if (!cached || !cached.imageUrl || isSingleWord) {
                         missingEntries.push({ text, keywords });
                     }
                 }
@@ -5126,9 +5161,10 @@ VARIETY RULES:
                 const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : null;
                 const configuredImageUrl = (typeof option === 'object' && option.image_url) ? option.image_url : null;
                 
-                // On initial load: cache only. Background: fetch if needed.
-                // After batch fetch, avoid per-button server fallback (keeps UI responsive)
-                const cacheOnly = true;
+                // On initial load: cache only for instant paint.
+                // Background pass: allow server validation so single-word local cache mismatches
+                // (e.g., tag hit beating subconcept exact) can self-correct.
+                const cacheOnly = initialLoad;
                 imagePromises.push(
                     configuredImageUrl
                         ? Promise.resolve(configuredImageUrl)
