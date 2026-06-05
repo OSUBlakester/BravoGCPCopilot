@@ -21194,8 +21194,27 @@ async def batch_symbol_search(
         locale = str(data.get('locale') or 'en-US').strip().lower()
         locale_base = locale.split('-')[0] if '-' in locale else locale
 
+        def _normalize_quotes_and_space(v):
+            text = str(v or '').strip().lower()
+            if not text:
+                return ''
+            text = (
+                text.replace('’', "'")
+                .replace('‘', "'")
+                .replace('`', "'")
+                .replace('“', '"')
+                .replace('”', '"')
+            )
+            return ' '.join(text.split())
+
         def _normalize_term(v):
-            return str(v or '').strip().lower()
+            """Canonical matcher term: lowercase, normalized quotes, punctuation-insensitive."""
+            text = _normalize_quotes_and_space(v)
+            if not text:
+                return ''
+            import re
+            text = re.sub(r"[^a-z0-9]+", " ", text)
+            return ' '.join(text.split())
 
         def _allowed_locale_keys():
             keys = {"en", "en-us", locale, locale_base}
@@ -21234,35 +21253,56 @@ async def batch_symbol_search(
                 if chunk:
                     yield chunk
 
+        TOKEN_STOP_WORDS = {
+            'the', 'a', 'an', 'and', 'or', 'to', 'of', 'on', 'in', 'at', 'for', 'with',
+            'if', 'you', 'your', 'are', 'is', 'it', 're', 's'
+        }
+
         def _expand_terms(text_value, keywords_value):
-            query_lower = _normalize_term(text_value)
+            query_raw = str(text_value or '').strip()
+            query_lower = _normalize_quotes_and_space(query_raw)
             normalized_query = query_lower
             if normalize_search_term and query_lower:
                 try:
-                    inflection_normalized = _normalize_term(normalize_search_term(query_lower, locale_base))
+                    inflection_normalized = _normalize_quotes_and_space(normalize_search_term(query_lower, locale_base))
                     if inflection_normalized:
                         normalized_query = inflection_normalized
                 except Exception as inflection_error:
                     logging.debug(f"🔍 BATCH: inflection normalization skipped for '{query_lower}': {inflection_error}")
+
+            query_norm = _normalize_term(query_lower)
+            normalized_query_norm = _normalize_term(normalized_query)
 
             out = []
             if query_lower:
                 out.append(query_lower)
                 if normalized_query and normalized_query != query_lower:
                     out.append(normalized_query)
+                if query_norm and query_norm not in out:
+                    out.append(query_norm)
+                if normalized_query_norm and normalized_query_norm not in out:
+                    out.append(normalized_query_norm)
                 for part in query_lower.split():
                     part = part.strip().lower()
-                    if len(part) >= 3:
+                    if len(part) >= 3 and part not in TOKEN_STOP_WORDS:
+                        out.append(part)
+                for part in query_norm.split():
+                    part = part.strip().lower()
+                    if len(part) >= 3 and part not in TOKEN_STOP_WORDS:
                         out.append(part)
 
             for kw in (keywords_value or [])[:3]:
+                kw_lower = _normalize_quotes_and_space(kw)
                 kw_norm = _normalize_term(kw)
-                if not kw_norm:
+                if not kw_lower and not kw_norm:
                     continue
-                out.append(kw_norm)
+                if kw_lower:
+                    out.append(kw_lower)
+                if kw_norm:
+                    out.append(kw_norm)
                 for part in kw_norm.split():
                     part = part.strip().lower()
-                    if len(part) >= 3:
+                    if len(part) >= 3 and part not in TOKEN_STOP_WORDS:
                         out.append(part)
 
             deduped = []
@@ -21308,7 +21348,7 @@ async def batch_symbol_search(
             # This prevents stale generic mappings (e.g. red->color) from leaking
             # across users or keyword contexts.
             terms_sig = "|".join(item_rec.get("search_terms", []))
-            return f"{account_id}:{aac_user_id}:{locale_base}:{item_rec.get('query_lower', '')}:{terms_sig}"
+            return f"v2:{account_id}:{aac_user_id}:{locale_base}:{item_rec.get('query_lower', '')}:{terms_sig}"
 
         # --- Serve cached results without hitting Firestore ---
         now_ts = time.time()
@@ -21350,12 +21390,32 @@ async def batch_symbol_search(
         # Per-item exact term fetches: guarantees exact subconcept/concept docs are present
         # even when broad chunk queries are dominated by generic terms like "color".
         for item_rec in uncached_items:
-            exact_terms = [item_rec.get("query_lower", "")]
+            query_lower = item_rec.get("query_lower", "")
             normalized_term = item_rec.get("normalized_query", "")
-            if normalized_term and normalized_term not in exact_terms:
-                exact_terms.append(normalized_term)
 
-            for exact_term in exact_terms:
+            raw_text = str(item_rec.get("text", "")).strip()
+            exact_terms = [raw_text, query_lower, normalized_term]
+
+            if raw_text:
+                exact_terms.extend([
+                    raw_text.lower(),
+                    raw_text.capitalize(),
+                    raw_text.title(),
+                    _normalize_quotes_and_space(raw_text),
+                    _normalize_term(raw_text),
+                ])
+
+            # Remove empties/dupes while preserving order
+            dedup_exact_terms = []
+            seen_exact_terms = set()
+            for t in exact_terms:
+                tt = str(t or '').strip()
+                if not tt or tt in seen_exact_terms:
+                    continue
+                seen_exact_terms.add(tt)
+                dedup_exact_terms.append(tt)
+
+            for exact_term in dedup_exact_terms:
                 if not exact_term:
                     continue
                 try:
@@ -21530,18 +21590,22 @@ async def batch_symbol_search(
             normalized_query = item_rec["normalized_query"]
             search_terms = item_rec["search_terms"]
 
+            query_norm = _normalize_term(normalized_query or query_lower)
+
             subconcept = cand.get("subconcept") or ""
             concept = cand.get("concept") or ""
             searchable_terms = cand.get("searchable_terms") or set()
             tags = cand.get("tags") or []
 
             exact_subconcept = bool(
-                (query_lower and query_lower == subconcept)
-                or (normalized_query and normalized_query == subconcept)
+                (query_norm and query_norm == subconcept)
+                or (normalized_query and _normalize_term(normalized_query) == subconcept)
+                or (query_lower and _normalize_term(query_lower) == subconcept)
             )
             exact_concept = bool(
-                (query_lower and query_lower == concept)
-                or (normalized_query and normalized_query == concept)
+                (query_norm and query_norm == concept)
+                or (normalized_query and _normalize_term(normalized_query) == concept)
+                or (query_lower and _normalize_term(query_lower) == concept)
             )
 
             # Large tiered bases to guarantee ordering.
@@ -21549,6 +21613,11 @@ async def batch_symbol_search(
                 score += 1000
             elif exact_concept:
                 score += 900
+
+            # Strongly prefer candidates that contain the full normalized phrase
+            # in any searchable field (tags, aliases, localized labels/tags, concept, subconcept).
+            if query_norm and query_norm in searchable_terms:
+                score += 780
 
             for idx, term in enumerate(search_terms):
                 if term in searchable_terms:
