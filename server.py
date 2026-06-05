@@ -601,15 +601,24 @@ async def get_target_account_id(
         if not account_id:
             raise HTTPException(status_code=403, detail="No account associated with this user")
 
+        # Fast-path: check admin by token email before hitting Firestore.
+        token_email = decoded_token.get("email", "")
+        is_admin = token_email == "admin@talkwithbravo.com"
+
         # Resolve role from authoritative account document in Firestore.
+        # Admin may not have a regular account doc, so only 404 for non-admins.
         account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
         account_doc = await asyncio.to_thread(account_doc_ref.get)
         if not account_doc.exists:
-            raise HTTPException(status_code=404, detail="Account not found")
+            if not is_admin:
+                raise HTTPException(status_code=404, detail="Account not found")
+            account_data = {}
+        else:
+            account_data = account_doc.to_dict() or {}
 
-        account_data = account_doc.to_dict() or {}
-        user_email = account_data.get("email") or decoded_token.get("email", "")
-        is_admin = user_email == "admin@talkwithbravo.com"
+        user_email = account_data.get("email") or token_email
+        # Re-check is_admin with the stored email in case they differ.
+        is_admin = is_admin or (user_email == "admin@talkwithbravo.com")
 
         # Therapist role is stored in account data; keep decoded-token fallback for compatibility.
         token_is_therapist = bool(decoded_token.get("is_therapist", False))
@@ -20663,6 +20672,9 @@ async def button_symbol_search(
                         
                         # Calculate tag position bonus - first tag gets highest score
                         tags = image.get('tags', [])
+                        tags_lower = [str(tag).lower() for tag in tags]
+                        image_subconcept = str(image.get('subconcept', '')).lower().strip()
+                        image_concept = str(image.get('concept', '')).lower().strip()
                         tag_position_bonus = 0
                         for pos, tag in enumerate(tags):
                             if tag.lower() == term.lower():
@@ -20674,9 +20686,17 @@ async def button_symbol_search(
                                     tag_position_bonus = 5   # Early tags get small bonus
                                 break
                         
-                        # BravoImages get higher base scores than symbols
-                        base_score = 50 * weight  # Higher than symbol scores
-                        image['match_score'] = base_score + tag_position_bonus
+                        # PRIORITY RULE: exact subconcept match must outrank tag matches.
+                        if image_subconcept and image_subconcept == term.lower():
+                            image['match_score'] = (95 * weight) + tag_position_bonus
+                        elif image_concept and image_concept == term.lower():
+                            image['match_score'] = (85 * weight) + tag_position_bonus
+                        elif term.lower() in tags_lower:
+                            # Keep tag-only matches below subconcept/concept exact matches.
+                            base_score = 50 * weight
+                            image['match_score'] = base_score + tag_position_bonus
+                        else:
+                            image['match_score'] = 40 * weight
                         image['matched_term'] = term
                         image['search_phase'] = "bravo_image_match"
                         
@@ -20698,17 +20718,9 @@ async def button_symbol_search(
         
         logging.info(f"Found {len(matched_symbols)} BravoImages matches")
 
-        # Fast return path for Tap interface (limit=1): avoid expensive fallback phases
-        if limit <= 1 and matched_symbols:
-            matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
-            return JSONResponse(content={
-                "symbols": matched_symbols[:1],
-                "total_found": len(matched_symbols),
-                "query": q,
-                "search_type": "bravo_image_fast"
-            })
-        
         # Phase -0.5: Search user's custom images (including profile images)
+        # NOTE: Must happen BEFORE the fast-return path so custom subconcept matches
+        # can outrank BravoImage tag matches even when limit=1 (Tap interface).
         account_id = current_ids["account_id"]
         aac_user_id = current_ids["aac_user_id"]
         
@@ -20717,18 +20729,75 @@ async def button_symbol_search(
             custom_images_ref = firestore_db.collection("accounts").document(account_id)\
                                           .collection("profiles").document(aac_user_id)\
                                           .collection("custom_images")
-            
-            # Search for active custom images (including profile images)
-            custom_query = custom_images_ref.where("active", "==", True).limit(limit * 3)
-            custom_docs = list(custom_query.stream())
-            
-            logging.info(f"Found {len(custom_docs)} active custom images for search matching")
-            
-            logging.info(f"Found {len(custom_docs)} active custom images for user")
+
+            # Build a targeted candidate set first so exact subconcept matches are not
+            # missed when limit=1 (Tap calls often request only one result).
+            custom_doc_map: Dict[str, Any] = {}
+
+            def _collect_custom_docs(doc_iterable):
+                for custom_doc in doc_iterable:
+                    custom_doc_map[custom_doc.id] = custom_doc
+
+            targeted_limit = max(50, limit * 20)
+
+            # Single-field queries avoid composite-index requirements and are reliable.
+            try:
+                _collect_custom_docs(custom_images_ref.where("subconcept", "==", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom subconcept query failed: {e}")
+
+            try:
+                _collect_custom_docs(custom_images_ref.where("concept", "==", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom concept query failed: {e}")
+
+            try:
+                _collect_custom_docs(custom_images_ref.where("tags", "array_contains", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom tags query failed: {e}")
+
+            try:
+                _collect_custom_docs(custom_images_ref.where("aliases", "array_contains", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom aliases query failed: {e}")
+
+            if locale_base and locale_base != "en":
+                localized_tags_field = f"localized_tags.{locale_base}"
+                localized_labels_field = f"localized_labels.{locale_base}"
+
+                try:
+                    _collect_custom_docs(custom_images_ref.where(localized_tags_field, "array_contains", query_lower).limit(targeted_limit).stream())
+                except Exception as e:
+                    logging.debug(f"Custom localized tags query failed: {e}")
+
+                for label_candidate in [query_lower, q.strip()]:
+                    if not label_candidate:
+                        continue
+                    try:
+                        _collect_custom_docs(custom_images_ref.where(localized_labels_field, "==", label_candidate).limit(targeted_limit).stream())
+                    except Exception as e:
+                        logging.debug(f"Custom localized label query failed for '{label_candidate}': {e}")
+
+            # Fallback broad scan to preserve previous behavior for legacy data where
+            # searchable fields may be incomplete.
+            fallback_scan_limit = max(200, limit * 60)
+            if len(custom_doc_map) < max(20, limit * 10):
+                try:
+                    fallback_query = custom_images_ref.where("active", "==", True).limit(fallback_scan_limit)
+                    _collect_custom_docs(fallback_query.stream())
+                except Exception as e:
+                    logging.debug(f"Custom fallback active query failed: {e}")
+
+            custom_docs = list(custom_doc_map.values())
+            logging.info(f"Collected {len(custom_docs)} custom image candidates for search matching")
             
             for doc in custom_docs:
                 custom_image = doc.to_dict()
                 custom_image_id = doc.id
+
+                # Enforce active-only behavior after collecting candidates.
+                if not custom_image.get('active', False):
+                    continue
                 
                 # Get all searchable fields
                 tags = custom_image.get('tags', [])
@@ -20755,11 +20824,11 @@ async def button_symbol_search(
                 # Check primary query against all fields
                 if query_lower == concept:
                     matched_term = query_lower
-                    match_score = 70  # Highest for exact concept match
+                    match_score = 70
                     logging.info(f"✅ EXACT CONCEPT MATCH: '{query_lower}' == '{concept}' (score: {match_score})")
                 elif query_lower == subconcept:
                     matched_term = query_lower  
-                    match_score = 65  # High for exact subconcept match
+                    match_score = 95  # Highest priority for exact subcategory/subconcept match
                     logging.info(f"✅ EXACT SUBCONCEPT MATCH: '{query_lower}' == '{subconcept}' (score: {match_score})")
                 elif query_lower in tags_lower:
                     matched_term = query_lower
@@ -20773,7 +20842,7 @@ async def button_symbol_search(
                             elif pos <= 3:
                                 tag_position_bonus = 8
                             break
-                    match_score = 60 + tag_position_bonus  # Higher than BravoImages
+                    match_score = 60 + tag_position_bonus
                 elif query_lower in aliases_lower:
                     matched_term = query_lower
                     match_score = 58
@@ -20799,7 +20868,7 @@ async def button_symbol_search(
                             break
                         elif keyword == subconcept:
                             matched_term = keyword
-                            match_score = 60
+                            match_score = 90  # Keep keyword-driven subconcept exact above tag hits
                             break
                         elif keyword in tags_lower:
                             matched_term = keyword
@@ -20860,7 +20929,18 @@ async def button_symbol_search(
             
         except Exception as e:
             logging.debug(f"Custom images search failed: {e}")
-        
+
+        # Fast return path for Tap interface (limit=1): avoid expensive fallback phases.
+        # Placed here (after custom images) so custom subconcept/concept matches are included.
+        if limit <= 1 and matched_symbols:
+            matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+            return JSONResponse(content={
+                "symbols": matched_symbols[:1],
+                "total_found": len(matched_symbols),
+                "query": q,
+                "search_type": "bravo_image_fast"
+            })
+
         # Phase 0: Enhanced keyword array matching for LLM-generated content (when keywords are provided)
         if keyword_list:
             try:
@@ -21223,12 +21303,19 @@ async def batch_symbol_search(
         if not request_items:
             return JSONResponse(content={"results": {}})
 
+        def _batch_cache_key(item_rec):
+            # Scope cache per account/profile/locale and search-term set.
+            # This prevents stale generic mappings (e.g. red->color) from leaking
+            # across users or keyword contexts.
+            terms_sig = "|".join(item_rec.get("search_terms", []))
+            return f"{account_id}:{aac_user_id}:{locale_base}:{item_rec.get('query_lower', '')}:{terms_sig}"
+
         # --- Serve cached results without hitting Firestore ---
         now_ts = time.time()
         cached_results = {}
         uncached_items = []
         for item_rec in request_items:
-            cache_key = f"{locale_base}:{item_rec['query_lower']}"
+            cache_key = _batch_cache_key(item_rec)
             cached_entry = _batch_search_cache.get(cache_key)
             if cached_entry and cached_entry[1] > now_ts:
                 cached_results[item_rec["text"]] = cached_entry[0]
@@ -21259,6 +21346,52 @@ async def batch_symbol_search(
                         candidate_docs[doc.id] = data
             except Exception as chunk_error:
                 logging.debug(f"🔍 BATCH: search_terms chunk query failed ({chunk_error})")
+
+        # Per-item exact term fetches: guarantees exact subconcept/concept docs are present
+        # even when broad chunk queries are dominated by generic terms like "color".
+        for item_rec in uncached_items:
+            exact_terms = [item_rec.get("query_lower", "")]
+            normalized_term = item_rec.get("normalized_query", "")
+            if normalized_term and normalized_term not in exact_terms:
+                exact_terms.append(normalized_term)
+
+            for exact_term in exact_terms:
+                if not exact_term:
+                    continue
+                try:
+                    docs = list(
+                        images_ref.where("source", "==", "bravo_images").where("subconcept", "==", exact_term).limit(40).stream()
+                    )
+                    for doc in docs:
+                        data = doc.to_dict() or {}
+                        if data.get("image_url"):
+                            candidate_docs[doc.id] = data
+                except Exception as exact_subconcept_error:
+                    logging.debug(f"🔍 BATCH: exact subconcept query failed ({exact_subconcept_error})")
+
+                try:
+                    docs = list(
+                        images_ref.where("source", "==", "bravo_images").where("concept", "==", exact_term).limit(40).stream()
+                    )
+                    for doc in docs:
+                        data = doc.to_dict() or {}
+                        if data.get("image_url"):
+                            candidate_docs[doc.id] = data
+                except Exception as exact_concept_error:
+                    logging.debug(f"🔍 BATCH: exact concept query failed ({exact_concept_error})")
+
+                if locale_base and locale_base != "en":
+                    localized_labels_field = f"localized_labels.{locale_base}"
+                    try:
+                        docs = list(
+                            images_ref.where("source", "==", "bravo_images").where(localized_labels_field, "==", exact_term).limit(20).stream()
+                        )
+                        for doc in docs:
+                            data = doc.to_dict() or {}
+                            if data.get("image_url"):
+                                candidate_docs[doc.id] = data
+                    except Exception as exact_label_error:
+                        logging.debug(f"🔍 BATCH: exact localized label query failed ({exact_label_error})")
 
         # Grouped query path 2: localized tags fallback.
         if locale_base and locale_base != "en":
@@ -21384,25 +21517,50 @@ async def batch_symbol_search(
         custom_by_id = {c["id"]: c for c in custom_candidates}
 
         def _score_candidate(item_rec, cand):
+            """
+            Priority order (strict):
+            1) Exact subconcept match
+            2) Exact concept match
+            3) Tag/alias/localized term matches
+            This prevents tag-only hits (e.g. "queen" tagged "red")
+            from outranking true subconcept matches for "red".
+            """
             score = 0
             query_lower = item_rec["query_lower"]
             normalized_query = item_rec["normalized_query"]
             search_terms = item_rec["search_terms"]
 
-            if query_lower and query_lower == cand["subconcept"]:
-                score += 45
-            if normalized_query and normalized_query == cand["subconcept"]:
-                score += 45
-            if query_lower and query_lower == cand["concept"]:
-                score += 35
-            if normalized_query and normalized_query == cand["concept"]:
-                score += 35
+            subconcept = cand.get("subconcept") or ""
+            concept = cand.get("concept") or ""
+            searchable_terms = cand.get("searchable_terms") or set()
+            tags = cand.get("tags") or []
+
+            exact_subconcept = bool(
+                (query_lower and query_lower == subconcept)
+                or (normalized_query and normalized_query == subconcept)
+            )
+            exact_concept = bool(
+                (query_lower and query_lower == concept)
+                or (normalized_query and normalized_query == concept)
+            )
+
+            # Large tiered bases to guarantee ordering.
+            if exact_subconcept:
+                score += 1000
+            elif exact_concept:
+                score += 900
 
             for idx, term in enumerate(search_terms):
-                if term in cand["searchable_terms"]:
-                    score += max(12, 30 - (idx * 3))
-                if cand["tags"] and cand["tags"][0] == term:
-                    score += 10
+                if term in searchable_terms:
+                    # Keep generic searchable-term points below concept tiers.
+                    score += max(8, 24 - (idx * 2))
+                if tags and tags[0] == term:
+                    score += 6
+
+            # Mild source preference: custom images win close ties.
+            if cand.get("source") == "custom_images":
+                score += 4
+
             return score
 
         results = {**cached_results}  # start with cache hits
@@ -21411,8 +21569,10 @@ async def batch_symbol_search(
             text = item_rec["text"]
 
             candidate_ids = set()
+            custom_ids = set()
             for term in item_rec["search_terms"]:
                 candidate_ids.update(term_index.get(term, set()))
+                custom_ids.update(custom_term_index.get(term, set()))
 
             best_url = None
             best_score = -1
@@ -21425,23 +21585,19 @@ async def batch_symbol_search(
                     best_score = score
                     best_url = cand["url"]
 
-            # Custom image fallback for unmatched terms.
-            if not best_url and custom_candidates:
-                custom_ids = set()
-                for term in item_rec["search_terms"]:
-                    custom_ids.update(custom_term_index.get(term, set()))
-                for custom_id in custom_ids:
-                    cand = custom_by_id.get(custom_id)
-                    if not cand:
-                        continue
-                    score = _score_candidate(item_rec, cand)
-                    if score > best_score:
-                        best_score = score
-                        best_url = cand["url"]
+            # Evaluate custom candidates in the same competition (not fallback-only).
+            for custom_id in custom_ids:
+                cand = custom_by_id.get(custom_id)
+                if not cand:
+                    continue
+                score = _score_candidate(item_rec, cand)
+                if score > best_score:
+                    best_score = score
+                    best_url = cand["url"]
 
             results[text] = best_url
             # Store in TTL cache (None results too, to avoid repeated Firestore misses)
-            _batch_search_cache[f"{locale_base}:{item_rec['query_lower']}"] = (best_url, expires_at)
+            _batch_search_cache[_batch_cache_key(item_rec)] = (best_url, expires_at)
 
         # Evict stale entries periodically to prevent unbounded memory growth
         if len(_batch_search_cache) > 2000:

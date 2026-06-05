@@ -745,37 +745,56 @@
          */
         async function initImageLibraryDB() {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open('BravoImageLibrary', 2);
-                
-                request.onerror = () => reject(request.error);
-                request.onsuccess = () => {
-                    imageLibraryDB = request.result;
-                    resolve(imageLibraryDB);
-                };
-                
-                request.onupgradeneeded = (event) => {
-                    const db = event.target.result;
-                    const transaction = event.target.transaction;
-                    
-                    let imageStore;
-                    if (!db.objectStoreNames.contains('images')) {
-                        imageStore = db.createObjectStore('images', { keyPath: 'id' });
-                    } else {
-                        imageStore = transaction.objectStore('images');
-                    }
+                const LIBRARY_DB_VERSION = 3;
 
-                    if (!imageStore.indexNames.contains('tags')) {
-                        imageStore.createIndex('tags', 'tags', { multiEntry: true });
-                    }
-                    if (!imageStore.indexNames.contains('search_terms')) {
-                        imageStore.createIndex('search_terms', 'search_terms', { multiEntry: true });
-                    }
-                    
-                    // Create object store for metadata
-                    if (!db.objectStoreNames.contains('metadata')) {
-                        db.createObjectStore('metadata', { keyPath: 'key' });
-                    }
+                const attachHandlers = (request, attemptedVersion) => {
+                    request.onerror = () => {
+                        const err = request.error;
+
+                        // If a newer version already exists, reopen without explicit version
+                        // to use the current DB instead of failing auth boot.
+                        if (err && err.name === 'VersionError' && attemptedVersion !== null) {
+                            console.warn('IndexedDB version mismatch detected, reopening BravoImageLibrary with current version');
+                            const retryRequest = indexedDB.open('BravoImageLibrary');
+                            attachHandlers(retryRequest, null);
+                            return;
+                        }
+
+                        reject(err);
+                    };
+
+                    request.onsuccess = () => {
+                        imageLibraryDB = request.result;
+                        resolve(imageLibraryDB);
+                    };
+
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        const transaction = event.target.transaction;
+
+                        let imageStore;
+                        if (!db.objectStoreNames.contains('images')) {
+                            imageStore = db.createObjectStore('images', { keyPath: 'id' });
+                        } else {
+                            imageStore = transaction.objectStore('images');
+                        }
+
+                        if (!imageStore.indexNames.contains('tags')) {
+                            imageStore.createIndex('tags', 'tags', { multiEntry: true });
+                        }
+                        if (!imageStore.indexNames.contains('search_terms')) {
+                            imageStore.createIndex('search_terms', 'search_terms', { multiEntry: true });
+                        }
+
+                        // Create object store for metadata
+                        if (!db.objectStoreNames.contains('metadata')) {
+                            db.createObjectStore('metadata', { keyPath: 'key' });
+                        }
+                    };
                 };
+
+                const request = indexedDB.open('BravoImageLibrary', LIBRARY_DB_VERSION);
+                attachHandlers(request, LIBRARY_DB_VERSION);
             });
         }
         
