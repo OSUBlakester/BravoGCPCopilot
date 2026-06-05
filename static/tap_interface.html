@@ -2740,8 +2740,8 @@
          * Load global image cache from localStorage (persistent across sessions)
          */
         function loadGlobalCacheFromLocalStorage() {
-            const CACHE_KEY = 'tap_pictogram_cache';
-            const ENV_KEY = 'tap_pictogram_cache_env';
+            const CACHE_KEY = 'tap_pictogram_cache_v2';
+            const ENV_KEY = 'tap_pictogram_cache_env_v2';
             const currentEnv = window.location.hostname; // Use hostname as environment indicator
             
             try {
@@ -2916,7 +2916,7 @@
          * Save global image cache to localStorage
          */
         function saveGlobalCacheToLocalStorage() {
-            const CACHE_KEY = 'tap_pictogram_cache';
+            const CACHE_KEY = 'tap_pictogram_cache_v2';
             try {
                 const cacheData = Array.from(window.symbolImageCache.entries());
                 localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
@@ -5075,21 +5075,15 @@ VARIETY RULES:
                     }
                     console.log(`💾 Cached ${cachedCount} images from local library batch search`);
 
-                    // 🚀 Refresh server-ranked images for local misses AND single-word terms.
-                    // Single-word terms (like colors) are prone to stale local/tag matches,
-                    // so refresh them even when local cache has a hit.
+                    // 🚀 Refresh server-ranked images for ALL words.
+                    // Multi-word titles (e.g., song names) can have stale local cache matches,
+                    // so always let server scoring re-rank and overwrite cache on initial paint.
                     const serverRefreshEntries = [];
                     for (const option of options) {
                         const text = typeof option === 'object' ? (option.text || option.option) : option;
                         if (!text || text === 'Something Else') continue;
-                        const ck = `tap_${String(text).trim().toLowerCase()}`;
-                        const hit = window.symbolImageCache.get(ck);
-                        const normalizedText = String(text).trim().toLowerCase();
-                        const isSingleWord = normalizedText.split(/\s+/).filter(Boolean).length === 1;
-                        if (!hit || !hit.imageUrl || isSingleWord) {
-                            const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
-                            serverRefreshEntries.push({ text, keywords });
-                        }
+                        const keywords = (typeof option === 'object' && option.keywords) ? option.keywords : [];
+                        serverRefreshEntries.push({ text, keywords });
                     }
                     if (serverRefreshEntries.length > 0) {
                         console.log(`🌐 Refreshing server-ranked images for ${serverRefreshEntries.length} words before first paint...`);
