@@ -22483,6 +22483,14 @@ class TapBoardUpdateRequest(BaseModel):
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
     created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
 
+
+class ConvertAIBoardsToStaticRequest(BaseModel):
+    """Payload for converting AI boards to static boards."""
+    board_ids: List[str] = Field(..., description="List of AI board IDs to convert")
+    num_options: int = Field(24, ge=1, le=84, description="Number of static options to generate per board")
+    options_per_row: int = Field(6, ge=1, le=12, description="Number of options per row in the button grid")
+    after_selection: str = Field("do_nothing", description="do_nothing|use_ai — action taken after user taps an option")
+
 # Update forward references
 TapNavigationButton.model_rebuild()
 TapBoardsMenuItem.model_rebuild()
@@ -25597,6 +25605,246 @@ async def delete_tap_board(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Note: Single configuration per user - no need for list, activate, or delete endpoints
+
+
+@app.post("/api/tap-interface/boards-convert-ai-to-static")
+async def convert_ai_boards_to_static(
+    payload: ConvertAIBoardsToStaticRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Convert AI boards to static boards by generating options with the LLM and auto-fetching images.
+    The original AI board is preserved unchanged; a new static board is created with a derived ID.
+    Menu items that referenced the original AI board are updated to point to the new static board.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    after_selection = payload.after_selection if payload.after_selection in ("do_nothing", "use_ai") else "do_nothing"
+
+    def _extract_options_from_llm_response(raw_response: str, board_id_for_log: str) -> List[str]:
+        """Robustly extract a flat list of string option labels from a raw LLM response."""
+        text = raw_response.strip()
+        # Remove any markdown code fences (```json ... ``` or plain ``` ... ```)
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        # Find the first JSON array anywhere in the response (handles explanatory preamble)
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            logging.warning(f"JSON parse failed for board {board_id_for_log}. Raw (first 400): {raw_response[:400]}")
+            return []
+        # If LLM returned a dict instead of list, look for a list value
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                # Grab the first list-valued key if any
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                label = item.strip()
+            elif isinstance(item, dict):
+                label = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                label = str(item).strip()
+            if label and label.lower() not in seen:
+                seen.add(label.lower())
+                options.append(label)
+        return options
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards: List[Dict[str, Any]] = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_index_by_id: Dict[str, int] = {
+            str(b.get('id')): i
+            for i, b in enumerate(boards)
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+        existing_board_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
+
+        results: List[Dict[str, Any]] = []
+        # Maps original AI board ID → new static board ID (for menu rewiring)
+        original_to_new_board_id: Dict[str, str] = {}
+        # Maps original AI board label (lowercase) → new static board ID (for label-based wiring)
+        converted_label_to_new_id: Dict[str, str] = {}
+        # New static boards to append after all boards are processed
+        new_static_boards: List[Dict[str, Any]] = []
+
+        for board_id in payload.board_ids:
+            board_idx = board_index_by_id.get(board_id)
+            if board_idx is None:
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_id, "success": False, "options_count": 0, "error": "Board not found"})
+                continue
+
+            board = boards[board_idx]
+            board_label = str(board.get('label') or board_id)
+
+            if str(board.get('board_type') or '') != 'ai':
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": "Board is not an AI board"})
+                continue
+
+            try:
+                llm_prompt = str(board.get('llm_prompt') or '').strip()
+                prompt_category = str(board.get('prompt_category') or '').strip()
+                prompt_context = llm_prompt or prompt_category or board_label
+
+                gen_prompt = (
+                    f"Generate EXACTLY {payload.num_options} unique, short AAC board button labels "
+                    f"for the category \"{board_label}\".\n"
+                    f"Context: {prompt_context}\n\n"
+                    f"REQUIREMENTS:\n"
+                    f"1. Generate at least {payload.num_options} distinct, practical options\n"
+                    f"2. No duplicates\n"
+                    f"3. Each label 1-5 words, clear and concise\n"
+                    f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+                    f"Return ONLY the JSON array — no explanation, no markdown."
+                )
+
+                raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+                generated_options = _extract_options_from_llm_response(raw_response, board_id)
+
+                if not generated_options:
+                    results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": "No options could be parsed from LLM response"})
+                    continue
+
+                generated_options = generated_options[:payload.num_options]
+                per_row = payload.options_per_row
+                buttons: List[Dict[str, Any]] = []
+                ts_base = int(time.time() * 1000)
+
+                for i, label in enumerate(generated_options):
+                    row = i // per_row
+                    col = i % per_row
+
+                    image_url: Optional[str] = None
+                    for term in [label, label.lower(), label.capitalize()]:
+                        try:
+                            q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                            docs = await asyncio.to_thread(q.get)
+                            for doc in docs:
+                                img_data = doc.to_dict()
+                                if img_data.get("image_url"):
+                                    image_url = img_data["image_url"]
+                                    break
+                        except Exception as img_err:
+                            logging.debug(f"Image search error for '{term}': {img_err}")
+                        if image_url:
+                            break
+
+                    buttons.append({
+                        "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                        "label": label,
+                        "row": row,
+                        "col": col,
+                        "speech_text": label,
+                        "action_type": "announce",
+                        "after_selection": after_selection,
+                        "target_board_id": None,
+                        "temporary_navigation": False,
+                        "custom_audio_file": None,
+                        "special_function": None,
+                        "image_url": image_url,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "hidden": False,
+                    })
+
+                # Generate a unique ID for the new static board
+                base_new_id = f"{board_id}_static"
+                new_board_id = base_new_id
+                suffix = 2
+                all_used_ids = existing_board_ids | {b.get('id', '') for b in new_static_boards}
+                while new_board_id in all_used_ids:
+                    new_board_id = f"{base_new_id}_{suffix}"
+                    suffix += 1
+
+                # Create the new static board — original AI board is left untouched
+                new_static_board = {
+                    **board,
+                    "id": new_board_id,
+                    "board_type": "static",
+                    "source": "custom",  # editable in Board Builder
+                    "buttons": buttons,
+                }
+                new_static_boards.append(new_static_board)
+
+                original_to_new_board_id[board_id] = new_board_id
+                converted_label_to_new_id[board_label.strip().lower()] = new_board_id
+                results.append({"board_id": board_id, "new_board_id": new_board_id, "board_label": board_label, "success": True, "options_count": len(buttons), "error": None})
+
+            except HTTPException:
+                raise
+            except Exception as board_err:
+                logging.error(f"Error converting board {board_id}: {board_err}", exc_info=True)
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": str(board_err)})
+
+        # Append all new static boards (originals are unchanged)
+        boards.extend(new_static_boards)
+        config_data['boards'] = boards
+
+        # Rewire menu items:
+        #   - Items with board_id pointing to an original AI board → point to new static board
+        #   - Items with no board_id whose label matches a converted board → wire to new static board
+        menu_items_wired = 0
+
+        def _rewire_menu_recursive(items: Any) -> None:
+            nonlocal menu_items_wired
+            if not isinstance(items, list):
+                return
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                current_bid = str(item.get('board_id') or '').strip()
+                if current_bid and current_bid in original_to_new_board_id:
+                    item['board_id'] = original_to_new_board_id[current_bid]
+                    menu_items_wired += 1
+                elif not current_bid:
+                    item_label = str(item.get('label') or '').strip().lower()
+                    matched_id = converted_label_to_new_id.get(item_label)
+                    if matched_id:
+                        item['board_id'] = matched_id
+                        menu_items_wired += 1
+                _rewire_menu_recursive(item.get('children'))
+
+        boards_menu = config_data.get('boards_menu')
+        if isinstance(boards_menu, list):
+            _rewire_menu_recursive(boards_menu)
+            config_data['boards_menu'] = boards_menu
+
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={"success": True, "results": results, "menu_items_wired": menu_items_wired})
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in convert_ai_boards_to_static: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/generate-options")
 async def generate_options(
