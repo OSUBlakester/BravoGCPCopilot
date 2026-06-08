@@ -358,6 +358,180 @@
             font-weight: bold;
             margin-left: 10px;
         }
+
+        #setupWizardBtn {
+            background-color: #6366f1;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            margin-top: 8px;
+            width: 100%;
+        }
+
+        #setupWizardBtn:hover {
+            background-color: #4f46e5;
+        }
+
+        .wizard-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9000;
+        }
+
+        .wizard-modal-overlay.active {
+            display: flex;
+        }
+
+        .wizard-modal-content {
+            background-color: white;
+            border-radius: 12px;
+            padding: 28px;
+            max-width: 520px;
+            width: 92%;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .wizard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .wizard-header h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0;
+            color: #111827;
+        }
+
+        .wizard-step-indicator {
+            font-size: 0.875rem;
+            color: #6b7280;
+            white-space: nowrap;
+        }
+
+        .wizard-progress {
+            height: 4px;
+            background: #e5e7eb;
+            border-radius: 2px;
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+
+        .wizard-progress-bar {
+            height: 100%;
+            background: #6366f1;
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .wizard-step-content {
+            min-height: 220px;
+        }
+
+        .wizard-status {
+            min-height: 20px;
+            font-size: 0.875rem;
+            margin-top: 10px;
+        }
+
+        .wizard-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            gap: 12px;
+        }
+
+        .wizard-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 500;
+        }
+
+        .wizard-btn-cancel { background-color: #f3f4f6; color: #374151; }
+        .wizard-btn-cancel:hover { background-color: #e5e7eb; }
+        .wizard-btn-back { background-color: #f3f4f6; color: #374151; }
+        .wizard-btn-back:hover { background-color: #e5e7eb; }
+        .wizard-btn-next { background-color: #6366f1; color: white; }
+        .wizard-btn-next:hover { background-color: #4f46e5; }
+        .wizard-btn-next:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .wizard-option-card {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+
+        .wizard-option-card.selected {
+            border-color: #6366f1;
+            background-color: #f5f3ff;
+        }
+
+        .wizard-field-label {
+            display: block;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 6px;
+        }
+
+        .wizard-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        .wizard-input:focus {
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .wizard-input-hint { font-size: 0.8rem; color: #6b7280; margin-top: 4px; }
+        .wizard-input-number { font-size: 1.5rem; text-align: center; }
+
+        .wizard-scan-opt {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 12px 14px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            cursor: pointer;
+            flex: 1;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+
+        .wizard-scan-opt.selected {
+            border-color: #6366f1;
+            background-color: #f5f3ff;
+        }
     </style>
 </head>
 <body>
@@ -1795,7 +1969,7 @@
 
             let html = `
                 <div class="user-selection-container">
-                    <label for="userDropdown">Select User Account:</label>
+                    <label for="userDropdown">Select Profile:</label>
                     <div class="dropdown-controls">
                         <select id="userDropdown" class="user-dropdown">
             `;
@@ -1822,7 +1996,10 @@
                         <button id="copyUserBtn" class="control-btn copy-btn">Copy</button>
                         <button id="setDefaultBtn" class="set-default-btn">Set as Default</button>
                     </div>
-                    <button id="selectUserBtn">Continue with Selected User</button>
+                    <div style="display:flex;gap:8px;margin-top:15px;">
+                        <button id="selectUserBtn" style="margin-top:0;flex:1;">Continue with Selected User</button>
+                        <button id="setupWizardBtn" style="flex:1;">New User Setup Wizard</button>
+                    </div>
                 </div>
             `;
 
@@ -1855,6 +2032,9 @@
             copyBtn.addEventListener('click', handleCopyUser);
             setDefaultBtn.addEventListener('click', handleSetDefaultUser);
             selectBtn.addEventListener('click', handleUserSelection);
+
+            const setupWizardBtn = document.getElementById('setupWizardBtn');
+            if (setupWizardBtn) setupWizardBtn.addEventListener('click', openSetupWizard);
         }
 
         async function handleEditUser() {
@@ -3086,6 +3266,518 @@ registerForm.addEventListener('submit', async (e) => {
             return false; // Proceed if error or no match
         }
 
+        // ============================================================
+        // Setup Wizard
+        // ============================================================
+
+        const WIZARD_LANGUAGES = [
+            { value: 'en-US', label: 'English (US)' },
+            { value: 'es-US', label: 'Spanish (US)' },
+            { value: 'fr-FR', label: 'French (France)' },
+            { value: 'de-DE', label: 'German (Germany)' },
+            { value: 'it-IT', label: 'Italian (Italy)' },
+            { value: 'pt-BR', label: 'Portuguese (Brazil)' },
+            { value: 'ar-XA', label: 'Arabic' }
+        ];
+
+        let wizardState = {
+            currentStep: 1,
+            userId: null,
+            displayName: null,
+            ttsVoices: [],
+            interfaceMode: 'tap',
+            wakeWordInterjection: '',
+            wakeWordName: '',
+            llmOptions: 12,
+            freestyleOptions: 4,
+            partnerLanguage: 'en-US',
+            partnerVoice: '',
+            gridColumns: 6,
+            scanMode: 'auto',
+            waitForSwitch: false,
+            scanDelay: 800
+        };
+
+        function wizardTotalSteps() {
+            return wizardState.interfaceMode === 'scan' ? 8 : 7;
+        }
+
+        async function openSetupWizard() {
+            const dropdown = document.getElementById('userDropdown');
+            if (!dropdown || !dropdown.value) {
+                alert('Please select a profile first.');
+                return;
+            }
+            const selectedOption = dropdown.options[dropdown.selectedIndex];
+            wizardState.userId = dropdown.value;
+            wizardState.displayName = selectedOption.dataset.displayName || selectedOption.text || '';
+            wizardState.currentStep = 1;
+
+            const modal = document.getElementById('setupWizardModal');
+            modal.classList.add('active');
+            wireWizardNavButtons();
+            setWizardStatus('Loading current settings…', false);
+
+            try {
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = { 'Authorization': `Bearer ${window.currentIdToken}`, 'X-User-ID': wizardState.userId };
+                if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+
+                const [settingsRes, voicesRes] = await Promise.all([
+                    fetch('/api/settings', { headers }),
+                    fetch('/api/tts-voices')
+                ]);
+
+                if (settingsRes.ok) {
+                    const s = await settingsRes.json();
+                    wizardState.interfaceMode = s.useTapInterface ? 'tap' : 'scan';
+                    wizardState.wakeWordInterjection = s.wakeWordInterjection || '';
+                    wizardState.wakeWordName = s.wakeWordName || '';
+                    wizardState.llmOptions = s.LLMOptions !== undefined ? s.LLMOptions : 12;
+                    wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 4;
+                    wizardState.partnerLanguage = s.defaultPartnerLanguage || 'en-US';
+                    wizardState.partnerVoice = s.defaultPartnerVoice || s.selected_tts_voice_name || '';
+                    wizardState.gridColumns = s.gridColumns !== undefined ? s.gridColumns : 6;
+                    wizardState.scanMode = s.scanMode || 'auto';
+                    wizardState.waitForSwitch = s.waitForSwitchToScan || false;
+                    wizardState.scanDelay = s.scanDelay || 800;
+                }
+
+                if (voicesRes.ok) {
+                    wizardState.ttsVoices = await voicesRes.json();
+                }
+
+                setWizardStatus('', false);
+                showWizardStep(1);
+
+            } catch (err) {
+                setWizardStatus(`Error loading settings: ${err.message}`, true);
+            }
+        }
+
+        function closeSetupWizard() {
+            document.getElementById('setupWizardModal').classList.remove('active');
+        }
+
+        function setWizardStatus(msg, isError) {
+            const el = document.getElementById('wizardStatus');
+            if (!el) return;
+            el.textContent = msg;
+            el.style.color = isError ? '#ef4444' : '#6b7280';
+        }
+
+        function showWizardStep(step) {
+            wizardState.currentStep = step;
+            const total = wizardTotalSteps();
+
+            document.getElementById('wizardStepIndicator').textContent = `Step ${step} of ${total}`;
+            document.getElementById('wizardProgressBar').style.width = `${(step / total) * 100}%`;
+
+            const backBtn = document.getElementById('wizardBackBtn');
+            const nextBtn = document.getElementById('wizardNextBtn');
+            backBtn.style.display = step === 1 ? 'none' : 'inline-block';
+            nextBtn.textContent = step === total ? 'Finish' : 'Next';
+            nextBtn.disabled = false;
+
+            renderWizardStep(step);
+        }
+
+        function renderWizardStep(step) {
+            const contentEl = document.getElementById('wizardStepContent');
+            const titleEl = document.getElementById('wizardTitle');
+
+            if (step === 1) {
+                titleEl.textContent = 'Interface Mode';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Choose how the user will interact with the app.</p>
+                    <div class="wizard-option-card${wizardState.interfaceMode === 'tap' ? ' selected' : ''}" data-mode="tap">
+                        <input type="radio" name="wizardInterface" value="tap" ${wizardState.interfaceMode === 'tap' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                        <div>
+                            <div style="font-weight:600;color:#111827;">Tap</div>
+                            <div style="font-size:0.875rem;color:#6b7280;margin-top:2px;">Touch-based image grid interface</div>
+                        </div>
+                    </div>
+                    <div class="wizard-option-card${wizardState.interfaceMode === 'scan' ? ' selected' : ''}" data-mode="scan">
+                        <input type="radio" name="wizardInterface" value="scan" ${wizardState.interfaceMode === 'scan' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                        <div>
+                            <div style="font-weight:600;color:#111827;">Scan</div>
+                            <div style="font-size:0.875rem;color:#6b7280;margin-top:2px;">Automatic scanning through grid cells using a switch or key</div>
+                        </div>
+                    </div>`;
+                contentEl.querySelectorAll('.wizard-option-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        wizardState.interfaceMode = card.dataset.mode;
+                        contentEl.querySelectorAll('.wizard-option-card').forEach(c => {
+                            c.classList.toggle('selected', c.dataset.mode === wizardState.interfaceMode);
+                            c.querySelector('input[type=radio]').checked = c.dataset.mode === wizardState.interfaceMode;
+                        });
+                        // Recompute total in case it changed
+                        const total = wizardTotalSteps();
+                        document.getElementById('wizardStepIndicator').textContent = `Step 1 of ${total}`;
+                        document.getElementById('wizardNextBtn').textContent = total === 1 ? 'Finish' : 'Next';
+                    });
+                });
+
+            } else if (step === 2) {
+                titleEl.textContent = 'Wake Word';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Configure the wake word that activates the app.</p>
+                    <div style="margin-bottom:16px;">
+                        <label class="wizard-field-label">Interjection</label>
+                        <input id="wizardWakeInterjection" class="wizard-input" type="text" value="${escapeHtmlAttr(wizardState.wakeWordInterjection)}" placeholder="e.g., Hey, OK, Yo">
+                        <p class="wizard-input-hint">The opening word spoken before the name</p>
+                    </div>
+                    <div>
+                        <label class="wizard-field-label">Name</label>
+                        <input id="wizardWakeName" class="wizard-input" type="text" value="${escapeHtmlAttr(wizardState.wakeWordName)}" placeholder="e.g., Bravo, Atlas">
+                        <p class="wizard-input-hint">The name spoken to wake the app</p>
+                    </div>`;
+
+            } else if (step === 3) {
+                titleEl.textContent = 'Button Size';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Adjust how many columns are shown in the grid. Fewer columns = larger buttons.</p>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <label class="wizard-field-label" style="margin:0;">Grid Columns</label>
+                        <span id="wizardGridColumnsVal" style="font-size:1.5rem;font-weight:700;color:#6366f1;">${wizardState.gridColumns}</span>
+                    </div>
+                    <input id="wizardGridColumns" type="range" min="2" max="18" value="${wizardState.gridColumns}" style="width:100%;accent-color:#6366f1;">
+                    <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#6b7280;margin-top:4px;">
+                        <span>2 (Large)</span><span>18 (Small)</span>
+                    </div>`;
+                document.getElementById('wizardGridColumns').addEventListener('input', function() {
+                    document.getElementById('wizardGridColumnsVal').textContent = this.value;
+                    wizardState.gridColumns = parseInt(this.value) || 6;
+                });
+
+            } else if (step === 4) {
+                titleEl.textContent = 'Number of AI Options';
+                const aiIsTap = wizardState.interfaceMode === 'tap';
+                const aiCols = wizardState.gridColumns;
+                const aiRec = aiCols - 1;
+                const aiCallout = aiIsTap
+                    ? `<div style="background:#eff6ff;border-left:3px solid #6366f1;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#1e40af;">
+                           <strong>Tap interface</strong> — Full-phrase options shown at the top of each page.<br>
+                           The <strong>Something Else</strong> button occupies one slot, so with <strong>${aiCols} columns</strong> we recommend
+                           <strong>${aiRec} AI options</strong> (${aiRec} + Something Else = ${aiCols} buttons).
+                       </div>`
+                    : `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
+                           <strong>Scan interface</strong> — Defines how many options are shown on each Scan page.
+                       </div>`;
+                contentEl.innerHTML = `
+                    ${aiCallout}
+                    <label class="wizard-field-label">AI Options (0–50)</label>
+                    <input id="wizardLlmOptions" class="wizard-input wizard-input-number" type="number" min="0" max="50" value="${wizardState.llmOptions}">
+                    <p class="wizard-input-hint">Set to 0 to disable AI-generated options</p>`;
+
+            } else if (step === 5) {
+                titleEl.textContent = 'Number of Freestyle Options';
+                const fsIsTap = wizardState.interfaceMode === 'tap';
+                const fsCols = wizardState.gridColumns;
+                const fsRows = 3;
+                const fsRec = (fsCols * fsRows) - 1;
+                const fsCallout = fsIsTap
+                    ? `<div style="background:#eff6ff;border-left:3px solid #6366f1;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#1e40af;">
+                           <strong>Tap interface</strong> — Word options displayed on the Freestyle page.<br>
+                           The <strong>Something Else</strong> button occupies one slot. With <strong>${fsCols} columns × ${fsRows} rows</strong>,
+                           we recommend <strong>${fsRec} options</strong> (${fsCols} × ${fsRows} − 1 = ${fsRec}).
+                       </div>`
+                    : `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
+                           <strong>Scan interface</strong> — Defines how many options are shown on the Freestyle page.
+                       </div>`;
+                contentEl.innerHTML = `
+                    ${fsCallout}
+                    <label class="wizard-field-label">Freestyle Options (1–50)</label>
+                    <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
+
+            } else if (step === 6) {
+                titleEl.textContent = 'Default Partner Language';
+                const langOpts = WIZARD_LANGUAGES.map(l =>
+                    `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                ).join('');
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Select the default language for communication partner responses.</p>
+                    <label class="wizard-field-label">Partner Language</label>
+                    <select id="wizardPartnerLanguage" class="wizard-input">${langOpts}</select>`;
+
+            } else if (step === 7) {
+                titleEl.textContent = 'Default Partner Voice';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Select the voice for partner language text-to-speech.</p>
+                    <label class="wizard-field-label">Partner Voice</label>
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                        <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
+                            <option value="">-- Select a Voice --</option>
+                        </select>
+                        <button id="wizardTestVoiceBtn" style="padding:10px 16px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:0.9rem;font-weight:500;">&#9654; Test</button>
+                    </div>
+                    <div id="wizardVoiceTestStatus" style="min-height:18px;font-size:0.85rem;color:#6b7280;"></div>`;
+                wizardFillVoiceSelect();
+                document.getElementById('wizardTestVoiceBtn').addEventListener('click', wizardTestVoice);
+
+            } else if (step === 8) {
+                titleEl.textContent = 'Scanning Configuration';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Configure scanning behavior for switch access.</p>
+                    <div style="margin-bottom:20px;">
+                        <label class="wizard-field-label">Scan Mode</label>
+                        <div style="display:flex;gap:10px;">
+                            <div class="wizard-scan-opt${wizardState.scanMode === 'auto' ? ' selected' : ''}" data-scan-mode="auto">
+                                <input type="radio" name="wizardScanMode" value="auto" ${wizardState.scanMode === 'auto' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                                <div>
+                                    <div style="font-weight:600;">Auto</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;">Scans automatically at set speed</div>
+                                </div>
+                            </div>
+                            <div class="wizard-scan-opt${wizardState.scanMode === 'step' ? ' selected' : ''}" data-scan-mode="step">
+                                <input type="radio" name="wizardScanMode" value="step" ${wizardState.scanMode === 'step' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                                <div>
+                                    <div style="font-weight:600;">Step</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;">Advances on each switch press</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:20px;">
+                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                            <input type="checkbox" id="wizardWaitForSwitch" ${wizardState.waitForSwitch ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                            <div>
+                                <div style="font-weight:600;color:#374151;">Wait for Switch</div>
+                                <div style="font-size:0.8rem;color:#6b7280;">Scanning waits for a switch press before starting</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="wizard-field-label">Scan Speed</label>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <input id="wizardScanDelay" type="number" min="100" max="5000" step="100" value="${wizardState.scanDelay}" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:1rem;width:110px;">
+                            <span style="color:#6b7280;">milliseconds between scans</span>
+                        </div>
+                        <p class="wizard-input-hint">Lower = faster scanning (100–5000 ms)</p>
+                    </div>`;
+                contentEl.querySelectorAll('.wizard-scan-opt').forEach(opt => {
+                    opt.addEventListener('click', () => {
+                        wizardState.scanMode = opt.dataset.scanMode;
+                        contentEl.querySelectorAll('.wizard-scan-opt').forEach(o => {
+                            o.classList.toggle('selected', o.dataset.scanMode === wizardState.scanMode);
+                            o.querySelector('input[type=radio]').checked = o.dataset.scanMode === wizardState.scanMode;
+                        });
+                    });
+                });
+            }
+        }
+
+        function escapeHtmlAttr(str) {
+            return String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function wizardFillVoiceSelect() {
+            const voiceSelect = document.getElementById('wizardPartnerVoice');
+            if (!voiceSelect) return;
+            const langLower = wizardState.partnerLanguage.toLowerCase();
+            const filtered = wizardState.ttsVoices.filter(v =>
+                (v.language_codes || []).some(c => c.toLowerCase() === langLower)
+            );
+            voiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>';
+            filtered.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.name;
+                opt.textContent = `${v.name} (${(v.ssml_gender || 'unknown').toLowerCase()})`;
+                voiceSelect.appendChild(opt);
+            });
+            if (wizardState.partnerVoice) voiceSelect.value = wizardState.partnerVoice;
+        }
+
+        async function wizardTestVoice() {
+            const voiceSelect = document.getElementById('wizardPartnerVoice');
+            const statusEl = document.getElementById('wizardVoiceTestStatus');
+            const testBtn = document.getElementById('wizardTestVoiceBtn');
+
+            if (!voiceSelect || !voiceSelect.value) {
+                if (statusEl) { statusEl.textContent = 'Please select a voice first.'; statusEl.style.color = '#ef4444'; }
+                return;
+            }
+
+            const voice = voiceSelect.value;
+            if (testBtn) { testBtn.disabled = true; testBtn.textContent = '…'; }
+            if (statusEl) { statusEl.textContent = 'Requesting audio…'; statusEl.style.color = '#6b7280'; }
+
+            try {
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = {
+                    'Authorization': `Bearer ${window.currentIdToken}`,
+                    'X-User-ID': wizardState.userId,
+                    'Content-Type': 'application/json'
+                };
+                if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+
+                const res = await fetch('/api/test-tts-voice', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ voice_name: voice, text: 'This is a test of the selected voice.' })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: res.statusText }));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+
+                const result = await res.json();
+                if (!result.audio_data) throw new Error('No audio data returned');
+
+                // Decode base64 → ArrayBuffer
+                const binaryStr = atob(result.audio_data);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+                const audioBuffer = await audioCtx.decodeAudioData(bytes.buffer);
+                if (statusEl) { statusEl.textContent = 'Playing…'; statusEl.style.color = '#6b7280'; }
+
+                await new Promise((resolve) => {
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioCtx.destination);
+                    source.onended = () => { audioCtx.close().catch(() => {}); resolve(); };
+                    source.start(0);
+                });
+
+                if (statusEl) { statusEl.textContent = 'Voice test complete.'; statusEl.style.color = '#22c55e'; }
+
+            } catch (err) {
+                if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.style.color = '#ef4444'; }
+            } finally {
+                if (testBtn) { testBtn.disabled = false; testBtn.textContent = '▶ Test'; }
+            }
+        }
+
+        function wizardCollectCurrentStep() {
+            const step = wizardState.currentStep;
+            if (step === 2) {
+                const i = document.getElementById('wizardWakeInterjection');
+                const n = document.getElementById('wizardWakeName');
+                if (i) wizardState.wakeWordInterjection = i.value.trim();
+                if (n) wizardState.wakeWordName = n.value.trim();
+            } else if (step === 3) {
+                const el = document.getElementById('wizardGridColumns');
+                if (el) wizardState.gridColumns = parseInt(el.value) || 6;
+            } else if (step === 4) {
+                const el = document.getElementById('wizardLlmOptions');
+                if (el) wizardState.llmOptions = Math.max(0, Math.min(50, parseInt(el.value) || 0));
+            } else if (step === 5) {
+                const el = document.getElementById('wizardFreestyleOptions');
+                if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
+            } else if (step === 6) {
+                const el = document.getElementById('wizardPartnerLanguage');
+                if (el) wizardState.partnerLanguage = el.value;
+            } else if (step === 7) {
+                const el = document.getElementById('wizardPartnerVoice');
+                if (el) wizardState.partnerVoice = el.value;
+            } else if (step === 8) {
+                const modeEl = document.querySelector('[name=wizardScanMode]:checked');
+                if (modeEl) wizardState.scanMode = modeEl.value;
+                const waitEl = document.getElementById('wizardWaitForSwitch');
+                if (waitEl) wizardState.waitForSwitch = waitEl.checked;
+                const delayEl = document.getElementById('wizardScanDelay');
+                if (delayEl) wizardState.scanDelay = Math.max(100, parseInt(delayEl.value) || 800);
+            }
+        }
+
+        function wireWizardNavButtons() {
+            const cancelBtn = document.getElementById('wizardCancelBtn');
+            const backBtn = document.getElementById('wizardBackBtn');
+            const nextBtn = document.getElementById('wizardNextBtn');
+            if (!cancelBtn) return;
+
+            cancelBtn.onclick = closeSetupWizard;
+            backBtn.onclick = () => {
+                wizardCollectCurrentStep();
+                if (wizardState.currentStep > 1) showWizardStep(wizardState.currentStep - 1);
+            };
+            nextBtn.onclick = () => {
+                wizardCollectCurrentStep();
+                const total = wizardTotalSteps();
+                if (wizardState.currentStep >= total) {
+                    executeWizard();
+                } else {
+                    showWizardStep(wizardState.currentStep + 1);
+                }
+            };
+        }
+
+        async function executeWizard() {
+            const nextBtn = document.getElementById('wizardNextBtn');
+            const backBtn = document.getElementById('wizardBackBtn');
+            if (nextBtn) nextBtn.disabled = true;
+            if (backBtn) backBtn.disabled = true;
+            setWizardStatus('Saving settings…', false);
+
+            try {
+                const payload = {
+                    useTapInterface: wizardState.interfaceMode === 'tap',
+                    ScanningOff: wizardState.interfaceMode === 'tap',
+                    wakeWordInterjection: wizardState.wakeWordInterjection,
+                    wakeWordName: wizardState.wakeWordName,
+                    LLMOptions: wizardState.llmOptions,
+                    FreestyleOptions: wizardState.freestyleOptions,
+                    defaultPartnerLanguage: wizardState.partnerLanguage,
+                    defaultPartnerVoice: wizardState.partnerVoice,
+                    selected_tts_voice_name: wizardState.partnerVoice,
+                    gridColumns: wizardState.gridColumns
+                };
+
+                if (wizardState.interfaceMode === 'scan') {
+                    payload.ScanningOff = false;
+                    payload.scanMode = wizardState.scanMode;
+                    payload.waitForSwitchToScan = wizardState.waitForSwitch;
+                    payload.scanDelay = wizardState.scanDelay;
+                }
+
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = {
+                    'Authorization': `Bearer ${window.currentIdToken}`,
+                    'X-User-ID': wizardState.userId,
+                    'Content-Type': 'application/json'
+                };
+                if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+
+                const res = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: res.statusText }));
+                    throw new Error(err.detail || 'Failed to save settings');
+                }
+
+                closeSetupWizard();
+
+                sessionStorage.setItem('firebaseIdToken', window.currentIdToken);
+                sessionStorage.setItem('currentAacUserId', wizardState.userId);
+                sessionStorage.setItem('selectedDisplayName', wizardState.displayName);
+
+                const adminCtx = sessionStorage.getItem('adminSelectedAccountId');
+                if (adminCtx) {
+                    sessionStorage.setItem('adminAccessContext', 'true');
+                    sessionStorage.setItem('adminTargetAccountId', adminCtx);
+                }
+
+                setTimeout(async () => {
+                    await checkScheduledFavoritesOnAuth();
+                    await redirectToPreferredInterface();
+                }, 100);
+
+            } catch (err) {
+                setWizardStatus(`Error: ${err.message}`, true);
+                if (nextBtn) nextBtn.disabled = false;
+                if (backBtn) backBtn.disabled = false;
+            }
+        }
+
     })(); // End of IIFE for async setup
     </script>
     <script src="/static/avatar-selector.js"></script>
@@ -3107,6 +3799,28 @@ registerForm.addEventListener('submit', async (e) => {
                 <button id="loadScheduledFavorite" class="speak-btn" style="background-color: #28a745; color: white; font-size: 1em; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">
                     Yes, Load It
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup Wizard Modal -->
+    <div id="setupWizardModal" class="wizard-modal-overlay">
+        <div class="wizard-modal-content">
+            <div class="wizard-header">
+                <h3 id="wizardTitle">Setup Wizard</h3>
+                <span id="wizardStepIndicator" class="wizard-step-indicator">Step 1 of 7</span>
+            </div>
+            <div class="wizard-progress">
+                <div id="wizardProgressBar" class="wizard-progress-bar" style="width:14%;"></div>
+            </div>
+            <div id="wizardStepContent" class="wizard-step-content"></div>
+            <div id="wizardStatus" class="wizard-status"></div>
+            <div class="wizard-footer">
+                <button id="wizardCancelBtn" class="wizard-btn wizard-btn-cancel">Cancel</button>
+                <div style="display:flex;gap:8px;">
+                    <button id="wizardBackBtn" class="wizard-btn wizard-btn-back" style="display:none;">Back</button>
+                    <button id="wizardNextBtn" class="wizard-btn wizard-btn-next">Next</button>
+                </div>
             </div>
         </div>
     </div>

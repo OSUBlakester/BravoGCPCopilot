@@ -150,7 +150,10 @@
         <section id="gridSection" class="bg-white p-4 border rounded-md relative">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
-                <button id="aiBulkBuildBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>AI Build Options</button>
+                <div class="flex gap-2 flex-wrap">
+                    <button id="setAllAfterSelectionBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Set All After Selection</button>
+                    <button id="aiBulkBuildBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>AI Build Options</button>
+                </div>
             </div>
             <p class="text-gray-600 mb-3">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
             <div id="buttonGrid"></div>
@@ -226,6 +229,32 @@
             <div id="imageLoadingIndicator" class="hidden text-center py-4 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>Loading...</div>
             <div id="imageGrid" class="grid grid-cols-6 gap-3 max-h-[420px] overflow-y-auto"></div>
             <div class="flex justify-end gap-2 mt-4"><button id="cancelImageSelection" class="px-4 py-2 bg-gray-300 rounded-md">Cancel</button><button id="selectImageBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" disabled>Select Image</button></div>
+        </div>
+    </div>
+
+    <div id="setAllAfterSelectionModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5250;">
+        <div class="relative top-32 mx-auto p-5 border w-11/12 max-w-md shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">Set After Selection — All Buttons</h3>
+                <button id="closeSetAllAfterSelectionModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">Choose what happens after the user taps any button on this board. This will overwrite the current setting on every button.</p>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">After Selection</label>
+                <select id="setAllAfterSelectionValue" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <option value="do_nothing">Do nothing (stay on current board)</option>
+                    <option value="use_ai">Use AI to generate next options</option>
+                    <option value="navigate">Navigate to Target Board</option>
+                </select>
+            </div>
+            <div id="setAllTargetBoardWrapper" class="mb-4 hidden">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Target Board</label>
+                <select id="setAllTargetBoard" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">-- Select board --</option></select>
+            </div>
+            <div class="flex justify-end gap-2 mt-5">
+                <button id="setAllAfterSelectionCancelBtn" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancel</button>
+                <button id="setAllAfterSelectionApplyBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Apply &amp; Save</button>
+            </div>
         </div>
     </div>
 
@@ -377,6 +406,14 @@
                 document.getElementById('performTranslateAllAiBoardsBtn').disabled = !hasLocale;
             });
             document.getElementById('aiBulkBuildBtn').addEventListener('click', openAIBulkBuilderModal);
+            document.getElementById('setAllAfterSelectionBtn').addEventListener('click', openSetAllAfterSelectionModal);
+            document.getElementById('closeSetAllAfterSelectionModal').addEventListener('click', closeSetAllAfterSelectionModal);
+            document.getElementById('setAllAfterSelectionCancelBtn').addEventListener('click', closeSetAllAfterSelectionModal);
+            document.getElementById('setAllAfterSelectionApplyBtn').addEventListener('click', applySetAllAfterSelection);
+            document.getElementById('setAllAfterSelectionValue').addEventListener('change', () => {
+                const val = document.getElementById('setAllAfterSelectionValue').value;
+                document.getElementById('setAllTargetBoardWrapper').classList.toggle('hidden', val !== 'navigate');
+            });
             document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
             document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
             document.getElementById('saveButtonEdit').addEventListener('click', saveButtonEdit);
@@ -819,6 +856,57 @@
                     : 'Do nothing (stay on current board)';
             document.getElementById('buttonTypeInfo').textContent = afterSelection;
             document.getElementById('actionInfo').textContent = actionText;
+        }
+
+        function openSetAllAfterSelectionModal() {
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
+            if (document.getElementById('boardType').value !== 'static') { showNotification('Switch Board Mode to Static first', 'error'); return; }
+            const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            if (!buttons.some(b => String(b.label || '').trim())) { showNotification('No buttons on this board yet', 'error'); return; }
+            // Pre-select the most common after_selection value currently on the board
+            const counts = {};
+            buttons.forEach(b => { const v = b.after_selection || 'do_nothing'; counts[v] = (counts[v] || 0) + 1; });
+            const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'do_nothing';
+            document.getElementById('setAllAfterSelectionValue').value = dominant;
+            document.getElementById('setAllTargetBoardWrapper').classList.toggle('hidden', dominant !== 'navigate');
+            // Populate target board dropdown
+            const sel = document.getElementById('setAllTargetBoard');
+            sel.innerHTML = '<option value="">-- Select board --</option>';
+            getBoardsSortedByLabel(allBoards).forEach(board => {
+                const opt = document.createElement('option');
+                opt.value = board.id;
+                opt.textContent = board.label || board.id;
+                sel.appendChild(opt);
+            });
+            document.getElementById('setAllAfterSelectionModal').classList.remove('hidden');
+        }
+
+        function closeSetAllAfterSelectionModal() {
+            document.getElementById('setAllAfterSelectionModal').classList.add('hidden');
+        }
+
+        async function applySetAllAfterSelection() {
+            if (!currentBoardData || isBoardReadOnly(currentBoardData)) return;
+            const afterSelection = document.getElementById('setAllAfterSelectionValue').value;
+            const targetBoardId = afterSelection === 'navigate' ? document.getElementById('setAllTargetBoard').value.trim() : null;
+            if (afterSelection === 'navigate' && !targetBoardId) {
+                showNotification('Select a target board for Navigate', 'error');
+                return;
+            }
+            const actionType = afterSelection === 'navigate' ? 'navigate' : 'announce';
+            const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            buttons.forEach(btn => {
+                if (!String(btn.label || '').trim()) return; // skip empty cells
+                btn.after_selection = afterSelection;
+                btn.action_type = actionType;
+                btn.target_board_id = afterSelection === 'navigate' ? targetBoardId : null;
+                if (afterSelection !== 'navigate') btn.temporary_navigation = false;
+            });
+            currentBoardData.buttons = buttons;
+            renderButtonGrid();
+            closeSetAllAfterSelectionModal();
+            await saveBoard();
         }
 
         function openAIBulkBuilderModal() {
