@@ -341,6 +341,13 @@
                                 <div class="text-xs text-gray-500 mt-0.5">After the option is spoken, the AI generates a new set of related options.</div>
                             </div>
                         </label>
+                        <label class="flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer hover:border-violet-400 transition-colors border-gray-200">
+                            <input type="radio" name="convertAfterSelection" value="navigate_home" class="mt-0.5 accent-violet-600">
+                            <div>
+                                <div class="font-semibold text-gray-800">Navigate to Home Board</div>
+                                <div class="text-xs text-gray-500 mt-0.5">After the option is spoken, return to the configured Home board.</div>
+                            </div>
+                        </label>
                     </div>
                     <div class="flex justify-between mt-5">
                         <button id="convertStep3Back" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><i class="fas fa-arrow-left mr-1"></i> Back</button>
@@ -1474,7 +1481,11 @@
             const numOptions = parseInt(document.getElementById('convertNumOptions').value) || 24;
             const perRow = parseInt(document.getElementById('convertOptionsPerRow').value) || 6;
             const afterVal = document.querySelector('input[name="convertAfterSelection"]:checked')?.value || 'do_nothing';
-            const afterLabel = afterVal === 'use_ai' ? 'AI Generates Next Options' : 'Do Nothing';
+            const afterLabel = afterVal === 'use_ai'
+                ? 'AI Generates Next Options'
+                : afterVal === 'navigate_home'
+                    ? 'Navigate to Home Board'
+                    : 'Do Nothing';
 
             document.getElementById('convertSummaryBoards').innerHTML =
                 boardNames.map(n => '<span class="inline-block bg-violet-100 text-violet-800 rounded px-1 mr-1 mb-1">' + escapeHtml(n) + '</span>').join('');
