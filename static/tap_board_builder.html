@@ -189,10 +189,16 @@
                         <div id="audioUploadStatus" class="text-xs mt-1 hidden"></div>
                     </div>
                     <div class="mb-4">
-                        <label for="afterSelection" class="block text-sm font-medium text-gray-700 mb-2">After Selection</label>
+                        <div class="flex items-center justify-between mb-2">
+                            <label for="afterSelection" class="block text-sm font-medium text-gray-700">After Selection</label>
+                            <button type="button" id="aiGenerateTargetBtn" class="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700" title="Use AI to generate a static target board for this button">
+                                <i class="fas fa-wand-magic-sparkles"></i> AI Generate Target Board
+                            </button>
+                        </div>
                         <select id="afterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                             <option value="do_nothing">Do nothing (stay on current board)</option>
                             <option value="navigate">Navigate to Target Board</option>
+                            <option value="navigate_home">Navigate to Home Board</option>
                             <option value="use_ai">Use AI to generate next options</option>
                         </select>
                     </div>
@@ -245,6 +251,7 @@
                     <option value="do_nothing">Do nothing (stay on current board)</option>
                     <option value="use_ai">Use AI to generate next options</option>
                     <option value="navigate">Navigate to Target Board</option>
+                    <option value="navigate_home">Navigate to Home Board</option>
                 </select>
             </div>
             <div id="setAllTargetBoardWrapper" class="mb-4 hidden">
@@ -283,6 +290,7 @@
                         <option value="do_nothing">Do nothing (default)</option>
                         <option value="use_ai">Use AI</option>
                         <option value="navigate">Navigate to Target Board</option>
+                        <option value="navigate_home">Navigate to Home Board</option>
                     </select>
                 </div>
                 <div id="aiBulkTargetBoardWrapper" class="hidden">
@@ -713,6 +721,13 @@
                             }
                             buttonDiv.appendChild(i);
                         }
+                        else if (buttonData.after_selection === 'navigate_home') {
+                            const i = document.createElement('div');
+                            i.className = 'button-indicator indicator-nav';
+                            i.textContent = '⌂';
+                            i.title = 'Navigates to Home board';
+                            buttonDiv.appendChild(i);
+                        }
                         else if (buttonData.after_selection === 'use_ai') { const i = document.createElement('div'); i.className = 'button-indicator'; i.style.cssText = 'background:#7c3aed;color:white;'; i.textContent = '✦'; i.title = 'AI generates next options'; buttonDiv.appendChild(i); }
                         else if (buttonData.action_type === 'audio') { const i = document.createElement('div'); i.className = 'button-indicator indicator-audio'; i.textContent = '♪'; i.title = 'Plays custom audio'; buttonDiv.appendChild(i); }
                         else if (buttonData.speech_text) { const i = document.createElement('div'); i.className = 'button-indicator indicator-speech'; i.textContent = 'S'; i.title = 'Has speech text'; buttonDiv.appendChild(i); }
@@ -762,6 +777,9 @@
             document.getElementById('buttonBgColor').value = buttonData.background_color || '#FFFFFF';
             // Derive after_selection from stored field or legacy action_type
             let afterSel = buttonData.after_selection || (buttonData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
+            if (!['do_nothing', 'navigate', 'navigate_home', 'use_ai'].includes(afterSel)) {
+                afterSel = 'do_nothing';
+            }
             document.getElementById('afterSelection').value = afterSel;
             document.getElementById('targetBoardWrapper').style.display = afterSel === 'navigate' ? '' : 'none';
             document.getElementById('temporaryNavigationWrapper').classList.toggle('hidden', afterSel !== 'navigate');
@@ -851,6 +869,8 @@
             const temporaryNavigation = document.getElementById('temporaryNavigation').checked;
             const actionText = afterSelection === 'navigate'
                 ? (temporaryNavigation ? 'Navigate to Target Board, then return after one selection' : 'Navigate to Target Board')
+                : afterSelection === 'navigate_home'
+                    ? 'Navigate to configured Home board'
                 : afterSelection === 'use_ai'
                     ? 'Use AI to generate next options'
                     : 'Do nothing (stay on current board)';
@@ -1816,6 +1836,317 @@
                 </div>
             </div>`;
         }
+    })();
+    </script>
+
+    <!-- AI Generate Target Board Modal -->
+    <div id="aiTargetBoardModal" class="fixed inset-0 bg-gray-900 bg-opacity-60 overflow-y-auto h-full w-full hidden" style="z-index:5500;">
+        <div class="relative top-10 mx-auto p-0 border w-11/12 max-w-2xl shadow-xl rounded-xl bg-white">
+            <div class="flex justify-between items-center px-6 py-4 border-b bg-violet-600 rounded-t-xl">
+                <h3 class="text-lg font-bold text-white"><i class="fas fa-wand-magic-sparkles mr-2"></i>AI Generate Target Board</h3>
+                <button id="closeAiTargetBoardModal" class="text-white hover:text-violet-200 text-xl"><i class="fas fa-times"></i></button>
+            </div>
+
+            <!-- Step indicators -->
+            <div class="flex items-center justify-center gap-1 px-6 pt-4 pb-2" id="atbStepIndicators">
+                <div id="atbSI1" class="flex items-center gap-1 text-xs font-semibold text-violet-700"><span class="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center">1</span><span class="hidden sm:inline">Options</span></div>
+                <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
+                <div id="atbSI2" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">2</span><span class="hidden sm:inline">After Selection</span></div>
+                <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
+                <div id="atbSI3" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">3</span><span class="hidden sm:inline">Confirm</span></div>
+            </div>
+
+            <div class="px-6 pb-6">
+
+                <!-- Step 1: Options Count & Per Row -->
+                <div id="atbStep1">
+                    <p class="text-sm text-gray-600 mb-4">Configure how many options to generate for the new <strong id="atbBoardNameLabel"></strong> board.</p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Number of Options</label>
+                            <input type="number" id="atbNumOptions" min="1" max="84" value="12" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-transparent">
+                            <p class="text-xs text-gray-400 mt-1">1 – 84 options</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Options Per Row</label>
+                            <input type="number" id="atbOptionsPerRow" min="1" max="12" value="4" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-violet-400 focus:border-transparent">
+                            <p class="text-xs text-gray-400 mt-1">1 – 12 per row</p>
+                        </div>
+                    </div>
+                    <div id="atbExistingTargetWarning" class="hidden mt-4 p-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800">
+                        <i class="fas fa-triangle-exclamation mr-1"></i>
+                        This button already has a different target board set (<strong id="atbExistingBoardName"></strong>). Generating a new board will replace that target board setting.
+                    </div>
+                    <div class="flex justify-end mt-5">
+                        <button id="atbStep1Next" class="px-5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700">Next <i class="fas fa-arrow-right ml-1"></i></button>
+                    </div>
+                </div>
+
+                <!-- Step 2: After Selection for generated buttons -->
+                <div id="atbStep2" class="hidden">
+                    <p class="text-sm text-gray-600 mb-4">What should happen after the user taps an option on the new <strong id="atbBoardNameLabel2"></strong> board?</p>
+                    <div class="space-y-3">
+                        <label class="flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer hover:border-violet-400 transition-colors border-violet-400 bg-violet-50">
+                            <input type="radio" name="atbAfterSelection" value="do_nothing" checked class="mt-0.5 accent-violet-600">
+                            <div>
+                                <div class="font-semibold text-gray-800">Do Nothing</div>
+                                <div class="text-xs text-gray-500 mt-0.5">The option is spoken and no further navigation occurs.</div>
+                            </div>
+                        </label>
+                        <label class="flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer hover:border-violet-400 transition-colors border-gray-200">
+                            <input type="radio" name="atbAfterSelection" value="use_ai" class="mt-0.5 accent-violet-600">
+                            <div>
+                                <div class="font-semibold text-gray-800">AI Generates Next Options</div>
+                                <div class="text-xs text-gray-500 mt-0.5">After the option is spoken, AI generates a new set of related options.</div>
+                            </div>
+                        </label>
+                        <label class="flex items-start gap-3 p-4 border-2 rounded-xl cursor-pointer hover:border-violet-400 transition-colors border-gray-200">
+                            <input type="radio" name="atbAfterSelection" value="navigate_home" class="mt-0.5 accent-violet-600">
+                            <div>
+                                <div class="font-semibold text-gray-800">Navigate to Home Board</div>
+                                <div class="text-xs text-gray-500 mt-0.5">After the option is spoken, return to the configured Home board.</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="flex justify-between mt-5">
+                        <button id="atbStep2Back" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><i class="fas fa-arrow-left mr-1"></i> Back</button>
+                        <button id="atbStep2Next" class="px-5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700">Next <i class="fas fa-arrow-right ml-1"></i></button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Confirmation -->
+                <div id="atbStep3" class="hidden">
+                    <p class="text-sm text-gray-600 mb-3">Review your settings, then click Generate to create the board.</p>
+                    <div class="bg-violet-50 border border-violet-200 rounded-xl p-4 space-y-3 text-sm">
+                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">New board name:</span><span id="atbSummaryName" class="font-medium text-gray-800"></span></div>
+                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Options to generate:</span><span id="atbSummaryOptions" class="font-medium text-gray-800"></span></div>
+                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Options per row:</span><span id="atbSummaryPerRow" class="font-medium text-gray-800"></span></div>
+                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">After selection:</span><span id="atbSummaryAfter" class="font-medium text-gray-800"></span></div>
+                    </div>
+                    <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                        <i class="fas fa-info-circle mr-1"></i> A new static board will be created and this button's After Selection will be set to Navigate to the new board. Images will be auto-fetched for each option.
+                    </div>
+                    <div class="flex justify-between mt-5">
+                        <button id="atbStep3Back" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><i class="fas fa-arrow-left mr-1"></i> Back</button>
+                        <button id="atbGenerateBtn" class="px-5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 font-semibold"><i class="fas fa-wand-magic-sparkles mr-1"></i>Generate Board</button>
+                    </div>
+                </div>
+
+                <!-- Step 4: Progress / Result -->
+                <div id="atbStep4" class="hidden">
+                    <div id="atbProgressArea" class="py-6 text-center">
+                        <i class="fas fa-spinner fa-spin text-violet-600 text-3xl mb-3"></i>
+                        <p class="text-gray-600 text-sm">Generating options and creating board — this may take a few seconds…</p>
+                    </div>
+                    <div id="atbResultArea" class="hidden">
+                        <div id="atbResultSuccess" class="hidden">
+                            <div class="flex items-center gap-3 p-4 bg-green-50 border border-green-300 rounded-xl mb-4">
+                                <i class="fas fa-circle-check text-green-600 text-2xl"></i>
+                                <div>
+                                    <div class="font-semibold text-green-800">Board created successfully!</div>
+                                    <div id="atbResultDetail" class="text-xs text-green-700 mt-1"></div>
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-600">The After Selection has been set to <strong>Navigate</strong> and the Target Board updated. Click Save Button to apply.</p>
+                        </div>
+                        <div id="atbResultError" class="hidden">
+                            <div class="flex items-center gap-3 p-4 bg-red-50 border border-red-300 rounded-xl">
+                                <i class="fas fa-circle-exclamation text-red-600 text-2xl"></i>
+                                <div>
+                                    <div class="font-semibold text-red-800">Generation failed</div>
+                                    <div id="atbErrorDetail" class="text-xs text-red-700 mt-1"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex justify-end mt-5">
+                            <button id="atbDoneBtn" class="px-5 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 font-semibold">Done</button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // ── AI Generate Target Board wizard ──────────────────────────────────
+        let atbStep = 1;
+
+        function atbShowStep(n) {
+            atbStep = n;
+            [1,2,3,4].forEach(i => {
+                const el = document.getElementById('atbStep' + i);
+                if (el) el.classList.toggle('hidden', i !== n);
+            });
+            // Update step indicators (only steps 1-3 have indicators)
+            [1,2,3].forEach(i => {
+                const si = document.getElementById('atbSI' + i);
+                if (!si) return;
+                const circle = si.querySelector('span');
+                if (i < n) {
+                    si.className = 'flex items-center gap-1 text-xs font-semibold text-violet-700';
+                    circle.className = 'w-6 h-6 rounded-full bg-violet-700 text-white flex items-center justify-center';
+                } else if (i === n) {
+                    si.className = 'flex items-center gap-1 text-xs font-semibold text-violet-700';
+                    circle.className = 'w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center';
+                } else {
+                    si.className = 'flex items-center gap-1 text-xs font-semibold text-gray-400';
+                    circle.className = 'w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center';
+                }
+            });
+        }
+
+        function openAiTargetBoardModal() {
+            const modal = document.getElementById('aiTargetBoardModal');
+            if (!modal) return;
+
+            // Require a button label
+            const label = (document.getElementById('buttonText') || {}).value || '';
+            if (!label.trim()) {
+                alert('Please enter a Button Label before generating a target board.');
+                return;
+            }
+
+            // Show warning if a different target board is already set
+            const afterSel = (document.getElementById('afterSelection') || {}).value || '';
+            const targetBoardSel = document.getElementById('targetBoard');
+            const currentTargetId = targetBoardSel ? targetBoardSel.value : '';
+            const warningEl = document.getElementById('atbExistingTargetWarning');
+            const existingNameEl = document.getElementById('atbExistingBoardName');
+            if (afterSel === 'navigate' && currentTargetId) {
+                const opt = targetBoardSel ? targetBoardSel.querySelector(`option[value="${currentTargetId}"]`) : null;
+                const existingName = opt ? opt.textContent : currentTargetId;
+                if (existingNameEl) existingNameEl.textContent = existingName;
+                if (warningEl) warningEl.classList.remove('hidden');
+            } else {
+                if (warningEl) warningEl.classList.add('hidden');
+            }
+
+            // Populate board name labels in steps
+            ['atbBoardNameLabel', 'atbBoardNameLabel2', 'atbSummaryName'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = '"' + label.trim() + '"';
+            });
+
+            atbShowStep(1);
+            modal.classList.remove('hidden');
+
+            // Wire nav buttons each open (avoid stacking listeners)
+            document.getElementById('atbStep1Next').onclick = function() {
+                const n = parseInt(document.getElementById('atbNumOptions').value, 10);
+                const r = parseInt(document.getElementById('atbOptionsPerRow').value, 10);
+                if (!n || n < 1 || n > 84) { alert('Number of options must be 1–84.'); return; }
+                if (!r || r < 1 || r > 12) { alert('Options per row must be 1–12.'); return; }
+                atbShowStep(2);
+            };
+            document.getElementById('atbStep2Back').onclick = () => atbShowStep(1);
+            document.getElementById('atbStep2Next').onclick = function() {
+                const n = parseInt(document.getElementById('atbNumOptions').value, 10);
+                const r = parseInt(document.getElementById('atbOptionsPerRow').value, 10);
+                const after = document.querySelector('input[name="atbAfterSelection"]:checked')?.value || 'do_nothing';
+                const afterLabel = after === 'use_ai'
+                    ? 'AI Generates Next Options'
+                    : after === 'navigate_home'
+                        ? 'Navigate to Home Board'
+                        : 'Do Nothing';
+                document.getElementById('atbSummaryOptions').textContent = n;
+                document.getElementById('atbSummaryPerRow').textContent = r;
+                document.getElementById('atbSummaryAfter').textContent = afterLabel;
+                atbShowStep(3);
+            };
+            document.getElementById('atbStep3Back').onclick = () => atbShowStep(2);
+            document.getElementById('atbGenerateBtn').onclick = executeAiTargetBoardGeneration;
+            document.getElementById('atbDoneBtn').onclick = closeAtbModal;
+            document.getElementById('closeAiTargetBoardModal').onclick = closeAtbModal;
+        }
+
+        function closeAtbModal() {
+            const modal = document.getElementById('aiTargetBoardModal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        async function executeAiTargetBoardGeneration() {
+            const label = (document.getElementById('buttonText') || {}).value || '';
+            const numOptions = parseInt(document.getElementById('atbNumOptions').value, 10);
+            const optionsPerRow = parseInt(document.getElementById('atbOptionsPerRow').value, 10);
+            const afterSelection = document.querySelector('input[name="atbAfterSelection"]:checked')?.value || 'do_nothing';
+
+            atbShowStep(4);
+            const progressArea = document.getElementById('atbProgressArea');
+            const resultArea = document.getElementById('atbResultArea');
+            const resultSuccess = document.getElementById('atbResultSuccess');
+            const resultError = document.getElementById('atbResultError');
+            if (progressArea) progressArea.classList.remove('hidden');
+            if (resultArea) resultArea.classList.add('hidden');
+            if (resultSuccess) resultSuccess.classList.add('hidden');
+            if (resultError) resultError.classList.add('hidden');
+
+            try {
+                const resp = await fetch('/api/tap-interface/create-ai-target-board', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        label: label.trim(),
+                        num_options: numOptions,
+                        options_per_row: optionsPerRow,
+                        after_selection: afterSelection,
+                    }),
+                });
+
+                const data = await resp.json();
+                if (progressArea) progressArea.classList.add('hidden');
+                if (resultArea) resultArea.classList.remove('hidden');
+
+                if (resp.ok && data.success) {
+                    // Update the button definition panel
+                    const afterSelEl = document.getElementById('afterSelection');
+                    if (afterSelEl) {
+                        afterSelEl.value = 'navigate';
+                        afterSelEl.dispatchEvent(new Event('change'));
+                    }
+                    // Add new board option and select it
+                    const targetSel = document.getElementById('targetBoard');
+                    if (targetSel && data.board_id) {
+                        // Check if option already exists (shouldn't, but be safe)
+                        let opt = targetSel.querySelector(`option[value="${data.board_id}"]`);
+                        if (!opt) {
+                            opt = document.createElement('option');
+                            opt.value = data.board_id;
+                            opt.textContent = data.board_label || label.trim();
+                            targetSel.appendChild(opt);
+                        }
+                        targetSel.value = data.board_id;
+                        // Add to global boards list so it can be referenced in the dropdown
+                        if (!allBoards.find(b => b.id === data.board_id)) {
+                            allBoards.push({ id: data.board_id, label: data.board_label || label.trim(), board_type: 'static' });
+                        }
+                    }
+
+                    if (resultSuccess) resultSuccess.classList.remove('hidden');
+                    const detailEl = document.getElementById('atbResultDetail');
+                    if (detailEl) detailEl.textContent = `"${data.board_label}" created with ${data.options_count} options.`;
+                } else {
+                    if (resultError) resultError.classList.remove('hidden');
+                    const errEl = document.getElementById('atbErrorDetail');
+                    if (errEl) errEl.textContent = data.detail || 'Unknown error';
+                }
+            } catch (err) {
+                if (progressArea) progressArea.classList.add('hidden');
+                if (resultArea) resultArea.classList.remove('hidden');
+                if (resultError) resultError.classList.remove('hidden');
+                const errEl = document.getElementById('atbErrorDetail');
+                if (errEl) errEl.textContent = String(err);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const btn = document.getElementById('aiGenerateTargetBtn');
+            if (btn) btn.addEventListener('click', openAiTargetBoardModal);
+        });
+
     })();
     </script>
 </body>

@@ -22365,7 +22365,7 @@ class TapBoardButton(BaseModel):
     modifier_trigger_id: Optional[int] = Field(None, description="TouchChat modifier id triggered after tapping this button")
     modifier_variants: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Alternate button states keyed by modifier id")
     action_type: str = Field("announce", description="announce|navigate|audio|special")
-    after_selection: Optional[str] = Field(None, description="do_nothing|navigate|use_ai")
+    after_selection: Optional[str] = Field(None, description="do_nothing|navigate|navigate_home|use_ai")
     target_board_id: Optional[str] = Field(None, description="Board ID for navigate action")
     temporary_navigation: bool = Field(False, description="If true, navigate target is temporary and selection should return to previous board")
     custom_audio_file: Optional[str] = Field(None, description="Audio URL for audio action")
@@ -22489,7 +22489,14 @@ class ConvertAIBoardsToStaticRequest(BaseModel):
     board_ids: List[str] = Field(..., description="List of AI board IDs to convert")
     num_options: int = Field(24, ge=1, le=84, description="Number of static options to generate per board")
     options_per_row: int = Field(6, ge=1, le=12, description="Number of options per row in the button grid")
-    after_selection: str = Field("do_nothing", description="do_nothing|use_ai — action taken after user taps an option")
+    after_selection: str = Field("do_nothing", description="do_nothing|use_ai|navigate_home — action taken after user taps an option")
+
+class CreateAITargetBoardRequest(BaseModel):
+    """Payload for generating a new static target board from a button label using AI."""
+    label: str = Field(..., min_length=1, description="Button label to use as the board name and LLM context")
+    num_options: int = Field(12, ge=1, le=84, description="Number of options to generate")
+    options_per_row: int = Field(4, ge=1, le=12, description="Number of options per row")
+    after_selection: str = Field("do_nothing", description="do_nothing|use_ai|navigate_home — action for the generated buttons")
 
 # Update forward references
 TapNavigationButton.model_rebuild()
@@ -22517,6 +22524,15 @@ def _normalize_action_type(value: Any) -> str:
     return normalized
 
 
+def _normalize_after_selection(value: Any) -> Optional[str]:
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return None
+    if normalized in {'do_nothing', 'navigate', 'navigate_home', 'use_ai'}:
+        return normalized
+    return None
+
+
 def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[str, Any]:
     return {
         'id': str(button.get('id') or f'btn_{index + 1}'),
@@ -22527,7 +22543,7 @@ def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[
         'modifier_trigger_id': button.get('modifier_trigger_id'),
         'modifier_variants': button.get('modifier_variants') if isinstance(button.get('modifier_variants'), dict) else {},
         'action_type': _normalize_action_type(button.get('action_type')),
-        'after_selection': str(button.get('after_selection') or '').strip() or None,
+        'after_selection': _normalize_after_selection(button.get('after_selection')),
         'target_board_id': button.get('target_board_id'),
         'temporary_navigation': bool(button.get('temporary_navigation', False)),
         'custom_audio_file': button.get('custom_audio_file'),
@@ -25620,7 +25636,7 @@ async def convert_ai_boards_to_static(
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
 
-    after_selection = payload.after_selection if payload.after_selection in ("do_nothing", "use_ai") else "do_nothing"
+    after_selection = payload.after_selection if payload.after_selection in ("do_nothing", "use_ai", "navigate_home") else "do_nothing"
 
     def _extract_options_from_llm_response(raw_response: str, board_id_for_log: str) -> List[str]:
         """Robustly extract a flat list of string option labels from a raw LLM response."""
@@ -25843,6 +25859,171 @@ async def convert_ai_boards_to_static(
         raise
     except Exception as e:
         logging.error(f"Error in convert_ai_boards_to_static: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/create-ai-target-board")
+async def create_ai_target_board(
+    payload: CreateAITargetBoardRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Generate AI options for a button label and create a new static board.
+    Returns the new board's ID and label for use as a Target Board.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    label = payload.label.strip()
+    after_selection = payload.after_selection if payload.after_selection in ("do_nothing", "use_ai", "navigate_home") else "do_nothing"
+
+    def _extract_options(raw: str) -> List[str]:
+        text = raw.strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                opt = item.strip()
+            elif isinstance(item, dict):
+                opt = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                opt = str(item).strip()
+            if opt and opt.lower() not in seen:
+                seen.add(opt.lower())
+                options.append(opt)
+        return options
+
+    try:
+        gen_prompt = (
+            f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
+            f"A user has just tapped a button that says \"{label}\".\n"
+            f"Generate EXACTLY {payload.num_options} short button labels for words or phrases that would naturally "
+            f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
+            f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
+            f"Example: if the word is \"eat\", good options are: more, now, lunch, snack, dinner, a lot, slowly, together, outside, please, later.\n"
+            f"Example: if the word is \"want\", good options are: more, that, this, help, food, water, to go, a hug, to play.\n"
+            f"Example: if the word is \"go\", good options are: home, outside, now, please, away, to school, fast, together, later, there.\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Every option must be a word or short phrase that makes sense coming AFTER \"{label}\" in speech\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        generated_options = _extract_options(raw_response)
+
+        if not generated_options:
+            raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
+
+        generated_options = generated_options[:payload.num_options]
+        per_row = payload.options_per_row
+        ts_base = int(time.time() * 1000)
+        buttons: List[Dict[str, Any]] = []
+
+        for i, opt_label in enumerate(generated_options):
+            row = i // per_row
+            col = i % per_row
+            image_url: Optional[str] = None
+            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
+                try:
+                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                    docs = await asyncio.to_thread(q.get)
+                    for doc in docs:
+                        img_data = doc.to_dict()
+                        if img_data.get("image_url"):
+                            image_url = img_data["image_url"]
+                            break
+                except Exception:
+                    pass
+                if image_url:
+                    break
+
+            buttons.append({
+                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "label": opt_label,
+                "row": row,
+                "col": col,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": after_selection,
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": image_url,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+            })
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data)
+
+        boards: List[Dict[str, Any]] = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        existing_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
+
+        # Build a filesystem-safe slug from the label
+        slug = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')
+        base_id = f"{slug}_target"
+        new_board_id = base_id
+        suffix = 2
+        while new_board_id in existing_ids:
+            new_board_id = f"{base_id}_{suffix}"
+            suffix += 1
+
+        new_board: Dict[str, Any] = {
+            "id": new_board_id,
+            "label": label,
+            "board_type": "static",
+            "source": "custom",
+            "buttons": buttons,
+        }
+        boards.append(new_board)
+        config_data['boards'] = boards
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={
+            "success": True,
+            "board_id": new_board_id,
+            "board_label": label,
+            "options_count": len(buttons),
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in create_ai_target_board: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
