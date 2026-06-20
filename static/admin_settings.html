@@ -373,72 +373,6 @@
                         <strong>Tap Screen:</strong> Uses the direct touch interface (Tap Interface).
                     </p>
                 </div>
-            </div>
-        </div>
-
-        <!-- Language and Voices Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-globe mr-2 text-cyan-600"></i>Language and Voices
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- User Language -->
-                <div class="md:col-span-2">
-                    <label for="userLanguage" class="block text-lg font-medium text-gray-700 mb-2">User Language:</label>
-                    <select id="userLanguage" name="userLanguage" class="w-full max-w-xs"></select>
-                    <p class="text-xs text-gray-500 mt-1">Primary language for user-facing AI generation and on-screen content.</p>
-                </div>
-
-                <!-- Default Partner Language & Voice (Side-by-side) -->
-                <div>
-                    <label for="defaultPartnerLanguage" class="block text-lg font-medium text-gray-700 mb-2">Default Partner Language:</label>
-                    <select id="defaultPartnerLanguage" name="defaultPartnerLanguage" class="w-full"></select>
-                    <p class="text-xs text-gray-500 mt-1">Default language for wake word, questions, and spoken announcements.</p>
-                </div>
-                <div>
-                    <label for="defaultPartnerVoiceSelect" class="block text-lg font-medium text-gray-700 mb-2">Default Partner Voice:</label>
-                    <div class="flex gap-2">
-                        <select id="defaultPartnerVoiceSelect" name="defaultPartnerVoiceSelect" class="flex-1"></select>
-                        <button type="button" id="testDefaultPartnerVoiceButton" class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors">
-                            <i class="fas fa-volume-up"></i>
-                        </button>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-1">Voice options update based on selected language.</p>
-                </div>
-
-                <!-- Location Override Languages Table -->
-                <div class="md:col-span-2">
-                    <div class="flex justify-between items-center mb-3">
-                        <label class="block text-lg font-medium text-gray-700">Location Override Languages:</label>
-                        <button type="button" id="addLocationOverrideRowButton" class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors">
-                            <i class="fas fa-plus"></i> Add Row
-                        </button>
-                    </div>
-                    <p class="text-xs text-gray-500 mb-3">Each row specifies a language available for per-location override selection in Location Features.</p>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full border-collapse border border-gray-300 rounded">
-                            <thead>
-                                <tr class="bg-gray-100">
-                                    <th class="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700">Language</th>
-                                    <th class="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700">Voice</th>
-                                    <th class="border border-gray-300 px-4 py-2 text-center font-semibold text-gray-700" style="width: 140px;">Test / Delete</th>
-                                </tr>
-                            </thead>
-                            <tbody id="locationOverrideLanguagesTable">
-                                <!-- Table rows will be dynamically populated here -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- AI Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-robot mr-2 text-blue-600"></i>AI Settings
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label class="block text-lg font-medium text-gray-700 mb-2">Wake Word:</label>
                     <div class="flex space-x-2 items-center">
@@ -448,31 +382,10 @@
                     <p class="text-xs text-gray-500 mt-1">The phrase used to activate voice commands (e.g., "Hey Brady").</p>
                 </div>
                 <div>
-                    <label for="LLMOptions" class="block text-lg font-medium text-gray-700 mb-2">Number of AI Options:</label>
-                    <input type="number" id="LLMOptions" name="LLMOptions" min="0" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 10">
-                    <p class="text-xs text-gray-500 mt-1">Number of AI-generated options for Auditory Scanning pages and Quick Talk in Tap Interface</p>
-                </div>
-                <div>
-                    <label for="FreestyleOptions" class="block text-lg font-medium text-gray-700 mb-2">Freestyle Word Options:</label>
-                    <input type="number" id="FreestyleOptions" name="FreestyleOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 20">
-                    <p class="text-xs text-gray-500 mt-1">Number of AI word suggestions for the Freestyle page and Words section in Tap Interface</p>
-                </div>
-                <div>
-                    <label for="SummaryOff" class="block text-lg font-medium text-gray-700 mb-2">Turn off Button Summary</label>
-                    <input type="checkbox" id="SummaryOff" name="SummaryOff" class="summaryoff-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Turn off Button Summary. Buttons will show full speech option.</p>
-                </div>
-                <div>
-                    <label for="autoClean" class="block text-lg font-medium text-gray-700 mb-2">Auto Clean in Freestyle</label>
-                    <input type="checkbox" id="autoClean" name="autoClean" class="autoclean-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Automatically clean up text before speaking in Freestyle mode.</p>
-                </div>
-                <div>
                     <label for="enableMoodSelection" class="block text-lg font-medium text-gray-700 mb-2">Enable Mood Selection</label>
                     <input type="checkbox" id="enableMoodSelection" name="enableMoodSelection" class="enablemoodselection-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                     <p class="text-xs text-gray-500 mt-1">Show mood selection screen at session start to provide personalized AI responses.</p>
                 </div>
-
                 <div>
                     <label class="block text-lg font-medium text-gray-700 mb-2">Location:</label>
                     <div class="flex space-x-2 items-center">
@@ -480,7 +393,25 @@
                     </div>
                     <p class="text-xs text-gray-500 mt-1">Location Country to determine local info. Use 2-letter codes.</p>
                 </div>
-                
+            </div>
+        </div>
+
+        <!-- Tap Interface Settings Section -->
+        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                <i class="fas fa-hand-pointer mr-2 text-indigo-600"></i>Tap Interface Settings
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="tapWordsRows" class="block text-lg font-medium text-gray-700 mb-2">Tap Words Rows:</label>
+                    <input type="number" id="tapWordsRows" name="tapWordsRows" min="1" max="10" step="1" class="w-full max-w-xs" placeholder="4">
+                    <p class="text-xs text-gray-500 mt-1">Number of rows in the Tap Interface grid (default 4)</p>
+                </div>
+                <div>
+                    <label for="tapPhrasesRows" class="block text-lg font-medium text-gray-700 mb-2">Tap Phrases Rows:</label>
+                    <input type="number" id="tapPhrasesRows" name="tapPhrasesRows" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="1">
+                    <p class="text-xs text-gray-500 mt-1">Number of Phrases rows in the Tap Interface (default 1)</p>
+                </div>
                 <div>
                     <label for="vocabularyLevel" class="block text-lg font-medium text-gray-700 mb-2">Vocabulary Level:</label>
                     <select id="vocabularyLevel" name="vocabularyLevel" class="w-full max-w-xs">
@@ -491,28 +422,84 @@
                     </select>
                     <p class="text-xs text-gray-500 mt-1">Controls the complexity of AI-generated vocabulary to match the user's communication level. Higher levels use more advanced words.</p>
                 </div>
+                <div>
+                    <label for="disableTapPictograms" class="block text-lg font-medium text-gray-700 mb-2">Disable Tap Interface Pictograms</label>
+                    <input type="checkbox" id="disableTapPictograms" name="disableTapPictograms" class="mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">When enabled, the <strong>Tap Interface</strong> will not show pictogram/images on buttons and will not use Sight Word formatting. Buttons will display text only.</p>
+                </div>
+                <div>
+                    <label for="useHybridPages" class="block text-lg font-medium text-gray-700 mb-2">Use Hybrid Pages:</label>
+                    <input type="checkbox" id="useHybridPages" name="useHybridPages" class="mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">When enabled, category pages will mix static buttons and dynamic (AI-generated) buttons in the bottom rows.</p>
+                </div>
+                <div id="dynamicRowsContainer" style="display: none;">
+                    <label for="tapDynamicRows" class="block text-lg font-medium text-gray-700 mb-2">Tap Dynamic Rows:</label>
+                    <input type="number" id="tapDynamicRows" name="tapDynamicRows" min="1" max="10" step="1" class="w-full max-w-xs" placeholder="1">
+                    <p class="text-xs text-gray-500 mt-1">Number of rows at the bottom of the Tap Interface grid dedicated to dynamic options.</p>
+                </div>
             </div>
-            
         </div>
 
-        <!-- Audio Settings Section -->
+        <!-- Scan Interface Settings Section -->
         <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-volume-up mr-2 text-green-600"></i>Audio Settings
+                <i class="fas fa-search mr-2 text-orange-600"></i>Scan Interface Settings
             </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <label for="speechRate" class="block text-lg font-medium text-gray-700 mb-2">Announcement Speech Rate (WPM):</label>
-                    <input type="number" id="speechRate" name="speechRate" min="100" max="300" step="10" class="w-full max-w-xs" placeholder="e.g., 180">
-                    <p class="text-xs text-gray-500 mt-1">Words Per Minute for server-side announcements (e.g., 100-300, default ~180).</p>
+                    <label for="LLMOptions" class="block text-lg font-medium text-gray-700 mb-2">Number of AI Options:</label>
+                    <input type="number" id="LLMOptions" name="LLMOptions" min="0" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 10">
+                    <p class="text-xs text-gray-500 mt-1">Number of AI-generated options for Auditory Scanning pages.</p>
                 </div>
                 <div>
-                    <label for="applicationVolume" class="block text-lg font-medium text-gray-700 mb-2">Application Volume:</label>
-                    <div class="flex items-center space-x-4">
-                        <input type="range" id="applicationVolume" name="applicationVolume" min="0" max="10" step="1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider" value="8">
-                        <span id="volumeDisplay" class="text-lg font-semibold text-gray-700 min-w-[3rem]">8/10</span>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-1">Volume level the app will set when loaded (0-10, where 10 is maximum volume).</p>
+                    <label for="FreestyleOptions" class="block text-lg font-medium text-gray-700 mb-2">Freestyle Word Options:</label>
+                    <input type="number" id="FreestyleOptions" name="FreestyleOptions" min="1" max="50" step="1" class="w-full max-w-xs" placeholder="e.g., 20">
+                    <p class="text-xs text-gray-500 mt-1">Number of AI word suggestions for the Freestyle page.</p>
+                </div>
+                <div>
+                    <label for="autoClean" class="block text-lg font-medium text-gray-700 mb-2">Auto Clean in Freestyle</label>
+                    <input type="checkbox" id="autoClean" name="autoClean" class="autoclean-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Automatically clean up text before speaking in Freestyle mode.</p>
+                </div>
+                <div>
+                    <label for="scanMode" class="block text-lg font-medium text-gray-700 mb-2">Scanning Mode:</label>
+                    <select id="scanMode" name="scanMode" class="w-full max-w-xs">
+                        <option value="auto">Auto Scanning (timer)</option>
+                        <option value="step">Step Scanning (Tab = Next, Space = Select)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Use Auto for timer-based scanning, or Step for two-switch scanning.</p>
+                </div>
+                <div>
+                    <label for="scanDelay" class="block text-lg font-medium text-gray-700 mb-2">Auditory Scan Speed (ms):</label>
+                    <input type="number" id="scanDelay" name="scanDelay" min="100" step="100" class="w-full max-w-xs" placeholder="e.g., 3500">
+                    <p class="text-xs text-gray-500 mt-1">Delay between highlighting buttons (milliseconds).</p>
+                </div>
+                <div>
+                    <label for="scanLoopLimit" class="block text-lg font-medium text-gray-700 mb-2">Scan Loop Limit:</label>
+                    <input type="number" id="scanLoopLimit" name="scanLoopLimit" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="e.g., 0">
+                    <p class="text-xs text-gray-500 mt-1">Number of complete scanning cycles before pausing (0 = unlimited, 1-10 = limit cycles)</p>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="waitForSwitchToScan" name="waitForSwitchToScan" class="mr-2 w-5 h-5">
+                    <label for="waitForSwitchToScan" class="text-lg font-medium text-gray-700">Wait For Switch to Start Scanning</label>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="playWaitForSwitchChime" name="playWaitForSwitchChime" class="mr-2 w-5 h-5">
+                    <label for="playWaitForSwitchChime" class="text-lg font-medium text-gray-700">Page Ready Chime</label>
+                </div>
+                <div>
+                    <label for="SummaryOff" class="block text-lg font-medium text-gray-700 mb-2">Turn off Button Summary</label>
+                    <input type="checkbox" id="SummaryOff" name="SummaryOff" class="summaryoff-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Turn off Button Summary. Buttons will show full speech option.</p>
+                </div>
+                <div>
+                    <label for="enablePictograms" class="block text-lg font-medium text-gray-700 mb-2">Enable Scanning Pictograms</label>
+                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Show pictogram images on buttons for the <strong>Auditory Scanning</strong> interface.</p>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
+                    <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
                 </div>
             </div>
         </div>
@@ -543,23 +530,7 @@
                     </select>
                     <p class="text-xs text-gray-500 mt-1">Letter arrangement for the Spell page in Tap Interface.</p>
                 </div>
-                
-                <!-- Pictograms Subsection -->
-                <div class="md:col-span-2 mt-4 mb-2">
-                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                        <i class="fas fa-images mr-2 text-purple-500"></i>Pictograms
-                    </h3>
-                </div>
-                <div>
-                    <label for="enablePictograms" class="block text-lg font-medium text-gray-700 mb-2">Enable Scanning Pictograms</label>
-                    <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Show pictogram images on buttons for the <strong>Auditory Scanning</strong> interface.</p>
-                </div>
-                <div>
-                    <label for="disableTapPictograms" class="block text-lg font-medium text-gray-700 mb-2">Disable Tap Interface Pictograms</label>
-                    <input type="checkbox" id="disableTapPictograms" name="disableTapPictograms" class="mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">When enabled, the <strong>Tap Interface</strong> will not show pictogram/images on buttons and will not use Sight Word formatting. Buttons will display text only.</p>
-                </div>
+
                 
                 <!-- Sight Words Subsection -->
                 <div class="md:col-span-2 mt-4 mb-2">
@@ -604,44 +575,102 @@
             </div>
         </div>
 
-        <!-- Auditory Scanning Settings Section -->
+        <!-- Language and Voices Section -->
         <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
             <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-search mr-2 text-orange-600"></i>Auditory Scanning Settings
+                <i class="fas fa-globe mr-2 text-cyan-600"></i>Language and Voices
             </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- User Language -->
+                <div class="md:col-span-2">
+                    <label for="userLanguage" class="block text-lg font-medium text-gray-700 mb-2">User Language:</label>
+                    <select id="userLanguage" name="userLanguage" class="w-full max-w-xs"></select>
+                    <p class="text-xs text-gray-500 mt-1">Primary language for user-facing AI generation and on-screen content.</p>
+                </div>
+
+                <!-- Default Partner Language & Voice (Side-by-side) -->
                 <div>
-                    <label for="scanDelay" class="block text-lg font-medium text-gray-700 mb-2">Auditory Scan Speed (ms):</label>
-                    <input type="number" id="scanDelay" name="scanDelay" min="100" step="100" class="w-full max-w-xs" placeholder="e.g., 3500">
-                    <p class="text-xs text-gray-500 mt-1">Delay between highlighting buttons (milliseconds).</p>
+                    <label for="defaultPartnerLanguage" class="block text-lg font-medium text-gray-700 mb-2">Default Partner Language:</label>
+                    <select id="defaultPartnerLanguage" name="defaultPartnerLanguage" class="w-full"></select>
+                    <p class="text-xs text-gray-500 mt-1">Default language for wake word, questions, and spoken announcements.</p>
                 </div>
                 <div>
-                    <label for="scanLoopLimit" class="block text-lg font-medium text-gray-700 mb-2">Scan Loop Limit:</label>
-                    <input type="number" id="scanLoopLimit" name="scanLoopLimit" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="e.g., 0">
-                    <p class="text-xs text-gray-500 mt-1">Number of complete scanning cycles before pausing (0 = unlimited, 1-10 = limit cycles)</p>
+                    <label for="defaultPartnerVoiceSelect" class="block text-lg font-medium text-gray-700 mb-2">Default Partner Voice:</label>
+                    <div class="flex gap-2">
+                        <select id="defaultPartnerVoiceSelect" name="defaultPartnerVoiceSelect" class="flex-1"></select>
+                        <button type="button" id="testDefaultPartnerVoiceButton" class="inline-flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors">
+                            <i class="fas fa-volume-up"></i>
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Voice options update based on selected language.</p>
                 </div>
+
+                <!-- Voice Style Selector -->
                 <div>
-                    <label for="scanMode" class="block text-lg font-medium text-gray-700 mb-2">Scanning Mode:</label>
-                    <select id="scanMode" name="scanMode" class="w-full max-w-xs">
-                        <option value="auto">Auto Scanning (timer)</option>
-                        <option value="step">Step Scanning (Tab = Next, Space = Select)</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Use Auto for timer-based scanning, or Step for two-switch scanning.</p>
+                    <label for="voiceStyle" class="block text-lg font-medium text-gray-700 mb-2">Voice Age/Style:</label>
+                    <div class="flex gap-3">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="voiceStyle" value="child" class="w-4 h-4"> 
+                            <span class="text-sm">👧 Child</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="voiceStyle" value="adult" class="w-4 h-4" checked> 
+                            <span class="text-sm">🧑 Adult</span>
+                        </label>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Higher pitch and rate for younger voices. Test to find the best fit for your user.</p>
                 </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
-                    <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
-                </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="waitForSwitchToScan" name="waitForSwitchToScan" class="mr-2 w-5 h-5">
-                    <label for="waitForSwitchToScan" class="text-lg font-medium text-gray-700">Wait For Switch to Start Scanning</label>
-                </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="playWaitForSwitchChime" name="playWaitForSwitchChime" class="mr-2 w-5 h-5">
-                    <label for="playWaitForSwitchChime" class="text-lg font-medium text-gray-700">Page Ready Chime</label>
+
+                <!-- Location Override Languages Table -->
+                <div class="md:col-span-2">
+                    <div class="flex justify-between items-center mb-3">
+                        <label class="block text-lg font-medium text-gray-700">Location Override Languages:</label>
+                        <button type="button" id="addLocationOverrideRowButton" class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-md transition-colors">
+                            <i class="fas fa-plus"></i> Add Row
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-3">Each row specifies a language available for per-location override selection in Location Features.</p>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full border-collapse border border-gray-300 rounded">
+                            <thead>
+                                <tr class="bg-gray-100">
+                                    <th class="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700">Language</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-left font-semibold text-gray-700">Voice</th>
+                                    <th class="border border-gray-300 px-4 py-2 text-center font-semibold text-gray-700" style="width: 140px;">Test / Delete</th>
+                                </tr>
+                            </thead>
+                            <tbody id="locationOverrideLanguagesTable">
+                                <!-- Table rows will be dynamically populated here -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
+
+
+        <!-- Audio Settings Section -->
+        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                <i class="fas fa-volume-up mr-2 text-green-600"></i>Audio Settings
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="speechRate" class="block text-lg font-medium text-gray-700 mb-2">Announcement Speech Rate (WPM):</label>
+                    <input type="number" id="speechRate" name="speechRate" min="100" max="300" step="10" class="w-full max-w-xs" placeholder="e.g., 180">
+                    <p class="text-xs text-gray-500 mt-1">Words Per Minute for server-side announcements (e.g., 100-300, default ~180).</p>
+                </div>
+                <div>
+                    <label for="applicationVolume" class="block text-lg font-medium text-gray-700 mb-2">Application Volume:</label>
+                    <div class="flex items-center space-x-4">
+                        <input type="range" id="applicationVolume" name="applicationVolume" min="0" max="10" step="1" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider" value="8">
+                        <span id="volumeDisplay" class="text-lg font-semibold text-gray-700 min-w-[3rem]">8/10</span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Volume level the app will set when loaded (0-10, where 10 is maximum volume).</p>
+                </div>
+            </div>
+        </div>
+
 
         <!-- Email Settings Section -->
         <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
@@ -948,6 +977,9 @@
                                                 <li>• <strong>Tap Screen:</strong> Direct touch interface optimized for touchscreen devices. Best for users who can tap or touch buttons directly.</li>
                                             </ul>
                                         </div>
+                                        <p><strong>Wake Word:</strong> The phrase used to activate voice commands (e.g., "Hey Bravo"). Set both the interjection (Hey) and name (Bravo).</p>
+                                        <p><strong>Enable Mood Selection:</strong> Shows a mood selection screen at session start to personalize AI responses.</p>
+                                        <p><strong>Location:</strong> Set the 2-letter country code (e.g., US, UK, CA) to determine local info.</p>
                                         <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded mt-2">
                                             <p class="text-xs text-red-900"><i class="fas fa-exclamation-triangle mr-1"></i><strong>Important:</strong> After changing the User Interface setting, you must log out and log back in to the newly selected interface for the changes to take effect.</p>
                                         </div>
@@ -957,17 +989,17 @@
                         </div>
                     </div>
 
-                    <!-- AI Settings -->
+                    <!-- Tap Interface Settings -->
                     <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
                         <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                             <div class="flex-shrink-0 mt-1">
-                                <i class="fas fa-robot text-blue-600 text-lg"></i>
+                                <i class="fas fa-hand-pointer text-indigo-600 text-lg"></i>
                             </div>
                             <div class="ml-3 flex-1">
                                 <div class="flex items-center justify-between">
-                                    <div class="font-semibold text-gray-900">AI Settings</div>
+                                    <div class="font-semibold text-gray-900">Tap Interface Settings</div>
                                     <div class="flex items-center space-x-2">
-                                        <button onclick="event.stopPropagation(); startSettingsGuide('ai-settings');" class="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition flex items-center">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('tap-settings');" class="px-3 py-1 bg-indigo-500 text-white text-xs rounded-lg hover:bg-indigo-600 transition flex items-center">
                                             <i class="fas fa-route mr-1"></i>Guide Me
                                         </button>
                                         <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
@@ -975,14 +1007,45 @@
                                 </div>
                                 <div class="guide-details hidden mt-2">
                                     <div class="text-sm text-gray-700 space-y-2">
-                                        <p><strong>Wake Word:</strong> The phrase used to activate voice commands (e.g., "Hey Brady"). Set both the interjection (Hey) and name (Brady).</p>
-                                        <p><strong>Number of AI Options:</strong> How many response choices AI provides when generating dynamic content. Higher numbers give more variety but take longer to scan through.</p>
-                                        <p><strong>Freestyle Word Options:</strong> Number of word suggestions AI provides in freestyle communication mode.</p>
+                                        <p><strong>Tap Words Rows:</strong> Number of rows in the Tap Interface grid (default 4).</p>
+                                        <p><strong>Tap Phrases Rows:</strong> Number of Phrases rows in the Tap Interface (default 1).</p>
+                                        <p><strong>Vocabulary Level:</strong> Controls the complexity of AI-generated vocabulary to match the user's communication level.</p>
+                                        <p><strong>Disable Tap Interface Pictograms:</strong> When enabled, the Tap Interface will not show pictogram/images on buttons and will not use Sight Word formatting. Buttons will display text only.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scan Interface Settings -->
+                    <div class="settings-guide-item cursor-pointer" onclick="toggleSettingsGuideDetails(this)">
+                        <div class="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                            <div class="flex-shrink-0 mt-1">
+                                <i class="fas fa-search text-orange-600 text-lg"></i>
+                            </div>
+                            <div class="ml-3 flex-1">
+                                <div class="flex items-center justify-between">
+                                    <div class="font-semibold text-gray-900">Scan Interface Settings</div>
+                                    <div class="flex items-center space-x-2">
+                                        <button onclick="event.stopPropagation(); startSettingsGuide('scanning');" class="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition flex items-center">
+                                            <i class="fas fa-route mr-1"></i>Guide Me
+                                        </button>
+                                        <i class="fas fa-chevron-down text-gray-400 transition-transform"></i>
+                                    </div>
+                                </div>
+                                <div class="guide-details hidden mt-2">
+                                    <div class="text-sm text-gray-700 space-y-2">
+                                        <p><strong>Scanning Mode:</strong> Choose how scanning advances. Auto moves through options automatically based on scan speed. Step advances one option per switch activation.</p>
+                                        <p><strong>Auditory Scan Speed:</strong> Time in milliseconds between button highlights during scanning. Lower = faster, higher = slower.</p>
+                                        <p><strong>Scan Loop Limit:</strong> Number of complete scan cycles before pausing (0 = unlimited, 1-10 = limited cycles).</p>
+                                        <p><strong>Disable Auditory Scanning:</strong> Turns off automatic scanning completely. User must manually navigate buttons.</p>
+                                        <p><strong>Wait For Switch to Start Scanning:</strong> When enabled, scanning will not begin automatically. User must press their switch to start scanning on initial page load.</p>
+                                        <p><strong>Page Ready Chime:</strong> When enabled, a chime will play after a page has been loaded and is waiting for the switch to begin scanning.</p>
+                                        <p><strong>Number of AI Options:</strong> Number of AI-generated options for Auditory Scanning pages and Quick Talk.</p>
+                                        <p><strong>Freestyle Word Options:</strong> Number of AI word suggestions for the Freestyle page.</p>
                                         <p><strong>Turn off Button Summary:</strong> When enabled, buttons show full speech text instead of summarized versions.</p>
                                         <p><strong>Auto Clean in Freestyle:</strong> Automatically formats and cleans text before speaking in freestyle mode.</p>
-                                        <p><strong>Enable Mood Selection:</strong> Shows a mood selection screen at session start to personalize AI responses based on the user's current emotional state.</p>
-                                        <p><strong>Location:</strong> Set the 2-letter country code (e.g., US, UK, CA) to provide location-relevant information.</p>
-                                        <p><strong>Vocabulary Level:</strong> Controls the complexity of AI-generated vocabulary (Emergent = basic words, Functional = practical daily vocabulary, Developing = academic terms, Proficient = sophisticated language).</p>
+                                        <p><strong>Enable Scanning Pictograms:</strong> Show pictogram images on buttons for the Auditory Scanning interface.</p>
                                     </div>
                                 </div>
                             </div>
@@ -1036,8 +1099,6 @@
                                     <div class="text-sm text-gray-700 space-y-2">
                                         <p><strong>Button Size:</strong> Slider controls button size by adjusting grid columns (2 = largest buttons, 18 = smallest buttons).</p>
                                         <p><strong>Spell Page Letter Order:</strong> How letters are arranged on the spelling page (Alphabetical, QWERTY, or Frequency-based).</p>
-                                        <p><strong>Enable Scanning Pictograms:</strong> Shows pictogram images on buttons for the Auditory Scanning interface.</p>
-                                        <p><strong>Disable Tap Interface Pictograms:</strong> When checked, the Tap Interface will not show any pictogram/images on buttons and will not use Sight Word formatting. All buttons display text only.</p>
                                         <p><strong>Enable Sight Word Logic:</strong> Uses Dolch sight word lists to show common words as text-only (no images).</p>
                                         <p><strong>Sight Words Grade Level:</strong> Choose which grade level of sight words to display as text-only. Higher grades include all lower grade words.</p>
                                         <p><strong>Display Splash Screen:</strong> Shows a speech bubble displaying text being announced.</p>
@@ -1118,7 +1179,7 @@
         const guides = {
             'security': securityGuide,
             'interface': interfaceGuide,
-            'ai-settings': aiSettingsGuide,
+            'tap-settings': tapSettingsGuide,
             'audio': audioGuide,
             'display': displayGuide,
             'scanning': scanningGuide
@@ -1183,21 +1244,8 @@
                 }
             },
             {
-                title: 'Important: Logout Required',
-                content: 'After changing the User Interface setting, you MUST log out and log back in to the newly selected interface for the changes to take effect. The interface change will not apply until you do this.',
-                highlight: null,
-                action: function() {},
-                cleanup: function() {}
-            }
-        ]
-    };
-    
-    const aiSettingsGuide = {
-        id: 'ai-settings',
-        steps: [
-            {
                 title: 'Wake Word Configuration',
-                content: 'Set the phrase that activates voice commands. Enter an interjection (like "Hey") and a name (like "Friend"). The user will say this phrase before voice commands.',
+                content: 'Set the phrase that activates voice commands. Enter an interjection (like "Hey") and a name (like "Bravo"). The user will say this phrase before voice commands.',
                 highlight: '#wakeWordInterjection',
                 action: function() {
                     const container = document.querySelector('#wakeWordInterjection')?.closest('.flex.space-x-2');
@@ -1208,74 +1256,6 @@
                 },
                 cleanup: function() {
                     const container = document.querySelector('#wakeWordInterjection')?.closest('.flex.space-x-2');
-                    if (container) container.classList.remove('guide-highlight-target');
-                }
-            },
-            {
-                title: 'Number of AI Options',
-                content: 'Set how many response options the AI will generate. More options give more choices but take longer to scan through. Use #LLMOptions placeholder in button queries to reference this number.',
-                highlight: '#LLMOptions',
-                action: function() {
-                    const input = document.getElementById('LLMOptions');
-                    if (input) {
-                        input.classList.add('guide-highlight-target');
-                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const input = document.getElementById('LLMOptions');
-                    if (input) input.classList.remove('guide-highlight-target');
-                }
-            },
-            {
-                title: 'Freestyle Word Options',
-                content: 'Number of word suggestions AI provides in freestyle communication mode. Higher numbers offer more word choices for sentence building.',
-                highlight: '#FreestyleOptions',
-                action: function() {
-                    const input = document.getElementById('FreestyleOptions');
-                    if (input) {
-                        input.classList.add('guide-highlight-target');
-                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const input = document.getElementById('FreestyleOptions');
-                    if (input) input.classList.remove('guide-highlight-target');
-                }
-            },
-            {
-                title: 'Turn off Button Summary',
-                content: 'When enabled, buttons will show the full speech option instead of a summary. Useful when you want users to see exactly what will be spoken.',
-                highlight: '#SummaryOff',
-                action: function() {
-                    const checkbox = document.getElementById('SummaryOff');
-                    const container = checkbox?.closest('div');
-                    if (container) {
-                        container.classList.add('guide-highlight-target');
-                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const checkbox = document.getElementById('SummaryOff');
-                    const container = checkbox?.closest('div');
-                    if (container) container.classList.remove('guide-highlight-target');
-                }
-            },
-            {
-                title: 'Auto Clean in Freestyle',
-                content: 'Transforms selected words into more conversational sentences before speaking. For example, "want park" becomes "I want to go to the park" for more natural communication.',
-                highlight: '#autoClean',
-                action: function() {
-                    const checkbox = document.getElementById('autoClean');
-                    const container = checkbox?.closest('div');
-                    if (container) {
-                        container.classList.add('guide-highlight-target');
-                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const checkbox = document.getElementById('autoClean');
-                    const container = checkbox?.closest('div');
                     if (container) container.classList.remove('guide-highlight-target');
                 }
             },
@@ -1314,6 +1294,51 @@
                 }
             },
             {
+                title: 'Important: Logout Required',
+                content: 'After changing the User Interface setting, you MUST log out and log back in to the newly selected interface for the changes to take effect. The interface change will not apply until you do this.',
+                highlight: null,
+                action: function() {},
+                cleanup: function() {}
+            }
+        ]
+    };
+    
+    const tapSettingsGuide = {
+        id: 'tap-settings',
+        steps: [
+            {
+                title: 'Tap Words Rows',
+                content: 'Number of rows in the Tap Interface word grid (default 4). Adjust to fit more or fewer words on screen.',
+                highlight: '#tapWordsRows',
+                action: function() {
+                    const input = document.getElementById('tapWordsRows');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('tapWordsRows');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Tap Phrases Rows',
+                content: 'Number of Phrases rows in the Tap Interface (default 1). Adjust to configure the rows dedicated for conversational phrase generation.',
+                highlight: '#tapPhrasesRows',
+                action: function() {
+                    const input = document.getElementById('tapPhrasesRows');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('tapPhrasesRows');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
                 title: 'Vocabulary Level',
                 content: 'Set the complexity of AI-generated vocabulary to match the user\'s communication level. Choose Emergent, Functional, Developing, or Proficient based on current language needs.',
                 highlight: '#vocabularyLevel',
@@ -1329,6 +1354,24 @@
                     if (select) select.classList.remove('guide-highlight-target');
                 }
             },
+            {
+                title: 'Disable Tap Interface Pictograms',
+                content: 'When enabled, the Tap Interface will not show pictogram images on buttons and will not use Dolch Sight Word formatting. All buttons display text only.',
+                highlight: '#disableTapPictograms',
+                action: function() {
+                    const checkbox = document.getElementById('disableTapPictograms');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('disableTapPictograms');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            }
         ]
     };
     
@@ -1427,42 +1470,7 @@
                     if (select) select.classList.remove('guide-highlight-target');
                 }
             },
-            {
-                title: 'Enable Pictograms',
-                content: 'Show images on buttons to aid recognition for the Auditory Scanning interface. Tap Interface pictograms are controlled separately by the Disable Tap Interface Pictograms setting.',
-                highlight: '#enablePictograms',
-                action: function() {
-                    const checkbox = document.getElementById('enablePictograms');
-                    const container = checkbox?.closest('div');
-                    if (container) {
-                        container.classList.add('guide-highlight-target');
-                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const checkbox = document.getElementById('enablePictograms');
-                    const container = checkbox?.closest('div');
-                    if (container) container.classList.remove('guide-highlight-target');
-                }
-            },
-            {
-                title: 'Disable Tap Interface Pictograms',
-                content: 'When enabled, Tap Interface buttons show text only (no pictograms/images) and Sight Word formatting is not applied.',
-                highlight: '#disableTapPictograms',
-                action: function() {
-                    const checkbox = document.getElementById('disableTapPictograms');
-                    const container = checkbox?.closest('div');
-                    if (container) {
-                        container.classList.add('guide-highlight-target');
-                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                },
-                cleanup: function() {
-                    const checkbox = document.getElementById('disableTapPictograms');
-                    const container = checkbox?.closest('div');
-                    if (container) container.classList.remove('guide-highlight-target');
-                }
-            },
+
             {
                 title: 'Sight Word Logic',
                 content: 'Use Dolch sight word lists to show common words as text-only (no images). Helps reading development by displaying frequently-used words as text.',
@@ -1636,6 +1644,92 @@
                 cleanup: function() {
                     const checkbox = document.getElementById('playWaitForSwitchChime');
                     const container = checkbox?.closest('.flex.items-center');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Number of AI Options',
+                content: 'Set how many response options the AI will generate. More options give more choices but take longer to scan through. Use #LLMOptions placeholder in button queries to reference this number.',
+                highlight: '#LLMOptions',
+                action: function() {
+                    const input = document.getElementById('LLMOptions');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('LLMOptions');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Freestyle Word Options',
+                content: 'Number of word suggestions AI provides in freestyle communication mode. Higher numbers offer more word choices for sentence building.',
+                highlight: '#FreestyleOptions',
+                action: function() {
+                    const input = document.getElementById('FreestyleOptions');
+                    if (input) {
+                        input.classList.add('guide-highlight-target');
+                        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const input = document.getElementById('FreestyleOptions');
+                    if (input) input.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Turn off Button Summary',
+                content: 'When enabled, buttons will show the full speech option instead of a summary. Useful when you want users to see exactly what will be spoken.',
+                highlight: '#SummaryOff',
+                action: function() {
+                    const checkbox = document.getElementById('SummaryOff');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('SummaryOff');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Auto Clean in Freestyle',
+                content: 'Transforms selected words into more conversational sentences before speaking. For example, "want park" becomes "I want to go to the park" for more natural communication.',
+                highlight: '#autoClean',
+                action: function() {
+                    const checkbox = document.getElementById('autoClean');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('autoClean');
+                    const container = checkbox?.closest('div');
+                    if (container) container.classList.remove('guide-highlight-target');
+                }
+            },
+            {
+                title: 'Enable Scanning Pictograms',
+                content: 'Show pictogram images on buttons for the Auditory Scanning interface.',
+                highlight: '#enablePictograms',
+                action: function() {
+                    const checkbox = document.getElementById('enablePictograms');
+                    const container = checkbox?.closest('div');
+                    if (container) {
+                        container.classList.add('guide-highlight-target');
+                        container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                },
+                cleanup: function() {
+                    const checkbox = document.getElementById('enablePictograms');
+                    const container = checkbox?.closest('div');
                     if (container) container.classList.remove('guide-highlight-target');
                 }
             }
@@ -1897,22 +1991,22 @@
                         }
                     },
                     {
-                        title: 'Navigate to AI Settings',
-                        icon: 'fa-robot',
+                        title: 'Navigate to User Interface Settings',
+                        icon: 'fa-user-cog',
                         content: `
-                            <p class="text-gray-700 mb-3">On the User Settings page, scroll to the AI Settings section.</p>
+                            <p class="text-gray-700 mb-3">On the User Settings page, scroll to the User Interface section.</p>
                             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
                                 <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the <strong>"Wake Word"</strong> setting</p>
                             </div>
                             <p class="text-sm text-gray-600">You'll see two input fields for the wake word (it must be exactly 2 words).</p>
                         `,
                         action: function() {
-                            // Scroll to AI Settings section and highlight the icon
+                            // Scroll to User Interface section and highlight the icon
                             const headers = document.querySelectorAll('h2');
                             for (const header of headers) {
-                                if (header.textContent.includes('AI Settings')) {
+                                if (header.textContent.includes('User Interface')) {
                                     header.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    const icon = header.querySelector('.fa-robot');
+                                    const icon = header.querySelector('.fa-user-cog');
                                     if (icon) {
                                         icon.classList.add('guide-highlight-target');
                                     }
@@ -1923,7 +2017,7 @@
                         cleanup: function() {
                             const headers = document.querySelectorAll('h2');
                             for (const header of headers) {
-                                const icon = header.querySelector('.fa-robot');
+                                const icon = header.querySelector('.fa-user-cog');
                                 if (icon) {
                                     icon.classList.remove('guide-highlight-target');
                                 }
@@ -2129,20 +2223,20 @@
                         }
                     },
                     {
-                        title: 'Navigate to AI Settings',
-                        icon: 'fa-robot',
+                        title: 'Navigate to Scan Interface Settings',
+                        icon: 'fa-search',
                         content: `
-                            <p class="text-gray-700 mb-3">Scroll to the AI Settings section.</p>
+                            <p class="text-gray-700 mb-3">Scroll to the Scan Interface Settings section.</p>
                             <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the AI Settings <i class="fas fa-robot text-blue-600"></i> section</p>
+                                <p class="text-sm"><i class="fas fa-info-circle text-blue-500 mr-2"></i>Look for the Scan Interface Settings <i class="fas fa-search text-orange-600"></i> section</p>
                             </div>
                         `,
                         action: function() {
                             const headers = document.querySelectorAll('h2');
                             for (const header of headers) {
-                                if (header.textContent.includes('AI Settings')) {
+                                if (header.textContent.includes('Scan Interface Settings')) {
                                     header.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    const icon = header.querySelector('.fa-robot');
+                                    const icon = header.querySelector('.fa-search');
                                     if (icon) icon.classList.add('guide-highlight-target');
                                     break;
                                 }
@@ -2422,16 +2516,16 @@
                         title: 'Find Scanning Settings',
                         icon: 'fa-tachometer-alt',
                         content: `
-                            <p class="text-gray-700 mb-3">Scroll to the Auditory Scanning Settings section where Scanning Mode, Scan Speed, and Loop Limit are configured.</p>
+                            <p class="text-gray-700 mb-3">Scroll to the Scan Interface Settings section where Scanning Mode, Scan Speed, and Loop Limit are configured.</p>
                             <div class="bg-orange-50 border-l-4 border-orange-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-orange-600 mr-2"></i>Look for the <strong>Auditory Scanning Settings</strong> <i class="fas fa-search text-orange-600"></i> heading</p>
+                                <p class="text-sm"><i class="fas fa-info-circle text-orange-600 mr-2"></i>Look for the <strong>Scan Interface Settings</strong> <i class="fas fa-search text-orange-600"></i> heading</p>
                             </div>
                         `,
                         action: function() {
-                            // Find the Auditory Scanning Settings section header
+                            // Find the Scan Interface Settings section header
                             const headers = document.querySelectorAll('h2');
                             for (const header of headers) {
-                                if (header.textContent.includes('Auditory Scanning Settings')) {
+                                if (header.textContent.includes('Scan Interface Settings')) {
                                     header.scrollIntoView({ behavior: 'smooth', block: 'start' });
                                     header.classList.add('guide-highlight-target');
                                     break;
@@ -2702,21 +2796,21 @@
                         }
                     },
                     {
-                        title: 'Navigate to AI Settings',
-                        icon: 'fa-robot',
+                        title: 'Navigate to Scan Interface Settings',
+                        icon: 'fa-search',
                         content: `
-                            <p class="text-gray-700 mb-3">Scroll to the AI Settings section.</p>
+                            <p class="text-gray-700 mb-3">Scroll to the Scan Interface Settings section.</p>
                             <div class="bg-purple-50 border-l-4 border-purple-500 p-3 mb-3">
-                                <p class="text-sm"><i class="fas fa-info-circle text-purple-500 mr-2"></i>Look for the <strong>"Auto Clean"</strong> setting in the Freestyle subsection</p>
+                                <p class="text-sm"><i class="fas fa-info-circle text-purple-500 mr-2"></i>Look for the <strong>"Auto Clean"</strong> setting</p>
                             </div>
                             <p class="text-sm text-gray-600">This setting enhances freestyle input to make it more conversational.</p>
                         `,
                         action: function() {
                             const headers = document.querySelectorAll('h2');
                             for (const header of headers) {
-                                if (header.textContent.includes('AI Settings')) {
+                                if (header.textContent.includes('Scan Interface Settings')) {
                                     header.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    const icon = header.querySelector('.fa-robot');
+                                    const icon = header.querySelector('.fa-search');
                                     if (icon) {
                                         icon.classList.add('guide-highlight-target');
                                     }
@@ -2727,7 +2821,7 @@
                         cleanup: function() {
                             const headers = document.querySelectorAll('h2');
                             for (const header of headers) {
-                                const icon = header.querySelector('.fa-robot');
+                                const icon = header.querySelector('.fa-search');
                                 if (icon) {
                                     icon.classList.remove('guide-highlight-target');
                                 }

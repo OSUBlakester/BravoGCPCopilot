@@ -1,3 +1,8 @@
+// --- Pre-warm SpeechSynthesis Voices ---
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+}
+
 // --- Global Flags ---
 let isAuthContextReady = false;
 let isDomContentLoaded = false;
@@ -53,6 +58,8 @@ const CountryCodeInput = document.getElementById('CountryCode');
 const speechRateInput = document.getElementById('speechRate');
 const LLMOptionsInput = document.getElementById('LLMOptions');
 const FreestyleOptionsInput = document.getElementById('FreestyleOptions');
+const tapWordsRowsInput = document.getElementById('tapWordsRows');
+const tapPhrasesRowsInput = document.getElementById('tapPhrasesRows');
 const scanLoopLimitInput = document.getElementById('scanLoopLimit');
 const scanModeInput = document.getElementById('scanMode');
 const ScanningOffInput = document.getElementById('ScanningOff');
@@ -64,6 +71,9 @@ const interfaceTapInput = document.getElementById('interfaceTap');
 const SummaryOffInput = document.getElementById('SummaryOff');
 const enablePictogramsInput = document.getElementById('enablePictograms');
 const disableTapPictogramsInput = document.getElementById('disableTapPictograms');
+const useHybridPagesCheckbox = document.getElementById('useHybridPages');
+const tapDynamicRowsInput = document.getElementById('tapDynamicRows');
+const dynamicRowsContainer = document.getElementById('dynamicRowsContainer');
 const enableSightWordsInput = document.getElementById('enableSightWords');
 const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const autoCleanInput = document.getElementById('autoClean');
@@ -77,6 +87,7 @@ const ttsVoiceStatus = document.getElementById('tts-voice-status');
 const userLanguageSelect = document.getElementById('userLanguage');
 const defaultPartnerLanguageSelect = document.getElementById('defaultPartnerLanguage');
 const defaultPartnerVoiceSelect = document.getElementById('defaultPartnerVoiceSelect');
+const voiceStyleInputs = document.querySelectorAll('input[name="voiceStyle"]');
 const locationOverrideLanguagesSelect = document.getElementById('locationOverrideLanguages');
 const locationOverrideLanguagesTable = document.getElementById('locationOverrideLanguagesTable');
 const addLocationOverrideRowButton = document.getElementById('addLocationOverrideRowButton');
@@ -125,6 +136,183 @@ let settingsStatus = null; // Changed to let
 let currentSettings = {};
 let availableVoices = []; // To store loaded voices
 
+function getSelectedVoiceStyle() {
+    const selected = document.querySelector('input[name="voiceStyle"]:checked');
+    return selected ? selected.value : 'adult';
+}
+
+function shouldUseBrowserSpeechFallback(error) {
+    const errorStr = String(error?.message || error?.detail || error || '');
+    const message = errorStr.toLowerCase();
+    const shouldFallback = (
+        message.includes('google') ||
+        message.includes('credential') ||
+        message.includes('reauth') ||
+        message.includes('login') ||
+        message.includes('gcloud') ||
+        message.includes('auth') ||
+        message.includes('azure') ||
+        message.includes('unavailable') ||
+        message.includes('not configured') ||
+        message.includes('tts') ||
+        message.includes('503') ||
+        message.includes('500') ||
+        message.includes('failed')
+    );
+    console.log(`[TTS Fallback] shouldUseBrowserSpeechFallback checking error: "${errorStr}". Result: ${shouldFallback}`);
+    return shouldFallback;
+}
+
+function inferLocaleFromVoiceName(voiceName) {
+    const match = String(voiceName || '').match(/^([a-z]{2}-[A-Za-z]{2,4})/);
+    return match ? match[1].replace('_', '-') : 'en-US';
+}
+
+function getBrowserSpeechRate(voiceStyle) {
+    switch (voiceStyle) {
+        case 'child':
+            return 1.15;
+        default:
+            return 1.0;
+    }
+}
+
+// Keep loadBrowserVoices for backward compatibility, but we avoid calling it synchronously to prevent losing user gesture.
+function loadBrowserVoices() {
+    return new Promise((resolve) => {
+        const synth = window.speechSynthesis;
+        if (!synth) {
+            resolve([]);
+            return;
+        }
+
+        const existingVoices = synth.getVoices();
+        if (existingVoices.length > 0) {
+            resolve(existingVoices);
+            return;
+        }
+
+        const handleVoicesChanged = () => {
+            synth.removeEventListener('voiceschanged', handleVoicesChanged);
+            resolve(synth.getVoices());
+        };
+
+        synth.addEventListener('voiceschanged', handleVoicesChanged);
+        window.setTimeout(() => {
+            synth.removeEventListener('voiceschanged', handleVoicesChanged);
+            resolve(synth.getVoices());
+        }, 1000);
+    });
+}
+
+async function playBrowserSpeechFallback(text, voiceName, voiceStyle) {
+    if (!window.speechSynthesis) {
+        throw new Error('Browser speech preview is not supported in this browser.');
+    }
+
+    const runSpeech = (useVoice) => {
+        return new Promise((resolve, reject) => {
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.activeUtterance = utterance; // Keep global reference to prevent GC
+
+            const locale = inferLocaleFromVoiceName(voiceName);
+            utterance.lang = locale;
+            utterance.rate = getBrowserSpeechRate(voiceStyle);
+
+            if (useVoice) {
+                const voices = window.speechSynthesis.getVoices() || [];
+                const localeLower = locale.toLowerCase();
+                const matchingVoice = voices.find((voice) => String(voice.lang || '').toLowerCase() === localeLower)
+                    || voices.find((voice) => String(voice.lang || '').toLowerCase().startsWith(localeLower.split('-')[0]))
+                    || null;
+
+                if (matchingVoice) {
+                    console.log(`[TTS Fallback] Attempting with voice: ${matchingVoice.name} (${matchingVoice.lang})`);
+                    utterance.voice = matchingVoice;
+                }
+            } else {
+                console.log(`[TTS Fallback] Attempting with default browser voice for locale: ${locale}`);
+            }
+
+            const startTime = Date.now();
+            let hasCompleted = false;
+
+            utterance.onend = () => {
+                const duration = Date.now() - startTime;
+                console.log(`[TTS Fallback] onend fired. Duration: ${duration}ms`);
+                window.activeUtterance = null;
+                hasCompleted = true;
+                
+                // If it completed in less than 75ms, it's a silent failure/skipped play
+                if (duration < 75) {
+                    reject(new Error(`Speech completed too quickly (${duration}ms) - silent abort.`));
+                } else {
+                    resolve();
+                }
+            };
+
+            utterance.onerror = (event) => {
+                console.error('[TTS Fallback] onerror fired. Event:', event);
+                window.activeUtterance = null;
+                hasCompleted = true;
+                reject(new Error(event?.error || event?.message || 'Browser speech preview failed.'));
+            };
+
+            window.speechSynthesis.speak(utterance);
+        });
+    };
+
+    const speaking = window.speechSynthesis.speaking;
+    if (speaking) {
+        window.speechSynthesis.cancel();
+    }
+
+    const startSpeak = async () => {
+        try {
+            // First attempt using the matched voice
+            await runSpeech(true);
+        } catch (err) {
+            console.warn('[TTS Fallback] Primary voice attempt failed or was silent:', err.message);
+            console.log('[TTS Fallback] Trying secondary attempt using browser default voice...');
+            
+            // Second attempt using the browser default voice
+            try {
+                await runSpeech(false);
+            } catch (err2) {
+                console.error('[TTS Fallback] Secondary fallback attempt also failed:', err2.message);
+                throw new Error('Browser speech preview failed to produce sound.');
+            }
+        }
+    };
+
+    if (speaking) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await startSpeak();
+}
+
+async function handleVoiceTestFailure(error, text, selectedVoice, targetElement, successMessage) {
+    if (!shouldUseBrowserSpeechFallback(error)) {
+        console.warn('[TTS Fallback] Fallback not allowed for this error. Throwing original error.');
+        throw error;
+    }
+
+    console.log(`[TTS Fallback] Executing browser speech fallback. Text: "${text}", Voice: "${selectedVoice}"`);
+    await playBrowserSpeechFallback(text, selectedVoice, getSelectedVoiceStyle());
+    console.log('[TTS Fallback] Browser speech fallback completed successfully.');
+    showTemporaryStatus(targetElement, `${successMessage} (browser preview)`, false, 4000);
+}
+
+function setSelectedVoiceStyle(style) {
+    let normalized = ['adult', 'child'].includes(style) ? style : 'adult';
+    if (style === 'teen') {
+        normalized = 'child';
+    }
+    voiceStyleInputs.forEach(input => {
+        input.checked = input.value === normalized;
+    });
+}
+
 const SUPPORTED_LANGUAGE_OPTIONS = [
     { value: 'en-US', label: 'English (US)' },
     { value: 'es-US', label: 'Spanish (US)' },
@@ -134,6 +322,8 @@ const SUPPORTED_LANGUAGE_OPTIONS = [
     { value: 'pt-BR', label: 'Portuguese (Brazil)' },
     { value: 'ar-XA', label: 'Arabic' }
 ];
+
+// Style configuration hints removed. Filtering is now done strictly by provider (Google vs Azure).
 
 function getSelectedMultiValues(selectEl) {
     if (!selectEl) return [];
@@ -174,9 +364,32 @@ function getVoicesForLocale(locale) {
     });
 }
 
-function fillVoiceSelect(selectEl, locale, selectedVoice = '') {
+function filterVoicesByStyle(voices, voiceStyle) {
+    if (!Array.isArray(voices) || voices.length === 0) return [];
+    let style = ['adult', 'child'].includes(voiceStyle) ? voiceStyle : 'adult';
+    if (voiceStyle === 'teen') {
+        style = 'child';
+    }
+
+    let filtered = [];
+    if (style === 'child') {
+        filtered = voices.filter(v => v.provider === 'azure');
+    } else {
+        filtered = voices.filter(v => v.provider === 'google');
+    }
+
+    // Never strand the user with an empty list.
+    return filtered.length > 0 ? filtered : voices;
+}
+
+function fillVoiceSelect(selectEl, locale, selectedVoice = '', options = {}) {
     if (!selectEl) return;
-    const voices = getVoicesForLocale(locale);
+    const applyStyleFilter = options.applyStyleFilter === true;
+    const voiceStyle = options.voiceStyle || getSelectedVoiceStyle();
+
+    const localeVoices = getVoicesForLocale(locale);
+    const voices = applyStyleFilter ? filterVoicesByStyle(localeVoices, voiceStyle) : localeVoices;
+
     selectEl.innerHTML = '<option value="">-- Select a Voice --</option>';
     voices.forEach(voice => {
         const option = document.createElement('option');
@@ -184,6 +397,15 @@ function fillVoiceSelect(selectEl, locale, selectedVoice = '') {
         option.textContent = `${voice.name} (${String(voice.ssml_gender || 'unknown').toLowerCase()})`;
         selectEl.appendChild(option);
     });
+
+    // Preserve already-saved voices even when the style filter hides them.
+    if (selectedVoice && !voices.some((voice) => voice.name === selectedVoice)) {
+        const selectedOption = document.createElement('option');
+        selectedOption.value = selectedVoice;
+        selectedOption.textContent = `${selectedVoice} (currently selected)`;
+        selectEl.appendChild(selectedOption);
+    }
+
     if (selectedVoice) {
         selectEl.value = selectedVoice;
     }
@@ -407,11 +629,18 @@ function getLocationOverrideVoiceMapFromUI() {
 function refreshLanguageDependentVoiceControls() {
     const partnerLocale = defaultPartnerLanguageSelect ? defaultPartnerLanguageSelect.value : 'en-US';
     const selectedPartnerVoice = defaultPartnerVoiceSelect ? defaultPartnerVoiceSelect.value : '';
-    fillVoiceSelect(defaultPartnerVoiceSelect, partnerLocale, selectedPartnerVoice);
+    const currentVoiceStyle = getSelectedVoiceStyle();
+    fillVoiceSelect(defaultPartnerVoiceSelect, partnerLocale, selectedPartnerVoice, {
+        applyStyleFilter: true,
+        voiceStyle: currentVoiceStyle
+    });
     
     // Also update test voice select to stay in sync
     if (ttsVoiceSelect) {
-        fillVoiceSelect(ttsVoiceSelect, partnerLocale, selectedPartnerVoice);
+        fillVoiceSelect(ttsVoiceSelect, partnerLocale, selectedPartnerVoice, {
+            applyStyleFilter: true,
+            voiceStyle: currentVoiceStyle
+        });
     }
     
     // Also update voice options in table rows
@@ -525,6 +754,21 @@ async function loadSettings() {
             console.log('DEBUG FreestyleOptions - currentSettings.FreestyleOptions:', currentSettings.FreestyleOptions);
             FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : ''; 
         }
+        if (tapWordsRowsInput) {
+            tapWordsRowsInput.value = currentSettings.tapWordsRows !== null && currentSettings.tapWordsRows !== undefined ? currentSettings.tapWordsRows : 4;
+        }
+        if (tapPhrasesRowsInput) {
+            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 1;
+        }
+        if (useHybridPagesCheckbox) {
+            useHybridPagesCheckbox.checked = currentSettings.useHybridPages === true;
+            if (dynamicRowsContainer) {
+                dynamicRowsContainer.style.display = useHybridPagesCheckbox.checked ? 'block' : 'none';
+            }
+        }
+        if (tapDynamicRowsInput) {
+            tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== null && currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 1;
+        }
         if (scanLoopLimitInput) { scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0; }
         if (scanModeInput) { scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto'; }
         
@@ -567,6 +811,7 @@ async function loadSettings() {
         if (defaultPartnerVoiceSelect) {
             defaultPartnerVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
         }
+        setSelectedVoiceStyle(currentSettings.voice_style || 'adult');
         if (ttsVoiceSelect) {
             ttsVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
         }
@@ -824,6 +1069,10 @@ async function saveSettings() {
     const newLLMOptions = LLMOptionsInput.value; 
     const newFreestyleOptions = FreestyleOptionsInput.value;
     console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
+    const newTapWordsRows = tapWordsRowsInput ? tapWordsRowsInput.value : '';
+    const newTapPhrasesRows = tapPhrasesRowsInput ? tapPhrasesRowsInput.value : '';
+    const newUseHybridPages = useHybridPagesCheckbox ? useHybridPagesCheckbox.checked : false;
+    const newTapDynamicRows = tapDynamicRowsInput ? tapDynamicRowsInput.value : '';
     const newScanLoopLimit = scanLoopLimitInput.value;
     const newScanMode = scanModeInput ? scanModeInput.value : 'auto';
     
@@ -857,6 +1106,7 @@ async function saveSettings() {
     const newUserLanguage = userLanguageSelect ? userLanguageSelect.value : 'en-US';
     const newDefaultPartnerLanguage = defaultPartnerLanguageSelect ? defaultPartnerLanguageSelect.value : 'en-US';
     const newDefaultPartnerVoice = defaultPartnerVoiceSelect ? defaultPartnerVoiceSelect.value : '';
+    const newVoiceStyle = getSelectedVoiceStyle();
     // Read from table-based location override languages
     const locationOverrideTableMap = getLocationOverrideLanguagesFromTable();
     const newLocationOverrideLanguages = Object.keys(locationOverrideTableMap);
@@ -910,6 +1160,18 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Freestyle Options. Must be a number (e.g., 1-50).';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
+    if (newTapWordsRows !== '' && (isNaN(parseInt(newTapWordsRows)) || parseInt(newTapWordsRows) < 1 || parseInt(newTapWordsRows) > 10)) {
+        settingsStatus.textContent = 'Invalid Tap Words Rows. Must be a number between 1 and 10.';
+        settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
+    }
+    if (newTapPhrasesRows !== '' && (isNaN(parseInt(newTapPhrasesRows)) || parseInt(newTapPhrasesRows) < 0 || parseInt(newTapPhrasesRows) > 10)) {
+        settingsStatus.textContent = 'Invalid Tap Phrases Rows. Must be a number between 0 and 10.';
+        settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
+    }
+    if (newTapDynamicRows !== '' && (isNaN(parseInt(newTapDynamicRows)) || parseInt(newTapDynamicRows) < 1 || parseInt(newTapDynamicRows) > 10)) {
+        settingsStatus.textContent = 'Invalid Tap Dynamic Rows. Must be a number between 1 and 10.';
+        settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
+    }
     if (newScanLoopLimit !== '' && (isNaN(parseInt(newScanLoopLimit)) || parseInt(newScanLoopLimit) < 0 || parseInt(newScanLoopLimit) > 10)) {
         settingsStatus.textContent = 'Invalid Scan Loop Limit. Must be 0 (unlimited) or 1-10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
@@ -953,6 +1215,10 @@ async function saveSettings() {
         applicationVolume: newApplicationVolume,
         LLMOptions: parseInt(newLLMOptions),
         FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
+        tapWordsRows: newTapWordsRows !== '' ? parseInt(newTapWordsRows) : 4,
+        tapPhrasesRows: newTapPhrasesRows !== '' ? parseInt(newTapPhrasesRows) : 1,
+        useHybridPages: newUseHybridPages,
+        tapDynamicRows: newTapDynamicRows !== '' ? parseInt(newTapDynamicRows) : 1,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
         scanMode: newScanMode,
         ScanningOff: newScanningOff,    
@@ -972,6 +1238,7 @@ async function saveSettings() {
         userLanguage: newUserLanguage,
         defaultPartnerLanguage: newDefaultPartnerLanguage,
         defaultPartnerVoice: newDefaultPartnerVoice,
+        voice_style: newVoiceStyle,
         locationOverrideLanguages: newLocationOverrideLanguages,
         locationOverrideVoices: newLocationOverrideVoices,
         gridColumns: newGridColumns, // Add gridColumns to save payload
@@ -1021,6 +1288,21 @@ async function saveSettings() {
             console.log('DEBUG FreestyleOptions - Reload value:', currentSettings.FreestyleOptions);
             FreestyleOptionsInput.value = currentSettings.FreestyleOptions !== null && currentSettings.FreestyleOptions !== undefined ? currentSettings.FreestyleOptions : '';
         }
+        if (tapWordsRowsInput) {
+            tapWordsRowsInput.value = currentSettings.tapWordsRows !== null && currentSettings.tapWordsRows !== undefined ? currentSettings.tapWordsRows : 4;
+        }
+        if (tapPhrasesRowsInput) {
+            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 1;
+        }
+        if (useHybridPagesCheckbox) {
+            useHybridPagesCheckbox.checked = currentSettings.useHybridPages === true;
+            if (dynamicRowsContainer) {
+                dynamicRowsContainer.style.display = useHybridPagesCheckbox.checked ? 'block' : 'none';
+            }
+        }
+        if (tapDynamicRowsInput) {
+            tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 1;
+        }
         if (scanLoopLimitInput) scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0;
         if (scanModeInput) scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto';
         if (ScanningOffInput) ScanningOffInput.checked = currentSettings.ScanningOff || false;
@@ -1043,6 +1325,7 @@ async function saveSettings() {
         if (defaultPartnerVoiceSelect) {
             defaultPartnerVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
         }
+        setSelectedVoiceStyle(currentSettings.voice_style || 'adult');
         if (ttsVoiceSelect) ttsVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
         // Update gridColumns slider after save
         if (gridColumnsSlider && currentSettings.gridColumns !== undefined) {
@@ -1095,10 +1378,22 @@ async function saveSettings() {
 async function testDefaultPartnerVoice() {
     if (!defaultPartnerVoiceSelect) return;
     const selectedVoice = defaultPartnerVoiceSelect.value;
+    const testText = "This is a test of the Default Partner Voice.";
     if (!selectedVoice) {
         showTemporaryStatus(settingsStatus, "Please select a Default Partner Voice to test.", true, 3000);
         return;
     }
+
+    // Synchronously unlock browser speech synthesis inside user gesture before the async fetch
+    if (window.speechSynthesis) {
+        try {
+            const unlockUtterance = new SpeechSynthesisUtterance('');
+            window.speechSynthesis.speak(unlockUtterance);
+        } catch (e) {
+            console.warn('[TTS Fallback] Failed to play silent unlock utterance:', e);
+        }
+    }
+
     showTemporaryStatus(settingsStatus, `Testing voice: ${selectedVoice}...`, false, 0);
     try {
         const response = await window.authenticatedFetch('/api/test-tts-voice', {
@@ -1106,7 +1401,8 @@ async function testDefaultPartnerVoice() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 voice_name: selectedVoice, 
-                text: "This is a test of the Default Partner Voice."
+                text: testText,
+                voice_style: getSelectedVoiceStyle()
             })
         });
         
@@ -1136,7 +1432,13 @@ async function testDefaultPartnerVoice() {
         }
     } catch (error) {
         console.error('Error testing voice:', error);
-        showTemporaryStatus(settingsStatus, `Error testing voice: ${error.message}`, true, 4000);
+        try {
+            console.log('[TTS Fallback] Attempting browser speech fallback for:', selectedVoice);
+            await handleVoiceTestFailure(error, testText, selectedVoice, settingsStatus, 'Default Partner Voice tested successfully');
+        } catch (fallbackError) {
+            console.error('[TTS Fallback] Fallback failed:', fallbackError);
+            showTemporaryStatus(settingsStatus, `Error testing voice: ${fallbackError.message}`, true, 4000);
+        }
     }
 }
 
@@ -1146,10 +1448,22 @@ async function testDefaultPartnerVoice() {
 async function testLocationOverrideVoice(voiceSelect) {
     if (!voiceSelect) return;
     const selectedVoice = voiceSelect.value;
+    const testText = "This is a test of the location override voice.";
     if (!selectedVoice) {
         alert("Please select a voice to test.");
         return;
     }
+
+    // Synchronously unlock browser speech synthesis inside user gesture before the async fetch
+    if (window.speechSynthesis) {
+        try {
+            const unlockUtterance = new SpeechSynthesisUtterance('');
+            window.speechSynthesis.speak(unlockUtterance);
+        } catch (e) {
+            console.warn('[TTS Fallback] Failed to play silent unlock utterance:', e);
+        }
+    }
+
     try {
         showTemporaryStatus(settingsStatus, `Testing voice: ${selectedVoice}...`, false, 0);
         const response = await window.authenticatedFetch('/api/test-tts-voice', {
@@ -1157,7 +1471,8 @@ async function testLocationOverrideVoice(voiceSelect) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 voice_name: selectedVoice, 
-                text: "This is a test of the location override voice."
+                text: testText,
+                voice_style: getSelectedVoiceStyle()
             })
         });
         
@@ -1187,7 +1502,13 @@ async function testLocationOverrideVoice(voiceSelect) {
         }
     } catch (error) {
         console.error('Error testing voice:', error);
-        showTemporaryStatus(settingsStatus, `Error testing voice: ${error.message}`, true, 4000);
+        try {
+            console.log('[TTS Fallback] Attempting browser speech fallback for:', selectedVoice);
+            await handleVoiceTestFailure(error, testText, selectedVoice, settingsStatus, 'Location override voice tested successfully');
+        } catch (fallbackError) {
+            console.error('[TTS Fallback] Fallback failed:', fallbackError);
+            showTemporaryStatus(settingsStatus, `Error testing voice: ${fallbackError.message}`, true, 4000);
+        }
     }
 }
 
@@ -1197,10 +1518,22 @@ async function testLocationOverrideVoice(voiceSelect) {
 async function testSelectedVoice() {
     if (!ttsVoiceSelect || !ttsVoiceStatus) return;
     const selectedVoice = ttsVoiceSelect.value;
+    const testText = "This is a test of the selected voice.";
     if (!selectedVoice) {
         showTemporaryStatus(ttsVoiceStatus, "Please select a voice to test.", true);
         return;
     }
+
+    // Synchronously unlock browser speech synthesis inside user gesture before the async fetch
+    if (window.speechSynthesis) {
+        try {
+            const unlockUtterance = new SpeechSynthesisUtterance('');
+            window.speechSynthesis.speak(unlockUtterance);
+        } catch (e) {
+            console.warn('[TTS Fallback] Failed to play silent unlock utterance:', e);
+        }
+    }
+
     showTemporaryStatus(ttsVoiceStatus, `Testing voice: ${selectedVoice}...`, false, 0);
     try {
         // Use the /api/test-tts-voice endpoint which is specifically for voice testing
@@ -1209,7 +1542,8 @@ async function testSelectedVoice() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 voice_name: selectedVoice, 
-                text: "This is a test of the selected voice."
+                text: testText,
+                voice_style: getSelectedVoiceStyle()
             })
         });
         
@@ -1285,7 +1619,13 @@ async function testSelectedVoice() {
         }
     } catch (error) {
         console.error('Error testing TTS voice:', error);
-        showTemporaryStatus(ttsVoiceStatus, `Error testing voice: ${error.message}`, true, 5000);
+        try {
+            console.log('[TTS Fallback] Attempting browser speech fallback for:', selectedVoice);
+            await handleVoiceTestFailure(error, testText, selectedVoice, ttsVoiceStatus, 'Test voice played successfully');
+        } catch (fallbackError) {
+            console.error('[TTS Fallback] Fallback failed:', fallbackError);
+            showTemporaryStatus(ttsVoiceStatus, `Error testing voice: ${fallbackError.message}`, true, 5000);
+        }
     }
 }
 
@@ -1449,10 +1789,20 @@ async function initializePage() {
 
         // Add Event Listeners
         if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
+        if (useHybridPagesCheckbox) {
+            useHybridPagesCheckbox.addEventListener('change', function() {
+                if (dynamicRowsContainer) {
+                    dynamicRowsContainer.style.display = this.checked ? 'block' : 'none';
+                }
+            });
+        }
         if (testTtsVoiceButton) testTtsVoiceButton.addEventListener('click', testSelectedVoice);
         const testDefaultPartnerVoiceButton = document.getElementById('testDefaultPartnerVoiceButton');
         if (testDefaultPartnerVoiceButton) testDefaultPartnerVoiceButton.addEventListener('click', testDefaultPartnerVoice);
         if (defaultPartnerLanguageSelect) defaultPartnerLanguageSelect.addEventListener('change', refreshLanguageDependentVoiceControls);
+        voiceStyleInputs.forEach((input) => {
+            input.addEventListener('change', refreshLanguageDependentVoiceControls);
+        });
         if (addLocationOverrideRowButton) addLocationOverrideRowButton.addEventListener('click', addLocationOverrideRow);
         if (locationOverrideLanguagesSelect) locationOverrideLanguagesSelect.addEventListener('change', refreshLanguageDependentVoiceControls);
         if (refreshEmailStatusButton) {

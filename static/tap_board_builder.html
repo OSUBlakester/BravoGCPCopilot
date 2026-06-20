@@ -77,7 +77,9 @@
                         <label for="selectBoard" class="block text-sm font-medium text-gray-700">Select Board</label>
                         <button id="showMigrationOnlyBtn" type="button" class="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 hidden" title="Show only boards created during migration that need configuration">Show Migration Boards</button>
                     </div>
-                    <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+                    <div class="flex flex-col gap-2">
+                        <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+                    </div>
                 </div>
                 <div>
                     <button id="createNewBoardBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Create New Board</button>
@@ -87,47 +89,15 @@
                 </div>
             </div>
             <p class="text-sm text-gray-600 mt-3">Recommended workflow: build or edit boards here first, then open Boards Menu to decide how those boards appear in Tap Interface.</p>
-            <p id="readOnlyHint" class="text-sm text-amber-700 mt-2 hidden">This board is read-only because it is a standard legacy/system board.</p>
+            <p id="readOnlyHint" class="text-sm text-amber-700 mt-2 hidden">This board is read-only (system board).</p>
         </div>
 
         <form id="boardForm" class="mb-6 p-4 border rounded-md bg-white">
             <h3 class="text-xl font-semibold mb-3">Board Details</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 gap-4">
                 <div>
                     <label for="boardLabel" class="block text-sm font-medium text-gray-700">Display Name</label>
                     <input type="text" id="boardLabel" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g., Home, Food, Feelings">
-                </div>
-                <div>
-                    <label for="boardType" class="block text-sm font-medium text-gray-700">Board Mode</label>
-                    <select id="boardType" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
-                        <option value="ai">AI-defined Board</option>
-                        <option value="static">Static Board</option>
-                        <option value="system">System Board</option>
-                    </select>
-                </div>
-            </div>
-
-            <div id="aiSettingsSection" class="mt-4">
-                <h4 class="font-semibold text-gray-800 mb-2">AI Settings</h4>
-                <div class="grid grid-cols-1 gap-3">
-                    <div>
-                        <label for="llmPrompt" class="block text-sm font-medium text-gray-700">LLM Prompt</label>
-                        <textarea id="llmPrompt" rows="3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe what the AI board should generate"></textarea>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div>
-                            <label for="promptTopic" class="block text-sm font-medium text-gray-700">Prompt Topic</label>
-                            <input type="text" id="promptTopic" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
-                        </div>
-                        <div>
-                            <label for="promptExamples" class="block text-sm font-medium text-gray-700">Prompt Examples</label>
-                            <input type="text" id="promptExamples" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
-                        </div>
-                        <div>
-                            <label for="promptExclusions" class="block text-sm font-medium text-gray-700">Prompt Exclusions</label>
-                            <input type="text" id="promptExclusions" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -151,8 +121,9 @@
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
                 <div class="flex gap-2 flex-wrap">
-                    <button id="setAllAfterSelectionBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Set All After Selection</button>
-                    <button id="aiBulkBuildBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>AI Build Options</button>
+                    <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
+                    <button id="aiBulkBuildBtn" type="button" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>Use AI to Create Options</button>
+                    <button id="setDynamicRowsBtn" type="button" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700"><i class="fas fa-sliders-h mr-1"></i>Configure Dynamic Rows</button>
                 </div>
             </div>
             <p class="text-gray-600 mb-3">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
@@ -169,8 +140,19 @@
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <div class="mb-4"><label for="buttonText" class="block text-sm font-medium text-gray-700 mb-2">Button Label</label><input type="text" id="buttonText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Enter button text"></div>
                     <div class="mb-4">
+                        <label for="buttonType" class="block text-sm font-medium text-gray-700 mb-2">Button Type</label>
+                        <select id="buttonType" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="static">Static (fixed content)</option>
+                            <option value="dynamic">Dynamic (AI-generated content)</option>
+                        </select>
+                    </div>
+                    <div class="mb-4" id="buttonLlmPromptWrapper" style="display:none;">
+                        <label for="buttonLlmPrompt" class="block text-sm font-medium text-gray-700 mb-2">AI Prompt</label>
+                        <textarea id="buttonLlmPrompt" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" placeholder="AI prompt for generating dynamic label & announcement on this button"></textarea>
+                    </div>
+                    <div class="mb-4" id="buttonTextWrapper"><label for="buttonText" class="block text-sm font-medium text-gray-700 mb-2">Button Label</label><input type="text" id="buttonText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Enter button text"></div>
+                    <div class="mb-4" id="buttonImageWrapper">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Button Image (Optional)</label>
                         <div class="flex items-center space-x-3">
                             <div id="assignedImagePreview" class="w-16 h-16 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center bg-gray-50 hidden"><img id="assignedImageThumb" class="w-full h-full object-cover rounded-md" alt="Selected image"></div>
@@ -181,8 +163,12 @@
                         </div>
                         <input type="hidden" id="assignedImageUrl" value="">
                     </div>
-                    <div class="mb-4"><label for="speechText" class="block text-sm font-medium text-gray-700 mb-2">Announcement (Optional)</label><input type="text" id="speechText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Announced out loud on selection"></div>
-                    <div class="mb-4">
+                    <div class="mb-4" id="speechTextWrapper"><label for="speechText" class="block text-sm font-medium text-gray-700 mb-2">Announcement (Optional)</label><input type="text" id="speechText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Announced out loud on selection"></div>
+                    <div class="mb-4 grid grid-cols-2 gap-3" id="variantFieldsWrapper">
+                        <div><label for="pastTenseVariant" class="block text-sm font-medium text-gray-700 mb-2">Past Tense (Optional)</label><input type="text" id="pastTenseVariant" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. wanted"></div>
+                        <div><label for="pluralVariant" class="block text-sm font-medium text-gray-700 mb-2">Plural (Optional)</label><input type="text" id="pluralVariant" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. friends"></div>
+                    </div>
+                    <div class="mb-4" id="customAudioFileWrapper">
                         <label for="customAudioFile" class="block text-sm font-medium text-gray-700 mb-2">Custom Audio File (Optional)</label>
                         <input type="file" id="customAudioFile" accept="audio/*" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <input type="hidden" id="customAudioFileUrl" value="">
@@ -190,7 +176,7 @@
                     </div>
                     <div class="mb-4">
                         <div class="flex items-center justify-between mb-2">
-                            <label for="afterSelection" class="block text-sm font-medium text-gray-700">After Selection</label>
+                            <label for="afterSelection" class="block text-sm font-medium text-gray-700">Action</label>
                             <button type="button" id="aiGenerateTargetBtn" class="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700" title="Use AI to generate a static target board for this button">
                                 <i class="fas fa-wand-magic-sparkles"></i> AI Generate Target Board
                             </button>
@@ -241,12 +227,12 @@
     <div id="setAllAfterSelectionModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5250;">
         <div class="relative top-32 mx-auto p-5 border w-11/12 max-w-md shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Set After Selection — All Buttons</h3>
+                <h3 class="text-lg font-bold text-gray-900">Set Action — All Buttons</h3>
                 <button id="closeSetAllAfterSelectionModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
             </div>
             <p class="text-sm text-gray-600 mb-4">Choose what happens after the user taps any button on this board. This will overwrite the current setting on every button.</p>
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">After Selection</label>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Action</label>
                 <select id="setAllAfterSelectionValue" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                     <option value="do_nothing">Do nothing (stay on current board)</option>
                     <option value="use_ai">Use AI to generate next options</option>
@@ -261,6 +247,68 @@
             <div class="flex justify-end gap-2 mt-5">
                 <button id="setAllAfterSelectionCancelBtn" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400">Cancel</button>
                 <button id="setAllAfterSelectionApplyBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Apply &amp; Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="setDynamicRowsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5250;">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-lg shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900" id="dynamicRowsModalTitle">Configure Dynamic Rows</h3>
+                <button id="closeSetDynamicRowsModal" type="button" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <!-- Step 1: AI Prompt + Examples/Exclusions -->
+            <div id="setDynamicRowsStep1">
+                <div class="mb-4">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Step 1 of 2</span>
+                    <h4 class="text-md font-semibold text-gray-800 mt-1">AI Prompt for Dynamic Rows</h4>
+                    <p class="text-sm text-gray-600 mt-1 mb-3">Specify what kind of words or phrases the AI should generate for the dynamic rows at the bottom of this board.</p>
+                    <textarea id="dynamicRowsPromptInput" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. Generate action words and phrases for common activities..."></textarea>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Examples <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                        <input type="text" id="dynamicRowsExamplesInput" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. Hello, Goodbye, Thank you">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Exclusions <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                        <input type="text" id="dynamicRowsExclusionsInput" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. words to avoid">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-5">
+                    <button id="setDynamicRowsCancelBtn1" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">Cancel</button>
+                    <button id="setDynamicRowsNextBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Next <i class="fas fa-arrow-right ml-1"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 2: Row Count -->
+            <div id="setDynamicRowsStep2" class="hidden">
+                <div class="mb-4">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Step 2 of 2</span>
+                    <h4 class="text-md font-semibold text-gray-800 mt-1">Number of Dynamic Rows</h4>
+                    <p class="text-sm text-gray-600 mt-1 mb-3">Set the number of dynamic rows (0 to <span id="maxDynamicRowsVal">10</span>). Enter 0 to disable dynamic rows.</p>
+                    <input type="number" id="dynamicRowsCountInput" min="0" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. 1">
+                </div>
+                <div class="flex justify-end gap-2 mt-5">
+                    <button id="setDynamicRowsBackBtn" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold"><i class="fas fa-arrow-left mr-1"></i> Back</button>
+                    <button id="setDynamicRowsCancelBtn2" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">Cancel</button>
+                    <button id="setDynamicRowsApplyBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Apply &amp; Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirmFillRowsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5350;">
+        <div class="relative top-40 mx-auto p-5 border w-11/12 max-w-md shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">Fill Vacated Rows?</h3>
+                <button id="closeConfirmFillRowsModal" type="button" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">You have reduced the number of dynamic rows. Would you like to fill the newly available rows with default static vocabulary options?</p>
+            <div class="flex justify-end gap-3 mt-5">
+                <button id="confirmFillRowsNoBtn" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">No, leave blank</button>
+                <button id="confirmFillRowsYesBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Yes, fill them</button>
             </div>
         </div>
     </div>
@@ -285,7 +333,7 @@
                     <input type="number" id="aiBulkOptionsPerRow" min="1" max="12" value="12" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                 </div>
                 <div>
-                    <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default After Selection</label>
+                    <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
                     <select id="aiBulkAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                         <option value="do_nothing">Do nothing (default)</option>
                         <option value="use_ai">Use AI</option>
@@ -369,12 +417,32 @@
     </div>
 
     <script>
-        const GRID_ROWS = 7, GRID_COLS = 12;
+        let GRID_ROWS = 7, GRID_COLS = 12;
+        let tapWordsRows = 4;
+        let tapDynamicRows = 1;
+        let useHybridPages = false;
         let authToken = null, currentAacUserId = null;
         let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
         let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
         let aiBulkPreviewOptions = [];
         let showMigrationBoardsOnly = false;
+
+        async function loadUserSettings() {
+            try {
+                const settingsResponse = await fetch('/api/settings', { headers: getAuthHeaders() });
+                if (settingsResponse.ok) {
+                    const settings = await settingsResponse.json();
+                    GRID_COLS = settings.gridColumns !== undefined ? settings.gridColumns : 6;
+                    tapWordsRows = settings.tapWordsRows !== undefined ? settings.tapWordsRows : 4;
+                    tapDynamicRows = settings.tapDynamicRows !== undefined ? settings.tapDynamicRows : 1;
+                    useHybridPages = settings.useHybridPages !== undefined ? settings.useHybridPages : false;
+                    GRID_ROWS = tapWordsRows;
+                    console.log(`Grid settings loaded: GRID_ROWS=${GRID_ROWS}, GRID_COLS=${GRID_COLS}, tapDynamicRows=${tapDynamicRows}, useHybridPages=${useHybridPages}`);
+                }
+            } catch (e) {
+                console.warn('Failed to load user grid settings:', e);
+            }
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
@@ -399,7 +467,6 @@
             });
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
-            document.getElementById('boardType').addEventListener('change', updateBoardModeUI);
             document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
             document.getElementById('translateAllAiBoardsBtn').addEventListener('click', openTranslateModal);
             document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
@@ -422,12 +489,32 @@
                 const val = document.getElementById('setAllAfterSelectionValue').value;
                 document.getElementById('setAllTargetBoardWrapper').classList.toggle('hidden', val !== 'navigate');
             });
+            document.getElementById('setDynamicRowsBtn').addEventListener('click', openSetDynamicRowsModal);
+            document.getElementById('closeSetDynamicRowsModal').addEventListener('click', closeSetDynamicRowsModal);
+            document.getElementById('setDynamicRowsCancelBtn1').addEventListener('click', closeSetDynamicRowsModal);
+            document.getElementById('setDynamicRowsCancelBtn2').addEventListener('click', closeSetDynamicRowsModal);
+            document.getElementById('setDynamicRowsNextBtn').addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById('setDynamicRowsStep1').classList.add('hidden');
+                document.getElementById('setDynamicRowsStep2').classList.remove('hidden');
+            });
+            document.getElementById('setDynamicRowsBackBtn').addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById('setDynamicRowsStep2').classList.add('hidden');
+                document.getElementById('setDynamicRowsStep1').classList.remove('hidden');
+            });
+            document.getElementById('setDynamicRowsApplyBtn').addEventListener('click', applySetDynamicRows);
             document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
             document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
             document.getElementById('saveButtonEdit').addEventListener('click', saveButtonEdit);
             document.getElementById('clearButtonBtn').addEventListener('click', clearCurrentButton);
             document.getElementById('showMigrationOnlyBtn').addEventListener('click', toggleMigrationBoardsFilter);
-            ['buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor', 'temporaryNavigation'].forEach(id => {
+            document.getElementById('buttonType').addEventListener('change', () => {
+                const val = document.getElementById('buttonType').value;
+                updateButtonEditorVisibility(val);
+                updateButtonPreview();
+            });
+            ['buttonType', 'buttonLlmPrompt', 'buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor', 'temporaryNavigation'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) { el.addEventListener('input', updateButtonPreview); el.addEventListener('change', updateButtonPreview); }
             });
@@ -484,13 +571,13 @@
                 currentAacUserId = sessionStorage.getItem('currentAacUserId');
                 if (!currentAacUserId) { window.location.href = 'auth.html'; return; }
                 authToken = await user.getIdToken();
+                await loadUserSettings();
                 await loadBoards();
                 const params = new URLSearchParams(window.location.search);
                 const boardId = params.get('board_id');
                 if (boardId && allBoards.some(b => b.id === boardId)) { document.getElementById('selectBoard').value = boardId; handleBoardSelected(); }
                 else if (allBoards.length > 0) {
-                    const firstEditable = allBoards.find(b => !isBoardReadOnly(b));
-                    document.getElementById('selectBoard').value = firstEditable ? firstEditable.id : allBoards[0].id;
+                    // populateBoardDropdown already set the first filtered board; just render it
                     handleBoardSelected();
                 }
             });
@@ -512,7 +599,7 @@
             const data = await response.json();
             allBoards = Array.isArray(data.boards) ? data.boards : [];
             boardSettings = data.board_settings || {};
-            populateBoardDropdown();
+            populateBoardDropdown(currentBoardData ? currentBoardData.id : null);
         }
 
         function getBoardsSortedByLabel(boards) {
@@ -524,22 +611,38 @@
             });
         }
 
-        function populateBoardDropdown() {
+        function populateBoardDropdown(forceBoardIdToShow = null) {
             const select = document.getElementById('selectBoard');
-            const currentValue = select.value;
+            let currentValue = select.value || forceBoardIdToShow;
+            if (forceBoardIdToShow) currentValue = forceBoardIdToShow;
+
             select.innerHTML = '<option value="">-- Select Board --</option>';
-            const editableBoards = allBoards.filter(board => !isBoardReadOnly(board));
+
+            // Filter out special non-traditional pages (Spell, Games, Numbers)
+            const editableBoards = allBoards.filter(board => {
+                if (!board) return false;
+                const b_id = String(board.id || '').toLowerCase();
+                const b_lbl = String(board.label || '').toLowerCase();
+                const spec_fn = String(board.special_function || '').toLowerCase();
+                if (spec_fn === 'spell' || spec_fn === 'games' || spec_fn === 'numbers') return false;
+                if (b_id.includes('spell') || b_id.includes('games') || b_id.includes('numbers')) return false;
+                if (b_lbl === 'spell' || b_lbl === 'games' || b_lbl === 'numbers') return false;
+                return true;
+            });
+
             const migrationBoards = editableBoards.filter(board => board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0);
             const filterBtn = document.getElementById('showMigrationOnlyBtn');
             filterBtn.classList.toggle('hidden', migrationBoards.length === 0);
+
             const boardsToShow = getBoardsSortedByLabel(showMigrationBoardsOnly ? migrationBoards : editableBoards);
             boardsToShow.forEach(board => {
                 const option = document.createElement('option');
                 option.value = board.id;
                 const tags = [];
                 if (board.id === boardSettings.home_board_id) tags.push('home');
-                if (board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0) tags.push('migration - needs config');
-                option.textContent = `${board.label || board.id} (${board.board_type || 'ai'})${tags.length ? ' [' + tags.join(', ') + ']' : ''}`;
+                if (board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0) tags.push('needs config');
+                if (isBoardReadOnly(board)) tags.push('read-only');
+                option.textContent = `${board.label || board.id}${tags.length ? ' [' + tags.join(', ') + ']' : ''}`;
                 select.appendChild(option);
             });
             if (currentValue && boardsToShow.some(b => b.id === currentValue)) {
@@ -562,10 +665,7 @@
         }
 
         function isBoardReadOnly(board) {
-            if (!board) return false;
-            const source = String(board.source || '').toLowerCase();
-            const boardType = String(board.board_type || '').toLowerCase();
-            return source === 'legacy_category' || boardType === 'system';
+            return false;
         }
 
         function handleBoardSelected() {
@@ -583,11 +683,6 @@
         function clearBoardForm() {
             currentBoardData = null;
             document.getElementById('boardLabel').value = '';
-            document.getElementById('boardType').value = 'ai';
-            document.getElementById('llmPrompt').value = '';
-            document.getElementById('promptTopic').value = '';
-            document.getElementById('promptExamples').value = '';
-            document.getElementById('promptExclusions').value = '';
             document.getElementById('setAsHomeBoard').checked = false;
             document.getElementById('buttonGrid').innerHTML = '';
             document.getElementById('readOnlyHint').classList.add('hidden');
@@ -645,25 +740,12 @@
         function bindBoardToForm() {
             if (!currentBoardData) return;
             document.getElementById('boardLabel').value = currentBoardData.label || '';
-            const bt = String(currentBoardData.board_type || 'ai').toLowerCase();
-            if (bt === 'static') document.getElementById('boardType').value = 'static';
-            else if (bt === 'system') document.getElementById('boardType').value = 'system';
-            else document.getElementById('boardType').value = 'ai';
-            document.getElementById('llmPrompt').value = currentBoardData.llm_prompt || '';
-            document.getElementById('promptTopic').value = currentBoardData.prompt_topic || '';
-            document.getElementById('promptExamples').value = currentBoardData.prompt_examples || '';
-            document.getElementById('promptExclusions').value = currentBoardData.prompt_exclusions || '';
             document.getElementById('setAsHomeBoard').checked = (currentBoardData.id && currentBoardData.id === boardSettings.home_board_id);
             refreshHomeBoardAssignmentUI();
         }
 
         function updateBoardModeUI() {
-            const boardType = document.getElementById('boardType').value;
-            const aiSection = document.getElementById('aiSettingsSection');
-            const gridSection = document.getElementById('gridSection');
-            if (boardType === 'ai') { aiSection.classList.remove('hidden'); gridSection.classList.add('hidden'); }
-            else { aiSection.classList.add('hidden'); gridSection.classList.remove('hidden'); }
-            // Re-render so click/drag listeners match the current board type.
+            document.getElementById('gridSection').classList.remove('hidden');
             if (currentBoardData) renderButtonGrid();
         }
 
@@ -673,7 +755,7 @@
             document.getElementById('gridReadOnlyOverlay').classList.toggle('hidden', !isReadOnly);
             document.getElementById('saveBoardBtn').disabled = !!isReadOnly;
             document.getElementById('deleteBoardBtn').disabled = !!isReadOnly;
-            ['boardLabel', 'boardType', 'llmPrompt', 'promptTopic', 'promptExamples', 'promptExclusions', 'setAsHomeBoard'].forEach(id => {
+            ['boardLabel', 'setAsHomeBoard'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.disabled = !!isReadOnly;
             });
@@ -689,19 +771,50 @@
             const grid = document.getElementById('buttonGrid');
             grid.innerHTML = '';
             if (!currentBoardData) return;
+            
+            GRID_ROWS = tapWordsRows;
+            grid.style.gridTemplateColumns = `repeat(${GRID_COLS}, minmax(100px, 1fr))`;
+            
+            const boardType = String(currentBoardData.board_type || '').toLowerCase();
+            const staticRowsCount = getStaticRowsCount();
+            
             for (let row = 0; row < GRID_ROWS; row++) {
                 for (let col = 0; col < GRID_COLS; col++) {
                     const buttonDiv = document.createElement('div');
                     buttonDiv.className = 'visual-button';
                     buttonDiv.dataset.row = String(row);
                     buttonDiv.dataset.col = String(col);
+                    
+                    let activeDynamicRows = 0;
+                    if (currentBoardData && currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                        activeDynamicRows = currentBoardData.dynamic_rows;
+                    } else if (useHybridPages) {
+                        activeDynamicRows = tapDynamicRows;
+                    }
+                    const isDynamicSlot = (boardType === 'ai') || ((activeDynamicRows > 0) && boardType === 'static' && row >= staticRowsCount);
                     const buttonData = findButtonAtPosition(row, col);
-                    if (buttonData && buttonData.label) {
+                    
+                    if (isDynamicSlot) {
+                        buttonDiv.classList.add('has-content');
+                        buttonDiv.style.backgroundColor = '#f5f3ff'; // light purple bg
+                        buttonDiv.style.borderColor = '#7c3aed';     // purple border
+                        buttonDiv.style.color = '#7c3aed';           // purple text
+                        buttonDiv.style.cursor = 'not-allowed';
+                        
+                        let displayLabel = '✦ Dynamic AI Slot';
+                        buttonDiv.innerHTML = `<div style="padding:4px; font-style: italic; font-size:11px; text-align:center; font-weight:600; line-height:30px;">${displayLabel}</div>`;
+                    } else if (buttonData && (buttonData.label || buttonData.button_type === 'dynamic')) {
                         buttonDiv.classList.add('has-content');
                         if (buttonData.after_selection === 'navigate' || buttonData.action_type === 'navigate') buttonDiv.classList.add('has-navigation');
                         if (buttonData.background_color && buttonData.background_color !== '#FFFFFF') { buttonDiv.style.backgroundColor = buttonData.background_color; }
                         if (buttonData.text_color && buttonData.text_color !== '#000000') { buttonDiv.style.color = buttonData.text_color; }
-                        if (buttonData.image_url) {
+                        if (buttonData.button_type === 'dynamic') {
+                            buttonDiv.style.borderColor = '#7c3aed';
+                            buttonDiv.style.color = '#7c3aed';
+                            let displayLabel = buttonData.llm_prompt ? `✦ AI: ${buttonData.llm_prompt}` : '✦ Dynamic Option';
+                            if (displayLabel.length > 30) displayLabel = displayLabel.substring(0, 27) + '...';
+                            buttonDiv.innerHTML = `<div style="padding:4px; font-style: italic; font-size:11px;">${escapeHtml(displayLabel)}</div>`;
+                        } else if (buttonData.image_url) {
                             buttonDiv.style.backgroundImage = `url('${buttonData.image_url}')`;
                             buttonDiv.style.backgroundSize = 'cover';
                             buttonDiv.style.backgroundPosition = 'center';
@@ -730,9 +843,10 @@
                         }
                         else if (buttonData.after_selection === 'use_ai') { const i = document.createElement('div'); i.className = 'button-indicator'; i.style.cssText = 'background:#7c3aed;color:white;'; i.textContent = '✦'; i.title = 'AI generates next options'; buttonDiv.appendChild(i); }
                         else if (buttonData.action_type === 'audio') { const i = document.createElement('div'); i.className = 'button-indicator indicator-audio'; i.textContent = '♪'; i.title = 'Plays custom audio'; buttonDiv.appendChild(i); }
-                        else if (buttonData.speech_text) { const i = document.createElement('div'); i.className = 'button-indicator indicator-speech'; i.textContent = 'S'; i.title = 'Has speech text'; buttonDiv.appendChild(i); }
-                    } else { buttonDiv.textContent = 'Undefined'; buttonDiv.classList.add('undefined'); }
-                    if (!isBoardReadOnly(currentBoardData) && document.getElementById('boardType').value !== 'ai') {
+                    } else { buttonDiv.textContent = '+'; buttonDiv.classList.add('undefined'); }
+ 
+                    
+                    if (!isBoardReadOnly(currentBoardData) && !isDynamicSlot) {
                         buttonDiv.addEventListener('click', () => openButtonEditor(row, col));
                         buttonDiv.draggable = true;
                         buttonDiv.addEventListener('dragstart', handleDragStart);
@@ -766,16 +880,31 @@
             sortedBoards.forEach(board => { const option = document.createElement('option'); option.value = board.id; option.textContent = board.label || board.id; if (board.id === selectedValue) option.selected = true; select.appendChild(option); });
         }
 
+        function updateButtonEditorVisibility(buttonType) {
+            const isDynamic = buttonType === 'dynamic';
+            document.getElementById('buttonTextWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('buttonImageWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('speechTextWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('customAudioFileWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('buttonLlmPromptWrapper').style.display = isDynamic ? '' : 'none';
+        }
+
         function openButtonEditor(row, col) {
             currentEditingButton = { row, col };
             const buttonData = findButtonAtPosition(row, col) || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, temporary_navigation: false, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
+            const btnType = buttonData.button_type || 'static';
+            document.getElementById('buttonType').value = btnType;
+            document.getElementById('buttonLlmPrompt').value = buttonData.llm_prompt || '';
+            updateButtonEditorVisibility(btnType);
+
             document.getElementById('buttonText').value = buttonData.label || '';
             document.getElementById('speechText').value = buttonData.speech_text || '';
+            document.getElementById('pastTenseVariant').value = buttonData.past_tense || '';
+            document.getElementById('pluralVariant').value = buttonData.plural || '';
             document.getElementById('buttonHidden').checked = !!buttonData.hidden;
             document.getElementById('assignedImageUrl').value = buttonData.image_url || '';
             document.getElementById('customAudioFileUrl').value = buttonData.custom_audio_file || '';
             document.getElementById('buttonBgColor').value = buttonData.background_color || '#FFFFFF';
-            // Derive after_selection from stored field or legacy action_type
             let afterSel = buttonData.after_selection || (buttonData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
             if (!['do_nothing', 'navigate', 'navigate_home', 'use_ai'].includes(afterSel)) {
                 afterSel = 'do_nothing';
@@ -816,13 +945,17 @@
         function closeButtonEditor() { document.getElementById('buttonEditorModal').classList.add('hidden'); currentEditingButton = null; }
         function saveButtonEdit() {
             if (!currentEditingButton || !currentBoardData) return;
-            const label = document.getElementById('buttonText').value.trim();
-            const speechText = document.getElementById('speechText').value.trim();
+            const buttonType = document.getElementById('buttonType').value;
+            const llmPrompt = buttonType === 'dynamic' ? document.getElementById('buttonLlmPrompt').value.trim() : null;
+            const label = buttonType === 'dynamic' ? 'AI Dynamic Option' : document.getElementById('buttonText').value.trim();
+            const speechText = buttonType === 'dynamic' ? null : document.getElementById('speechText').value.trim();
+            const pastTenseVariant = buttonType !== 'dynamic' ? document.getElementById('pastTenseVariant').value.trim() : '';
+            const pluralVariant = buttonType !== 'dynamic' ? document.getElementById('pluralVariant').value.trim() : '';
             const afterSelection = document.getElementById('afterSelection').value;
             const targetBoard = afterSelection === 'navigate' ? document.getElementById('targetBoard').value.trim() : '';
             const temporaryNavigation = (afterSelection === 'navigate') && document.getElementById('temporaryNavigation').checked;
-            const customAudio = document.getElementById('customAudioFileUrl').value.trim();
-            const imageUrl = document.getElementById('assignedImageUrl').value.trim();
+            const customAudio = buttonType === 'dynamic' ? null : document.getElementById('customAudioFileUrl').value.trim();
+            const imageUrl = buttonType === 'dynamic' ? null : document.getElementById('assignedImageUrl').value.trim();
             const bgColor = document.getElementById('buttonBgColor').value.trim() || '#FFFFFF';
             const existingButton = findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
             const textColor = (existingButton && existingButton.text_color) ? existingButton.text_color : '#000000';
@@ -832,9 +965,31 @@
                 : {};
             const hidden = document.getElementById('buttonHidden').checked;
             currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
-            if (label || speechText || targetBoard || customAudio || imageUrl) {
-                const actionType = customAudio ? 'audio' : 'announce';
-                currentBoardData.buttons.push({ id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`, label: label || `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`, row: currentEditingButton.row, col: currentEditingButton.col, speech_text: speechText || null, modifier_trigger_id: modifierTriggerId, modifier_variants: modifierVariants, after_selection: afterSelection, action_type: actionType, target_board_id: targetBoard || null, temporary_navigation: temporaryNavigation, custom_audio_file: customAudio || null, special_function: null, image_url: imageUrl || null, background_color: bgColor, text_color: textColor, hidden });
+            if (label || speechText || targetBoard || customAudio || imageUrl || (buttonType === 'dynamic' && llmPrompt) || ['navigate_home', 'use_ai'].includes(afterSelection)) {
+                const actionType = afterSelection === 'navigate' ? 'navigate' : (customAudio ? 'audio' : 'announce');
+                currentBoardData.buttons.push({
+                    id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`,
+                    label: label || (buttonType === 'dynamic' ? 'AI Dynamic Option' : `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`),
+                    row: currentEditingButton.row,
+                    col: currentEditingButton.col,
+                    speech_text: speechText || null,
+                    past_tense: pastTenseVariant || null,
+                    plural: pluralVariant || null,
+                    button_type: buttonType,
+                    llm_prompt: llmPrompt,
+                    modifier_trigger_id: modifierTriggerId,
+                    modifier_variants: modifierVariants,
+                    after_selection: afterSelection,
+                    action_type: actionType,
+                    target_board_id: targetBoard || null,
+                    temporary_navigation: temporaryNavigation,
+                    custom_audio_file: customAudio || null,
+                    special_function: null,
+                    image_url: imageUrl || null,
+                    background_color: bgColor,
+                    text_color: textColor,
+                    hidden
+                });
             }
             renderButtonGrid();
             closeButtonEditor();
@@ -849,13 +1004,17 @@
 
         function updateButtonPreview() {
             const preview = document.getElementById('buttonPreview');
+            const buttonType = document.getElementById('buttonType').value;
             const text = document.getElementById('buttonText').value.trim();
-            const speechText = document.getElementById('speechText').value.trim();
-            const targetBoard = document.getElementById('targetBoard').value.trim();
-            const customAudio = document.getElementById('customAudioFileUrl').value.trim();
+            const llmPrompt = document.getElementById('buttonLlmPrompt').value.trim();
             const imageUrl = document.getElementById('assignedImageUrl').value.trim();
             const bgColor = document.getElementById('buttonBgColor').value || '#FFFFFF';
-            if (text) {
+            
+            if (buttonType === 'dynamic') {
+                let label = llmPrompt ? `✦ AI: ${llmPrompt}` : '✦ Dynamic AI Button (No prompt yet)';
+                if (label.length > 50) label = label.substring(0, 47) + '...';
+                preview.innerHTML = `<div class="visual-button has-content" style="background-color:${bgColor}; font-style: italic; border-color: #7c3aed; color: #7c3aed;">${escapeHtml(label)}</div>`;
+            } else if (text) {
                 let html = `<div class="visual-button has-content" style="background-color:${bgColor};">`;
                 if (imageUrl) {
                     html += `<div style="position: relative; width: 100%; height: 80px; background-image: url('${imageUrl}'); background-size: cover; background-position: center; border-radius: 6px;">`;
@@ -864,7 +1023,9 @@
                 } else html += escapeHtml(text);
                 html += '</div>';
                 preview.innerHTML = html;
-            } else preview.innerHTML = '<div class="visual-button undefined">Undefined</div>';
+            } else preview.innerHTML = '<div class="visual-button undefined">Empty Slot</div>';
+
+            
             const afterSelection = document.getElementById('afterSelection').value;
             const temporaryNavigation = document.getElementById('temporaryNavigation').checked;
             const actionText = afterSelection === 'navigate'
@@ -874,14 +1035,15 @@
                 : afterSelection === 'use_ai'
                     ? 'Use AI to generate next options'
                     : 'Do nothing (stay on current board)';
-            document.getElementById('buttonTypeInfo').textContent = afterSelection;
+            
+            document.getElementById('buttonTypeInfo').textContent = buttonType === 'dynamic' ? 'Dynamic (AI)' : 'Static';
             document.getElementById('actionInfo').textContent = actionText;
         }
 
         function openSetAllAfterSelectionModal() {
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            if (document.getElementById('boardType').value !== 'static') { showNotification('Switch Board Mode to Static first', 'error'); return; }
+            if (String(currentBoardData?.board_type || 'ai') !== 'static') { showNotification('This board has no static rows to update', 'error'); return; }
             const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
             if (!buttons.some(b => String(b.label || '').trim())) { showNotification('No buttons on this board yet', 'error'); return; }
             // Pre-select the most common after_selection value currently on the board
@@ -929,10 +1091,178 @@
             await saveBoard();
         }
 
+        function openSetDynamicRowsModal(e) {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            
+            // Set Step 1 visible, Step 2 hidden
+            document.getElementById('setDynamicRowsStep1').classList.remove('hidden');
+            document.getElementById('setDynamicRowsStep2').classList.add('hidden');
+            
+            // Populate Step 1 Prompt + Examples/Exclusions
+            document.getElementById('dynamicRowsPromptInput').value = currentBoardData.llm_prompt || '';
+            document.getElementById('dynamicRowsExamplesInput').value = currentBoardData.prompt_examples || '';
+            document.getElementById('dynamicRowsExclusionsInput').value = currentBoardData.prompt_exclusions || '';
+            
+            const maxVal = GRID_ROWS;
+            document.getElementById('maxDynamicRowsVal').textContent = maxVal;
+            const input = document.getElementById('dynamicRowsCountInput');
+            input.max = maxVal;
+            
+            let val = 0;
+            const boardTypeForModal = String(currentBoardData.board_type || 'ai').toLowerCase();
+            if (currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                val = currentBoardData.dynamic_rows;
+            } else if (boardTypeForModal === 'ai') {
+                // Fully AI board: all rows are dynamic
+                val = GRID_ROWS;
+            } else if (useHybridPages) {
+                val = tapDynamicRows;
+            }
+            input.value = Math.min(val, maxVal);
+            
+            document.getElementById('setDynamicRowsModal').classList.remove('hidden');
+        }
+
+        function closeSetDynamicRowsModal() {
+            document.getElementById('setDynamicRowsModal').classList.add('hidden');
+        }
+
+        function askFillVacatedRows() {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmFillRowsModal');
+                const yesBtn = document.getElementById('confirmFillRowsYesBtn');
+                const noBtn = document.getElementById('confirmFillRowsNoBtn');
+                const closeBtn = document.getElementById('closeConfirmFillRowsModal');
+                
+                function cleanup(value) {
+                    modal.classList.add('hidden');
+                    yesBtn.removeEventListener('click', onYes);
+                    noBtn.removeEventListener('click', onNo);
+                    closeBtn.removeEventListener('click', onClose);
+                    resolve(value);
+                }
+                
+                function onYes(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(true); }
+                function onNo(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(false); }
+                function onClose(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(false); }
+                
+                yesBtn.addEventListener('click', onYes);
+                noBtn.addEventListener('click', onNo);
+                closeBtn.addEventListener('click', onClose);
+                
+                modal.classList.remove('hidden');
+            });
+        }
+
+        async function applySetDynamicRows(e) {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
+            
+            const maxVal = GRID_ROWS;
+            const dynamicRowsInput = document.getElementById('dynamicRowsCountInput');
+            const val = parseInt(dynamicRowsInput.value, 10);
+            
+            if (isNaN(val) || val < 0 || val > maxVal) {
+                showNotification(`Please enter a valid number of rows between 0 and ${maxVal}`, 'error');
+                return;
+            }
+            
+            let oldVal = 0;
+            if (currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                oldVal = currentBoardData.dynamic_rows;
+            } else if (useHybridPages) {
+                oldVal = tapDynamicRows;
+            }
+            
+            const newVal = val;
+            currentBoardData.dynamic_rows = newVal;
+            
+            const promptVal = document.getElementById('dynamicRowsPromptInput').value.trim();
+            currentBoardData.llm_prompt = promptVal || null;
+            currentBoardData.prompt_examples = document.getElementById('dynamicRowsExamplesInput').value.trim() || null;
+            currentBoardData.prompt_exclusions = document.getElementById('dynamicRowsExclusionsInput').value.trim() || null;
+            
+            let fillStatic = false;
+            if (newVal < oldVal) {
+                closeSetDynamicRowsModal();
+                fillStatic = await askFillVacatedRows();
+            } else {
+                closeSetDynamicRowsModal();
+            }
+            
+            try {
+                if (fillStatic) {
+                    const response = await fetch('/api/tap-interface/static-pool?label=' + encodeURIComponent(currentBoardData.label), { headers: getAuthHeaders() });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    const pool = data.pool || [];
+                    
+                    if (pool.length > 0) {
+                        const existingLabels = new Set(
+                            (currentBoardData.buttons || [])
+                                .map(btn => (btn.label || '').trim().toLowerCase())
+                                .filter(l => l)
+                        );
+                        
+                        let poolIdx = 0;
+                        if (!currentBoardData.buttons) {
+                            currentBoardData.buttons = [];
+                        }
+                        
+                        for (let r = GRID_ROWS - oldVal; r < GRID_ROWS - newVal; r++) {
+                            for (let c = 0; c < GRID_COLS; c++) {
+                                const hasBtn = currentBoardData.buttons.some(btn => Number(btn.row) === r && Number(btn.col) === c);
+                                if (!hasBtn) {
+                                    let word = null;
+                                    while (poolIdx < pool.length) {
+                                        const candidate = pool[poolIdx].trim();
+                                        poolIdx++;
+                                        if (!existingLabels.has(candidate.toLowerCase())) {
+                                            word = candidate;
+                                            break;
+                                        }
+                                    }
+                                    if (word) {
+                                        const newBtn = {
+                                            id: `btn_${r}_${c}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                                            label: word,
+                                            row: r,
+                                            col: c,
+                                            speech_text: word,
+                                            after_selection: 'do_nothing',
+                                            action_type: 'announce',
+                                            target_board_id: null,
+                                            temporary_navigation: false,
+                                            custom_audio_file: null,
+                                            special_function: null,
+                                            image_url: null,
+                                            background_color: '#FFFFFF',
+                                            text_color: '#000000',
+                                            hidden: false
+                                        };
+                                        currentBoardData.buttons.push(newBtn);
+                                        existingLabels.add(word.toLowerCase());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                await saveBoard();
+                renderButtonGrid();
+            } catch (error) {
+                console.error('Error saving board dynamic rows:', error);
+                showNotification('Error saving board settings: ' + error.message, 'error');
+            }
+        }
+
         function openAIBulkBuilderModal() {
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            if (document.getElementById('boardType').value === 'ai') { showNotification('Switch Board Mode to Static to build button options', 'error'); return; }
+            if (String(currentBoardData?.board_type || 'ai') === 'ai') { showNotification('This board is fully AI-generated — add static rows first via Configure Dynamic Rows', 'error'); return; }
             aiBulkPreviewOptions = [];
             document.getElementById('aiBulkPreviewList').textContent = 'No preview generated yet.';
             document.getElementById('aiBulkPreviewMeta').textContent = '';
@@ -1078,9 +1408,27 @@
             }
         }
 
+        function getStaticRowsCount() {
+            const boardType = String(currentBoardData?.board_type || 'ai').toLowerCase();
+            if (boardType === 'ai') {
+                return 0;
+            }
+            let activeDynamicRows = 0;
+            if (currentBoardData && currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                activeDynamicRows = currentBoardData.dynamic_rows;
+            } else if (useHybridPages) {
+                activeDynamicRows = tapDynamicRows;
+            }
+            if (boardType === 'static') {
+                return Math.max(0, tapWordsRows - activeDynamicRows);
+            }
+            return tapWordsRows;
+        }
+
         function findFirstCompletelyEmptyRow(buttons) {
             const list = Array.isArray(buttons) ? buttons : [];
-            for (let row = 0; row < GRID_ROWS; row++) {
+            const maxStaticRow = getStaticRowsCount();
+            for (let row = 0; row < maxStaticRow; row++) {
                 const hasAny = list.some(btn => Number(btn.row) === row && !!String(btn.label || '').trim());
                 if (!hasAny) return row;
             }
@@ -1146,8 +1494,10 @@
                 return;
             }
 
+            const maxStaticRow = getStaticRowsCount();
+
             const slots = [];
-            for (let row = startRow; row < GRID_ROWS; row++) {
+            for (let row = startRow; row < maxStaticRow; row++) {
                 for (let col = 0; col < perRow; col++) {
                     const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
                     if (!occupied) slots.push({ row, col });
@@ -1179,18 +1529,24 @@
         async function saveBoard() {
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            const boardType = document.getElementById('boardType').value;
-            const buttons = boardType === 'ai' ? [] : (currentBoardData.buttons || []);
+            const boardType = String(currentBoardData.board_type || 'ai').toLowerCase();
+            const staticRowsCount = getStaticRowsCount();
+            let buttons = currentBoardData.buttons || [];
+            if (boardType === 'ai') {
+                buttons = [];
+            } else {
+                buttons = buttons.filter(btn => Number(btn.row) < staticRowsCount);
+            }
             const payload = {
                 label: document.getElementById('boardLabel').value.trim() || 'Untitled Board',
                 board_type: boardType,
                 owner_scope: 'user',
                 hidden: false,
-                llm_prompt: boardType === 'ai' ? (document.getElementById('llmPrompt').value.trim() || null) : null,
-                prompt_category: null,
-                prompt_topic: boardType === 'ai' ? (document.getElementById('promptTopic').value.trim() || null) : null,
-                prompt_examples: boardType === 'ai' ? (document.getElementById('promptExamples').value.trim() || null) : null,
-                prompt_exclusions: boardType === 'ai' ? (document.getElementById('promptExclusions').value.trim() || null) : null,
+                llm_prompt: currentBoardData.llm_prompt || null,
+                prompt_category: currentBoardData.prompt_category || null,
+                prompt_topic: currentBoardData.prompt_topic || null,
+                prompt_examples: currentBoardData.prompt_examples || null,
+                prompt_exclusions: currentBoardData.prompt_exclusions || null,
                 static_options: null,
                 special_function: null,
                 default_columns: 12,
@@ -1198,6 +1554,8 @@
                 buttons: buttons,
                 set_as_home: !!document.getElementById('setAsHomeBoard').checked,
                 created_during_migration: (currentBoardData.created_during_migration && buttons.length === 0) ? true : false,
+                dynamic_rows: boardType === 'static' ? (currentBoardData.dynamic_rows !== undefined ? currentBoardData.dynamic_rows : null) : null,
+                is_customized: true,
             };
             try {
                 let response;
@@ -1282,10 +1640,10 @@
                 for (let row = 0; row < GRID_ROWS; row++) {
                     for (let col = 0; col < GRID_COLS; col++) {
                         const key = `${row},${col}`;
-                        const button = currentBoardData.buttons?.[key];
+                        const button = findButtonAtPosition(row, col);
                         if (button) {
-                            if (button.text) {
-                                const text = button.text;
+                            if (button.label) {
+                                const text = button.label;
                                 if (!textsToTranslate.includes(text)) textsToTranslate.push(text);
                                 if (!textMap[text]) textMap[text] = [];
                                 if (Array.isArray(textMap[text])) textMap[text].push({ type: 'button_text', position: key });
@@ -1851,7 +2209,7 @@
             <div class="flex items-center justify-center gap-1 px-6 pt-4 pb-2" id="atbStepIndicators">
                 <div id="atbSI1" class="flex items-center gap-1 text-xs font-semibold text-violet-700"><span class="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center">1</span><span class="hidden sm:inline">Options</span></div>
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
-                <div id="atbSI2" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">2</span><span class="hidden sm:inline">After Selection</span></div>
+                <div id="atbSI2" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">2</span><span class="hidden sm:inline">Action</span></div>
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
                 <div id="atbSI3" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">3</span><span class="hidden sm:inline">Confirm</span></div>
             </div>
@@ -1882,7 +2240,7 @@
                     </div>
                 </div>
 
-                <!-- Step 2: After Selection for generated buttons -->
+                <!-- Step 2: Action for generated buttons -->
                 <div id="atbStep2" class="hidden">
                     <p class="text-sm text-gray-600 mb-4">What should happen after the user taps an option on the new <strong id="atbBoardNameLabel2"></strong> board?</p>
                     <div class="space-y-3">
@@ -1921,10 +2279,10 @@
                         <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">New board name:</span><span id="atbSummaryName" class="font-medium text-gray-800"></span></div>
                         <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Options to generate:</span><span id="atbSummaryOptions" class="font-medium text-gray-800"></span></div>
                         <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Options per row:</span><span id="atbSummaryPerRow" class="font-medium text-gray-800"></span></div>
-                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">After selection:</span><span id="atbSummaryAfter" class="font-medium text-gray-800"></span></div>
+                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Action:</span><span id="atbSummaryAfter" class="font-medium text-gray-800"></span></div>
                     </div>
                     <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                        <i class="fas fa-info-circle mr-1"></i> A new static board will be created and this button's After Selection will be set to Navigate to the new board. Images will be auto-fetched for each option.
+                        <i class="fas fa-info-circle mr-1"></i> A new static board will be created and this button's Action will be set to Navigate to the new board. Images will be auto-fetched for each option.
                     </div>
                     <div class="flex justify-between mt-5">
                         <button id="atbStep3Back" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><i class="fas fa-arrow-left mr-1"></i> Back</button>
@@ -1947,7 +2305,7 @@
                                     <div id="atbResultDetail" class="text-xs text-green-700 mt-1"></div>
                                 </div>
                             </div>
-                            <p class="text-sm text-gray-600">The After Selection has been set to <strong>Navigate</strong> and the Target Board updated. Click Save Button to apply.</p>
+                            <p class="text-sm text-gray-600">The Action has been set to <strong>Navigate</strong> and the Target Board updated. Click Save Button to apply.</p>
                         </div>
                         <div id="atbResultError" class="hidden">
                             <div class="flex items-center gap-3 p-4 bg-red-50 border border-red-300 rounded-xl">
@@ -2145,6 +2503,23 @@
         document.addEventListener('DOMContentLoaded', function() {
             const btn = document.getElementById('aiGenerateTargetBtn');
             if (btn) btn.addEventListener('click', openAiTargetBoardModal);
+
+            // Style radio labels on change for AI Target Board modal
+            document.querySelectorAll('input[name="atbAfterSelection"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    document.querySelectorAll('input[name="atbAfterSelection"]').forEach(r => {
+                        const lbl = r.closest('label');
+                        if (!lbl) return;
+                        if (r.checked) {
+                            lbl.classList.add('border-violet-400', 'bg-violet-50');
+                            lbl.classList.remove('border-gray-200');
+                        } else {
+                            lbl.classList.remove('border-violet-400', 'bg-violet-50');
+                            lbl.classList.add('border-gray-200');
+                        }
+                    });
+                });
+            });
         });
 
     })();

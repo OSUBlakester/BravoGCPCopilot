@@ -154,6 +154,11 @@ import openai # Add OpenAI import
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
 from routes import router as static_router # Import static pages router
 from jokes_system import jokes_db, JokesDatabase, bulk_import_icanhazdadjoke, cleanup_joke_quotes
+try:
+    from scratch_pools import CATEGORY_STATIC_POOLS, WORD_VARIANTS
+except ImportError:
+    CATEGORY_STATIC_POOLS = {}
+    WORD_VARIANTS = {}
 
 oauth2_scheme = HTTPBearer()
 
@@ -314,13 +319,15 @@ template_user_data_paths = {
         "playWaitForSwitchChime": False,
         "SummaryOff": False,
         "selected_tts_voice_name": "en-US-Neural2-A",
-        "gridColumns": 10,
+        "gridColumns": 6,
         "lightColorValue": 4294659860,
         "darkColorValue": 4278198852,
         "toolbarPIN": "1234",  # Default PIN for toolbar
         "autoClean": False,  # Default Auto Clean setting for freestyle (automatic cleanup on Speak Display)
         "enablePictograms": False,  # Default AAC pictograms disabled
-        "sightWordGradeLevel": "pre_k"  # Default sight word grade level
+        "sightWordGradeLevel": "pre_k",  # Default sight word grade level
+        "tapWordsRows": 3,
+        "hasLoggedIn": False  # Explicitly False so new profiles are distinguishable from legacy profiles
     }, indent=4),
     "birthdays.json": json.dumps({"userBirthdate": None, "friendsFamily": []}, indent=4),
     "user_diary.json": json.dumps([], indent=4),
@@ -1714,7 +1721,7 @@ DEFAULT_USER_CURRENT = {
     "favorite_name": None,
     "saved_at": None
 }
-DEFAULT_COLUMNS = 10 # Default number of columns in the grid
+DEFAULT_COLUMNS = 6 # Default number of columns in the grid
 DEFAULT_LIGHT_COLOR = 4294659860 # Default light color
 DEFAULT_DARK_COLOR = 4278198852 # Default dark color
 DEFAULT_USER_LANGUAGE = "en-US"
@@ -1758,7 +1765,16 @@ DEFAULT_SETTINGS = {
     "applicationVolume": 8,  # Default application volume (80%)
     "spellLetterOrder": "alphabetical",  # Default spell page letter order
     "vocabularyLevel": "functional",  # Default vocabulary level: emergent|functional|developing|proficient
-    "specialPageTranslations": {}
+    "specialPageTranslations": {},
+    "voice_style": "adult",
+    "tapWordsRows": 3,
+    "tapPhrasesRows": 1,
+    "useHybridPages": False,
+    "tapDynamicRows": 1,
+    "useBravoBuild": True,
+    "defaultButtonAction": "do_nothing",
+    "hasLoggedIn": False,
+    "regenerate_boards": False
 }
 
 
@@ -8503,6 +8519,15 @@ class SettingsModel(BaseModel):
     spellLetterOrder: Optional[str] = Field(None, description="Letter order for spell page: 'alphabetical', 'qwerty', or 'frequency'")
     vocabularyLevel: Optional[str] = Field(None, description="Vocabulary complexity level for LLM outputs: 'emergent', 'functional', 'developing', or 'proficient'")
     specialPageTranslations: Optional[Dict[str, Dict[str, Dict[str, str]]]] = Field(None, description="Pretranslated static UI strings for special pages by page and locale.")
+    voice_style: Optional[str] = Field(None, description="Voice age style: 'adult', 'teen', or 'child'.")
+    tapWordsRows: Optional[int] = Field(None, description="Number of words rows in Tap Interface.")
+    tapPhrasesRows: Optional[int] = Field(None, description="Number of phrases rows in Tap Interface.")
+    useHybridPages: Optional[bool] = Field(None, description="Whether to use hybrid pages.")
+    tapDynamicRows: Optional[int] = Field(None, description="Number of dynamic rows in Tap Interface.")
+    useBravoBuild: Optional[bool] = Field(None, description="Whether to use BravoBuild algorithm.")
+    defaultButtonAction: Optional[str] = Field(None, description="Default action type for Tap Interface options.")
+    hasLoggedIn: Optional[bool] = Field(None, description="Whether the user profile has completed initial setup/login.")
+    regenerate_boards: Optional[bool] = Field(None, description="Trigger board regeneration on settings save.")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -8540,6 +8565,17 @@ class SettingsModel(BaseModel):
                 return value
             else:
                 raise ValueError(f"Invalid vocabularyLevel value: {value}. Must be 'emergent', 'functional', 'developing', or 'proficient'")
+        return value
+
+    @field_validator('voice_style', mode='before')
+    @classmethod
+    def validate_voice_style(cls, value: Any) -> Optional[str]:
+        if isinstance(value, str) and value:
+            value = value.strip().lower()
+            if value in ['adult', 'teen', 'child']:
+                return value
+            else:
+                raise ValueError(f"Invalid voice_style value: {value}. Must be 'adult', 'teen', or 'child'")
         return value
 
     @field_validator('scanMode', mode='before')
@@ -8703,12 +8739,61 @@ async def get_settings(current_ids: Annotated[Dict[str, str], Depends(get_curren
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     logging.info(f"GET /api/settings request received for acccount {account_id} and user {aac_user_id}.")
-    settings_dict = await load_settings_from_file(account_id, aac_user_id) # Get as dict
-    # Create an instance of SettingsModel from the dict
-    settings_model_instance = SettingsModel(**settings_dict) 
-    # FastAPI will handle the serialization to JSON, no need for .model_dump() here
-    # because response_model=SettingsModel is already specified
-    return settings_model_instance # Return the Pydantic instance directly
+    settings_dict = await load_settings_from_file(account_id, aac_user_id)
+
+    # Backward-compatibility for profiles created before hasLoggedIn was introduced.
+    # New profiles have hasLoggedIn explicitly set to False in Firestore (via the template).
+    # Legacy profiles (created before the field existed) have NO hasLoggedIn key in Firestore
+    # at all — the False we see in settings_dict comes only from DEFAULT_SETTINGS merging.
+    # We detect legacy profiles by reading the raw Firestore document and checking whether
+    # the key is absent. If absent, the profile predates the wizard → treat as already set up.
+    if not settings_dict.get('hasLoggedIn', False) and firestore_db:
+        try:
+            settings_doc_path = (
+                f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/"
+                f"{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/settings/app_settings"
+            )
+            raw_doc = await asyncio.to_thread(firestore_db.document(settings_doc_path).get)
+            if raw_doc.exists:
+                raw_data = raw_doc.to_dict() or {}
+                # Key absent from raw data → legacy profile (field predates the wizard)
+                is_legacy_profile = raw_data and 'hasLoggedIn' not in raw_data
+                if is_legacy_profile:
+                    settings_dict['hasLoggedIn'] = True
+
+                    # Derive tapWordsRows / tapPhrasesRows from legacy FreestyleOptions /
+                    # LLMOptions if the profile pre-dates those row-count settings.
+                    legacy_patches: Dict[str, Any] = {'hasLoggedIn': True}
+                    if 'tapWordsRows' not in raw_data:
+                        grid_cols = int(raw_data.get('gridColumns') or settings_dict.get('gridColumns') or DEFAULT_COLUMNS or 10)
+                        freestyle = int(raw_data.get('FreestyleOptions') or settings_dict.get('FreestyleOptions') or 20)
+                        llm_opts = int(raw_data.get('LLMOptions') or settings_dict.get('LLMOptions') or DEFAULT_LLM_OPTIONS or 10)
+                        if grid_cols > 0:
+                            words_rows = max(1, round(freestyle / grid_cols))
+                            phrases_rows = max(0, round(llm_opts / grid_cols))
+                        else:
+                            words_rows = 4
+                            phrases_rows = 1
+                        settings_dict['tapWordsRows'] = words_rows
+                        settings_dict['tapPhrasesRows'] = phrases_rows
+                        legacy_patches['tapWordsRows'] = words_rows
+                        legacy_patches['tapPhrasesRows'] = phrases_rows
+
+                    # Persist so this extra Firestore read is never needed again
+                    try:
+                        await asyncio.to_thread(
+                            firestore_db.document(settings_doc_path).set,
+                            legacy_patches,
+                            merge=True
+                        )
+                    except Exception:
+                        pass
+                # else: hasLoggedIn is explicitly False in raw data → new profile, wizard should run
+        except Exception:
+            pass
+
+    settings_model_instance = SettingsModel(**settings_dict)
+    return settings_model_instance
 
 @app.post("/api/settings", response_model=SettingsModel)
 async def save_settings_endpoint(settings_update: SettingsModel, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
@@ -8753,14 +8838,104 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
     if success:
         # Await load_settings_from_file to get the actual dictionary
         saved_settings_dict = await load_settings_from_file(account_id, aac_user_id)
-        
+
+        # If the wizard (or any caller) requests board regeneration, rebuild the tap board
+        # config from scratch using the freshly saved settings so that board types and
+        # dynamic_rows counts reflect the current grid configuration.
+        if update_data.get('regenerate_boards'):
+            try:
+                use_hybrid_pages = bool(saved_settings_dict.get('useHybridPages', False))
+                tap_dynamic_rows = int(saved_settings_dict.get('tapDynamicRows', 0) or 0)
+
+                tap_words_rows = int(saved_settings_dict.get('tapWordsRows', 4) or 4)
+                grid_cols = int(saved_settings_dict.get('gridColumns', 6) or 6)
+                static_rows = max(0, tap_words_rows - tap_dynamic_rows)
+                default_button_action = str(saved_settings_dict.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+
+                logging.warning(
+                    f"DEBUG regenerate_boards: update_data tapDynamicRows={update_data.get('tapDynamicRows')!r} "
+                    f"useHybridPages={update_data.get('useHybridPages')!r} | "
+                    f"saved tapDynamicRows={saved_settings_dict.get('tapDynamicRows')!r} "
+                    f"useHybridPages={saved_settings_dict.get('useHybridPages')!r} | "
+                    f"computed use_hybrid_pages={use_hybrid_pages} tap_dynamic_rows={tap_dynamic_rows}"
+                )
+
+                # When tap_dynamic_rows == 0 the user wants fully static boards.
+                # use_hybrid_pages may be False in that case (wizard sets it = dynamic > 0),
+                # but boards still need board_type='static' so static pool pre-population works.
+                # Pass use_hybrid_pages=True to create_default_tap_config whenever we want
+                # 'static' board types (i.e. whenever tap_dynamic_rows == 0 OR use_hybrid_pages).
+                create_as_hybrid = use_hybrid_pages or (tap_dynamic_rows == 0)
+                new_tap_config = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=create_as_hybrid)
+                logging.warning(
+                    f"DEBUG regenerate_boards: create_as_hybrid={create_as_hybrid} "
+                    f"board_types_sample={[b.get('board_type') for b in new_tap_config.get('boards', []) if isinstance(b, dict)][:5]}"
+                )
+
+                for board in new_tap_config.get('boards', []):
+                    if not isinstance(board, dict):
+                        continue
+                    # Always record the explicit dynamic_rows count on static boards so the
+                    # tap interface and board builder both reflect the chosen value (0 = all static).
+                    if board.get('board_type') == 'static':
+                        board['dynamic_rows'] = tap_dynamic_rows
+                    # Pre-populate empty static rows with vocabulary from the pool
+                    if (
+                        board.get('board_type') == 'static'
+                        and static_rows > 0
+                        and not board.get('buttons')
+                        and CATEGORY_STATIC_POOLS
+                    ):
+                        raw_key = str(board.get('prompt_category') or board.get('label') or '').strip().lower()
+                        pool_key = ''.join(ch if ch.isalnum() else '_' for ch in raw_key)
+                        while '__' in pool_key:
+                            pool_key = pool_key.replace('__', '_')
+                        pool_key = pool_key.strip('_')
+                        pool = CATEGORY_STATIC_POOLS.get(pool_key, [])
+                        if pool:
+                            max_buttons = static_rows * grid_cols
+                            pool_words = pool[:max_buttons]
+                            def _make_pool_button(idx, word, board_id):
+                                variants = WORD_VARIANTS.get(str(word).strip().lower(), {})
+                                btn = {
+                                    'id': f"btn_{board_id}_{idx // grid_cols}_{idx % grid_cols}",
+                                    'label': word,
+                                    'row': idx // grid_cols,
+                                    'col': idx % grid_cols,
+                                    'background_color': '#FFFFFF',
+                                    'text_color': '#000000',
+                                    'after_selection': default_button_action,
+                                    'button_type': 'static',
+                                }
+                                if variants.get('past_tense'):
+                                    btn['past_tense'] = variants['past_tense']
+                                if variants.get('plural'):
+                                    btn['plural'] = variants['plural']
+                                return btn
+                            board['buttons'] = [
+                                _make_pool_button(idx, word, board['id'])
+                                for idx, word in enumerate(pool_words)
+                            ]
+
+                logging.warning(
+                    f"DEBUG regenerate_boards after loop: "
+                    f"dynamic_rows_sample={[(b.get('board_type'), b.get('dynamic_rows')) for b in new_tap_config.get('boards', []) if isinstance(b, dict)][:5]}"
+                )
+                await save_tap_nav_config(account_id, aac_user_id, new_tap_config)
+                logging.info(
+                    f"✅ Regenerated tap boards for {account_id}/{aac_user_id}: "
+                    f"use_hybrid_pages={use_hybrid_pages}, tap_dynamic_rows={tap_dynamic_rows}"
+                )
+            except Exception as e:
+                logging.error(f"Failed to regenerate tap boards after settings update: {e}", exc_info=True)
+
         # Invalidate cache - settings ARE in base context (cached)
         try:
             await cache_manager.invalidate_cache(account_id, aac_user_id)
             logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after settings update (base context change)")
         except Exception as e:
             logging.error(f"Failed to invalidate caches after settings update: {e}")
-        
+
         # JSONResponse expects a dictionary, not a Pydantic model here.
         # Using model_dump on the SettingsModel with saved_settings_dict will structure it correctly for JSON.
         return JSONResponse(content=SettingsModel(**saved_settings_dict).model_dump())
@@ -8853,7 +9028,7 @@ async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Di
     tap_interface_board_settings: Dict[str, Any] = {}
     if isinstance(tap_interface_config, dict):
         tap_interface_config, _ = normalize_compose_tap_config(tap_interface_config)
-        tap_interface_config, _ = ensure_tap_boards_structure(tap_interface_config)
+        tap_interface_config, _ = ensure_tap_boards_structure(tap_interface_config, use_hybrid_pages=settings.get("useHybridPages", False))
         tap_interface_boards = [
             dict(b) for b in tap_interface_config.get("boards", [])
             if isinstance(b, dict)
@@ -9009,12 +9184,17 @@ async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bund
         )
     )
     if tap_sections_present:
+        settings = bundle.get("settings")
+        if not isinstance(settings, dict):
+            settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+
         existing_tap_config = await load_tap_nav_config(account_id, aac_user_id)
         if not isinstance(existing_tap_config, dict):
-            existing_tap_config = create_default_tap_config(account_id, aac_user_id)
+            existing_tap_config = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
 
         existing_tap_config, _ = normalize_compose_tap_config(existing_tap_config)
-        existing_tap_config, _ = ensure_tap_boards_structure(existing_tap_config)
+        existing_tap_config, _ = ensure_tap_boards_structure(existing_tap_config, use_hybrid_pages=use_hybrid_pages)
 
         # Backward compatibility: accept either split sections or legacy full object.
         legacy_tap_payload = bundle.get("tap_interface_config")
@@ -9059,7 +9239,7 @@ async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bund
 
         merged_tap_config["boards_schema_version"] = 1
         merged_tap_config["updated_at"] = dt.now().isoformat()
-        merged_tap_config, _ = ensure_tap_boards_structure(merged_tap_config, existing_config=existing_tap_config)
+        merged_tap_config, _ = ensure_tap_boards_structure(merged_tap_config, existing_config=existing_tap_config, use_hybrid_pages=use_hybrid_pages)
         merged_tap_config["buttons"] = compose_legacy_buttons_from_boards_menu(merged_tap_config)
 
         if not await save_tap_nav_config(account_id, aac_user_id, merged_tap_config):
@@ -10008,8 +10188,10 @@ async def translate_pages_endpoint(
         if not isinstance(tap_config_data, dict):
             raise HTTPException(status_code=404, detail="Tap interface configuration not found")
 
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
-        tap_config_data, _ = ensure_tap_boards_structure(tap_config_data)
+        tap_config_data, _ = ensure_tap_boards_structure(tap_config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
         prompt_jobs: List[Dict[str, Any]] = []
@@ -10243,8 +10425,10 @@ async def translate_pages_endpoint(
     if should_translate_tap_board_prompts:
         tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
         if isinstance(tap_config_data, dict):
+            settings = await load_settings_from_file(account_id, aac_user_id)
+            use_hybrid_pages = settings.get("useHybridPages", False)
             tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
-            tap_config_data, _ = ensure_tap_boards_structure(tap_config_data)
+            tap_config_data, _ = ensure_tap_boards_structure(tap_config_data, use_hybrid_pages=use_hybrid_pages)
 
             boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
             prompt_jobs: List[Dict[str, Any]] = []
@@ -17376,7 +17560,7 @@ def build_category_fallback_word_objects(
     ]
 
     fallback_candidates = list(get_generic_category_words(category))
-    if any(token in category_lower for token in ["home", "general"]):
+    if any(token in category_lower for token in ["home", "general", "general_conversation", "conversation"]):
         fallback_candidates.extend(supplemental_words)
 
     result: List[Dict[str, Any]] = []
@@ -17544,6 +17728,26 @@ async def generate_category_words(
         build_space_text = str(request.build_space_content or "").strip()
         exclude_words_text = ", ".join(sorted(excluded_words)) if excluded_words else "none"
 
+        # When the user has already said something, reframe the task: generate words that
+        # continue/extend the partial sentence rather than words that describe the category.
+        if build_space_text:
+            task_framing = (
+                f"The AAC user has already said: \"{build_space_text}\"\n"
+                f"Generate {freestyle_options} short words or phrases that would naturally FOLLOW and EXTEND "
+                f"what was already said, completing or adding to the thought.\n"
+                f"Category context (for domain guidance only): {request.category}"
+            )
+            follow_up_rule = (
+                "Generate natural follow-up completions to the partial message. "
+                "Do NOT repeat, rephrase, or restate words already in the current message."
+            )
+        else:
+            task_framing = (
+                f"Category: {request.category}\n"
+                f"Instruction: {instruction_text}"
+            )
+            follow_up_rule = "Stay tightly on the requested category"
+
         cache_payload = {
             "category": request.category,
             "build_space": build_space_text,
@@ -17607,12 +17811,10 @@ Each object must have:
 - text: a 1-3 word AAC-friendly option
 - keywords: an array of 0-3 short image-search hints
 
-Category: {request.category}
-Instruction: {instruction_text}
+{task_framing}
 User context: {user_context}
 Live context: {live_context_summary}
 Navigation context: {navigation_context or 'none'}
-Current message: {build_space_text or 'none'}
 Exclude: {exclude_words_text}
 {mood_context}
 {adjective_constraint}
@@ -17620,18 +17822,16 @@ Exclude: {exclude_words_text}
 
 Rules:
 - Use common, useful, everyday AAC vocabulary
-- Stay tightly on the requested category
+- {follow_up_rule}
 - No markdown or commentary{language_instruction}
 
 Example:
 [{{"text":"park","keywords":["outside"]}},{{"text":"school","keywords":["building"]}}]"""
 
-        user_query_only = f"""Category={request.category}
-Instruction={instruction_text}
+        user_query_only = f"""{task_framing}
 Count={freestyle_options}
 Live={live_context_summary}
 Navigation={navigation_context or 'none'}
-Current message={build_space_text or 'none'}
 Exclude={exclude_words_text}
 {mood_context}
 {adjective_constraint}
@@ -21373,29 +21573,14 @@ async def batch_symbol_search(
                 if term:
                     all_search_terms.add(term)
 
-        images_ref = firestore_db.collection("aac_images")
-        candidate_docs = {}
-
-        # Grouped query path 1: precomputed normalized search terms.
-        for chunk in _chunked(all_search_terms, 10):
-            try:
-                docs = list(images_ref.where("search_terms", "array_contains_any", chunk).limit(300).stream())
-                for doc in docs:
-                    data = doc.to_dict() or {}
-                    if data.get("source") == "bravo_images" and data.get("image_url"):
-                        candidate_docs[doc.id] = data
-            except Exception as chunk_error:
-                logging.debug(f"🔍 BATCH: search_terms chunk query failed ({chunk_error})")
-
-        # Per-item exact term fetches: guarantees exact subconcept/concept docs are present
-        # even when broad chunk queries are dominated by generic terms like "color".
+        # Collect all unique exact search terms from uncached items globally
+        all_exact_terms = set()
         for item_rec in uncached_items:
             query_lower = item_rec.get("query_lower", "")
             normalized_term = item_rec.get("normalized_query", "")
-
             raw_text = str(item_rec.get("text", "")).strip()
-            exact_terms = [raw_text, query_lower, normalized_term]
 
+            exact_terms = [raw_text, query_lower, normalized_term]
             if raw_text:
                 exact_terms.extend([
                     raw_text.lower(),
@@ -21404,86 +21589,72 @@ async def batch_symbol_search(
                     _normalize_quotes_and_space(raw_text),
                     _normalize_term(raw_text),
                 ])
-
-            # Remove empties/dupes while preserving order
-            dedup_exact_terms = []
-            seen_exact_terms = set()
             for t in exact_terms:
                 tt = str(t or '').strip()
-                if not tt or tt in seen_exact_terms:
-                    continue
-                seen_exact_terms.add(tt)
-                dedup_exact_terms.append(tt)
+                if tt:
+                    all_exact_terms.add(tt)
 
-            for exact_term in dedup_exact_terms:
-                if not exact_term:
-                    continue
-                try:
-                    docs = list(
-                        images_ref.where("source", "==", "bravo_images").where("subconcept", "==", exact_term).limit(40).stream()
-                    )
-                    for doc in docs:
-                        data = doc.to_dict() or {}
-                        if data.get("image_url"):
-                            candidate_docs[doc.id] = data
-                except Exception as exact_subconcept_error:
-                    logging.debug(f"🔍 BATCH: exact subconcept query failed ({exact_subconcept_error})")
+        images_ref = firestore_db.collection("aac_images")
+        candidate_docs = {}
 
-                try:
-                    docs = list(
-                        images_ref.where("source", "==", "bravo_images").where("concept", "==", exact_term).limit(40).stream()
-                    )
-                    for doc in docs:
-                        data = doc.to_dict() or {}
-                        if data.get("image_url"):
-                            candidate_docs[doc.id] = data
-                except Exception as exact_concept_error:
-                    logging.debug(f"🔍 BATCH: exact concept query failed ({exact_concept_error})")
+        # Build list of queries to run in parallel
+        queries = []
+        
+        # 1. Grouped query path 1: precomputed normalized search terms
+        for chunk in _chunked(all_search_terms, 10):
+            queries.append(("path1", images_ref.where("search_terms", "array_contains_any", chunk).limit(300)))
+            
+        # 2. Per-item exact term fetches using batch 'in' operator to query concept and subconcept in parallel
+        for chunk in _chunked(all_exact_terms, 10):
+            queries.append(("exact_subconcept", images_ref.where("source", "==", "bravo_images").where("subconcept", "in", chunk).limit(100)))
+            queries.append(("exact_concept", images_ref.where("source", "==", "bravo_images").where("concept", "in", chunk).limit(100)))
+            if locale_base and locale_base != "en":
+                localized_labels_field = f"localized_labels.{locale_base}"
+                queries.append(("exact_localized_labels", images_ref.where("source", "==", "bravo_images").where(localized_labels_field, "in", chunk).limit(100)))
 
-                if locale_base and locale_base != "en":
-                    localized_labels_field = f"localized_labels.{locale_base}"
-                    try:
-                        docs = list(
-                            images_ref.where("source", "==", "bravo_images").where(localized_labels_field, "==", exact_term).limit(20).stream()
-                        )
-                        for doc in docs:
-                            data = doc.to_dict() or {}
-                            if data.get("image_url"):
-                                candidate_docs[doc.id] = data
-                    except Exception as exact_label_error:
-                        logging.debug(f"🔍 BATCH: exact localized label query failed ({exact_label_error})")
-
-        # Grouped query path 2: localized tags fallback.
+        # 3. Grouped query path 2: localized tags fallback
         if locale_base and locale_base != "en":
             localized_tags_field = f"localized_tags.{locale_base}"
             for chunk in _chunked(all_search_terms, 10):
-                try:
-                    docs = list(
-                        images_ref.where("source", "==", "bravo_images").where(
-                            localized_tags_field, "array_contains_any", chunk
-                        ).limit(250).stream()
-                    )
-                    for doc in docs:
-                        data = doc.to_dict() or {}
-                        if data.get("image_url"):
-                            candidate_docs[doc.id] = data
-                except Exception as chunk_error:
-                    logging.debug(f"🔍 BATCH: localized_tags chunk query failed ({chunk_error})")
+                queries.append(("localized_tags", images_ref.where("source", "==", "bravo_images").where(localized_tags_field, "array_contains_any", chunk).limit(250)))
 
-        # Grouped query path 3: legacy tags fallback.
+        # 4. Grouped query path 3: legacy tags fallback
         for chunk in _chunked(all_search_terms, 10):
-            try:
-                docs = list(
-                    images_ref.where("source", "==", "bravo_images").where(
-                        "tags", "array_contains_any", chunk
-                    ).limit(250).stream()
-                )
-                for doc in docs:
-                    data = doc.to_dict() or {}
-                    if data.get("image_url"):
+            queries.append(("legacy_tags", images_ref.where("source", "==", "bravo_images").where("tags", "array_contains_any", chunk).limit(250)))
+
+        # Helper to execute query stream block in thread pool
+        def _execute_query_stream(query):
+            return list(query.stream())
+
+        # Execute all queries in parallel
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            tasks = [asyncio.to_thread(_execute_query_stream, q) for q_type, q in queries]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            results = [_execute_query_stream(q) for q_type, q in queries]
+
+        # Process results
+        for (q_type, q), result in zip(queries, results):
+            if isinstance(result, Exception):
+                logging.warning(f"🔍 BATCH: Query {q_type} failed with error: {result}")
+                continue
+            
+            for doc in result:
+                data = doc.to_dict() or {}
+                if not data.get("image_url"):
+                    continue
+                
+                # Path 1 check: legacy code requires source == "bravo_images"
+                if q_type == "path1":
+                    if data.get("source") == "bravo_images":
                         candidate_docs[doc.id] = data
-            except Exception as chunk_error:
-                logging.debug(f"🔍 BATCH: legacy tags chunk query failed ({chunk_error})")
+                else:
+                    candidate_docs[doc.id] = data
 
         def _extract_localized_terms_for_doc(doc_data):
             localized_terms = []
@@ -22462,6 +22633,8 @@ class TapBoardCreateRequest(BaseModel):
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
     created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
+    dynamic_rows: Optional[int] = Field(None, description="Number of AI-generated dynamic rows at bottom of board; None = use global setting")
+    is_customized: bool = Field(False, description="Whether this board has been manually customized")
 
 
 class TapBoardUpdateRequest(BaseModel):
@@ -22482,6 +22655,8 @@ class TapBoardUpdateRequest(BaseModel):
     buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
     set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
     created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
+    dynamic_rows: Optional[int] = Field(None, description="Number of AI-generated dynamic rows at bottom of board; None = use global setting")
+    is_customized: bool = Field(False, description="Whether this board has been manually customized")
 
 
 class ConvertAIBoardsToStaticRequest(BaseModel):
@@ -22498,6 +22673,18 @@ class CreateAITargetBoardRequest(BaseModel):
     options_per_row: int = Field(4, ge=1, le=12, description="Number of options per row")
     after_selection: str = Field("do_nothing", description="do_nothing|use_ai|navigate_home — action for the generated buttons")
 
+class BravoBuildRequest(BaseModel):
+    """Payload for dynamically generating a static board based on a clicked button's context."""
+    source_board_id: str = Field(..., description="ID of the board containing the clicked button")
+    button_id: Optional[str] = Field(None, description="ID of the clicked button (used to look up the button's label)")
+    button_label: Optional[str] = Field(None, description="Text label of the clicked button — fallback when button_id lookup fails")
+    context: Optional[str] = Field("", description="Built sentence context so far")
+
+class RegenerateBoardRequest(BaseModel):
+    """Payload for dynamically regenerating options on an AI board based on context."""
+    board_id: str = Field(..., description="ID of the AI board to regenerate")
+    context: Optional[str] = Field("", description="Built sentence context so far")
+
 # Update forward references
 TapNavigationButton.model_rebuild()
 TapBoardsMenuItem.model_rebuild()
@@ -22505,6 +22692,8 @@ TapBoardsMenuItem.model_rebuild()
 
 def _normalize_board_type(value: Any) -> str:
     normalized = str(value or 'ai').strip().lower()
+    if normalized == 'hybrid':
+        return 'static'
     if normalized not in {'ai', 'static', 'system'}:
         return 'ai'
     return normalized
@@ -22552,6 +22741,7 @@ def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[
         'background_color': button.get('background_color') or '#FFFFFF',
         'text_color': button.get('text_color') or '#000000',
         'hidden': bool(button.get('hidden', False)),
+        'button_type': button.get('button_type') or 'static',
     }
 
 
@@ -22588,6 +22778,8 @@ def _normalize_board_payload(
         'max_rows': int(board_data.get('max_rows', 7) or 7),
         'buttons': normalized_buttons,
         'created_during_migration': bool(board_data.get('created_during_migration', False)) and len(normalized_buttons) == 0,
+        'dynamic_rows': board_data.get('dynamic_rows'),
+        'is_customized': bool(board_data.get('is_customized', False)),
     }
 
 
@@ -22638,6 +22830,7 @@ def _convert_children_to_board_buttons(children: Any) -> List[Dict[str, Any]]:
 def ensure_tap_boards_structure(
     config_data: Optional[Dict[str, Any]],
     existing_config: Optional[Dict[str, Any]] = None,
+    use_hybrid_pages: bool = False,
 ) -> Tuple[Optional[Dict[str, Any]], bool]:
     """Ensure parallel board-oriented structure exists while preserving legacy config compatibility."""
     if not isinstance(config_data, dict):
@@ -22792,7 +22985,7 @@ def ensure_tap_boards_structure(
                 elif has_static_options:
                     board_type = 'static'
                 else:
-                    board_type = 'ai'
+                    board_type = 'static' if use_hybrid_pages else 'ai'
 
                 owner_scope_default = 'global' if str(button_node.get('id') or '').endswith('_btn') else 'user'
                 owner_scope = owner_scope_default
@@ -22994,13 +23187,13 @@ def ensure_tap_boards_structure(
             merged_boards.append({
                 'id': home_board_id,
                 'label': 'Home',
-                'board_type': 'ai',
+                'board_type': 'static' if use_hybrid_pages else 'ai',
                 'source': 'default_home',
                 'source_button_id': None,
                 'owner_scope': 'user',
                 'hidden': False,
-                'llm_prompt': None,
-                'prompt_category': None,
+                'llm_prompt': 'Generate high-frequency general conversation starters and everyday AAC vocabulary for the home/start screen. Include a mix of: common sentence starters (I want, I need, I feel, Can I, Let\'s), social phrases (hi, yes, no, please, thank you, help), and action words (go, stop, more, done, wait, look). Words should be versatile enough to begin any type of conversation.',
+                'prompt_category': 'general_conversation',
                 'prompt_topic': None,
                 'prompt_examples': None,
                 'prompt_exclusions': None,
@@ -23011,6 +23204,21 @@ def ensure_tap_boards_structure(
                 'buttons': [],
             })
             merged_board_ids.add(home_board_id)
+
+    # Normalize board types: migrate any legacy 'hybrid' boards to the correct type.
+    # 'hybrid' is no longer a valid stored board_type. A static board with dynamic rows
+    # stays 'static'; a fully-AI board stays 'ai'. Never re-introduce 'hybrid'.
+    # When use_hybrid_pages is True, legacy_category AI boards become static because
+    # they represent category boards that should have static rows + dynamic rows at bottom.
+    for board in merged_boards:
+        if isinstance(board, dict):
+            current_bt = board.get('board_type')
+            if current_bt == 'hybrid':
+                board['board_type'] = 'static'
+            elif (current_bt == 'ai' and use_hybrid_pages
+                  and str(board.get('source') or '') == 'legacy_category'
+                  and not board.get('special_function')):
+                board['board_type'] = 'static'
 
     merged_settings = {
         'max_columns': int(settings.get('max_columns', 12) or 12),
@@ -23297,6 +23505,7 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
                     'temporary_navigation': bool(btn.get('temporary_navigation', False)),
                     'background_color': btn.get('background_color') or '#FFFFFF',
                     'text_color': btn.get('text_color') or '#000000',
+                    'button_type': btn.get('button_type') or 'static',
                 })
         return word_options
 
@@ -23670,6 +23879,192 @@ def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[
         return config_data, False
 
     normalized = False
+
+    expected_greetings_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'greetings_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'greetings',
+        'llm_prompt': 'Generate greeting phrases and words suitable for everyday social interactions. Include hellos, goodbyes, and common polite expressions.',
+        'static_options': None,
+        'label': 'Greetings',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+    expected_help_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'help_btn',
+        'prompt_exclusions': None,
+        'speech_text': 'I need help',
+        'prompt_category': 'help',
+        'llm_prompt': 'Generate AAC-friendly phrases for asking for help or assistance, covering a range of urgency and intensity. Include mild requests (I could use some help, Can you help me please, I need a little help), moderate requests (I need help right now, Please help me, I am having trouble and need assistance), and urgent phrases (I need help immediately, This is an emergency, Please call for help now, I need someone right away). Phrases should be clear, direct, and appropriate for someone with a communication disability.',
+        'static_options': None,
+        'label': 'Help',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+    expected_questions_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'requests_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'questions',
+        'llm_prompt': 'Generate AAC-friendly starters, question words, and short phrases for asking questions or making requests. Include question starters (Can, Could, What, Where, Why, How, Do, Is, Will, Would) and request starters (Please, I need, I want, May I, Help me) so the user can begin either a question or a request.',
+        'static_options': None,
+        'label': 'Questions',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+
+    # Normalize Greetings — remove children, enforce flat board
+    for button in buttons:
+        if not isinstance(button, dict):
+            continue
+        if str(button.get('id') or '').strip().lower() == 'greetings_btn' or str(button.get('label') or '').strip().lower() == 'greetings':
+            if button.get('children'):
+                button['children'] = []
+                normalized = True
+            if button.get('llm_prompt') != expected_greetings_button['llm_prompt']:
+                button['llm_prompt'] = expected_greetings_button['llm_prompt']
+                normalized = True
+            break
+
+    # Normalize Questions — remove children, enforce flat board
+    for button in buttons:
+        if not isinstance(button, dict):
+            continue
+        if str(button.get('id') or '').strip().lower() == 'requests_btn' or str(button.get('label') or '').strip().lower() == 'questions':
+            if button.get('children'):
+                button['children'] = []
+                normalized = True
+            if button.get('llm_prompt') != expected_questions_button['llm_prompt']:
+                button['llm_prompt'] = expected_questions_button['llm_prompt']
+                normalized = True
+            break
+
+    # Ensure root-level Help button exists; insert after Greetings if missing
+    help_index = None
+    greetings_index = None
+    for index, button in enumerate(buttons):
+        if not isinstance(button, dict):
+            continue
+        btn_id = str(button.get('id') or '').strip().lower()
+        btn_label = str(button.get('label') or '').strip().lower()
+        if btn_id == 'help_btn' or (btn_label == 'help' and button.get('prompt_category') == 'help'):
+            help_index = index
+        if btn_id == 'greetings_btn' or btn_label == 'greetings':
+            greetings_index = index
+
+    if help_index is None:
+        insert_at = (greetings_index + 1) if greetings_index is not None else len(buttons)
+        buttons.insert(insert_at, copy.deepcopy(expected_help_button))
+        normalized = True
+    else:
+        btn = buttons[help_index]
+        if btn.get('children'):
+            btn['children'] = []
+            normalized = True
+        if btn.get('prompt_category') != 'help':
+            btn['prompt_category'] = 'help'
+            normalized = True
+        if btn.get('llm_prompt') != expected_help_button['llm_prompt']:
+            btn['llm_prompt'] = expected_help_button['llm_prompt']
+            normalized = True
+
+    # Also normalize the boards_menu (source of truth for migrated configs).
+    # For greetings and questions: strip children. For help: ensure it exists at root level.
+    boards_menu = config_data.get('boards_menu')
+    if isinstance(boards_menu, list):
+        greetings_menu_index = None
+        help_menu_index = None
+        questions_menu_index = None
+
+        for mi, menu_item in enumerate(boards_menu):
+            if not isinstance(menu_item, dict):
+                continue
+            item_label = str(menu_item.get('label') or '').strip().lower()
+            item_source_btn = str(menu_item.get('source_button_id') or '').strip().lower()
+            if item_label == 'greetings' or item_source_btn == 'greetings_btn':
+                greetings_menu_index = mi
+                if menu_item.get('children'):
+                    menu_item['children'] = []
+                    normalized = True
+            elif item_label == 'help' and (item_source_btn == 'help_btn' or menu_item.get('board_id', '').startswith('board_help')):
+                help_menu_index = mi
+                if menu_item.get('children'):
+                    menu_item['children'] = []
+                    normalized = True
+            elif item_label == 'questions' or item_source_btn == 'requests_btn':
+                questions_menu_index = mi
+                if menu_item.get('children'):
+                    menu_item['children'] = []
+                    normalized = True
+
+        # Insert help menu item after greetings if missing from boards_menu
+        if help_menu_index is None:
+            new_help_menu_item = {
+                'id': 'menu_help_btn',
+                'label': 'Help',
+                'board_id': 'board_help_btn',
+                'source': 'legacy_category',
+                'source_button_id': 'help_btn',
+                'sort_order': (greetings_menu_index + 1) if greetings_menu_index is not None else len(boards_menu),
+                'hidden': False,
+                'image_url': None,
+                'speech_text': 'I need help',
+                'custom_audio_file': None,
+                'background_color': '#FFFFFF',
+                'text_color': '#000000',
+                'children': [],
+            }
+            insert_at = (greetings_menu_index + 1) if greetings_menu_index is not None else len(boards_menu)
+            boards_menu.insert(insert_at, new_help_menu_item)
+            config_data['boards_menu'] = boards_menu
+            normalized = True
+
+    # Normalize the home board in boards[] to ensure it has a conversation-starter prompt.
+    _home_llm_prompt = (
+        "Generate high-frequency general conversation starters and everyday AAC vocabulary for the home/start screen. "
+        "Include a mix of: common sentence starters (I want, I need, I feel, Can I, Let's), social phrases "
+        "(hi, yes, no, please, thank you, help), and action words (go, stop, more, done, wait, look). "
+        "Words should be versatile enough to begin any type of conversation."
+    )
+    boards = config_data.get('boards')
+    if isinstance(boards, list):
+        for board in boards:
+            if not isinstance(board, dict):
+                continue
+            is_home = (
+                str(board.get('source') or '') == 'default_home'
+                or str(board.get('label') or '').strip().lower() == 'home'
+            )
+            if is_home and not board.get('llm_prompt'):
+                board['llm_prompt'] = _home_llm_prompt
+                board['prompt_category'] = 'general_conversation'
+                normalized = True
+
     expected_ask_button = {
         'text_color': '#000000',
         'special_function': None,
@@ -23679,52 +24074,13 @@ def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[
         'prompt_exclusions': None,
         'speech_text': None,
         'prompt_category': 'ask',
-        'llm_prompt': 'Generate AAC-friendly starters, words, and short phrases for asking questions or making requests. When starting a sentence, strongly prefer natural openings like Can, Could, May, Will, Would, Please, What, Where, Why, How, Do, and Is.',
+        'llm_prompt': 'Generate AAC-friendly starters, words, and short phrases for asking questions or making requests. Include question starters (Can, Could, What, Where, Why, How, Do, Is, Will, Would) and request starters (Please, I need, I want, May I, Help me) so the user can begin either a question or a request from this board.',
         'static_options': None,
         'label': 'Ask',
         'image_url': None,
         'prompt_examples': None,
         'hidden': False,
-        'children': [
-            {
-                'text_color': '#000000',
-                'special_function': None,
-                'custom_audio_file': None,
-                'words_prompt': None,
-                'id': 'ask_question_btn',
-                'prompt_exclusions': None,
-                'speech_text': None,
-                'prompt_category': 'questions',
-                'llm_prompt': 'Generate question words and short AAC-friendly question phrases for asking about people, things, places, needs, choices, feelings, and preferences',
-                'static_options': None,
-                'label': 'Question',
-                'image_url': None,
-                'prompt_examples': None,
-                'hidden': False,
-                'children': [],
-                'prompt_topic': None,
-                'background_color': '#ffffff'
-            },
-            {
-                'text_color': '#000000',
-                'special_function': None,
-                'custom_audio_file': None,
-                'words_prompt': None,
-                'id': 'ask_request_btn',
-                'prompt_exclusions': None,
-                'speech_text': None,
-                'prompt_category': 'requests',
-                'llm_prompt': 'Generate AAC-friendly request starters, request words, and short request phrases for asking for help, objects, actions, comfort, food, drinks, and assistance. When starting a sentence, strongly prefer natural request openings like Can, Could, May, Will, Would, Please, I need, and I want.',
-                'static_options': None,
-                'label': 'Request',
-                'image_url': None,
-                'prompt_examples': None,
-                'hidden': False,
-                'children': [],
-                'prompt_topic': None,
-                'background_color': '#ffffff'
-            }
-        ],
+        'children': [],
         'prompt_topic': None,
         'background_color': '#FFFFFF'
     }
@@ -23756,7 +24112,7 @@ def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[
 
         button_id = str(button.get('id') or '').strip().lower()
         button_label = str(button.get('label') or '').strip().lower()
-        if button_id not in {'requests_btn', 'ask_btn'} and button_label not in {'requests', 'questions', 'ask'}:
+        if button_id != 'ask_btn' and button_label != 'ask':
             continue
 
         if button != expected_ask_button:
@@ -23794,7 +24150,7 @@ def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[
 
     return config_data, normalized
 
-def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
+def create_default_tap_config(account_id: str, aac_user_id: str, use_hybrid_pages: bool = False) -> Dict:
     """Create a comprehensive default tap navigation configuration based on production template"""
     from datetime import datetime
     
@@ -23803,44 +24159,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
         "id": "user_config",
         "is_active": True,
         "buttons": [
-        {
-            "text_color": "#000000",
-            "special_function": "spell",
-            "custom_audio_file": None,
-            "words_prompt": None,
-            "id": "spell_btn",
-            "prompt_exclusions": None,
-            "speech_text": None,
-            "prompt_category": None,
-            "llm_prompt": None,
-            "static_options": None,
-            "label": "Spell",
-            "image_url": None,
-            "prompt_examples": None,
-            "hidden": False,
-            "children": [],
-            "prompt_topic": None,
-            "background_color": "#ffffff"
-        },
-        {
-            "text_color": "#000000",
-            "special_function": "games",
-            "custom_audio_file": None,
-            "words_prompt": None,
-            "id": "games_btn",
-            "prompt_exclusions": None,
-            "speech_text": None,
-            "prompt_category": None,
-            "llm_prompt": None,
-            "static_options": None,
-            "label": "Games",
-            "image_url": None,
-            "prompt_examples": None,
-            "hidden": False,
-            "children": [],
-            "prompt_topic": None,
-            "background_color": "#ffffff"
-        },
         {
             "text_color": "#000000",
             "special_function": None,
@@ -23856,161 +24174,26 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "image_url": None,
             "prompt_examples": None,
             "hidden": False,
-            "children": [
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548786477",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate common greeting phrases and expressions for everyday social interactions",
-                    "prompt_category": "generic_greetings",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Generic Greetings",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548814397",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate location-based greetings and conversation starters",
-                    "prompt_category": "current_location",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Current Location",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548829795",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate simple, appropriate jokes and funny conversation starters",
-                    "prompt_category": "jokes",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Jokes",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548860476",
-                    "prompt_exclusions": None,
-                    "llm_prompt": None,
-                    "prompt_category": None,
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "About Me",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548883127",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "personal_info",
-                            "llm_prompt": "Generate phrases for sharing personal information and basic details about myself",
-                            "static_options": None,
-                            "label": "Personal Info",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548909153",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "family",
-                            "llm_prompt": "Generate phrases for talking about family members and relationships",
-                            "static_options": None,
-                            "label": "Family",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548945509",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "interests",
-                            "llm_prompt": "Generate phrases for discussing hobbies, interests, and favorite activities",
-                            "static_options": None,
-                            "label": "Interests",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548971094",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "medical_info",
-                            "llm_prompt": "Generate phrases for communicating medical needs and health information",
-                            "static_options": None,
-                            "label": "Medical Info",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        }
-                    ],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                }
-            ],
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#FFFFFF"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": None,
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "help_btn",
+            "prompt_exclusions": None,
+            "speech_text": "I need help",
+            "prompt_category": "help",
+            "llm_prompt": "Generate AAC-friendly phrases for asking for help or assistance, covering a range of urgency and intensity. Include mild requests (I could use some help, Can you help me please, I need a little help), moderate requests (I need help right now, Please help me, I am having trouble and need assistance), and urgent phrases (I need help immediately, This is an emergency, Please call for help now, I need someone right away). Phrases should be clear, direct, and appropriate for someone with a communication disability.",
+            "static_options": None,
+            "label": "Help",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
             "prompt_topic": None,
             "background_color": "#FFFFFF"
         },
@@ -24023,148 +24206,32 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "prompt_exclusions": None,
             "speech_text": None,
             "prompt_category": "questions",
-            "llm_prompt": "Generate question words and short AAC-friendly question phrases for asking about people, things, places, needs, choices, feelings, and preferences",
+            "llm_prompt": "Generate AAC-friendly starters, question words, and short phrases for asking questions or making requests. Include question starters (Can, Could, What, Where, Why, How, Do, Is, Will, Would) and request starters (Please, I need, I want, May I, Help me) so the user can begin either a question or a request.",
             "static_options": None,
             "label": "Questions",
             "image_url": None,
             "prompt_examples": None,
             "hidden": False,
-            "children": [
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549017543",
-                    "prompt_exclusions": None,
-                    "llm_prompt": None,
-                    "prompt_category": None,
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Help",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769549040004",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "emergency",
-                            "llm_prompt": "Generate emergency communication phrases and urgent requests",
-                            "static_options": None,
-                            "label": "Emergency",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769549072633",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "need_assistance",
-                            "llm_prompt": "Generate phrases for requesting help and assistance",
-                            "static_options": None,
-                            "label": "Need Assistance",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        }
-                    ],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549107362",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate options for food, include specific food and restaurant options",
-                    "prompt_category": "food",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Food",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549136913",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate options for drinks",
-                    "prompt_category": "drink",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Drink",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549165059",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate words or phrases to request something related to comfort",
-                    "prompt_category": "comfort",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Comfort",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549181795",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate question words and phrases for asking about things",
-                    "prompt_category": "questions",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Questions",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-            ],
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#FFFFFF"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": None,
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "respond_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": "respond",
+            "llm_prompt": "Generate AAC-friendly response starters, words, and short phrases for responding to a question or request. When starting a sentence, strongly prefer natural response openings like Yes, No, Okay, Sure, Maybe, I can, I cannot, Please, Thank you, and Not right now.",
+            "static_options": None,
+            "label": "Respond",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
             "prompt_topic": None,
             "background_color": "#FFFFFF"
         },
@@ -24222,25 +24289,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "prompt_examples": None,
             "hidden": False,
             "children": [
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549267036",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate a list of nouns for common objects and items found in the current location",
-                    "prompt_category": "in_the_room",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "In the Room",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
                 {
                     "words_prompt": None,
                     "special_function": None,
@@ -25159,6 +25207,44 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             ],
             "prompt_topic": None,
             "background_color": "#ffffff"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": "spell",
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "spell_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": None,
+            "llm_prompt": None,
+            "static_options": None,
+            "label": "Spell",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#ffffff"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": "games",
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "games_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": None,
+            "llm_prompt": None,
+            "static_options": None,
+            "label": "Games",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#ffffff"
         }
     ],
     "name": "My Navigation"
@@ -25169,7 +25255,7 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     config['updated_at'] = datetime.now().isoformat()
 
     config, _ = normalize_compose_tap_config(config)
-    config, _ = ensure_tap_boards_structure(config)
+    config, _ = ensure_tap_boards_structure(config, use_hybrid_pages=use_hybrid_pages)
     
     return config
 
@@ -25185,15 +25271,17 @@ async def get_tap_interface_config(
     account_id = current_ids["account_id"]
     
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         
         if not config_data:
             # Create and save default configuration
-            config_data = create_default_tap_config(account_id, aac_user_id)
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
             await save_tap_nav_config(account_id, aac_user_id, config_data)
         else:
             config_data, was_normalized = normalize_compose_tap_config(config_data)
-            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
             menu_before = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
             menu_deduped = dedupe_boards_menu_tree(menu_before)
             menu_changed = menu_before != menu_deduped
@@ -25231,6 +25319,8 @@ async def save_tap_interface_config(
     account_id = current_ids["account_id"]
     
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         existing_config = await load_tap_nav_config(account_id, aac_user_id)
 
         # DEBUG: Log words_prompt presence in received config
@@ -25247,7 +25337,7 @@ async def save_tap_interface_config(
         config_dict['id'] = 'user_config'
         config_dict['updated_at'] = dt.now().isoformat()
         config_dict, _ = normalize_compose_tap_config(config_dict)
-        config_dict, _ = ensure_tap_boards_structure(config_dict, existing_config=existing_config)
+        config_dict, _ = ensure_tap_boards_structure(config_dict, existing_config=existing_config, use_hybrid_pages=use_hybrid_pages)
         
         success = await save_tap_nav_config(account_id, aac_user_id, config_dict)
         
@@ -25260,6 +25350,95 @@ async def save_tap_interface_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class WordVariantRequest(BaseModel):
+    words: List[str]
+    mode: str  # 'past' or 'plural'
+    category: Optional[str] = None
+
+@app.post("/api/tap-interface/word-variants")
+async def get_word_variants(
+    request: WordVariantRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Convert a list of words to past tense or plural using LLM."""
+    if request.mode not in ('past', 'plural'):
+        raise HTTPException(status_code=400, detail="mode must be 'past' or 'plural'")
+
+    words = [w.strip() for w in request.words if isinstance(w, str) and w.strip()]
+    if not words:
+        return JSONResponse(content={"variants": {}})
+
+    words_json = json.dumps(words)
+
+    if request.mode == 'past':
+        prompt = (
+            f"Convert these words/phrases to past tense. "
+            f"Return ONLY a valid JSON object mapping each original word/phrase to its past tense form. "
+            f"For multi-word phrases, convert only the verb (first word that changes): 'do this'->'did this', 'wait here'->'waited here', 'go home'->'went home'. "
+            f"If a word does not change meaningfully in past tense (articles, prepositions, adjectives, nouns, pronouns, already-past forms), return it unchanged. "
+            f"Examples: want->wanted, am->was, is->was, are->were, have->had, has->had, can->could, will->would, feel->felt, go->went, need->needed, like->liked, understand->understood. "
+            f"Words: {words_json}"
+        )
+    else:
+        prompt = (
+            f"Convert these words/phrases to plural form. "
+            f"Return ONLY a valid JSON object mapping each original word to its plural form. "
+            f"If a word does not have a meaningful plural (verbs, prepositions, pronouns, adjectives, etc.), return it unchanged. "
+            f"Examples: cat->cats, wish->wishes, cookie->cookies, idea->ideas. "
+            f"Words: {words_json}"
+        )
+
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_provider = str(settings.get('llm_provider') or 'gemini').lower()
+
+        response_text = None
+        if llm_provider == 'chatgpt' and openai_client:
+            resp = await asyncio.to_thread(
+                openai_client.chat.completions.create,
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+                temperature=0.1,
+            )
+            response_text = resp.choices[0].message.content.strip() if resp.choices else None
+        else:
+            import google.generativeai as genai
+            model = genai.GenerativeModel('gemini-2.0-flash-lite')
+            resp = await asyncio.to_thread(model.generate_content, prompt)
+            response_text = resp.text.strip() if resp and resp.text else None
+
+        if not response_text:
+            return JSONResponse(content={"variants": {w: w for w in words}})
+
+        # Extract JSON from response
+        json_str = response_text
+        if '```' in json_str:
+            import re
+            match = re.search(r'```(?:json)?\s*([\s\S]*?)```', json_str)
+            if match:
+                json_str = match.group(1).strip()
+
+        variants = json.loads(json_str)
+        if not isinstance(variants, dict):
+            return JSONResponse(content={"variants": {}})
+
+        # Only return words that actually changed — client skips identity mappings
+        result = {}
+        for w in words:
+            v = str(variants.get(w) or '').strip()
+            if v and v.lower() != w.lower():
+                result[w] = v
+
+        return JSONResponse(content={"variants": result})
+    except Exception as e:
+        logging.error(f"Error converting word variants: {e}", exc_info=True)
+        # Return identity mapping on error
+        return JSONResponse(content={"variants": {w: w for w in words}})
+
+
 @app.get("/api/tap-interface/boards-menu")
 async def get_tap_boards_menu_config(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
@@ -25269,13 +25448,15 @@ async def get_tap_boards_menu_config(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
-            config_data = create_default_tap_config(account_id, aac_user_id)
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
             await save_tap_nav_config(account_id, aac_user_id, config_data)
         else:
             config_data, was_normalized = normalize_compose_tap_config(config_data)
-            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
             if was_normalized or boards_changed:
                 await save_tap_nav_config(account_id, aac_user_id, config_data)
 
@@ -25324,12 +25505,14 @@ async def save_tap_boards_menu_config(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
-            config_data = create_default_tap_config(account_id, aac_user_id)
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
 
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         valid_board_ids = {
@@ -25391,13 +25574,15 @@ async def list_tap_boards(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
-            config_data = create_default_tap_config(account_id, aac_user_id)
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
             await save_tap_nav_config(account_id, aac_user_id, config_data)
         else:
             config_data, was_normalized = normalize_compose_tap_config(config_data)
-            config_data, boards_changed = ensure_tap_boards_structure(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
             if was_normalized or boards_changed:
                 await save_tap_nav_config(account_id, aac_user_id, config_data)
 
@@ -25429,12 +25614,14 @@ async def get_tap_board(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
             raise HTTPException(status_code=404, detail='Board config not found')
 
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
 
@@ -25460,12 +25647,14 @@ async def create_tap_board(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
-            config_data = create_default_tap_config(account_id, aac_user_id)
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
 
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         existing_ids = {
@@ -25519,12 +25708,14 @@ async def update_tap_board(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
             raise HTTPException(status_code=404, detail='Board config not found')
 
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_index = next(
@@ -25535,8 +25726,8 @@ async def update_tap_board(
             raise HTTPException(status_code=404, detail='Board not found')
 
         existing_board = boards[board_index]
-        if str(existing_board.get('source') or '') == 'legacy_category' or str(existing_board.get('board_type') or '') == 'system':
-            raise HTTPException(status_code=403, detail='Legacy and system boards are read-only')
+        if str(existing_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='System boards are read-only')
 
         updated_board = _normalize_board_payload(
             payload.model_dump(),
@@ -25578,12 +25769,14 @@ async def delete_tap_board(
     account_id = current_ids["account_id"]
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
             raise HTTPException(status_code=404, detail='Board config not found')
 
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_index = next(
@@ -25683,12 +25876,14 @@ async def convert_ai_boards_to_static(
         return options
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
             raise HTTPException(status_code=404, detail="Board config not found")
 
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards: List[Dict[str, Any]] = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_index_by_id: Dict[str, int] = {
@@ -25916,6 +26111,13 @@ async def create_ai_target_board(
         return options
 
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+        _dr = settings.get("tapDynamicRows")
+        tap_dynamic_rows = int(_dr) if _dr is not None else 1
+        static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+
         gen_prompt = (
             f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
             f"A user has just tapped a button that says \"{label}\".\n"
@@ -25962,6 +26164,8 @@ async def create_ai_target_board(
                 if image_url:
                     break
 
+            btn_type = "static" if row < static_rows_count else "dynamic"
+
             buttons.append({
                 "id": f"btn_{row}_{col}_{ts_base}_{i}",
                 "label": opt_label,
@@ -25978,13 +26182,14 @@ async def create_ai_target_board(
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "hidden": False,
+                "button_type": btn_type,
             })
 
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         if not config_data:
             raise HTTPException(status_code=404, detail="Board config not found")
         config_data, _ = normalize_compose_tap_config(config_data)
-        config_data, _ = ensure_tap_boards_structure(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
         boards: List[Dict[str, Any]] = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         existing_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
@@ -26003,6 +26208,7 @@ async def create_ai_target_board(
             "label": label,
             "board_type": "static",
             "source": "custom",
+            "dynamic_rows": tap_dynamic_rows,
             "buttons": buttons,
         }
         boards.append(new_board)
@@ -26024,6 +26230,414 @@ async def create_ai_target_board(
         raise
     except Exception as e:
         logging.error(f"Error in create_ai_target_board: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/bravo-build")
+async def bravo_build(
+    payload: BravoBuildRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Dynamically build a new static board based on a clicked button's label and context.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    source_board_id = payload.source_board_id
+    button_id = payload.button_id
+    context = payload.context.strip() if payload.context else ""
+
+    def _extract_options(raw: str) -> List[str]:
+        text = raw.strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                opt = item.strip()
+            elif isinstance(item, dict):
+                opt = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                opt = str(item).strip()
+            if opt and opt.lower() not in seen:
+                seen.add(opt.lower())
+                options.append(opt)
+        return options
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+        _dr = settings.get("tapDynamicRows")
+        tap_dynamic_rows = int(_dr) if _dr is not None else 1
+        static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        # Scan boards to find the button
+        button_obj = None
+        boards: List[Dict[str, Any]] = config_data.get('boards', [])
+        
+        # If source_board_id is "home", it might be a root button
+        if source_board_id == "home":
+            root_buttons = config_data.get('buttons', [])
+            for btn in root_buttons:
+                if btn.get('id') == button_id:
+                    button_obj = btn
+                    break
+        
+        # Otherwise, find the board first, then the button in that board
+        if not button_obj:
+            for board in boards:
+                if board.get('id') == source_board_id:
+                    for btn in board.get('buttons', []):
+                        if btn.get('id') == button_id:
+                            button_obj = btn
+                            break
+                    if button_obj:
+                        break
+
+        # Fallback search all boards
+        if not button_obj:
+            for board in boards:
+                for btn in board.get('buttons', []):
+                    if btn.get('id') == button_id:
+                        button_obj = btn
+                        break
+                if button_obj:
+                    break
+
+        label = "Next Option"
+        if button_obj:
+            label = button_obj.get('label') or button_obj.get('speech_text') or "Next Option"
+        elif payload.button_label and str(payload.button_label).strip():
+            label = str(payload.button_label).strip()
+
+        options_per_row = settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6
+        num_options = options_per_row * tap_words_rows
+        
+        if context:
+            prompt_text = (
+                f"The user is building a sentence on an AAC device. So far, they have said: \"{context}\".\n"
+                f"They just tapped the button \"{label}\" (so the combined sentence context is \"{context} {label}\").\n"
+                f"Generate EXACTLY {num_options} unique, short button labels for words or phrases that would naturally "
+                f"FOLLOW \"{label}\" to continue the sentence \"{context} {label}\" in spoken conversation.\n\n"
+            )
+        else:
+            prompt_text = (
+                f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
+                f"A user has just tapped a button that says \"{label}\".\n"
+                f"Generate EXACTLY {num_options} short button labels for words or phrases that would naturally "
+                f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
+            )
+
+        gen_prompt = (
+            prompt_text +
+            f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
+            f"Example: if the sentence is \"I want\" and the tapped word is \"eat\", good options are: more, now, lunch, snack, dinner, pizza, an apple, please, later.\n"
+            f"Example: if the sentence is \"I like\" and the tapped word is \"go\", good options are: home, outside, to school, to the park, fast, there.\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Every option must be a word or short phrase that makes sense coming AFTER the tapped word in speech\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        generated_options = _extract_options(raw_response)
+
+        if not generated_options:
+            raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
+
+        generated_options = generated_options[:num_options]
+        ts_base = int(time.time() * 1000)
+        buttons: List[Dict[str, Any]] = []
+
+        for i, opt_label in enumerate(generated_options):
+            row = i // options_per_row
+            col = i % options_per_row
+            image_url: Optional[str] = None
+            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
+                try:
+                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                    docs = await asyncio.to_thread(q.get)
+                    for doc in docs:
+                        img_data = doc.to_dict()
+                        if img_data.get("image_url"):
+                            image_url = img_data["image_url"]
+                            break
+                except Exception:
+                    pass
+                if image_url:
+                    break
+
+            btn_type = "static" if row < static_rows_count else "dynamic"
+
+            buttons.append({
+                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "label": opt_label,
+                "row": row,
+                "col": col,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": "use_ai",  # Allow continuous AI generation!
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": image_url,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+                "button_type": btn_type,
+            })
+
+        existing_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
+
+        # Build a filesystem-safe slug from the label
+        slug = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')
+        base_id = f"{slug}_target"
+        new_board_id = base_id
+        suffix = 2
+        while new_board_id in existing_ids:
+            new_board_id = f"{base_id}_{suffix}"
+            suffix += 1
+
+        new_board: Dict[str, Any] = {
+            "id": new_board_id,
+            "label": label,
+            "board_type": "static",
+            "source": "custom",
+            "dynamic_rows": tap_dynamic_rows,
+            "buttons": buttons,
+        }
+        boards.append(new_board)
+        config_data['boards'] = boards
+
+        # Update the clicked button to navigate to the new board
+        if button_obj:
+            button_obj['after_selection'] = 'navigate'
+            button_obj['target_board_id'] = new_board_id
+
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={
+            "success": True,
+            "new_board_id": new_board_id,
+            "board": new_board,
+            "board_label": label
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in bravo_build: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/regenerate-board")
+async def regenerate_board(
+    payload: RegenerateBoardRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Dynamically regenerate options on an AI board based on context.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    board_id = payload.board_id
+    context = payload.context.strip() if payload.context else ""
+
+    def _extract_options(raw: str) -> List[str]:
+        text = raw.strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                opt = item.strip()
+            elif isinstance(item, dict):
+                opt = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                opt = str(item).strip()
+            if opt and opt.lower() not in seen:
+                seen.add(opt.lower())
+                options.append(opt)
+        return options
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+        _dr = settings.get("tapDynamicRows")
+        tap_dynamic_rows = int(_dr) if _dr is not None else 1
+        static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        # Find the board in the user's config
+        board_obj = None
+        boards: List[Dict[str, Any]] = config_data.get('boards', [])
+        for b in boards:
+            if b.get('id') == board_id:
+                board_obj = b
+                break
+
+        if not board_obj:
+            raise HTTPException(status_code=404, detail=f"Board {board_id} not found")
+
+        board_label = board_obj.get('label') or "Options"
+        llm_prompt = board_obj.get('llm_prompt') or board_obj.get('prompt_category') or board_label
+
+        options_per_row = settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6
+        num_options = options_per_row * tap_words_rows
+
+        if context:
+            prompt_text = (
+                f"You are helping generate AAC (Augmentative and Alternative Communication) device buttons.\n"
+                f"The user is in the middle of building a sentence. So far, they have typed/spoken: \"{context}\".\n"
+                f"The current board category/topic is: \"{board_label}\" (Instructions: {llm_prompt}).\n"
+                f"Generate EXACTLY {num_options} unique, short button labels (words or phrases) relevant to \"{board_label}\" "
+                f"that would naturally FOLLOW or fit into the sentence context \"{context}\" in spoken conversation.\n\n"
+            )
+        else:
+            prompt_text = (
+                f"You are helping generate AAC (Augmentative and Alternative Communication) device buttons.\n"
+                f"The board category/topic is: \"{board_label}\" (Instructions: {llm_prompt}).\n"
+                f"Generate EXACTLY {num_options} unique, short button labels (words or phrases) for this topic/category "
+                f"for everyday communication.\n\n"
+            )
+            
+        gen_prompt = (
+            prompt_text +
+            f"REQUIREMENTS:\n"
+            f"1. Every option must be a practical word or short phrase for AAC users\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        generated_options = _extract_options(raw_response)
+
+        if not generated_options:
+            raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
+
+        generated_options = generated_options[:num_options]
+        ts_base = int(time.time() * 1000)
+        buttons: List[Dict[str, Any]] = []
+
+        for i, opt_label in enumerate(generated_options):
+            row = i // options_per_row
+            col = i % options_per_row
+            image_url: Optional[str] = None
+            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
+                try:
+                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                    docs = await asyncio.to_thread(q.get)
+                    for doc in docs:
+                        img_data = doc.to_dict()
+                        if img_data.get("image_url"):
+                            image_url = img_data["image_url"]
+                            break
+                except Exception:
+                    pass
+                if image_url:
+                    break
+
+            btn_type = "static" if row < static_rows_count else "dynamic"
+
+            buttons.append({
+                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "label": opt_label,
+                "row": row,
+                "col": col,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": "do_nothing",  # Or match original after_selection if any
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": image_url,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+                "button_type": btn_type,
+            })
+
+        board_obj['buttons'] = buttons
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={
+            "success": True,
+            "board": board_obj
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in regenerate_board: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -27147,11 +27761,13 @@ async def import_touchchat_board(
     if not selected_buttons:
         raise HTTPException(status_code=400, detail="No valid buttons selected for import")
 
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    use_hybrid_pages = settings.get("useHybridPages", False)
     config_data = await load_tap_nav_config(account_id, aac_user_id)
     if not config_data:
-        config_data = create_default_tap_config(account_id, aac_user_id)
+        config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
     config_data, _ = normalize_compose_tap_config(config_data)
-    config_data, _ = ensure_tap_boards_structure(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
 
     boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
     existing_by_id = {
@@ -27749,11 +28365,13 @@ async def check_touchchat_cascade_conflicts(
     }
 
     # Load the user's existing Tap boards to detect name collisions
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    use_hybrid_pages = settings.get("useHybridPages", False)
     config_data = await load_tap_nav_config(account_id, aac_user_id)
     if not config_data:
-        config_data = create_default_tap_config(account_id, aac_user_id)
+        config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
     config_data, _ = normalize_compose_tap_config(config_data)
-    config_data, _ = ensure_tap_boards_structure(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
     tap_boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
     tap_by_label: Dict[str, Dict[str, Any]] = {
         _normalize_board_label(b.get("label")): b
