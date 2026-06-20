@@ -107,9 +107,11 @@ import json
 import logging
 import time
 import datetime
+import copy
 import holidays
 import calendar # For calculating floating observances
 from datetime import date, timedelta, datetime as dt, timezone # Alias datetime to avoid conflict
+from zoneinfo import ZoneInfo
 from fastapi.middleware.cors import CORSMiddleware
 import re
 # from sentence_transformers import SentenceTransformer  # DISABLED - not currently used
@@ -117,17 +119,23 @@ from jinja2 import Environment, FileSystemLoader
 import urllib.parse
 import http.client  # Import the http.client module
 import requests  # Import the requests library (though http.client is used)
+import base64
+import secrets
+import hmac
+import hashlib
 from bs4 import BeautifulSoup
 import random
 import aiohttp
 import asyncio
 from urllib.parse import urljoin, urlparse
+from email.utils import parseaddr
+from email.message import EmailMessage
 import uuid
 import io
 import wave
 from pydantic import BaseModel, Field, field_validator, validator, conint # Import field_validator
 from pydantic_core.core_schema import ValidationInfo # For more complex V2 validators if needed
-from typing import List, Optional, Dict, Any, Union, Literal, Annotated
+from typing import List, Optional, Dict, Any, Union, Literal, Annotated, Set, Tuple
 import google.api_core.exceptions # For specific error handling with LLM
 from google.cloud import texttospeech as google_tts # Import Google Cloud Text-to-Speech with an alias
 from contextlib import asynccontextmanager # Import for lifespan
@@ -145,11 +153,28 @@ import openai # Add OpenAI import
 
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
 from routes import router as static_router # Import static pages router
+from jokes_system import jokes_db, JokesDatabase, bulk_import_icanhazdadjoke, cleanup_joke_quotes
+try:
+    from scratch_pools import CATEGORY_STATIC_POOLS, WORD_VARIANTS
+except ImportError:
+    CATEGORY_STATIC_POOLS = {}
+    WORD_VARIANTS = {}
 
 oauth2_scheme = HTTPBearer()
 
 # Mood update tracking to prevent race conditions
 mood_update_timestamps = {}  # Format: {account_id/aac_user_id: timestamp}
+
+# Short-lived in-memory cache for repeated /llm option requests.
+# This smooths interactive UX when users trigger the same button/prompt repeatedly.
+LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS = 180
+llm_quick_response_cache: Dict[str, Dict[str, Any]] = {}
+llm_inflight_requests: Dict[str, asyncio.Future] = {}
+llm_inflight_requests_lock = asyncio.Lock()
+
+# Short-lived in-memory cache for repeated category-words requests.
+CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS = 180
+category_words_quick_response_cache: Dict[str, Dict[str, Any]] = {}
 
 # Redis cache client (initialized in lifespan)
 redis_client = None
@@ -289,16 +314,20 @@ template_user_data_paths = {
         "LLMOptions": 10,
         "FreestyleOptions": 20,
         "ScanningOff": False,
+        "scanMode": "auto",
         "waitForSwitchToScan": False,
+        "playWaitForSwitchChime": False,
         "SummaryOff": False,
         "selected_tts_voice_name": "en-US-Neural2-A",
-        "gridColumns": 10,
+        "gridColumns": 6,
         "lightColorValue": 4294659860,
         "darkColorValue": 4278198852,
         "toolbarPIN": "1234",  # Default PIN for toolbar
         "autoClean": False,  # Default Auto Clean setting for freestyle (automatic cleanup on Speak Display)
         "enablePictograms": False,  # Default AAC pictograms disabled
-        "sightWordGradeLevel": "pre_k"  # Default sight word grade level
+        "sightWordGradeLevel": "pre_k",  # Default sight word grade level
+        "tapWordsRows": 3,
+        "hasLoggedIn": False  # Explicitly False so new profiles are distinguishable from legacy profiles
     }, indent=4),
     "birthdays.json": json.dumps({"userBirthdate": None, "friendsFamily": []}, indent=4),
     "user_diary.json": json.dumps([], indent=4),
@@ -312,6 +341,7 @@ template_user_data_paths = {
     {
         "name": "home",
         "displayName": "Home",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Greetings", "LLMQuery": "", "targetPage": "greetings", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "Going On", "LLMQuery": "", "targetPage": "goingon", "queryType": "", "speechPhrase": "Let's talk about things that are going on", "customAudioFile": None, "hidden": False},
@@ -333,6 +363,7 @@ template_user_data_paths = {
     {
         "name": "greetings",
         "displayName": "Greetings",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "Generic Greetings", "LLMQuery": "Generate #LLMOptions generic but expressive greetings, goodbyes or conversation starters.  Each item should be a single sentence and have varying levels of energy, creativity and engagement.  The greetings, goodbye or conversation starter should be in first person from the user.", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
@@ -347,9 +378,10 @@ template_user_data_paths = {
     {
         "name": "goingon",
         "displayName": "Going On",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 1,"text": "My Recent Activities", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements based on the most recent activities. CRITICAL: Use ONLY diary events dated today or earlier and EXCLUDE any future-dated events. Use past tense since these events have already happened (e.g., 'I went to...', 'I did...', 'I attended...', 'I saw...', 'I had...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby what they have done recently.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 2,"text": "My Upcoming Plans", "LLMQuery": "Using the user diary and the current date, generate #LLMOptions statements about planned activities and events. CRITICAL: Use correct verb tenses based on timing - future tense ONLY for events that haven't happened yet (e.g., 'I'm going to...', 'I have plans to...', 'I will...') and past tense for events that already happened (e.g., 'I went to...', 'I did...', 'I attended...'). ALWAYS use first person pronouns ('I', 'me', 'my') - NEVER use the user's name or third person pronouns. Each statement should be phrased conversationally as if the user is telling someone nearby about their activities.", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 3,"text": "You lately", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "What have you been up to recently?", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 4,"text": "Any plans?", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "Do you have any fun plans coming up?", "customAudioFile": None, "hidden": False}
@@ -358,6 +390,7 @@ template_user_data_paths = {
     {
         "name": "describe",
         "displayName": "Describe",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "Positive", "LLMQuery": "Provide up to #LLMOptions creative, with different levels of intensity,  and descriptive words or short phrases to describe something positive, as if someone was very excited", "targetPage": "home", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
@@ -373,6 +406,7 @@ template_user_data_paths = {
     {
         "name": "questions",
         "displayName": "Questions",
+        "scan_pattern": "column",
         "buttons": [
             {"row": 0,"col": 0,"text": "Home", "LLMQuery": "", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 1,"text": "What?", "LLMQuery": "Generate #LLMOptions generic, basic questions, starting with what, for the user to ask someone nearby.  Include questions with different levels of inquiry, from simple to very simple. As simple as What is That?  Phrase each question as if it was asked by the user. All options must begin with What...", "targetPage": "home", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
@@ -399,12 +433,12 @@ async def verify_firebase_token_only(
         decoded_token = await asyncio.to_thread(auth.verify_id_token, token.credentials)
         # Return Firebase UID and email from the token
         return {"account_id": decoded_token['uid'], "email": decoded_token.get('email')}
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received during token-only verification.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received during token-only verification.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received during token-only verification.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except Exception as e:
         logging.error(f"Error during token-only verification: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Authentication error during token verification: {e}")
@@ -477,8 +511,10 @@ async def get_current_account_and_user_ids(
             has_access = False
             if is_admin and target_account_data.get("allow_admin_access", True):
                 has_access = True
-            elif is_therapist and target_account_data.get("therapist_email") == user_email:
-                has_access = True
+            elif is_therapist:
+                # Therapists can access their own account or client accounts where they're listed as therapist_email
+                if x_admin_target_account == account_id or target_account_data.get("therapist_email") == user_email:
+                    has_access = True
             
             if not has_access:
                 logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
@@ -538,12 +574,12 @@ async def get_current_account_and_user_ids(
             "email": account_data.get("email", "")  # Add email for admin verification
         }
 
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except HTTPException as e:
         # Re-raise explicit HTTPExceptions
         raise e
@@ -565,18 +601,35 @@ async def get_target_account_id(
     try:
         id_token = token.credentials
         decoded_token = auth.verify_id_token(id_token, firebase_app)
-        
-        user_email = decoded_token.get("email", "")
+
         # Use uid as account_id (same as verify_firebase_token_only)
         account_id = decoded_token.get("uid")
-        # Check admin status by email (consistent with other endpoints)
-        is_admin = user_email == "admin@talkwithbravo.com"
-        # Also check custom claims for therapist status
-        custom_claims = decoded_token.get("custom_claims", {})
-        is_therapist = custom_claims.get("is_therapist", False)
-        
+
         if not account_id:
             raise HTTPException(status_code=403, detail="No account associated with this user")
+
+        # Fast-path: check admin by token email before hitting Firestore.
+        token_email = decoded_token.get("email", "")
+        is_admin = token_email == "admin@talkwithbravo.com"
+
+        # Resolve role from authoritative account document in Firestore.
+        # Admin may not have a regular account doc, so only 404 for non-admins.
+        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
+        account_doc = await asyncio.to_thread(account_doc_ref.get)
+        if not account_doc.exists:
+            if not is_admin:
+                raise HTTPException(status_code=404, detail="Account not found")
+            account_data = {}
+        else:
+            account_data = account_doc.to_dict() or {}
+
+        user_email = account_data.get("email") or token_email
+        # Re-check is_admin with the stored email in case they differ.
+        is_admin = is_admin or (user_email == "admin@talkwithbravo.com")
+
+        # Therapist role is stored in account data; keep decoded-token fallback for compatibility.
+        token_is_therapist = bool(decoded_token.get("is_therapist", False))
+        is_therapist = bool(account_data.get("is_therapist", False) or token_is_therapist)
 
         target_account_id = account_id  # Default to the authenticated account
         
@@ -599,8 +652,11 @@ async def get_target_account_id(
             # Check access permissions
             if is_admin and target_account_data.get("allow_admin_access", True):
                 pass  # Admin access allowed
-            elif is_therapist and target_account_data.get("therapist_email") == user_email:
-                pass  # Therapist access to their assigned account
+            elif is_therapist:
+                # Therapists can access their own account or client accounts where they're listed as therapist_email
+                if not (x_admin_target_account == account_id or target_account_data.get("therapist_email") == user_email):
+                    logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
+                    raise HTTPException(status_code=403, detail="Access denied to target account")
             else:
                 logging.warning(f"Access denied to account {x_admin_target_account} for user {user_email}")
                 raise HTTPException(status_code=403, detail="Access denied to target account")
@@ -615,12 +671,12 @@ async def get_target_account_id(
             "is_therapist": is_therapist
         }
 
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -762,12 +818,12 @@ async def save_avatar_variations(payload: AvatarVariationRequest):
     
 
 @app.get("/api/account/users")
-async def get_aac_user_profiles(token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
+async def get_aac_user_profiles(account_info: Annotated[Dict[str, str], Depends(get_target_account_id)]):
     """
     Returns a list of individual AAC user profiles associated with the authenticated account.
     This endpoint does NOT require an X-User-ID header as it lists users *for* the account.
     """
-    account_id = token_info["account_id"] # Get account_id from the verified token
+    account_id = account_info["account_id"]
 
     global firestore_db
     if not firestore_db:
@@ -961,6 +1017,11 @@ class UserCurrentState(BaseModel):
     location: Optional[str] = ""
     people: Optional[str] = "" # Renamed from People Present for consistency
     activity: Optional[str] = ""
+    topicTitle: Optional[str] = ""
+    focusChapters: Optional[str] = ""
+    focusPlotPoints: Optional[str] = ""
+    topicSummary: Optional[str] = ""
+    locationLanguageOverride: Optional[str] = None
     mood: Optional[str] = None  # Current mood - saved to info/user_narrative
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
     favorite_name: Optional[str] = None  # NEW: Name of the favorite that was loaded
@@ -977,6 +1038,11 @@ class UserCurrentFavorite(BaseModel):
     location: str
     people: str
     activity: str
+    topicTitle: Optional[str] = ""
+    focusChapters: Optional[str] = ""
+    focusPlotPoints: Optional[str] = ""
+    topicSummary: Optional[str] = ""
+    locationLanguageOverride: Optional[str] = None
     loaded_at: Optional[str] = None  # NEW: ISO timestamp when favorite was loaded
     schedule: Optional[FavoriteSchedule] = None # NEW: Schedule for this favorite
 
@@ -988,6 +1054,11 @@ class FavoriteRequest(BaseModel):
     location: str
     people: str
     activity: str
+    topicTitle: Optional[str] = ""
+    focusChapters: Optional[str] = ""
+    focusPlotPoints: Optional[str] = ""
+    topicSummary: Optional[str] = ""
+    locationLanguageOverride: Optional[str] = None
     schedule: Optional[FavoriteSchedule] = None # NEW: Schedule for this favorite
 
 class ManageFavoriteRequest(BaseModel):
@@ -1018,11 +1089,18 @@ async def get_user_current_endpoint(current_ids: Annotated[Dict[str, str], Depen
         )
         current_mood = user_info.get("currentMood")
         
+        normalized_location_override = _normalize_locale_tag(user_current_content_dict.get("locationLanguageOverride"))
+
         # Return the full state including favorite tracking fields and mood
         return JSONResponse(content={
             "location": user_current_content_dict.get("location", ""),
             "people": user_current_content_dict.get("people", ""),
             "activity": user_current_content_dict.get("activity", ""),
+            "topicTitle": user_current_content_dict.get("topicTitle", ""),
+            "focusChapters": user_current_content_dict.get("focusChapters", ""),
+            "focusPlotPoints": user_current_content_dict.get("focusPlotPoints", ""),
+            "topicSummary": user_current_content_dict.get("topicSummary", ""),
+            "locationLanguageOverride": normalized_location_override,
             "mood": current_mood,  # Include mood from user_narrative
             "loaded_at": user_current_content_dict.get("loaded_at"),
             "favorite_name": user_current_content_dict.get("favorite_name"),
@@ -1039,15 +1117,31 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
     location = payload.location or ""
     people = payload.people or ""
     activity = payload.activity or ""
+    topic_title = payload.topicTitle or ""
+    focus_chapters = payload.focusChapters or ""
+    focus_plot_points = payload.focusPlotPoints or ""
+    topic_summary = payload.topicSummary or ""
+    location_language_override = _normalize_locale_tag(payload.locationLanguageOverride)
+    discussion_narrative = (topic_summary or focus_plot_points or "").strip()
     mood = payload.mood  # Current mood
     loaded_at = payload.loaded_at  # Timestamp when favorite was loaded
     favorite_name = payload.favorite_name  # Name of the favorite that was loaded
     provided_saved_at = payload.saved_at  # Timestamp when data was saved (may be provided for favorite loads)
     
-    logging.info(f"🔍 /user_current called with mood='{mood}', location='{location}', people='{people}', activity='{activity}'")
+    logging.info(
+        f"🔍 /user_current called with mood='{mood}', location='{location}', people='{people}', "
+        f"activity='{activity}', topicTitle='{topic_title}', focusChapters='{focus_chapters}'"
+    )
     
     # The content to embed for current state should be a single string for LLM context
-    current_state_content = f"Location: {location}\nPeople Present: {people}\nActivity: {activity}"
+    current_state_content = (
+        f"Location: {location}\n"
+        f"People Present: {people}\n"
+        f"Activity: {activity}\n"
+        f"Discussion Topic Title: {topic_title}\n"
+        f"Discussion Focus Chapters: {focus_chapters}\n"
+        f"Discussion Narrative: {discussion_narrative}"
+    )
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     
@@ -1062,6 +1156,11 @@ async def update_user_current_endpoint(payload: UserCurrentState, current_ids: A
         "location": location, 
         "people": people, 
         "activity": activity,
+        "topicTitle": topic_title,
+        "focusChapters": focus_chapters,
+        "focusPlotPoints": focus_plot_points,
+        "topicSummary": discussion_narrative,
+        "locationLanguageOverride": location_language_override,
         "saved_at": saved_at  # Always update saved_at when manually saving
     }
     
@@ -1137,7 +1236,19 @@ async def get_user_current_favorites(current_ids: Annotated[Dict[str, str], Depe
             doc_subpath="info/current_favorites",
             default_data={"favorites": []}
         )
-        return UserCurrentFavoritesData(**favorites_data)
+
+        raw_favorites = favorites_data.get("favorites", []) if isinstance(favorites_data, dict) else []
+        normalized_favorites = []
+        for favorite in raw_favorites:
+            if not isinstance(favorite, dict):
+                continue
+            normalized_favorite = favorite.copy()
+            normalized_favorite["locationLanguageOverride"] = _normalize_locale_tag(
+                normalized_favorite.get("locationLanguageOverride")
+            )
+            normalized_favorites.append(normalized_favorite)
+
+        return UserCurrentFavoritesData(favorites=normalized_favorites)
     except Exception as e:
         logging.error(f"Error loading user current favorites: {e}")
         return UserCurrentFavoritesData(favorites=[])
@@ -1169,6 +1280,11 @@ async def save_user_current_favorite(payload: FavoriteRequest, current_ids: Anno
             "location": payload.location,
             "people": payload.people,
             "activity": payload.activity,
+            "topicTitle": payload.topicTitle or "",
+            "focusChapters": payload.focusChapters or "",
+            "focusPlotPoints": payload.focusPlotPoints or "",
+            "topicSummary": payload.topicSummary or "",
+            "locationLanguageOverride": _normalize_locale_tag(payload.locationLanguageOverride),
             "schedule": payload.schedule.model_dump() if payload.schedule else None
         }
         favorites_list.append(new_favorite)
@@ -1221,6 +1337,11 @@ async def manage_user_current_favorite(payload: ManageFavoriteRequest, current_i
                         "location": payload.favorite.location,
                         "people": payload.favorite.people,
                         "activity": payload.favorite.activity,
+                        "topicTitle": payload.favorite.topicTitle or "",
+                        "focusChapters": payload.favorite.focusChapters or "",
+                        "focusPlotPoints": payload.favorite.focusPlotPoints or "",
+                        "topicSummary": payload.favorite.topicSummary or "",
+                        "locationLanguageOverride": _normalize_locale_tag(payload.favorite.locationLanguageOverride),
                         "schedule": payload.favorite.schedule.model_dump() if payload.favorite.schedule else None
                     }
                     break
@@ -1261,6 +1382,7 @@ class FreestyleWordOptionsRequest(BaseModel):
     originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
     current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
     max_options: Optional[int] = Field(None, description="Override the user's FreestyleOptions setting for this request", ge=1, le=50)
+    target_locale: Optional[str] = Field(None, description="Optional locale override for generated words (e.g., es-US)")
 
 @app.post("/api/generate-llm-prompt")
 async def generate_llm_prompt(payload: GeneratePromptRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
@@ -1501,8 +1623,17 @@ SENTENCE_TRANSFORMER_MODEL = "all-MiniLM-L6-v2" # Model for generating embedding
 
 # LLM Model Configuration - Environment Variables
 # Gemini Models
-GEMINI_PRIMARY_MODEL = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-1.5-flash-latest")
-GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-1.5-flash-latest")
+GEMINI_PRIMARY_MODEL = (os.environ.get("GEMINI_PRIMARY_MODEL") or "").strip()
+if not GEMINI_PRIMARY_MODEL:
+    raise RuntimeError("Missing required environment variable: GEMINI_PRIMARY_MODEL")
+
+GEMINI_FALLBACK_MODEL = (os.environ.get("GEMINI_FALLBACK_MODEL") or "").strip()
+if not GEMINI_FALLBACK_MODEL:
+    raise RuntimeError("Missing required environment variable: GEMINI_FALLBACK_MODEL")
+
+# Fast lightweight model for low-latency word list generation (category-words endpoint).
+# Defaults to the configured primary model if not explicitly provided.
+GEMINI_FAST_WORDS_MODEL = (os.environ.get("GEMINI_FAST_WORDS_MODEL") or GEMINI_PRIMARY_MODEL).strip()
 
 # ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
 # GPT-4o/4o-mini use: max_tokens, adjustable temperature
@@ -1555,12 +1686,46 @@ DEFAULT_WAKE_WORD_NAME = "Friend" # Default name
 DEFAULT_USER_INFO = {
     "narrative": "Welcome to Bravo! This is your personal communication assistant. As you use the app, this section will contain information about you, your interests, communication preferences, and important personal details that help customize your experience. You can update this information anytime through the user info settings to make your communication more personalized and effective.",
     "currentMood": None,
-    "name": ""
+    "name": "",
+    "aiOptionOverrides": {
+        "exclusions": {
+            "eatingByMouth": False,
+            "eatingIndependently": False,
+            "drinkingByMouth": False,
+            "drinkingIndependently": False,
+            "walkingIndependently": False,
+            "toiletingIndependently": False,
+            "readingIndependently": False,
+            "foodAllergies": "",
+            "environmentalAllergies": ""
+        },
+        "inclusions": {
+            "profanity": False,
+            "adultTopics": False,
+            "adultJokes": False,
+            "religion": False,
+            "politics": False
+        }
+    }
 }
-DEFAULT_USER_CURRENT = {"location": "Unknown", "people": "None", "activity": "Idle", "loaded_at": None, "favorite_name": None, "saved_at": None}
-DEFAULT_COLUMNS = 10 # Default number of columns in the grid
+DEFAULT_USER_CURRENT = {
+    "location": "Unknown",
+    "people": "None",
+    "activity": "Idle",
+    "topicTitle": "",
+    "focusChapters": "",
+    "focusPlotPoints": "",
+    "topicSummary": "",
+    "locationLanguageOverride": None,
+    "loaded_at": None,
+    "favorite_name": None,
+    "saved_at": None
+}
+DEFAULT_COLUMNS = 6 # Default number of columns in the grid
 DEFAULT_LIGHT_COLOR = 4294659860 # Default light color
 DEFAULT_DARK_COLOR = 4278198852 # Default dark color
+DEFAULT_USER_LANGUAGE = "en-US"
+DEFAULT_PARTNER_LANGUAGE = "en-US"
 
 # --- Updated Defaults to include wake word parts ---
 DEFAULT_SETTINGS = {
@@ -1573,9 +1738,16 @@ DEFAULT_SETTINGS = {
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
     "FreestyleOptions": 20,  # Default Freestyle Options
     "ScanningOff": False, # Default scanning off
+    "scanMode": "auto", # Scanning mode: "auto" timer scanning or "step" switch-driven scanning
     "waitForSwitchToScan": False, # Default wait for switch to start scanning
+    "playWaitForSwitchChime": False, # Default page-ready chime off while waiting for switch
     "SummaryOff": False, # Default summary off
     "selected_tts_voice_name": DEFAULT_TTS_VOICE, # Default TTS voice
+    "userLanguage": DEFAULT_USER_LANGUAGE,
+    "defaultPartnerLanguage": DEFAULT_PARTNER_LANGUAGE,
+    "defaultPartnerVoice": DEFAULT_TTS_VOICE,
+    "locationOverrideLanguages": [],
+    "locationOverrideVoices": {},
     "gridColumns": DEFAULT_COLUMNS, # Default grid columns
     "lightColorValue": DEFAULT_LIGHT_COLOR, # Default light color
     "darkColorValue": DEFAULT_DARK_COLOR, # Default dark color
@@ -1586,13 +1758,133 @@ DEFAULT_SETTINGS = {
     "displaySplashTime": 3000,  # Default splash screen duration (3 seconds)
     "enableMoodSelection": True,  # Default mood selection enabled
     "enablePictograms": False,  # Default AAC pictograms disabled
+    "disableTapPictograms": False,  # Default Tap Interface pictograms enabled
     "enableSightWords": True,  # Default sight word logic enabled
     "sightWordGradeLevel": "pre_k",  # Default sight word grade level
     "useTapInterface": False,  # Default to gridpage interface
     "applicationVolume": 8,  # Default application volume (80%)
     "spellLetterOrder": "alphabetical",  # Default spell page letter order
-    "vocabularyLevel": "functional"  # Default vocabulary level: emergent|functional|developing|proficient
+    "vocabularyLevel": "functional",  # Default vocabulary level: emergent|functional|developing|proficient
+    "specialPageTranslations": {},
+    "voice_style": "adult",
+    "tapWordsRows": 3,
+    "tapPhrasesRows": 1,
+    "useHybridPages": False,
+    "tapDynamicRows": 1,
+    "useBravoBuild": True,
+    "defaultButtonAction": "do_nothing",
+    "hasLoggedIn": False,
+    "regenerate_boards": False
 }
+
+
+def _normalize_locale_tag(value: Optional[str]) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().replace("_", "-")
+    if not cleaned:
+        return None
+
+    label_to_locale = {
+        "english (us)": "en-US",
+        "spanish (us)": "es-US",
+        "french (france)": "fr-FR",
+        "german (germany)": "de-DE",
+        "italian (italy)": "it-IT",
+        "portuguese (brazil)": "pt-BR",
+        "arabic": "ar-XA",
+    }
+
+    mapped = label_to_locale.get(cleaned.lower())
+    if mapped:
+        return mapped
+
+    parts = cleaned.split("-")
+    if len(parts) == 1:
+        lang = parts[0].lower()
+        if len(lang) != 2:
+            return None
+        return lang
+    lang = parts[0].lower()
+    region = parts[1].upper()
+    if len(lang) != 2 or len(region) < 2:
+        return None
+    return f"{lang}-{region}"
+
+def _sanitize_translated_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r'^[\s"“”‘’`]+', '', text)
+    text = re.sub(r'[\s"“”‘’`]+$', '', text)
+    text = text.rstrip(",")
+    return text.strip()
+
+def _normalize_language_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    merged = DEFAULT_SETTINGS.copy()
+    if isinstance(settings, dict):
+        merged.update(settings)
+
+    user_language = _normalize_locale_tag(merged.get("userLanguage")) or DEFAULT_USER_LANGUAGE
+    partner_language = _normalize_locale_tag(merged.get("defaultPartnerLanguage")) or DEFAULT_PARTNER_LANGUAGE
+
+    partner_voice = (merged.get("defaultPartnerVoice") or "").strip()
+    if not partner_voice:
+        partner_voice = (merged.get("selected_tts_voice_name") or "").strip() or DEFAULT_TTS_VOICE
+
+    location_override_languages_raw = merged.get("locationOverrideLanguages")
+    normalized_override_languages: List[str] = []
+    if isinstance(location_override_languages_raw, list):
+        for item in location_override_languages_raw:
+            normalized = _normalize_locale_tag(item)
+            if normalized and normalized not in normalized_override_languages:
+                normalized_override_languages.append(normalized)
+
+    location_override_voices_raw = merged.get("locationOverrideVoices")
+    normalized_override_voices: Dict[str, str] = {}
+    if isinstance(location_override_voices_raw, dict):
+        for locale_key, voice_name in location_override_voices_raw.items():
+            normalized_locale = _normalize_locale_tag(locale_key)
+            normalized_voice = str(voice_name or "").strip()
+            if normalized_locale and normalized_voice:
+                normalized_override_voices[normalized_locale] = normalized_voice
+
+    merged["userLanguage"] = user_language
+    merged["defaultPartnerLanguage"] = partner_language
+    merged["defaultPartnerVoice"] = partner_voice
+    merged["selected_tts_voice_name"] = partner_voice
+    merged["locationOverrideLanguages"] = normalized_override_languages
+    merged["locationOverrideVoices"] = normalized_override_voices
+
+    special_page_translations_raw = merged.get("specialPageTranslations")
+    normalized_special_page_translations: Dict[str, Dict[str, Dict[str, str]]] = {}
+    if isinstance(special_page_translations_raw, dict):
+        for page_key, locale_map in special_page_translations_raw.items():
+            page_name = str(page_key or "").strip().lower()
+            if not page_name or not isinstance(locale_map, dict):
+                continue
+
+            normalized_locale_map: Dict[str, Dict[str, str]] = {}
+            for locale_key, field_map in locale_map.items():
+                normalized_locale = _normalize_locale_tag(locale_key)
+                if not normalized_locale or not isinstance(field_map, dict):
+                    continue
+
+                normalized_field_map: Dict[str, str] = {}
+                for field_key, field_value in field_map.items():
+                    key_name = str(field_key or "").strip()
+                    value_text = _sanitize_translated_text(field_value)
+                    if key_name and value_text:
+                        normalized_field_map[key_name] = value_text
+
+                if normalized_field_map:
+                    normalized_locale_map[normalized_locale] = normalized_field_map
+
+            if normalized_locale_map:
+                normalized_special_page_translations[page_name] = normalized_locale_map
+
+    merged["specialPageTranslations"] = normalized_special_page_translations
+    return merged
 
 
 # --- Default Birthday Structure ---
@@ -1600,6 +1892,193 @@ DEFAULT_BIRTHDAYS = {
     "userBirthdate": None, # Expects "YYYY-MM-DD" string or None
     "friendsFamily": []    # List of {"name": "...", "monthDay": "MM-DD"}
 }
+
+
+def _safe_parse_month_day(month_day: str) -> Optional[tuple[int, int]]:
+    if not isinstance(month_day, str) or not month_day.strip():
+        return None
+    raw_value = month_day.strip()
+    for fmt in ("%m-%d", "%m/%d"):
+        try:
+            parsed = dt.strptime(raw_value, fmt)
+            return parsed.month, parsed.day
+        except ValueError:
+            continue
+    return None
+
+
+def _next_occurrence_for_month_day(month: int, day: int, today_date: date) -> Optional[date]:
+    for year in (today_date.year, today_date.year + 1):
+        try:
+            candidate = date(year, month, day)
+        except ValueError:
+            continue
+        if candidate >= today_date:
+            return candidate
+    return None
+
+
+def _get_supplemental_holidays(country_code: str, year: int) -> Dict[date, str]:
+    """Return additional culturally relevant holidays not always present in official holiday datasets."""
+    supplemental: Dict[date, str] = {}
+
+    # US federal holiday datasets usually exclude many widely celebrated observances.
+    if country_code == "US":
+        fixed_dates = [
+            (2, 14, "Valentine's Day"),
+            (3, 17, "St. Patrick's Day"),
+            (10, 31, "Halloween"),
+            (12, 31, "New Year's Eve"),
+        ]
+        for month, day, name in fixed_dates:
+            try:
+                supplemental[date(year, month, day)] = name
+            except ValueError:
+                continue
+
+    return supplemental
+
+
+def _build_upcoming_celebrations_context(
+    birthday_data: Optional[Dict[str, Any]],
+    friends_family_data: Optional[Dict[str, Any]],
+    settings_data: Optional[Dict[str, Any]],
+    today_date: date,
+    days_ahead: int = 60,
+    max_items: int = 18,
+) -> str:
+    if not birthday_data:
+        birthday_data = {}
+    if not friends_family_data:
+        friends_family_data = {}
+    if not settings_data:
+        settings_data = {}
+
+    horizon_date = today_date + timedelta(days=days_ahead)
+    events: List[Dict[str, Any]] = []
+
+    user_birthdate = birthday_data.get("userBirthdate")
+    if isinstance(user_birthdate, str) and user_birthdate.strip():
+        try:
+            parsed_birthdate = date.fromisoformat(user_birthdate.strip())
+            next_birthday = _next_occurrence_for_month_day(parsed_birthdate.month, parsed_birthdate.day, today_date)
+            if next_birthday and next_birthday <= horizon_date:
+                events.append({
+                    "date": next_birthday,
+                    "kind": "birthday",
+                    "label": "User birthday",
+                    "days_away": (next_birthday - today_date).days,
+                })
+        except ValueError:
+            pass
+
+    for person in birthday_data.get("friendsFamily", []) or []:
+        if not isinstance(person, dict):
+            continue
+        person_name = str(person.get("name") or "Someone important").strip() or "Someone important"
+        month_day = person.get("monthDay") or person.get("birthday") or person.get("date")
+        parsed_month_day = _safe_parse_month_day(str(month_day) if month_day is not None else "")
+        if not parsed_month_day:
+            continue
+        next_birthday = _next_occurrence_for_month_day(parsed_month_day[0], parsed_month_day[1], today_date)
+        if next_birthday and next_birthday <= horizon_date:
+            events.append({
+                "date": next_birthday,
+                "kind": "birthday",
+                "label": f"{person_name}'s birthday",
+                "days_away": (next_birthday - today_date).days,
+            })
+
+    # Support birthdays stored in info/friends_family (user_info_admin primary source)
+    for person in friends_family_data.get("friends_family", []) or []:
+        if not isinstance(person, dict):
+            continue
+        person_name = str(person.get("name") or "Someone important").strip() or "Someone important"
+        month_day = person.get("birthday") or person.get("monthDay") or person.get("date")
+        parsed_month_day = _safe_parse_month_day(str(month_day) if month_day is not None else "")
+        if not parsed_month_day:
+            continue
+        next_birthday = _next_occurrence_for_month_day(parsed_month_day[0], parsed_month_day[1], today_date)
+        if next_birthday and next_birthday <= horizon_date:
+            events.append({
+                "date": next_birthday,
+                "kind": "birthday",
+                "label": f"{person_name}'s birthday",
+                "days_away": (next_birthday - today_date).days,
+            })
+
+    country_code_raw = str(settings_data.get("CountryCode") or "US").strip().upper()
+    country_code = country_code_raw if re.fullmatch(r"[A-Z]{2}", country_code_raw) else "US"
+    try:
+        holiday_calendar = holidays.country_holidays(country_code, years=[today_date.year, today_date.year + 1])
+    except Exception:
+        holiday_calendar = holidays.country_holidays("US", years=[today_date.year, today_date.year + 1])
+        country_code = "US"
+
+    for holiday_date, holiday_name in holiday_calendar.items():
+        if today_date <= holiday_date <= horizon_date:
+            events.append({
+                "date": holiday_date,
+                "kind": "holiday",
+                "label": str(holiday_name),
+                "days_away": (holiday_date - today_date).days,
+            })
+
+    # Merge supplemental holidays (e.g., St. Patrick's Day in US)
+    supplemental_holidays: Dict[date, str] = {}
+    for y in (today_date.year, today_date.year + 1):
+        supplemental_holidays.update(_get_supplemental_holidays(country_code, y))
+
+    for holiday_date, holiday_name in supplemental_holidays.items():
+        if today_date <= holiday_date <= horizon_date:
+            events.append({
+                "date": holiday_date,
+                "kind": "holiday",
+                "label": str(holiday_name),
+                "days_away": (holiday_date - today_date).days,
+            })
+
+    events.sort(key=lambda item: (item["date"], item["kind"], item["label"]))
+    truncated_events = events[:max_items]
+
+    lines = [
+        "--- Upcoming Celebrations Context (use when relevant) ---",
+        f"Today: {today_date.isoformat()}",
+        f"Country code for holidays: {country_code}",
+        f"Window: next {days_ahead} days",
+    ]
+
+    if not truncated_events:
+        lines.append("No upcoming holidays or birthdays in the next window.")
+        lines.append("If asked about plans, suggest asking others about upcoming events anyway.")
+        return "\n".join(lines)
+
+    lines.append("Upcoming birthdays and holidays (chronological):")
+    for event in truncated_events:
+        day_phrase = "today" if event["days_away"] == 0 else f"in {event['days_away']} day(s)"
+        lines.append(
+            f"- {event['date'].isoformat()} | {event['kind']} | {event['label']} | {day_phrase}"
+        )
+
+    lines.append(
+        "Guidance: For greetings and plans, naturally reference upcoming celebrations when it fits user context and tone."
+    )
+    lines.append(
+        "Guidance: Mention birthdays by name when available and appropriate."
+    )
+
+    priority_events = [
+        event for event in truncated_events
+        if event.get("days_away", 9999) <= 14
+    ]
+    if priority_events:
+        lines.append("Priority events in next 14 days:")
+        for event in priority_events:
+            lines.append(
+                f"- {event['label']} ({event['date'].isoformat()}, in {event['days_away']} day(s))"
+            )
+
+    return "\n".join(lines)
 
 # --- Default Friends & Family Structure ---
 DEFAULT_RELATIONSHIPS = [
@@ -1614,6 +2093,667 @@ DEFAULT_FRIENDS_FAMILY = []  # List of friends and family entries
 DEFAULT_DIARY: List[Dict] = [] # Diary is a list of entries
 DEFAULT_CHAT_HISTORY: List[Dict] = [] # Chat history is a list of entries
 DEFAULT_BUTTON_ACTIVITY_LOG: List[Dict] = [] # For button clicks
+
+
+def get_default_ai_option_overrides() -> Dict[str, Any]:
+    return copy.deepcopy(DEFAULT_USER_INFO["aiOptionOverrides"])
+
+
+def normalize_ai_option_overrides(raw_overrides: Any) -> Dict[str, Any]:
+    defaults = get_default_ai_option_overrides()
+    if not isinstance(raw_overrides, dict):
+        return defaults
+
+    exclusions = raw_overrides.get("exclusions") if isinstance(raw_overrides.get("exclusions"), dict) else {}
+    inclusions = raw_overrides.get("inclusions") if isinstance(raw_overrides.get("inclusions"), dict) else {}
+
+    exclusion_aliases: Dict[str, List[str]] = {
+        "eatingByMouth": ["eatingByMouth", "noEatingByMouth", "noEatingDrinkingByMouth"],
+        "drinkingByMouth": ["drinkingByMouth", "noDrinkingByMouth", "noEatingDrinkingByMouth"],
+        "eatingIndependently": ["eatingIndependently", "noEatingIndependently", "noEatingDrinkingIndependently"],
+        "drinkingIndependently": ["drinkingIndependently", "noDrinkingIndependently", "noEatingDrinkingIndependently"],
+        "walkingIndependently": ["walkingIndependently", "noWalkingIndependently"],
+        "toiletingIndependently": ["toiletingIndependently", "noToiletingIndependently"],
+        "readingIndependently": ["readingIndependently", "noReadingIndependently"],
+        "foodAllergies": ["foodAllergies", "allergiesFood", "food_allergies"],
+        "environmentalAllergies": ["environmentalAllergies", "allergiesEnvironmental", "environmental_allergies"]
+    }
+
+    inclusion_aliases: Dict[str, List[str]] = {
+        "profanity": ["profanity", "allowProfanity"],
+        "adultTopics": ["adultTopics", "allowAdultTopics"],
+        "adultJokes": ["adultJokes", "allowAdultJokes"],
+        "religion": ["religion", "allowReligion"],
+        "politics": ["politics", "allowPolitics"]
+    }
+
+    def _first_present_value(source: Dict[str, Any], keys: List[str], default_value: Any) -> Any:
+        for alias_key in keys:
+            if alias_key in source:
+                return source.get(alias_key)
+        return default_value
+
+    def _first_present_value_multi(sources: List[Dict[str, Any]], keys: List[str], default_value: Any) -> Any:
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            value = _first_present_value(source, keys, None)
+            if value is not None:
+                return value
+        return default_value
+
+    for key in defaults["exclusions"].keys():
+        aliases = exclusion_aliases.get(key, [key])
+        if key in ["foodAllergies", "environmentalAllergies"]:
+            value = _first_present_value_multi([exclusions, raw_overrides], aliases, defaults["exclusions"][key])
+            defaults["exclusions"][key] = value.strip() if isinstance(value, str) else ""
+        else:
+            value = _first_present_value_multi([exclusions, raw_overrides], aliases, defaults["exclusions"][key])
+            defaults["exclusions"][key] = bool(value)
+
+    for key in defaults["inclusions"].keys():
+        aliases = inclusion_aliases.get(key, [key])
+        value = _first_present_value_multi([inclusions, raw_overrides], aliases, defaults["inclusions"][key])
+        defaults["inclusions"][key] = bool(value)
+
+    return defaults
+
+
+def _extract_allergy_terms(raw_text: str) -> List[str]:
+    if not raw_text or not isinstance(raw_text, str):
+        return []
+    terms = re.split(r'[,\n;]+', raw_text)
+    return [term.strip().lower() for term in terms if term and term.strip()]
+
+
+def build_ai_option_overrides_prompt_block(overrides: Dict[str, Any]) -> str:
+    exclusions = overrides.get("exclusions", {})
+    inclusions = overrides.get("inclusions", {})
+
+    excluded_activity_flags = [
+        ("eatingByMouth", "Eating by mouth is not allowed."),
+        ("eatingIndependently", "Eating independently is not allowed."),
+        ("drinkingByMouth", "Drinking by mouth is not allowed."),
+        ("drinkingIndependently", "Drinking independently is not allowed."),
+        ("walkingIndependently", "Walking independently is not allowed."),
+        ("toiletingIndependently", "Independent toileting actions are not allowed."),
+        ("readingIndependently", "Independent reading actions are not allowed."),
+    ]
+
+    lines = ["=== AI OPTION OVERRIDES (HARD CONSTRAINTS) ==="]
+    for key, sentence in excluded_activity_flags:
+        if exclusions.get(key, False):
+            lines.append(f"- EXCLUDE: {sentence}")
+
+    food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
+    if food_allergy_terms:
+        lines.append(f"- EXCLUDE any food/drink references containing allergies: {', '.join(food_allergy_terms)}")
+
+    env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
+    if env_allergy_terms:
+        lines.append(f"- EXCLUDE environmental triggers containing: {', '.join(env_allergy_terms)}")
+
+    # Inclusion toggles represent explicit allowed topics.
+    if not inclusions.get("profanity", False):
+        lines.append("- EXCLUDE profanity.")
+    if not inclusions.get("adultTopics", False):
+        lines.append("- EXCLUDE adult/sexual topics.")
+    if not inclusions.get("adultJokes", False):
+        lines.append("- EXCLUDE adult jokes.")
+    if not inclusions.get("religion", False):
+        lines.append("- EXCLUDE religion topics.")
+    if not inclusions.get("politics", False):
+        lines.append("- EXCLUDE politics topics.")
+
+    lines.append("If unsure, prefer neutral, accessible, conversational options aligned with user ability constraints.")
+    return "\n".join(lines)
+
+
+def _extract_option_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return ""
+
+    if isinstance(item.get("option"), str):
+        return item.get("option", "")
+
+    for key, value in item.items():
+        if key in ["summary", "keywords"]:
+            continue
+        if isinstance(value, str):
+            return value
+
+    if isinstance(item.get("summary"), str):
+        return item.get("summary", "")
+    return ""
+
+
+def _build_option_search_text(item: Any) -> str:
+    if isinstance(item, str):
+        return item
+    if not isinstance(item, dict):
+        return ""
+
+    parts: List[str] = []
+    option_text = _extract_option_text(item)
+    if option_text:
+        parts.append(option_text)
+
+    summary_text = item.get("summary")
+    if isinstance(summary_text, str) and summary_text:
+        parts.append(summary_text)
+
+    keywords = item.get("keywords")
+    if isinstance(keywords, list):
+        parts.extend([str(keyword) for keyword in keywords if isinstance(keyword, (str, int, float))])
+
+    return " ".join(parts)
+
+
+def _derive_llm_option_summary(option_text: str, summary: Optional[str] = None) -> str:
+    summary_text = re.sub(r"\s+", " ", str(summary or "").strip())
+    if not summary_text:
+        summary_text = re.sub(r"[.!?]+$", "", option_text.strip())
+
+    words = [word for word in summary_text.split() if word]
+    if len(words) <= 5:
+        return " ".join(words)
+    return " ".join(words[:5])
+
+
+def _derive_llm_option_keywords(
+    option_text: str,
+    summary_text: str,
+    existing_keywords: Optional[Any] = None,
+) -> List[str]:
+    if isinstance(existing_keywords, list):
+        normalized_keywords: List[str] = []
+        seen_keywords: set[str] = set()
+        for keyword in existing_keywords:
+            keyword_text = re.sub(r"\s+", " ", str(keyword or "").strip().lower())
+            if not keyword_text or keyword_text in seen_keywords:
+                continue
+            seen_keywords.add(keyword_text)
+            normalized_keywords.append(keyword_text)
+            if len(normalized_keywords) >= 5:
+                return normalized_keywords
+
+    token_source = f"{summary_text} {option_text}".lower()
+    candidate_tokens = re.findall(r"[a-z0-9']+", token_source)
+    stop_words = {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "i", "if",
+        "in", "is", "it", "me", "my", "of", "on", "or", "so", "that", "the", "this", "to",
+        "up", "we", "with", "you", "your"
+    }
+
+    derived_keywords: List[str] = []
+    seen_tokens: set[str] = set()
+    for token in candidate_tokens:
+        if len(token) < 3 or token in stop_words or token in seen_tokens:
+            continue
+        seen_tokens.add(token)
+        derived_keywords.append(token)
+        if len(derived_keywords) >= 5:
+            break
+
+    return derived_keywords
+
+
+def _normalize_llm_option_item(item: Any) -> Optional[Dict[str, Any]]:
+    option_text = re.sub(r"\s+", " ", _extract_option_text(item).strip())
+    if not option_text:
+        return None
+
+    provided_summary = item.get("summary") if isinstance(item, dict) else None
+    provided_keywords = item.get("keywords") if isinstance(item, dict) else None
+    summary_text = _derive_llm_option_summary(option_text, provided_summary)
+    keyword_list = _derive_llm_option_keywords(option_text, summary_text, provided_keywords)
+
+    return {
+        "option": option_text,
+        "summary": summary_text or option_text,
+        "keywords": keyword_list,
+    }
+
+
+def _contains_any_pattern(text: str, patterns: List[str]) -> bool:
+    if not text:
+        return False
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _prompt_requests_prioritized_profanity(prompt_text: str) -> bool:
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        return False
+    normalized = prompt_text.lower()
+    has_profanity_keyword = bool(re.search(r'\bprofanit(y|ies)\b|\bswear(ing| words?)?\b|\bcuss(ing| words?)?\b', normalized))
+    has_priority_keyword = bool(re.search(r'\bprioriti[sz]e\b|\bprefer\b|\bemphasize\b|\bfocus on\b|\binclude\b', normalized))
+    return has_profanity_keyword and has_priority_keyword
+
+
+def _contains_profanity_text(text: str) -> bool:
+    if not isinstance(text, str) or not text:
+        return False
+    profanity_patterns = [r'\b(fuck|fucking|shit|damn|bitch|asshole|bastard|hell)\b']
+    return _contains_any_pattern(text.lower(), profanity_patterns)
+
+
+def _detect_requested_sentiment(prompt_text: str) -> Optional[str]:
+    if not isinstance(prompt_text, str) or not prompt_text.strip():
+        return None
+
+    normalized = prompt_text.lower()
+
+    negative_prompt_patterns = [
+        r'\bdescribe\b[^\n]*\bsomething\s+negative\b',
+        r'\bnegative\b',
+        r'\bbad\b',
+        r'\bangry\b',
+        r'\bupset\b',
+        r'\bfrustrat',
+        r'\bterrible\b',
+        r'\bhorrible\b'
+    ]
+    positive_prompt_patterns = [
+        r'\bdescribe\b[^\n]*\bsomething\s+positive\b',
+        r'\bpositive\b',
+        r'\bgood\b',
+        r'\bhappy\b',
+        r'\bjoy\b',
+        r'\bgrateful\b',
+        r'\bawesome\b',
+        r'\bamazing\b'
+    ]
+
+    asks_negative = _contains_any_pattern(normalized, negative_prompt_patterns)
+    asks_positive = _contains_any_pattern(normalized, positive_prompt_patterns)
+
+    if asks_negative and not asks_positive:
+        return "negative"
+    if asks_positive and not asks_negative:
+        return "positive"
+    return None
+
+
+def _classify_text_sentiment(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return "neutral"
+
+    normalized = text.lower()
+    negative_patterns = [
+        r'\bawful\b', r'\bterrible\b', r'\bhorrible\b', r'\bbad\b', r'\bworst\b',
+        r'\bangry\b', r'\bmad\b', r'\bpissed\b', r'\bfrustrat', r'\bupset\b',
+        r'\bannoy', r'\bstress', r'\boverwhelm', r'\bmiserable\b', r'\bsucks?\b',
+        r'\bdisappoint', r'\bfurious\b', r'\birritat', r'\bdevastat', r'\btragic\b',
+        r'\bdisaster\b', r'\bnightmare\b', r'\bhate\b', r'\bdoom\b', r'\bcrap\b'
+    ]
+    positive_patterns = [
+        r'\bamazing\b', r'\bawesome\b', r'\bgreat\b', r'\bfantastic\b', r'\bwonderful\b',
+        r'\bhappy\b', r'\bjoy\b', r'\bthrilled\b', r'\becstatic\b', r'\bstoked\b',
+        r'\bdelight', r'\bover the moon\b', r'\bon cloud nine\b', r'\bbest\b', r'\bbrilliant\b',
+        r'\bincredible\b', r'\bphenomenal\b', r'\bspectacular\b', r'\bsensational\b', r'\bepic\b',
+        r'\boverjoy', r'\bmiracle\b', r'\bunbelievably good\b', r'\brad\b', r'\bholy cow\b'
+    ]
+
+    has_negative = _contains_any_pattern(normalized, negative_patterns)
+    has_positive = _contains_any_pattern(normalized, positive_patterns)
+
+    if has_negative and not has_positive:
+        return "negative"
+    if has_positive and not has_negative:
+        return "positive"
+    return "neutral"
+
+
+def _default_positive_profanity_options() -> List[Dict[str, Any]]:
+    return [
+        {
+            "option": "This is fucking amazing!",
+            "summary": "Fucking amazing",
+            "keywords": ["fucking", "amazing", "excited", "positive"]
+        },
+        {
+            "option": "I am so damn excited right now!",
+            "summary": "Damn excited",
+            "keywords": ["damn", "excited", "thrilled", "positive"]
+        }
+    ]
+
+
+def _default_negative_profanity_options() -> List[Dict[str, Any]]:
+    return [
+        {
+            "option": "This is fucking awful!",
+            "summary": "Fucking awful",
+            "keywords": ["fucking", "awful", "negative", "upset"]
+        },
+        {
+            "option": "This is so damn frustrating!",
+            "summary": "Damn frustrating",
+            "keywords": ["damn", "frustrating", "angry", "negative"]
+        }
+    ]
+
+
+def _dynamic_profanity_fallback_options(sentiment: Optional[str], requested_count: int = 3) -> List[Dict[str, Any]]:
+    import random
+
+    negative_pool: List[Dict[str, Any]] = [
+        {"option": "This is fucking awful!", "summary": "Fucking awful", "keywords": ["fucking", "awful", "negative", "upset"]},
+        {"option": "This is so damn frustrating!", "summary": "Damn frustrating", "keywords": ["damn", "frustrating", "angry", "negative"]},
+        {"option": "Holy shit, this is a disaster.", "summary": "Holy shit disaster", "keywords": ["holy shit", "disaster", "negative", "angry"]},
+        {"option": "What the hell, this is terrible.", "summary": "What the hell terrible", "keywords": ["hell", "terrible", "negative", "upset"]},
+        {"option": "This outcome is fucking ridiculous.", "summary": "Fucking ridiculous outcome", "keywords": ["fucking", "ridiculous", "negative", "frustrated"]},
+        {"option": "Damn, this really sucks.", "summary": "Damn this sucks", "keywords": ["damn", "sucks", "negative", "annoyed"]},
+        {"option": "I am pissed off about this.", "summary": "Pissed off", "keywords": ["pissed", "angry", "negative", "frustrated"]},
+        {"option": "This is a shit situation.", "summary": "Shit situation", "keywords": ["shit", "situation", "negative", "stress"]}
+    ]
+
+    positive_pool: List[Dict[str, Any]] = [
+        {"option": "This is fucking amazing!", "summary": "Fucking amazing", "keywords": ["fucking", "amazing", "excited", "positive"]},
+        {"option": "I am so damn excited right now!", "summary": "Damn excited", "keywords": ["damn", "excited", "thrilled", "positive"]},
+        {"option": "Holy shit, this is incredible!", "summary": "Holy shit incredible", "keywords": ["holy shit", "incredible", "positive", "joy"]},
+        {"option": "What the hell, this is awesome!", "summary": "What the hell awesome", "keywords": ["hell", "awesome", "positive", "excited"]},
+        {"option": "This is so damn good!", "summary": "So damn good", "keywords": ["damn", "good", "positive", "happy"]},
+        {"option": "I am fucking thrilled about this!", "summary": "Fucking thrilled", "keywords": ["fucking", "thrilled", "positive", "excited"]}
+    ]
+
+    selected_pool = negative_pool if sentiment == "negative" else positive_pool
+    if sentiment is None:
+        selected_pool = negative_pool + positive_pool
+
+    if not selected_pool:
+        return []
+
+    count = max(1, min(requested_count, len(selected_pool)))
+    rng = random.SystemRandom()
+    return rng.sample(selected_pool, count)
+
+
+def _default_negative_options() -> List[Dict[str, Any]]:
+    return [
+        {"option": "This is really upsetting.", "summary": "Really upsetting", "keywords": ["upsetting", "negative", "sad", "frustrated"]},
+        {"option": "I feel overwhelmed and stressed.", "summary": "Overwhelmed and stressed", "keywords": ["overwhelmed", "stressed", "negative", "anxious"]},
+        {"option": "This is disappointing.", "summary": "Disappointing", "keywords": ["disappointing", "negative", "letdown", "sad"]},
+        {"option": "I am really frustrated right now.", "summary": "Really frustrated", "keywords": ["frustrated", "negative", "angry", "annoyed"]},
+        {"option": "This feels terrible.", "summary": "Feels terrible", "keywords": ["terrible", "negative", "bad", "upset"]},
+        {"option": "I am upset about this.", "summary": "Upset about this", "keywords": ["upset", "negative", "sad", "angry"]},
+        {"option": "This is a mess.", "summary": "This is a mess", "keywords": ["mess", "negative", "chaotic", "bad"]},
+        {"option": "I hate this outcome.", "summary": "Hate this outcome", "keywords": ["hate", "negative", "angry", "frustrated"]},
+        {"option": "This is going badly.", "summary": "Going badly", "keywords": ["badly", "negative", "problem", "stress"]},
+        {"option": "I feel defeated right now.", "summary": "Feel defeated", "keywords": ["defeated", "negative", "discouraged", "sad"]},
+        {"option": "This is exhausting.", "summary": "This is exhausting", "keywords": ["exhausting", "negative", "drained", "tired"]},
+        {"option": "I am angry about this situation.", "summary": "Angry about this", "keywords": ["angry", "negative", "mad", "frustrated"]},
+        {"option": "This is unacceptable.", "summary": "This is unacceptable", "keywords": ["unacceptable", "negative", "serious", "upset"]},
+        {"option": "I feel stuck and frustrated.", "summary": "Stuck and frustrated", "keywords": ["stuck", "frustrated", "negative", "annoyed"]},
+        {"option": "This is honestly horrible.", "summary": "Honestly horrible", "keywords": ["horrible", "negative", "awful", "upset"]}
+    ]
+
+
+def _default_positive_options() -> List[Dict[str, Any]]:
+    return [
+        {"option": "This is amazing!", "summary": "This is amazing", "keywords": ["amazing", "positive", "excited", "happy"]},
+        {"option": "I feel so happy right now!", "summary": "So happy", "keywords": ["happy", "positive", "joy", "excited"]},
+        {"option": "This is wonderful news!", "summary": "Wonderful news", "keywords": ["wonderful", "positive", "great", "joy"]},
+        {"option": "I am thrilled about this!", "summary": "Thrilled about this", "keywords": ["thrilled", "positive", "excited", "delighted"]},
+        {"option": "Everything feels perfect.", "summary": "Feels perfect", "keywords": ["perfect", "positive", "great", "satisfied"]},
+        {"option": "This is fantastic!", "summary": "This is fantastic", "keywords": ["fantastic", "positive", "excited", "awesome"]},
+        {"option": "I am overjoyed!", "summary": "I am overjoyed", "keywords": ["overjoyed", "positive", "joy", "delight"]},
+        {"option": "This is excellent news!", "summary": "Excellent news", "keywords": ["excellent", "positive", "great", "happy"]},
+        {"option": "I feel grateful and happy.", "summary": "Grateful and happy", "keywords": ["grateful", "happy", "positive", "joy"]},
+        {"option": "This is so exciting!", "summary": "So exciting", "keywords": ["exciting", "positive", "thrilled", "happy"]}
+    ]
+
+
+def _extend_with_fallbacks(options: List[Any], fallback_items: List[Dict[str, Any]], max_options: int) -> List[Any]:
+    if len(options) >= max_options:
+        return options[:max(1, max_options)]
+
+    existing_texts = set()
+    for item in options:
+        existing_texts.add(_extract_option_text(item).strip().lower())
+
+    for candidate in fallback_items:
+        candidate_text = _extract_option_text(candidate).strip().lower()
+        if candidate_text and candidate_text not in existing_texts:
+            options.append(candidate)
+            existing_texts.add(candidate_text)
+        if len(options) >= max_options:
+            break
+
+    return options[:max(1, max_options)]
+
+
+def apply_prompt_sentiment_alignment(
+    options: List[Any],
+    user_prompt: str,
+    max_options: int = DEFAULT_LLM_OPTIONS
+) -> List[Any]:
+    if not isinstance(options, list):
+        return options
+
+    requested_sentiment = _detect_requested_sentiment(user_prompt)
+    if requested_sentiment not in ["negative", "positive"]:
+        return options[:max(1, max_options)]
+
+    exact_match: List[Any] = []
+    neutral: List[Any] = []
+    opposite: List[Any] = []
+
+    for item in options:
+        text = _build_option_search_text(item)
+        sentiment = _classify_text_sentiment(text)
+        if sentiment == requested_sentiment:
+            exact_match.append(item)
+        elif sentiment == "neutral":
+            neutral.append(item)
+        else:
+            opposite.append(item)
+
+    aligned = exact_match + neutral
+    if requested_sentiment == "negative":
+        aligned = _extend_with_fallbacks(aligned, _default_negative_options(), max_options)
+    elif requested_sentiment == "positive":
+        aligned = _extend_with_fallbacks(aligned, _default_positive_options(), max_options)
+
+    logging.info(
+        "Prompt sentiment alignment. requested=%s counts={match:%s, neutral:%s, opposite_filtered:%s, returned:%s}",
+        requested_sentiment,
+        len(exact_match),
+        len(neutral),
+        len(opposite),
+        len(aligned)
+    )
+
+    return aligned[:max(1, max_options)]
+
+
+def apply_inclusion_preference_bias(
+    options: List[Any],
+    overrides: Dict[str, Any],
+    user_prompt: str,
+    max_options: int = DEFAULT_LLM_OPTIONS
+) -> List[Any]:
+    if not isinstance(options, list) or not options:
+        return options
+
+    inclusions = overrides.get("inclusions", {}) if isinstance(overrides, dict) else {}
+    allow_profanity = bool(inclusions.get("profanity", False))
+    prompt_requests_profanity = _prompt_requests_prioritized_profanity(user_prompt)
+    effective_allow_profanity = allow_profanity or prompt_requests_profanity
+
+    if not effective_allow_profanity:
+        if prompt_requests_profanity:
+            logging.info("Inclusion bias skipped profanity prioritization because overrides.inclusions.profanity is false.")
+        return options[:max(1, max_options)]
+
+    if not prompt_requests_profanity:
+        return options[:max(1, max_options)]
+
+    if not allow_profanity and prompt_requests_profanity:
+        logging.info("Inclusion bias using explicit prompt request for profanity prioritization even though overrides.inclusions.profanity is false.")
+
+    requested_sentiment = _detect_requested_sentiment(user_prompt)
+
+    profane_sentiment_match: List[Any] = []
+    profane_neutral: List[Any] = []
+    profane_other: List[Any] = []
+    non_profane_sentiment_match: List[Any] = []
+    non_profane_neutral: List[Any] = []
+    non_profane_other: List[Any] = []
+
+    for item in options:
+        search_text = _build_option_search_text(item)
+        has_profanity = _contains_profanity_text(search_text)
+        option_sentiment = _classify_text_sentiment(search_text)
+        sentiment_matches = requested_sentiment is None or option_sentiment == requested_sentiment
+
+        if has_profanity and sentiment_matches:
+            profane_sentiment_match.append(item)
+        elif has_profanity and option_sentiment == "neutral":
+            profane_neutral.append(item)
+        elif has_profanity:
+            profane_other.append(item)
+        elif sentiment_matches:
+            non_profane_sentiment_match.append(item)
+        elif option_sentiment == "neutral":
+            non_profane_neutral.append(item)
+        else:
+            non_profane_other.append(item)
+
+    if not profane_sentiment_match:
+        dynamic_count = 3 if max_options >= 6 else 2
+        profane_sentiment_match.extend(_dynamic_profanity_fallback_options(requested_sentiment, dynamic_count))
+
+    combined = profane_sentiment_match + profane_neutral + non_profane_sentiment_match + non_profane_neutral
+
+    if requested_sentiment is None:
+        combined = combined + profane_other + non_profane_other
+
+    if requested_sentiment == "negative":
+        combined = _extend_with_fallbacks(combined, _default_negative_options(), max_options)
+    elif requested_sentiment == "positive":
+        combined = _extend_with_fallbacks(combined, _default_positive_options(), max_options)
+
+    logging.info(
+        "Inclusion bias applied. requested_sentiment=%s, counts={profane_match:%s, profane_neutral:%s, profane_other:%s, non_profane_match:%s, non_profane_neutral:%s, non_profane_other:%s}",
+        requested_sentiment,
+        len(profane_sentiment_match),
+        len(profane_neutral),
+        len(profane_other),
+        len(non_profane_sentiment_match),
+        len(non_profane_neutral),
+        len(non_profane_other)
+    )
+
+    return combined[:max(1, max_options)]
+
+
+def _violates_ai_option_overrides(option_text: str, overrides: Dict[str, Any]) -> Optional[str]:
+    if not option_text:
+        return None
+
+    normalized_text = option_text.lower()
+    exclusions = overrides.get("exclusions", {})
+    inclusions = overrides.get("inclusions", {})
+
+    # Broad oral-intake restrictions
+    broad_eating_patterns = [
+        r'\beat\b', r'\beating\b', r'\bmeal\b', r'\blunch\b', r'\bdinner\b', r'\bbreakfast\b', r'\bsnack\b',
+        r'\bfood\b', r'\bbite\b', r'\bchew\b', r'\bswallow\b', r'\bget (a|some)?\s*snack\b', r'\bgrab (a|some)?\s*snack\b'
+    ]
+    broad_drinking_patterns = [
+        r'\bdrink\b', r'\bdrinking\b', r'\bsip\b', r'\bgulp\b', r'\bwater\b', r'\bjuice\b', r'\bcoffee\b', r'\btea\b', r'\bsoda\b',
+        r'\bget (a|some)?\s*drink\b', r'\bgrab (a|some)?\s*drink\b', r'\bpour (a|my|your)?\s*drink\b'
+    ]
+
+    if exclusions.get("eatingByMouth", False) and _contains_any_pattern(normalized_text, broad_eating_patterns):
+        return "excluded_activity:eatingByMouth"
+    if exclusions.get("drinkingByMouth", False) and _contains_any_pattern(normalized_text, broad_drinking_patterns):
+        return "excluded_activity:drinkingByMouth"
+
+    # Independent restrictions should block explicitly self-directed consumption actions.
+    independent_eating_patterns = [
+        r'\beat by myself\b', r'\beat by yourself\b', r'\bindependently\s+eat\b', r'\bfeed myself\b', r'\bfeed yourself\b',
+        r'\bmake (my|your) (food|meal)\b', r'\bget (a|some)?\s*snack\b', r'\bgrab (a|some)?\s*snack\b', r'\bget food\b'
+    ]
+    independent_drinking_patterns = [
+        r'\bdrink by myself\b', r'\bdrink by yourself\b', r'\bget (myself|yourself)?\s*(a|some)?\s*drink\b',
+        r'\bpour (my|your)?\s*drink\b', r'\bgrab (a|some)?\s*drink\b'
+    ]
+
+    if exclusions.get("eatingIndependently", False) and _contains_any_pattern(normalized_text, independent_eating_patterns):
+        return "excluded_activity:eatingIndependently"
+    if exclusions.get("drinkingIndependently", False) and _contains_any_pattern(normalized_text, independent_drinking_patterns):
+        return "excluded_activity:drinkingIndependently"
+
+    exclusion_patterns = {
+        "walkingIndependently": [r'\bwalk\b', r'\bwalking\b', r'\bgo for a walk\b', r'\bstroll\b', r'\bhike\b'],
+        "toiletingIndependently": [r'\btoilet\b', r'\bbathroom\b', r'\brestroom\b', r'\bpotty\b', r'\bpee\b', r'\bpoop\b'],
+        "readingIndependently": [r'\bread\b', r'\breading\b', r'\bread a book\b', r'\bbook\b']
+    }
+
+    for key, patterns in exclusion_patterns.items():
+        if exclusions.get(key, False) and _contains_any_pattern(normalized_text, patterns):
+            return f"excluded_activity:{key}"
+
+    food_allergy_terms = _extract_allergy_terms(exclusions.get("foodAllergies", ""))
+    for term in food_allergy_terms:
+        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+            return f"food_allergy:{term}"
+
+    env_allergy_terms = _extract_allergy_terms(exclusions.get("environmentalAllergies", ""))
+    for term in env_allergy_terms:
+        if term and re.search(rf'\b{re.escape(term)}\b', normalized_text):
+            return f"environmental_allergy:{term}"
+
+    topic_patterns = {
+        "profanity": [r'\b(fuck|shit|damn|bitch|asshole|bastard)\b'],
+        "adultTopics": [r'\b(sex|sexual|porn|nude|naked|erotic|orgasm)\b'],
+        "adultJokes": [r'\b(dirty joke|adult joke|nsfw joke|sexual joke)\b'],
+        "religion": [r'\b(god|jesus|christian|church|bible|allah|islam|hindu|buddh)\b'],
+        "politics": [r'\b(politic|election|president|senate|congress|democrat|republican|vote)\b']
+    }
+
+    for inclusion_key, patterns in topic_patterns.items():
+        if not inclusions.get(inclusion_key, False) and _contains_any_pattern(normalized_text, patterns):
+            return f"blocked_topic:{inclusion_key}"
+
+    return None
+
+
+def enforce_ai_option_overrides(options: List[Any], overrides: Dict[str, Any], max_options: int = DEFAULT_LLM_OPTIONS) -> List[Any]:
+    if not isinstance(options, list):
+        return options
+
+    filtered: List[Any] = []
+    removed_reasons: Dict[str, int] = {}
+
+    logging.info(f"AI override enforcement active. Exclusions={overrides.get('exclusions', {})}, Inclusions={overrides.get('inclusions', {})}")
+
+    for item in options:
+        option_text = _build_option_search_text(item)
+        reason = _violates_ai_option_overrides(option_text, overrides)
+        if reason:
+            removed_reasons[reason] = removed_reasons.get(reason, 0) + 1
+            continue
+        filtered.append(item)
+
+    if removed_reasons:
+        logging.info(f"AI override filter removed options: {removed_reasons}")
+    else:
+        logging.info("AI override filter removed 0 options.")
+
+    if len(filtered) == 0:
+        fallback_options = [
+            {"option": "Tell me more about that.", "summary": "Tell me more", "keywords": ["talk", "more", "help"]},
+            {"option": "What do you think about that?", "summary": "What do you think", "keywords": ["question", "think", "talk"]},
+            {"option": "Can we talk about another idea?", "summary": "Another idea", "keywords": ["talk", "idea", "another"]}
+        ]
+        return fallback_options[:max(1, min(max_options, len(fallback_options)))]
+
+    return filtered[:max(1, max_options)]
 
 # AI-extracted narrative from chat history
 DEFAULT_CHAT_DERIVED_NARRATIVE = {
@@ -1650,11 +2790,15 @@ class GeminiCacheManager:
         self.db = firestore.Client()
         
         self.ttl_seconds = ttl_hours * 3600
+        self.local_validation_ttl_seconds = 60
+        self._validated_cache_refs: Dict[str, Dict[str, Any]] = {}
         logging.info(f"✅ Cache Manager initialized with Firestore persistence and {ttl_hours}-hour TTL.")
 
     def _get_user_key(self, account_id: str, aac_user_id: str) -> str:
         """Generates a unique key for a user to manage their cache."""
-        return f"{account_id}_{aac_user_id}"
+        # Versioned to invalidate stale cached base context after diary context moved to DELTA.
+        # v3: model upgraded from gemini-1.5-flash-latest to gemini-2.0-flash (caches are model-specific)
+        return f"v3_{account_id}_{aac_user_id}"
     
     async def _load_cache_from_firestore(self, user_key: str) -> Optional[Dict]:
         """Load cache info from Firestore."""
@@ -1669,8 +2813,15 @@ class GeminiCacheManager:
             logging.error(f"Error loading cache from Firestore for {user_key}: {e}")
             return None
     
-    async def _save_cache_to_firestore(self, user_key: str, cache_name: str, created_at: float, message_count: int = 0):
-        """Save cache info to Firestore with message count for drift tracking."""
+    async def _save_cache_to_firestore(
+        self,
+        user_key: str,
+        cache_name: str,
+        created_at: float,
+        message_count: int = 0,
+        chat_history_cached: bool = True,
+    ):
+        """Save cache info to Firestore with enough metadata to decide if drift checks apply."""
         try:
             expires_at = created_at + self.ttl_seconds
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
@@ -1683,10 +2834,19 @@ class GeminiCacheManager:
                     "created_at": created_at,
                     "expires_at": expires_at,
                     "ttl_seconds": self.ttl_seconds,
-                    "message_count": message_count  # Track messages in cache for drift detection
+                    "message_count": message_count,
+                    "chat_history_cached": bool(chat_history_cached),
                 }
             )
-            logging.info(f"💾 Saved cache reference to Firestore: {user_key} -> {cache_name} ({message_count} messages)")
+            logging.info(
+                f"💾 Saved cache reference to Firestore: {user_key} -> {cache_name} "
+                f"({message_count} messages, chat_history_cached={bool(chat_history_cached)})"
+            )
+            self._validated_cache_refs[user_key] = {
+                "cache_name": cache_name,
+                "expires_at": expires_at,
+                "validated_at": dt.now().timestamp(),
+            }
         except Exception as e:
             logging.error(f"Error saving cache to Firestore for {user_key}: {e}")
     
@@ -1695,12 +2855,25 @@ class GeminiCacheManager:
         try:
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
             await asyncio.to_thread(doc_ref.delete)
+            self._validated_cache_refs.pop(user_key, None)
             logging.info(f"Deleted cache reference from Firestore: {user_key}")
         except Exception as e:
             logging.error(f"Error deleting cache from Firestore for {user_key}: {e}")
 
     async def _is_cache_valid(self, user_key: str) -> bool:
         """Checks if a user's cache exists in Firestore and is within its TTL."""
+        now_ts = dt.now().timestamp()
+        local_cache_ref = self._validated_cache_refs.get(user_key)
+        if local_cache_ref:
+            if (
+                local_cache_ref.get('cache_name')
+                and local_cache_ref.get('expires_at', 0) > now_ts
+                and (now_ts - local_cache_ref.get('validated_at', 0)) <= self.local_validation_ttl_seconds
+            ):
+                return True
+            if local_cache_ref.get('expires_at', 0) <= now_ts:
+                self._validated_cache_refs.pop(user_key, None)
+
         print(f"DEBUG: _is_cache_valid called for {user_key}", flush=True)
         cache_data = await self._load_cache_from_firestore(user_key)
         print(f"DEBUG: cache_data from Firestore: {cache_data}", flush=True)
@@ -1724,6 +2897,11 @@ class GeminiCacheManager:
             try:
                 # Verify the cache still exists in Gemini API
                 await asyncio.to_thread(caching.CachedContent.get, cache_name)
+                self._validated_cache_refs[user_key] = {
+                    "cache_name": cache_name,
+                    "expires_at": cache_data.get('expires_at', now_ts + self.ttl_seconds),
+                    "validated_at": now_ts,
+                }
                 logging.info(f"Cache for '{user_key}' is valid: {cache_name}")
                 return True
             except Exception as e:
@@ -1759,7 +2937,6 @@ class GeminiCacheManager:
         - Friends & family (stable)
         - Settings (rarely changes)
         - Birthdays (stable)
-        - Diary entries (stable)
         - Old chat history (>10 messages old)
         
         Excludes (moved to delta):
@@ -1777,7 +2954,6 @@ class GeminiCacheManager:
             "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "settings": load_settings_from_file(account_id, aac_user_id),
             "birthdays": load_birthdays_from_file(account_id, aac_user_id),
-            "diary": load_diary_entries(account_id, aac_user_id),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
             "chat_narrative": load_chat_derived_narrative(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
@@ -1802,6 +2978,8 @@ Analyze the provided context to create helpful, personalized suggestions."""
         if context_data["user_info"]:
             user_narrative = context_data['user_info'].get('narrative', 'Not available')
             context_parts.append(f"=== PRIMARY USER PROFILE (MOST IMPORTANT) ===\n{user_narrative}\n\n⚠️  REMEMBER: This user profile should be the foundation for ALL responses. Personal details, family, interests, and characteristics mentioned here are the most important context.\n")
+            overrides = normalize_ai_option_overrides(context_data["user_info"].get("aiOptionOverrides", {}))
+            context_parts.append(build_ai_option_overrides_prompt_block(overrides) + "\n")
         
         # Additional supporting context (stable data only)
         if context_data["friends_family"]:
@@ -1810,25 +2988,6 @@ Analyze the provided context to create helpful, personalized suggestions."""
             context_parts.append(f"--- User Settings (Supporting Context) ---\n{json.dumps(context_data['settings'], indent=2)}\n")
         if context_data["birthdays"] and (context_data["birthdays"].get("userBirthdate") or context_data["birthdays"].get("friendsFamily")):
             context_parts.append(f"--- Birthdays (Supporting Context) ---\n{json.dumps(context_data['birthdays'], indent=2)}\n")
-        
-        # Add current date for diary context
-        from datetime import datetime
-        current_date_str = datetime.now().strftime('%Y-%m-%d')
-        context_parts.append(f"--- TODAY'S DATE (CRITICAL FOR DIARY CONTEXT) ---\n{current_date_str}\n⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events. Generate responses accordingly.\n")
-        
-        # Diary entries (stable, long-term data)
-        if context_data["diary"]:
-            diary_context = f"""--- Diary Entries (Background Context) ---
-📅 TODAY'S DATE: {current_date_str}
-⚠️ CRITICAL INSTRUCTIONS FOR DIARY INTERPRETATION:
-- Entries with dates BEFORE {current_date_str} = PAST events (use past tense: "I did", "I went", "I had")
-- Entries with date {current_date_str} = TODAY'S events (use present tense: "I am", "I'm doing")  
-- Entries with dates AFTER {current_date_str} = FUTURE events (use future tense: "I will", "I'm going to", "I have planned")
-
-Diary Entries (most recent 15, sorted newest to oldest):
-{json.dumps(context_data['diary'][:15], indent=2)}
-"""
-            context_parts.append(diary_context)
         
         # Vocabulary level instruction (replaces sending full pages/vocabulary lists)
         # This saves ~261k tokens by using instruction instead of full word lists
@@ -1897,7 +3056,17 @@ Diary Entries (most recent 15, sorted newest to oldest):
         logging.info(f"✅ BASE context for {account_id}/{aac_user_id} is {len(base_string)} chars (~{len(base_string)//4} tokens) - ready for caching")
         return base_string
     
-    async def _build_delta_context(self, account_id: str, aac_user_id: str, query_hint: str = "") -> str:
+    async def _build_delta_context(
+        self,
+        account_id: str,
+        aac_user_id: str,
+        query_hint: str = "",
+        compose_mode: bool = False,
+        compose_body: str = "",
+        prefetched_user_info: Optional[Dict[str, Any]] = None,
+        prefetched_settings: Optional[Dict[str, Any]] = None,
+        include_rich_context: bool = True,
+    ) -> str:
         """
         Builds the DELTA context - dynamic data that changes frequently.
         This is passed as standard input text with each request (NOT cached).
@@ -1905,21 +3074,32 @@ Diary Entries (most recent 15, sorted newest to oldest):
         Includes:
         - Current mood (changes frequently)
         - Current location/people/activity (changes per request)
+        - Current date and diary entries (date-sensitive; query-sensitive)
         - Recent chat history (last 10 turns)
         - User pages (frequently edited)
         """
         logging.info(f"⚡ Building DELTA context (dynamic data) for {account_id}/{aac_user_id}...")
         
+        query_hint_lower = str(query_hint or "").lower()
+
         # Fetch dynamic data
         # NOTE: chat_history uses recent messages (CHAT_HISTORY_ACTIVE_DAYS) to match BASE context
         # NOTE: pages moved to BASE cache (they rarely change, but are huge)
         tasks = {
-            "user_info": load_firestore_document(account_id, aac_user_id, "info/user_narrative", DEFAULT_USER_INFO),
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
         }
+        if include_rich_context:
+            tasks["birthdays"] = load_birthdays_from_file(account_id, aac_user_id)
+            tasks["friends_family"] = load_friends_family_from_file(account_id, aac_user_id)
+            tasks["diary"] = load_diary_entries(account_id, aac_user_id)
         results = await asyncio.gather(*tasks.values())
         context_data = dict(zip(tasks.keys(), results))
+        context_data["user_info"] = prefetched_user_info if isinstance(prefetched_user_info, dict) else DEFAULT_USER_INFO
+        context_data["settings"] = prefetched_settings if isinstance(prefetched_settings, dict) else {}
+        context_data.setdefault("birthdays", {})
+        context_data.setdefault("friends_family", {})
+        context_data.setdefault("diary", [])
         
         delta_parts = ["=== DYNAMIC CONTEXT (Current Session Data) ==="]
         
@@ -1976,18 +3156,231 @@ Diary Entries (most recent 15, sorted newest to oldest):
         
         # Current situation - location, people, activity
         if context_data["user_current"]:
-            current_parts = []
-            current_parts.extend([
-                f"Location: {context_data['user_current'].get('location', 'Unknown')}",
-                f"People Present: {context_data['user_current'].get('people', 'None')}",
-                f"Activity: {context_data['user_current'].get('activity', 'Idle')}"
-            ])
-            delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
+            if not compose_mode:
+                current_parts = []
+                current_parts.extend([
+                    f"Location: {context_data['user_current'].get('location', 'Unknown')}",
+                    f"People Present: {context_data['user_current'].get('people', 'None')}",
+                    f"Activity: {context_data['user_current'].get('activity', 'Idle')}"
+                ])
+                delta_parts.append(f"\n📍 CURRENT SITUATION:\n{chr(10).join(current_parts)}\n")
+
+                topic_title = (context_data["user_current"].get("topicTitle") or "").strip()
+                focus_chapters = (context_data["user_current"].get("focusChapters") or "").strip()
+                focus_plot_points = (context_data["user_current"].get("focusPlotPoints") or "").strip()
+                topic_summary = (context_data["user_current"].get("topicSummary") or "").strip()
+                discussion_narrative = topic_summary or focus_plot_points
+
+                if topic_title or focus_chapters or discussion_narrative:
+                    discussion_lines = [
+                        "📚 BOOK/DISCUSSION CONTEXT (SUPPLEMENTAL)",
+                        f"Topic Title: {topic_title or 'Not provided'}",
+                        f"Focus Chapters: {focus_chapters or 'Not provided'}",
+                        f"Discussion Narrative: {discussion_narrative or 'Not provided'}",
+                        "Use this context at the SAME PRIORITY as Location, People Present, and Activity.",
+                        "Only apply this context when the request is clearly about the current topic/book/discussion.",
+                        "If the request is general, do not force topic-specific options.",
+                        "If chapter range is provided and topic context is used, avoid introducing events beyond that range."
+                    ]
+                    delta_parts.append("\n" + "\n".join(discussion_lines) + "\n")
+            else:
+                # Compose mode: suppress location/book context, inject compose guidance instead
+                compose_lines = [
+                    "✏️ COMPOSE MODE — USER IS ACTIVELY WRITING A DOCUMENT",
+                    "⚠️ IGNORE: Location, People Present, Activity, and Book/Discussion context — NOT relevant.",
+                    "⚠️ IGNORE: Any greeting, conversational, or situational context.",
+                    "FOCUS ONLY ON: Generating options that are natural next phrases, sentences, or ideas",
+                    "  for the user's written composition (letter, story, message, etc.).",
+                    "OPTIONS must be written document phrases — not spoken conversation starters.",
+                    "Keep options concise, literary, and appropriate for written text.",
+                ]
+                compose_body_text = (compose_body or "").strip()
+                if compose_body_text:
+                    compose_lines.append(f'\nCURRENT COMPOSITION SO FAR:\n"{compose_body_text}"')
+                    compose_lines.append("Continue this composition naturally. Options should logically follow what has been written.")
+                delta_parts.append("\n" + "\n".join(compose_lines) + "\n")
+
+        today_date = dt.now().date()
+        current_date_str = today_date.strftime('%Y-%m-%d')
+        celebrations_context = _build_upcoming_celebrations_context(
+            birthday_data=context_data.get("birthdays") or {},
+            friends_family_data=context_data.get("friends_family") or {},
+            settings_data=context_data.get("settings") or {},
+            today_date=today_date,
+            days_ahead=60,
+            max_items=20,
+        )
+
+        delta_parts.append(
+            f"\n--- TODAY'S DATE (CRITICAL FOR DIARY CONTEXT) ---\n{current_date_str}\n"
+            "⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events.\n"
+        )
+
+        if include_rich_context and context_data["diary"]:
+            def parse_diary_date(entry: Dict) -> Optional[date]:
+                if not isinstance(entry, dict):
+                    return None
+                raw_date = entry.get("date")
+                if not isinstance(raw_date, str) or not raw_date.strip():
+                    return None
+                raw_date = raw_date.strip()
+
+                for fmt in ("%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"):
+                    try:
+                        return dt.strptime(raw_date, fmt).date()
+                    except ValueError:
+                        continue
+
+                try:
+                    return dt.fromisoformat(raw_date.replace("Z", "+00:00")).date()
+                except ValueError:
+                    return None
+
+            dated_entries = []
+            undated_entries = []
+            for entry in context_data["diary"]:
+                parsed_date = parse_diary_date(entry)
+                if parsed_date is None:
+                    undated_entries.append(entry)
+                else:
+                    dated_entries.append((entry, parsed_date))
+
+            dated_entries.sort(key=lambda item: item[1], reverse=True)
+
+            completed_entries = [(entry, parsed) for entry, parsed in dated_entries if parsed <= today_date]
+            upcoming_entries = [(entry, parsed) for entry, parsed in dated_entries if parsed > today_date]
+            recent_cutoff = today_date - timedelta(days=14)
+            recent_completed_entries = [
+                entry for entry, parsed in completed_entries if parsed >= recent_cutoff
+            ]
+
+            recent_activity_keywords = [
+                "recent activit",
+                "within 14 days",
+                "last 14 days",
+                "what i did",
+                "have done recently",
+                "past activit",
+            ]
+            use_recent_only = any(keyword in query_hint_lower for keyword in recent_activity_keywords)
+
+            completed_entries_for_context = recent_completed_entries if use_recent_only else [
+                entry for entry, _ in completed_entries[:15]
+            ]
+            completed_heading = (
+                f"Completed Diary Entries Within Last 14 Days Only (date >= {recent_cutoff.strftime('%Y-%m-%d')} and <= {current_date_str}, newest first, max 15):"
+                if use_recent_only
+                else f"Completed / Today Diary Entries (date <= {current_date_str}, newest first, max 15):"
+            )
+            recent_only_rule = (
+                f"- THIS REQUEST is about recent past activity. Use ONLY completed diary entries from the last 14 days ({recent_cutoff.strftime('%Y-%m-%d')} through {current_date_str}).\n"
+                "- DO NOT use older completed diary entries for this request, even if they seem relevant.\n"
+                "- DO NOT use upcoming/future diary entries as a fallback if there are no completed entries in the last 14 days.\n"
+                "- If there are no completed diary entries in the last 14 days, do not generate any activity-based options from diary data.\n"
+                if use_recent_only
+                else ""
+            )
+            upcoming_entries_for_context = [] if use_recent_only else [
+                entry for entry, _ in list(reversed(upcoming_entries[-15:]))
+            ]
+            upcoming_heading = (
+                "Upcoming Diary Entries (hidden for this recent-activity request; do not use):"
+                if use_recent_only
+                else f"Upcoming Diary Entries (date > {current_date_str}, soonest first, max 15):"
+            )
+
+            diary_context = f"""--- Diary Entries (Dynamic Context) ---
+📅 TODAY'S DATE: {current_date_str}
+⚠️ CRITICAL INSTRUCTIONS FOR DIARY INTERPRETATION:
+- Entries with dates BEFORE {current_date_str} = PAST events (use past tense: "I did", "I went", "I had")
+- Entries with date {current_date_str} = TODAY'S events (use present tense: "I am", "I'm doing")
+- Entries with dates AFTER {current_date_str} = FUTURE events (use future tense: "I will", "I'm going to", "I have planned")
+
+⚠️ DIARY USAGE RULES:
+- For prompts about "recent activities" or "what I did", use ONLY Completed/Today entries.
+{recent_only_rule}- For prompts about "upcoming plans" or "what I will do", use ONLY Upcoming entries.
+- NEVER describe Upcoming entries as if they already happened.
+
+{completed_heading}
+{json.dumps(completed_entries_for_context[:15], indent=2)}
+
+{upcoming_heading}
+{json.dumps(upcoming_entries_for_context, indent=2)}
+
+Undated Diary Entries (use cautiously, max 5):
+{json.dumps(undated_entries[:5], indent=2)}
+"""
+            delta_parts.append(diary_context)
+
+        # Live time context (dynamic per request; NOT cached)
+        # This prevents stale/hallucinated times when users ask about current time/date.
+        now_utc = dt.now(timezone.utc)
+        mountain_now = now_utc.astimezone(ZoneInfo("America/Denver"))
+
+        preferred_tz_name = "America/Denver" if (
+            "mountain" in query_hint_lower or
+            "mst" in query_hint_lower or
+            "mdt" in query_hint_lower
+        ) else "UTC"
+
+        try:
+            preferred_now = now_utc.astimezone(ZoneInfo(preferred_tz_name))
+        except Exception:
+            preferred_tz_name = "UTC"
+            preferred_now = now_utc
+
+        delta_parts.append(
+            "\n🕒 LIVE DATE/TIME CONTEXT (AUTHORITATIVE - USE FOR TIME/DATE QUESTIONS):\n"
+            f"- Current UTC: {now_utc.strftime('%Y-%m-%d %I:%M:%S %p UTC')}\n"
+            f"- Current US Mountain (America/Denver): {mountain_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}\n"
+            f"- Preferred timezone for this request: {preferred_tz_name}\n"
+            f"- Current time in preferred timezone: {preferred_now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}\n"
+            "⚠️ TIME ACCURACY RULE: If the prompt asks for current time/date, use the exact values above."
+            " Do NOT invent or reuse old times from prior context.\n"
+        )
+
+        celebration_keywords = [
+            "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
+            "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
+        ]
+        if include_rich_context and any(keyword in query_hint_lower for keyword in celebration_keywords):
+            celebrations_context += (
+                "\n⚠️ HIGH PRIORITY FOR THIS REQUEST: The prompt indicates greetings/plans/celebrations. "
+                "Prefer options that reference relevant upcoming birthdays/holidays naturally and in first person."
+            )
+            celebrations_context += (
+                "\n⚠️ REQUIREMENT: If Priority events in next 14 days are listed above, include at least one generated option "
+                "for each priority event unless that would conflict with safety rules."
+            )
+
+        delta_parts.append("\n🎉 " + celebrations_context + "\n")
         
-        # CHAT HISTORY: Now ALL recent messages go in DELTA (not cached)
+        # CHAT HISTORY: rich mode keeps full recent history, fast mode keeps a compact tail.
         # This significantly reduces cache size/cost since messages change frequently
         if context_data["chat_history"]:
             recent_messages = context_data["chat_history"]
+
+            if not include_rich_context:
+                compact_messages: List[Dict[str, Any]] = []
+                for msg in recent_messages[-8:]:
+                    if not isinstance(msg, dict):
+                        continue
+                    compact_messages.append({
+                        "question": str(msg.get("question", ""))[:120],
+                        "response": str(msg.get("response", ""))[:180],
+                        "timestamp": msg.get("timestamp"),
+                    })
+                delta_parts.append(
+                    f"\n💬 RECENT CHAT SNAPSHOT (FAST MODE, last {len(compact_messages)} messages):\n"
+                    f"{json.dumps(compact_messages, indent=2)}\n"
+                )
+                delta_string = "\n".join(delta_parts)
+                logging.warning(
+                    f"✅ DELTA context (FAST) for {account_id}/{aac_user_id} is {len(delta_string)} chars "
+                    f"(~{len(delta_string)//4} tokens)"
+                )
+                logging.warning(f"📋 DELTA PREVIEW (first 500 chars): {delta_string[:500]}")
+                return delta_string
             
             # Extract jokes from recent messages for explicit repetition avoidance
             recent_jokes = []
@@ -2038,10 +3431,10 @@ Diary Entries (most recent 15, sorted newest to oldest):
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
-            # Gemini 2.5 Flash minimum cache size - temporarily lowered to 512 for testing
-            # Use a more accurate token estimation: roughly 4 chars per token for English text
+            # Gemini cached content rejects requests below 2048 total tokens in production.
+            # Use a rough 4 chars/token estimate and skip cache creation when we are clearly under.
             estimated_tokens = len(base_context) // 4
-            min_tokens_required = 512
+            min_tokens_required = 2048
             
             logging.warning(f"✅ BASE context for user '{user_key}': {len(base_context)} chars, ~{int(estimated_tokens)} tokens")
             
@@ -2066,7 +3459,13 @@ Diary Entries (most recent 15, sorted newest to oldest):
             )
 
             # Save to Firestore (no message count since we don't cache chat anymore)
-            await self._save_cache_to_firestore(user_key, cached_content.name, created_at, message_count=0)
+            await self._save_cache_to_firestore(
+                user_key,
+                cached_content.name,
+                created_at,
+                message_count=0,
+                chat_history_cached=False,
+            )
             logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
         except Exception as e:
@@ -2171,6 +3570,19 @@ Diary Entries (most recent 15, sorted newest to oldest):
             return {"should_rebuild": True, "reason": "no_cache", "drift": 0}
         
         messages_in_cache = cache_data.get('message_count', 0)
+        chat_history_cached = cache_data.get('chat_history_cached')
+
+        # Chat history is no longer part of the cached BASE context. For those caches,
+        # rebuilding on chat drift only destroys the cache benefit without improving relevance.
+        if chat_history_cached is False or messages_in_cache == 0:
+            return {
+                "should_rebuild": False,
+                "reason": "chat_history_not_cached",
+                "drift": 0,
+                "max_drift": max_drift,
+                "messages_in_cache": messages_in_cache,
+                "current_message_count": None,
+            }
         
         # Get current message count
         chat_history = await load_chat_history(account_id, aac_user_id)
@@ -2275,6 +3687,7 @@ chroma_client_global = None # NEW: Keep a global chroma client for static db if 
 sentence_transformer_model = None # DISABLED - not currently used
 primary_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
 fallback_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
+fast_words_llm_model_instance: Optional[genai.GenerativeModel] = None # Lightweight fast model for category word lists
 openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
 tts_client: Optional[google_tts.TextToSpeechClient] = None # Global instance
 firestore_db: Optional[FirestoreClient] = None
@@ -2325,11 +3738,26 @@ else:
         except Exception as e_fallback:
             logging.error(f"Error initializing fallback Gemini model '{DEFAULT_FALLBACK_LLM_MODEL_NAME}': {e_fallback}", exc_info=True)
             fallback_llm_model_instance = None
+
+        try:
+            fast_words_model_name = GEMINI_FAST_WORDS_MODEL
+            if "2.0-flash-lite" in fast_words_model_name:
+                logging.warning(
+                    f"Configured fast words model '{fast_words_model_name}' is deprecated for many accounts; "
+                    f"using primary model '{GEMINI_PRIMARY_MODEL}' instead."
+                )
+                fast_words_model_name = GEMINI_PRIMARY_MODEL
+            fast_words_llm_model_instance = genai.GenerativeModel(fast_words_model_name)
+            logging.info(f"Fast words Gemini model '{fast_words_llm_model_instance.model_name}' initialized.")
+        except Exception as e_fast:
+            logging.error(f"Error initializing fast words model '{GEMINI_FAST_WORDS_MODEL}': {e_fast}", exc_info=True)
+            fast_words_llm_model_instance = None
     except Exception as e_genai_config: # Catch any error from genai.configure itself
         logging.error(f"Fatal error during Gemini API configuration: {e_genai_config}", exc_info=True)
         # Ensure models are None if configuration fails
         primary_llm_model_instance = None
         fallback_llm_model_instance = None
+        fast_words_llm_model_instance = None
 
 # --- Initialize OpenAI Client ---
 logging.info("Initializing OpenAI client...")
@@ -3030,6 +4458,69 @@ async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
             logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
             raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
+
+def _is_retryable_gemini_exception(exc: Exception) -> bool:
+    retryable_types = (
+        google.api_core.exceptions.TooManyRequests,
+        google.api_core.exceptions.ResourceExhausted,
+        google.api_core.exceptions.ServiceUnavailable,
+        google.api_core.exceptions.InternalServerError,
+        google.api_core.exceptions.DeadlineExceeded,
+    )
+
+    if isinstance(exc, retryable_types):
+        return True
+
+    message = str(exc).lower()
+    retryable_markers = [
+        "429",
+        "too many requests",
+        "resource exhausted",
+        "rate limit",
+        "quota exceeded",
+        "service unavailable",
+        "internal server error",
+        "deadline exceeded",
+    ]
+    return any(marker in message for marker in retryable_markers)
+
+
+async def _execute_gemini_call_with_retry(
+    call_factory,
+    operation_label: str,
+    account_id: str = "unknown",
+    aac_user_id: str = "unknown",
+    max_attempts: int = 6,
+    base_delay_seconds: float = 0.5,
+    max_delay_seconds: float = 20.0,
+):
+    attempt = 1
+    while attempt <= max_attempts:
+        try:
+            return await asyncio.to_thread(call_factory)
+        except Exception as exc:
+            is_retryable = _is_retryable_gemini_exception(exc)
+            is_last_attempt = attempt >= max_attempts
+
+            if (not is_retryable) or is_last_attempt:
+                if is_retryable and is_last_attempt:
+                    logging.error(
+                        f"Gemini call failed after {attempt}/{max_attempts} attempts "
+                        f"for {operation_label} ({account_id}/{aac_user_id}): {exc}",
+                        exc_info=True,
+                    )
+                raise
+
+            exponential_ceiling = min(max_delay_seconds, base_delay_seconds * (2 ** (attempt - 1)))
+            sleep_seconds = random.uniform(0, exponential_ceiling)
+            logging.warning(
+                f"Retryable Gemini error on {operation_label} ({account_id}/{aac_user_id}) "
+                f"attempt {attempt}/{max_attempts}: {type(exc).__name__}: {exc}. "
+                f"Sleeping {sleep_seconds:.2f}s before retry."
+            )
+            await asyncio.sleep(sleep_seconds)
+            attempt += 1
+
 # --- Helper function for Gemini LLM with Context Caching ---
 async def _generate_gemini_content_with_caching(
     account_id: str, 
@@ -3072,12 +4563,22 @@ async def _generate_gemini_content_with_caching(
                 logging.info(f"TOKEN SAVINGS: User query preview: {user_query_only[:200]}...")
                 
                 # Send only the user query - context is cached in the session
-                response = await asyncio.to_thread(chat_session.send_message, user_query_only)
+                response = await _execute_gemini_call_with_retry(
+                    lambda: chat_session.send_message(user_query_only),
+                    operation_label="gemini_chat_session_send_message",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
             else:
                 # Fallback: send full prompt if no user_query_only provided
                 logging.info(f"No user_query_only provided, sending full prompt to chat session for {account_id}/{aac_user_id}")
                 logging.info(f"Full prompt preview: {prompt_text[:200]}...")
-                response = await asyncio.to_thread(chat_session.send_message, prompt_text)
+                response = await _execute_gemini_call_with_retry(
+                    lambda: chat_session.send_message(prompt_text),
+                    operation_label="gemini_chat_session_send_message",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
             
             # Update message count
             user_key = cache_manager._get_user_key(account_id, aac_user_id)
@@ -3114,10 +4615,14 @@ async def _generate_gemini_content_with_caching(
                     generation_config_with_cache = generation_config or {}
                     
                     # Try using the cached content name directly in the request
-                    response = await asyncio.to_thread(
-                        model.generate_content, 
-                        user_query_only, 
-                        generation_config=generation_config_with_cache
+                    response = await _execute_gemini_call_with_retry(
+                        lambda: model.generate_content(
+                            user_query_only,
+                            generation_config=generation_config_with_cache
+                        ),
+                        operation_label="gemini_cached_content_generate",
+                        account_id=account_id,
+                        aac_user_id=aac_user_id,
                     )
                     return response.text.strip()
                     
@@ -3165,7 +4670,12 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
         logging.info(f"⚙️ Generation config (fallback): {generation_config}")
         
-        response = await asyncio.to_thread(primary_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+        response = await _execute_gemini_call_with_retry(
+            lambda: primary_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
+            operation_label=f"gemini_primary_generate:{primary_llm_model_instance.model_name}",
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+        )
         
         # Log response details for debugging
         logging.info(f"🤖 RAW LLM RESPONSE LENGTH (fallback): {len(response.text) if response.text else 0} chars")
@@ -3198,7 +4708,12 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         if fallback_llm_model_instance:
             try:
                 logging.info(f"Attempting LLM generation with fallback model: {fallback_llm_model_instance.model_name}")
-                response_fallback = await asyncio.to_thread(fallback_llm_model_instance.generate_content, prompt_text, generation_config=generation_config) # <--- THIS CALL
+                response_fallback = await _execute_gemini_call_with_retry(
+                    lambda: fallback_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
+                    operation_label=f"gemini_fallback_generate:{fallback_llm_model_instance.model_name}",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                )
                 fallback_response_text = (await get_text_from_response(response_fallback)).strip()
                 
                 # Log detailed token usage for fallback requests
@@ -3214,6 +4729,71 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
     except Exception as e_other_primary:
         logging.error(f"An unexpected error occurred with primary LLM ({primary_llm_model_instance.model_name}): {e_other_primary}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {e_other_primary}")
+
+
+async def _generate_fast_category_words_content(prompt_text: str, account_id: str = "unknown", aac_user_id: str = "unknown") -> str:
+    global fast_words_llm_model_instance, primary_llm_model_instance
+
+    if not prompt_text or not prompt_text.strip():
+        logging.error("Empty or whitespace-only prompt provided to fast category-words Gemini path")
+        raise HTTPException(status_code=400, detail="Empty prompt provided to LLM")
+
+    model_instance = fast_words_llm_model_instance or primary_llm_model_instance
+    if not model_instance:
+        logging.warning("Fast category-words model unavailable; falling back to standard Gemini path")
+        return await _generate_gemini_content_with_fallback(prompt_text, None, account_id, aac_user_id)
+
+    generation_config = {
+        "temperature": 0.2,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_output_tokens": 220,
+    }
+
+    start_time = time.perf_counter()
+    logging.info(
+        f"Attempting fast category-words generation with model: {model_instance.model_name} "
+        f"for {account_id}/{aac_user_id}"
+    )
+    logging.info(f"Fast category-words prompt length: {len(prompt_text)} characters")
+
+    try:
+        response = await _execute_gemini_call_with_retry(
+            lambda: model_instance.generate_content(prompt_text, generation_config=generation_config),
+            operation_label=f"gemini_fast_category_words:{model_instance.model_name}",
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            max_attempts=3,
+            base_delay_seconds=0.25,
+            max_delay_seconds=2.0,
+        )
+
+        response_text = ""
+        if hasattr(response, 'text') and response.text:
+            response_text = response.text.strip()
+        elif hasattr(response, 'parts') and isinstance(response.parts, list) and response.parts:
+            response_text = "".join(part.text for part in response.parts if hasattr(part, 'text')).strip()
+
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000)
+        logging.info(
+            f"Fast category-words Gemini completed in {elapsed_ms}ms using {model_instance.model_name} "
+            f"for {account_id}/{aac_user_id}"
+        )
+
+        if hasattr(response, 'usage_metadata'):
+            log_token_usage(response, "FAST_CATEGORY_WORDS", account_id, aac_user_id)
+
+        if response_text:
+            return response_text
+
+        logging.warning("Fast category-words Gemini returned empty response; falling back to standard Gemini path")
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
+    except Exception as fast_error:
+        logging.warning(
+            f"Fast category-words Gemini path failed for {account_id}/{aac_user_id}: {fast_error}. "
+            f"Falling back to standard Gemini path."
+        )
+        return await _generate_gemini_content_with_fallback(prompt_text, generation_config, account_id, aac_user_id)
 
 
 @app.options("/llm")
@@ -3252,7 +4832,16 @@ async def refresh_user_cache(current_ids: Annotated[Dict[str, str], Depends(get_
     return JSONResponse(content={"message": f"Cache invalidated for user {aac_user_id}."})
 
 
-async def build_full_prompt_for_non_cached_llm(account_id: str, aac_user_id: str, user_query: str) -> str:
+async def build_full_prompt_for_non_cached_llm(
+    account_id: str,
+    aac_user_id: str,
+    user_query: str,
+    compose_mode: bool = False,
+    compose_body: str = "",
+    prefetched_user_info: Optional[Dict[str, Any]] = None,
+    prefetched_settings: Optional[Dict[str, Any]] = None,
+    include_rich_delta_context: bool = True,
+) -> str:
     """
     Builds the complete LLM prompt from scratch by fetching all context data.
     This is used as a fallback when a cache is not available.
@@ -3266,7 +4855,16 @@ async def build_full_prompt_for_non_cached_llm(account_id: str, aac_user_id: str
         base_context = await cache_manager._build_base_context(account_id, aac_user_id)
         logging.info(f"✅ Base context built: {len(base_context)} chars")
         
-        delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_query)
+        delta_context = await cache_manager._build_delta_context(
+            account_id,
+            aac_user_id,
+            user_query,
+            compose_mode=compose_mode,
+            compose_body=compose_body,
+            prefetched_user_info=prefetched_user_info,
+            prefetched_settings=prefetched_settings,
+            include_rich_context=include_rich_delta_context,
+        )
         logging.info(f"✅ Delta context built: {len(delta_context)} chars")
         
         # Combine base + delta (same as cached requests do)
@@ -3359,6 +4957,13 @@ def log_token_usage(response, request_type: str, account_id: str, aac_user_id: s
 
 class LLMRequest(BaseModel):
     prompt: str
+    count: Optional[int] = None          # Override max options returned (e.g., for bulk board builder)
+    compose_mode: bool = False          # True when the user is in an active compose session
+    compose_body: str = ""               # Current composition text (sent for context when compose_mode is True)
+    request_id: Optional[str] = None     # Client-provided request correlation id for log tracing
+    button_text: Optional[str] = None    # Source button label from UI when available
+    page_name: Optional[str] = None      # Source page name from UI when available
+    click_timestamp: Optional[str] = None  # UI click timestamp for correlation
 
 # --- Vocabulary Level Helper Function ---
 def get_vocabulary_level_instruction(level: str) -> str:
@@ -3418,15 +5023,51 @@ async def get_llm_response_endpoint(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
 ):
     global cache_manager
+    global llm_quick_response_cache
+    global llm_inflight_requests
+    global llm_inflight_requests_lock
+    global fast_words_llm_model_instance
+    global primary_llm_model_instance
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     user_prompt_content = request_data.prompt
+    request_start_time = time.perf_counter()
+
+    def _infer_button_label_from_prompt(prompt: str) -> Optional[str]:
+        prompt_lower = (prompt or "").lower()
+        explicit_prefixes = ["what", "who", "where", "when", "why", "how"]
+        for prefix in explicit_prefixes:
+            if f"begin with {prefix}" in prompt_lower:
+                return prefix.capitalize()
+        return None
+
+    request_correlation_id = (request_data.request_id or str(uuid.uuid4()))[:64]
+    button_label = (
+        (request_data.button_text or "").strip()
+        or _infer_button_label_from_prompt(user_prompt_content)
+        or "unknown"
+    )[:40]
+    page_label = ((request_data.page_name or "").strip() or "unknown")[:40]
+    log_context = (
+        f"request_id={request_correlation_id} button={button_label} "
+        f"page={page_label} account={account_id}/{aac_user_id}"
+    )
 
     # Get user's settings to determine LLM provider and options
     user_settings = await load_settings_from_file(account_id, aac_user_id)
+    user_info_doc = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy()
+    )
+    ai_option_overrides = normalize_ai_option_overrides(user_info_doc.get("aiOptionOverrides", {}))
+    logging.info(f"Loaded AI option overrides for /llm [{log_context}]: {ai_option_overrides}")
     llm_provider = user_settings.get("llm_provider", "gemini").lower()
     llm_options_value = user_settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)
     vocabulary_level = user_settings.get("vocabularyLevel", "functional")
+    prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+    logging.info(f"⏱️ /llm prep stage: {prep_elapsed_ms:.1f}ms [{log_context}]")
 
     # Check if mood was recently updated and add small delay to prevent race conditions
     global mood_update_timestamps
@@ -3478,17 +5119,48 @@ CREATIVITY BOOSTERS:
 """
         user_prompt_content = randomization_prompt + user_prompt_content
 
-    # Define generation config and add JSON formatting instructions  
-    generation_config = {
-        "response_mime_type": "application/json", 
-        "temperature": 0.9,  # Increased temperature for more creativity
-        "max_output_tokens": 4096  # Ensure enough space for complete JSON responses
-    }
-    
+    requested_options_count = request_data.count if request_data.count and request_data.count > 0 else int(llm_options_value)
+
     # Get vocabulary level instruction
     vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
-    
-    json_format_instructions = f"""
+
+    high_context_keywords = [
+        "diary", "journal", "memory", "remember", "yesterday", "tomorrow", "schedule",
+        "calendar", "birthday", "holiday", "celebrate", "celebration", "anniversary",
+        "what happened", "what did", "plan", "plans", "upcoming", "event",
+    ]
+    include_rich_delta_context = any(keyword in user_prompt_content.lower() for keyword in high_context_keywords)
+    if request_data.compose_mode:
+        include_rich_delta_context = False
+    use_fast_generation_profile = not include_rich_delta_context and not request_data.compose_mode
+    is_starter_question_prompt = (
+        "all options must begin with" in user_prompt_content.lower()
+        and "generic, basic questions" in user_prompt_content.lower()
+    )
+
+    if use_fast_generation_profile:
+        estimated_max_output_tokens = min(768, max(320, requested_options_count * 28 + 120))
+        temperature_value = 0.75
+
+        if is_starter_question_prompt:
+            # Starter question prompts (What/Who/Where/When/Why/How) should be short and stable.
+            # Lowering output budget and temperature reduces long-tail generation latency variance.
+            estimated_max_output_tokens = min(estimated_max_output_tokens, max(240, requested_options_count * 14 + 60))
+            temperature_value = 0.45
+
+        json_format_instructions = f"""
+{vocab_instruction}
+
+CRITICAL FORMAT: Return ONLY a valid JSON array of strings with exactly {requested_options_count} items. Nothing else.
+Each string element must be a complete, natural-sounding spoken option (e.g., "Hello, how are you?", "I'm having a great day!").
+For jokes, include the punchline in the same string (e.g., "Why did the chicken cross the road? To get to the other side!").
+Do NOT return objects, do NOT include keys like "option", "summary", or "keywords" - the server will handle those automatically.
+No markdown, no code blocks, no commentary. Return ONLY the JSON array.
+Example: ["hello everyone", "good to see you", "what's going on"]"""
+    else:
+        estimated_max_output_tokens = max(768, min(2048, int(llm_options_value) * 140))
+        temperature_value = 0.9
+        json_format_instructions = f"""
 {vocab_instruction}
 
 CRITICAL: Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
@@ -3506,18 +5178,174 @@ IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND p
 - Do not forget commas between array elements
 
 Return ONLY valid JSON - no other text before or after the JSON array."""
-    final_user_query = f"{user_prompt_content}\n\n{json_format_instructions}"
+
+    generation_config = {
+        "response_mime_type": "application/json",
+        "temperature": temperature_value,
+        "max_output_tokens": estimated_max_output_tokens,
+    }
+
+    ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+    llm_user_language = _normalize_locale_tag(str(user_settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+    llm_language_suffix = (
+        f"\n\n⚠️ FINAL LANGUAGE OVERRIDE: Every string you generate MUST be in the language with locale tag '{llm_user_language}'. "
+        f"The English-language examples in the formatting instructions above are structural examples only — they do NOT determine the output language. "
+        f"Generate ALL output in '{llm_user_language}'. Do NOT use English."
+        if not llm_user_language.lower().startswith("en")
+        else ""
+    )
+    final_user_query = f"{user_prompt_content}\n\n{ai_override_prompt_block}\n\n{json_format_instructions}{llm_language_suffix}"
+
+    compose_body_hash = hashlib.sha1((request_data.compose_body or "").encode("utf-8")).hexdigest()[:10]
+    prompt_hash = hashlib.sha1(user_prompt_content.encode("utf-8")).hexdigest()[:16]
+    quick_cache_key = (
+        f"{account_id}|{aac_user_id}|{llm_provider}|{requested_options_count}|"
+        f"{int(include_rich_delta_context)}|{int(request_data.compose_mode)}|{prompt_hash}|{compose_body_hash}"
+    )
+
+    now_ts = time.time()
+    if len(llm_quick_response_cache) > 600:
+        llm_quick_response_cache = {
+            key: value
+            for key, value in llm_quick_response_cache.items()
+            if (now_ts - float(value.get("created_at", 0))) < LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS
+        }
+
+    cached_response_entry = llm_quick_response_cache.get(quick_cache_key)
+    if cached_response_entry and (now_ts - float(cached_response_entry.get("created_at", 0))) < LLM_QUICK_RESPONSE_CACHE_TTL_SECONDS:
+        cached_options = copy.deepcopy(cached_response_entry.get("response", []))
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"⚡ /llm quick-cache HIT [{log_context}] key={quick_cache_key[-24:]} "
+            f"in {total_elapsed_ms:.1f}ms"
+        )
+        return JSONResponse(
+            content=cached_options,
+            headers={
+                "X-LLM-Cache": "quick-hit",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+                "X-LLM-Request-Id": request_correlation_id,
+                "X-LLM-Button": button_label,
+            },
+        )
+
+    is_inflight_owner = False
+    inflight_future: Optional[asyncio.Future] = None
+
+    async with llm_inflight_requests_lock:
+        existing_future = llm_inflight_requests.get(quick_cache_key)
+        if existing_future and not existing_future.done():
+            inflight_future = existing_future
+        else:
+            inflight_future = asyncio.get_running_loop().create_future()
+            llm_inflight_requests[quick_cache_key] = inflight_future
+            is_inflight_owner = True
+
+    if not is_inflight_owner:
+        try:
+            coalesced_options = await inflight_future
+        except Exception as coalesced_error:
+            logging.error(
+                f"⚠️ /llm coalesced wait failed [{log_context}] key={quick_cache_key[-24:]}: {coalesced_error}",
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Coalesced /llm request failed")
+
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"🤝 /llm in-flight coalesced HIT [{log_context}] key={quick_cache_key[-24:]} "
+            f"in {total_elapsed_ms:.1f}ms"
+        )
+        return JSONResponse(
+            content=copy.deepcopy(coalesced_options),
+            headers={
+                "X-LLM-Cache": "inflight-hit",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+                "X-LLM-Request-Id": request_correlation_id,
+                "X-LLM-Button": button_label,
+            },
+        )
+
+    logging.info(
+        f"🧠 DELTA CONTEXT PROFILE: {'RICH' if include_rich_delta_context else 'FAST'} "
+        f"[{log_context}]"
+    )
+    logging.info(
+        f"⚙️ GENERATION PROFILE: {'FAST' if use_fast_generation_profile else 'RICH'} "
+        f"(max_output_tokens={estimated_max_output_tokens}, temperature={temperature_value}, requested_options={requested_options_count}) [{log_context}]"
+    )
 
     llm_response_json_str = ""
+    llm_generate_start_time = time.perf_counter()
 
     # --- Route to appropriate LLM ---
-    if llm_provider == "chatgpt":
-        logging.info(f"Using OpenAI for {account_id}/{aac_user_id}. Building full prompt manually.")
-        full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
+    if llm_provider != "chatgpt" and is_starter_question_prompt:
+        # Starter question prompts are dynamic and short-lived. Avoid cache warm-up/drift checks and
+        # generate directly to reduce latency variance caused by cache bookkeeping/fallback paths.
+        logging.info(f"⚡ Starter-question fast path (cache bypass) [{log_context}]")
+        fast_model = fast_words_llm_model_instance or primary_llm_model_instance
+
+        if not fast_model:
+            logging.warning(f"Starter-question fast model unavailable; using standard fallback path [{log_context}]")
+            llm_response_json_str = await _generate_gemini_content_with_fallback(
+                final_user_query,
+                generation_config,
+                account_id,
+                aac_user_id,
+            )
+        else:
+            try:
+                response = await _execute_gemini_call_with_retry(
+                    lambda: fast_model.generate_content(final_user_query, generation_config=generation_config),
+                    operation_label=f"gemini_starter_questions_fast:{fast_model.model_name}",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
+                    max_attempts=3,
+                    base_delay_seconds=0.2,
+                    max_delay_seconds=1.5,
+                )
+
+                llm_response_json_str = (response.text or "").strip()
+                if not llm_response_json_str:
+                    logging.warning(f"Starter-question fast path returned empty response; using standard fallback [{log_context}]")
+                    llm_response_json_str = await _generate_gemini_content_with_fallback(
+                        final_user_query,
+                        generation_config,
+                        account_id,
+                        aac_user_id,
+                    )
+                else:
+                    log_token_usage(response, "STARTER_FAST", account_id, aac_user_id)
+            except Exception as starter_fast_error:
+                logging.warning(
+                    f"Starter-question fast path failed [{log_context}]: {starter_fast_error}. "
+                    f"Using standard fallback path."
+                )
+                llm_response_json_str = await _generate_gemini_content_with_fallback(
+                    final_user_query,
+                    generation_config,
+                    account_id,
+                    aac_user_id,
+                )
+
+    elif llm_provider == "chatgpt":
+        logging.info(f"Using OpenAI [{log_context}]. Building full prompt manually.")
+        full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(
+            account_id,
+            aac_user_id,
+            final_user_query,
+            compose_mode=request_data.compose_mode,
+            compose_body=request_data.compose_body,
+            prefetched_user_info=user_info_doc,
+            prefetched_settings=user_settings,
+            include_rich_delta_context=include_rich_delta_context,
+        )
         llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
         # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
-        logging.info(f"🚀 Using Gemini with Base+Delta caching for {account_id}/{aac_user_id}.")
+        logging.info(f"🚀 Using Gemini with Base+Delta caching [{log_context}].")
         
         # SMART DRIFT DETECTION: Check if cache needs rebuilding
         drift_check = await cache_manager.check_cache_drift(account_id, aac_user_id, max_drift=20)
@@ -3544,19 +5372,31 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         if cached_content_ref:
             try:
                 # Build delta context (dynamic data not in cache)
-                delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content)
+                delta_context = await cache_manager._build_delta_context(
+                    account_id,
+                    aac_user_id,
+                    user_prompt_content,
+                    compose_mode=request_data.compose_mode,
+                    compose_body=request_data.compose_body,
+                    prefetched_user_info=user_info_doc,
+                    prefetched_settings=user_settings,
+                    include_rich_context=include_rich_delta_context,
+                )
                 
                 # Combine delta + user query
                 combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                 
                 logging.info(f"🔍 COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
-                logging.info(f"📊 USER QUERY that triggered LLM: {user_prompt_content[:500]}")
+                logging.info(f"📊 USER QUERY that triggered LLM [{log_context}]: {user_prompt_content[:500]}")
                 logging.info(f"⚙️ Generation config: {generation_config}")
                 
                 # Use cached base context + pass delta as standard input
                 model = genai.GenerativeModel.from_cached_content(cached_content_ref)
-                response = await asyncio.to_thread(
-                    model.generate_content, combined_prompt, generation_config=generation_config
+                response = await _execute_gemini_call_with_retry(
+                    lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                    operation_label="gemini_cached_base_plus_delta_generate",
+                    account_id=account_id,
+                    aac_user_id=aac_user_id,
                 )
                 
                 # Log response details for debugging
@@ -3579,13 +5419,22 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 # Log detailed token usage for cached requests
                 log_token_usage(response, "CACHED+DELTA", account_id, aac_user_id)
                 
-                logging.info(f"✅ Successfully generated content using BASE cache + DELTA context for {account_id}/{aac_user_id}.")
+                logging.info(f"✅ Successfully generated content using BASE cache + DELTA context [{log_context}].")
             except Exception as e:
-                logging.error(f"Error using cached content for {account_id}/{aac_user_id}: {e}. Falling back.")
-                full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
+                logging.error(f"Error using cached content [{log_context}]: {e}. Falling back.")
+                full_prompt = await build_full_prompt_for_non_cached_llm(
+                    account_id,
+                    aac_user_id,
+                    final_user_query,
+                    compose_mode=request_data.compose_mode,
+                    compose_body=request_data.compose_body,
+                    prefetched_user_info=user_info_doc,
+                    prefetched_settings=user_settings,
+                    include_rich_delta_context=include_rich_delta_context,
+                )
                 llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
         else:
-            logging.warning(f"No valid cache found for {account_id}/{aac_user_id}. Attempting to warm up cache...")
+            logging.warning(f"No valid cache found [{log_context}]. Attempting to warm up cache...")
             
             # Try to warm up cache before falling back to full prompt
             try:
@@ -3596,16 +5445,28 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 
                 if cached_content_ref:
                     # Cache was successfully created, use it with delta context
-                    delta_context = await cache_manager._build_delta_context(account_id, aac_user_id, user_prompt_content)
+                    delta_context = await cache_manager._build_delta_context(
+                        account_id,
+                        aac_user_id,
+                        user_prompt_content,
+                        compose_mode=request_data.compose_mode,
+                        compose_body=request_data.compose_body,
+                        prefetched_user_info=user_info_doc,
+                        prefetched_settings=user_settings,
+                        include_rich_context=include_rich_delta_context,
+                    )
                     combined_prompt = f"{delta_context}\n\n=== USER QUERY ===\n{final_user_query}"
                     
                     logging.info(f"🔍 NEW_CACHE COMBINED PROMPT PREVIEW (first 800 chars):\n{combined_prompt[:800]}")
-                    logging.info(f"📊 USER QUERY that triggered LLM (new cache path): {user_prompt_content[:500]}")
+                    logging.info(f"📊 USER QUERY that triggered LLM (new cache path) [{log_context}]: {user_prompt_content[:500]}")
                     logging.info(f"⚙️ Generation config: {generation_config}")
                     
                     model = genai.GenerativeModel.from_cached_content(cached_content_ref)
-                    response = await asyncio.to_thread(
-                        model.generate_content, combined_prompt, generation_config=generation_config
+                    response = await _execute_gemini_call_with_retry(
+                        lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                        operation_label="gemini_new_cached_base_plus_delta_generate",
+                        account_id=account_id,
+                        aac_user_id=aac_user_id,
                     )
                     
                     # Log response details for debugging
@@ -3628,19 +5489,40 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     # Log detailed token usage for newly cached requests
                     log_token_usage(response, "NEW_CACHE+DELTA", account_id, aac_user_id)
                     
-                    logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA for {account_id}/{aac_user_id}.")
+                    logging.info(f"✅ Successfully generated content using newly created BASE cache + DELTA [{log_context}].")
                 else:
                     # Cache creation failed, use full prompt fallback
-                    logging.warning(f"Cache creation failed for {account_id}/{aac_user_id}. Using full prompt fallback.")
-                    full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
+                    logging.warning(f"Cache creation failed [{log_context}]. Using full prompt fallback.")
+                    full_prompt = await build_full_prompt_for_non_cached_llm(
+                        account_id,
+                        aac_user_id,
+                        final_user_query,
+                        compose_mode=request_data.compose_mode,
+                        compose_body=request_data.compose_body,
+                        prefetched_user_info=user_info_doc,
+                        prefetched_settings=user_settings,
+                        include_rich_delta_context=include_rich_delta_context,
+                    )
                     llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
                     
             except Exception as warmup_error:
-                logging.error(f"Cache warmup failed for {account_id}/{aac_user_id}: {warmup_error}. Using full prompt fallback.")
-                full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, final_user_query)
+                logging.error(f"Cache warmup failed [{log_context}]: {warmup_error}. Using full prompt fallback.")
+                full_prompt = await build_full_prompt_for_non_cached_llm(
+                    account_id,
+                    aac_user_id,
+                    final_user_query,
+                    compose_mode=request_data.compose_mode,
+                    compose_body=request_data.compose_body,
+                    prefetched_user_info=user_info_doc,
+                    prefetched_settings=user_settings,
+                    include_rich_delta_context=include_rich_delta_context,
+                )
                 llm_response_json_str = await _generate_gemini_content_with_fallback(full_prompt, generation_config, account_id, aac_user_id)
+
+    llm_generate_elapsed_ms = (time.perf_counter() - llm_generate_start_time) * 1000
+    logging.info(f"⏱️ /llm generation stage: {llm_generate_elapsed_ms:.1f}ms [{log_context}]")
     
-    logging.info(f"--- LLM Final JSON Response Text for account {account_id} and user {aac_user_id} (Length: {len(llm_response_json_str)}) ---")
+    logging.info(f"--- LLM Final JSON Response Text [{log_context}] (Length: {len(llm_response_json_str)}) ---")
 
     def extract_json_from_response(response_text: str) -> str:
         """Extract JSON from LLM response, handling markdown code blocks and conversational text"""
@@ -3746,6 +5628,84 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         
         return json_str
 
+    def salvage_llm_output(*candidate_strings: str) -> Optional[Any]:
+        import ast
+        import re
+
+        for candidate in candidate_strings:
+            if not candidate or not str(candidate).strip():
+                continue
+
+            text = str(candidate).strip()
+            try:
+                parsed_literal = ast.literal_eval(text)
+                if isinstance(parsed_literal, (list, dict)):
+                    logging.warning("Recovered LLM response using ast.literal_eval fallback")
+                    return parsed_literal
+            except Exception:
+                pass
+
+            object_matches = re.finditer(r'\{[^{}]*\}', text, re.DOTALL)
+            recovered_objects: List[Dict[str, Any]] = []
+            for match in object_matches:
+                object_text = match.group(0)
+                option_match = re.search(r'("option"|\'option\')\s*:\s*("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', object_text, re.DOTALL)
+                if not option_match:
+                    continue
+
+                try:
+                    option_text = ast.literal_eval(option_match.group(2))
+                except Exception:
+                    continue
+
+                summary_match = re.search(r'("summary"|\'summary\')\s*:\s*("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', object_text, re.DOTALL)
+                keywords_match = re.search(r'("keywords"|\'keywords\')\s*:\s*(\[[^\]]*\])', object_text, re.DOTALL)
+                summary_text = None
+                keyword_values = None
+
+                if summary_match:
+                    try:
+                        summary_text = ast.literal_eval(summary_match.group(2))
+                    except Exception:
+                        summary_text = None
+
+                if keywords_match:
+                    try:
+                        parsed_keywords = ast.literal_eval(keywords_match.group(2))
+                        if isinstance(parsed_keywords, list):
+                            keyword_values = parsed_keywords
+                    except Exception:
+                        keyword_values = None
+
+                recovered_objects.append({
+                    "option": option_text,
+                    "summary": summary_text,
+                    "keywords": keyword_values,
+                })
+
+            if recovered_objects:
+                logging.warning(f"Recovered {len(recovered_objects)} LLM option objects via regex salvage")
+                return recovered_objects
+
+            string_matches = re.finditer(r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\')', text, re.DOTALL)
+            recovered_strings: List[str] = []
+            for match in string_matches:
+                token = match.group(0)
+                try:
+                    parsed_token = ast.literal_eval(token)
+                except Exception:
+                    continue
+                if isinstance(parsed_token, str):
+                    cleaned_token = re.sub(r"\s+", " ", parsed_token).strip()
+                    if cleaned_token and cleaned_token not in {"option", "summary", "keywords"}:
+                        recovered_strings.append(cleaned_token)
+
+            if len(recovered_strings) >= 3:
+                logging.warning(f"Recovered {len(recovered_strings)} LLM option strings via regex salvage")
+                return recovered_strings
+
+        return None
+
     try:
         parsed_llm_output = json.loads(clean_json_str)
     except json.JSONDecodeError as first_error:
@@ -3758,19 +5718,24 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             parsed_llm_output = json.loads(repaired_json_str)
             logging.info("✅ JSON repair successful!")
         except json.JSONDecodeError as second_error:
-            # Repair failed, log details and re-raise
-            logging.error(f"JSON repair failed: {second_error}")
-            logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
-            logging.error(f"Repaired JSON (first 2000 chars): {repaired_json_str[:2000]}")
-            logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
-            
-            # Log the specific problematic area around the error
-            if hasattr(second_error, 'pos'):
-                start = max(0, second_error.pos - 200)
-                end = min(len(repaired_json_str), second_error.pos + 200)
-                logging.error(f"Problem area (±200 chars around error): {repaired_json_str[start:end]}")
-            
-            raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
+            salvaged_llm_output = salvage_llm_output(repaired_json_str, clean_json_str, llm_response_json_str)
+            if salvaged_llm_output is not None:
+                parsed_llm_output = salvaged_llm_output
+                logging.warning("Recovered malformed LLM output using salvage fallback after JSON repair failure")
+            else:
+                # Repair failed, log details and re-raise
+                logging.error(f"JSON repair failed: {second_error}")
+                logging.error(f"Failed to parse LLM response as JSON. Clean Raw (first 1000 chars): {clean_json_str[:1000]}")
+                logging.error(f"Repaired JSON (first 2000 chars): {repaired_json_str[:2000]}")
+                logging.error(f"FULL RAW LLM RESPONSE (first 2000 chars): {llm_response_json_str[:2000]}")
+                
+                # Log the specific problematic area around the error
+                if hasattr(second_error, 'pos'):
+                    start = max(0, second_error.pos - 200)
+                    end = min(len(repaired_json_str), second_error.pos + 200)
+                    logging.error(f"Problem area (±200 chars around error): {repaired_json_str[start:end]}")
+                
+                raise HTTPException(status_code=500, detail=f"LLM returned invalid JSON: {str(first_error)}")
     
     # Continue with processing the parsed output
     try:
@@ -3794,13 +5759,81 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
             logging.error(f"Logic Error: After processing, extracted LLM options were not a list: {type(extracted_options_list)} - Content: {llm_response_json_str}")
             raise HTTPException(status_code=500, detail="Internal server error: Failed to extract LLM options as a list.")
 
-        return JSONResponse(content=extracted_options_list)
+        normalized_options = []
+        for raw_item in extracted_options_list:
+            normalized_item = _normalize_llm_option_item(raw_item)
+            if normalized_item:
+                normalized_options.append(normalized_item)
+
+        if not normalized_options:
+            logging.error(f"LLM returned no usable option items after normalization: {parsed_llm_output}")
+            raise HTTPException(status_code=500, detail="LLM response did not contain any usable options.")
+
+        logging.info(f"📊 1. Extracted options count: {len(extracted_options_list)}")
+        logging.info(f"📊 1b. Normalized options count: {len(normalized_options)}")
+        effective_max_options = request_data.count if request_data.count and request_data.count > 0 else llm_options_value
+        logging.info(f"📊 Using max_options={effective_max_options} (request.count={request_data.count}, llm_options_value={llm_options_value})")
+        enforced_options = enforce_ai_option_overrides(normalized_options, ai_option_overrides, effective_max_options)
+        logging.info(f"📊 2. After enforce_ai_option_overrides: {len(enforced_options)}")
+        
+        sentiment_aligned_options = apply_prompt_sentiment_alignment(
+            enforced_options,
+            user_prompt_content,
+            effective_max_options
+        )
+        logging.info(f"📊 3. After apply_prompt_sentiment_alignment: {len(sentiment_aligned_options)}")
+        
+        biased_options = apply_inclusion_preference_bias(
+            sentiment_aligned_options,
+            ai_option_overrides,
+            user_prompt_content,
+            effective_max_options
+        )
+        logging.info(f"📊 4. After apply_inclusion_preference_bias: {len(biased_options)}")
+        logging.info(f"📊 5. FINAL OPTIONS BEING RETURNED: {biased_options[:2] if biased_options else 'empty'}")
+
+        llm_quick_response_cache[quick_cache_key] = {
+            "created_at": time.time(),
+            "response": copy.deepcopy(biased_options),
+        }
+
+        if inflight_future and not inflight_future.done():
+            inflight_future.set_result(copy.deepcopy(biased_options))
+        async with llm_inflight_requests_lock:
+            llm_inflight_requests.pop(quick_cache_key, None)
+
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"⏱️ /llm total: {total_elapsed_ms:.1f}ms "
+            f"(prep={prep_elapsed_ms:.1f}ms, generate={llm_generate_elapsed_ms:.1f}ms) "
+            f"[{log_context}]"
+        )
+        return JSONResponse(
+            content=biased_options,
+            headers={
+                "X-LLM-Cache": "quick-miss",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate={llm_generate_elapsed_ms:.1f};total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "FAST" if use_fast_generation_profile else "RICH",
+                "X-LLM-Request-Id": request_correlation_id,
+                "X-LLM-Button": button_label,
+            },
+        )
 
     except HTTPException:
+        if is_inflight_owner and inflight_future and not inflight_future.done():
+            inflight_future.set_exception(HTTPException(status_code=500, detail="Owner /llm request failed"))
+        if is_inflight_owner:
+            async with llm_inflight_requests_lock:
+                llm_inflight_requests.pop(quick_cache_key, None)
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logging.error(f"Error processing LLM response for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+        if is_inflight_owner and inflight_future and not inflight_future.done():
+            inflight_future.set_exception(e)
+        if is_inflight_owner:
+            async with llm_inflight_requests_lock:
+                llm_inflight_requests.pop(quick_cache_key, None)
+        logging.error(f"Error processing LLM response [{log_context}]: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error processing LLM response: {str(e)}")
 
 
@@ -3963,6 +5996,25 @@ def initialize_backend_services():
 
 
 # --- Firestore Helper Functions ---
+
+# Short-lived in-memory cache for frequently-read per-user documents (settings,
+# user_narrative, current_state).  Documents that users rarely change mid-session
+# (e.g. app_settings) are safe to cache for 60 s; high-churn paths (config/pages_list)
+# are deliberately excluded below.
+_FIRESTORE_DOC_CACHE: dict = {}
+_FIRESTORE_DOC_CACHE_TTL = 60  # seconds
+
+# Paths that must always be read fresh (mutable mid-session data).
+_FIRESTORE_DOC_CACHE_SKIP = {
+    "config/pages_list",
+    "config/tap_config",
+}
+
+def _invalidate_firestore_doc_cache(account_id: str, aac_user_id: str, doc_subpath: str) -> None:
+    """Call this whenever a document is written so the cache stays coherent."""
+    key = f"{account_id}/{aac_user_id}/{doc_subpath}"
+    _FIRESTORE_DOC_CACHE.pop(key, None)
+
 async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath: str, default_data: Any) -> Any:
     """
     Loads a document from Firestore for a specific AAC user under an account,
@@ -3975,6 +6027,14 @@ async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath
         return default_data.copy() if isinstance(default_data, (dict, list)) else default_data
 
     full_path = f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/{doc_subpath}"
+
+    # Serve from short-TTL cache for high-frequency, low-churn documents.
+    if doc_subpath not in _FIRESTORE_DOC_CACHE_SKIP:
+        _cache_key = f"{account_id}/{aac_user_id}/{doc_subpath}"
+        _cached = _FIRESTORE_DOC_CACHE.get(_cache_key)
+        if _cached and (time.time() - _cached[1]) < _FIRESTORE_DOC_CACHE_TTL:
+            return copy.deepcopy(_cached[0])
+
     doc_ref = firestore_db.document(full_path)
     try:
         doc = await asyncio.to_thread(doc_ref.get)
@@ -3996,12 +6056,22 @@ async def load_firestore_document(account_id: str, aac_user_id: str, doc_subpath
             if isinstance(default_data, dict) and isinstance(data_from_db, dict):
                 merged_data = default_data.copy()
                 merged_data.update(data_from_db) # Merge with defaults
-                return merged_data
+                result = merged_data
             elif isinstance(default_data, list) and isinstance(data_from_db, list):
-                return data_from_db # Return the list as is
+                result = data_from_db
             else:
                 logging.warning(f"Type mismatch for Firestore document at {full_path} for AAC user {aac_user_id}. Expected {type(default_data)}, got {type(data_from_db)}. Returning default.")
                 return default_data.copy() if isinstance(default_data, (dict, list)) else default_data
+
+            # Store result in cache (skip high-churn paths)
+            if doc_subpath not in _FIRESTORE_DOC_CACHE_SKIP:
+                _FIRESTORE_DOC_CACHE[_cache_key] = (copy.deepcopy(result), time.time())
+                # Evict oldest entries if cache grows too large
+                if len(_FIRESTORE_DOC_CACHE) > 1000:
+                    oldest = sorted(_FIRESTORE_DOC_CACHE.items(), key=lambda x: x[1][1])[:200]
+                    for k, _ in oldest:
+                        del _FIRESTORE_DOC_CACHE[k]
+            return result
         else:
             logging.warning(f"Firestore document at {full_path} not found for AAC user {aac_user_id}. Using and saving defaults.")
             await save_firestore_document(account_id, aac_user_id, doc_subpath, default_data)
@@ -4034,6 +6104,9 @@ async def save_firestore_document(account_id: str, aac_user_id: str, doc_subpath
     Saves data to a Firestore document for a specific AAC user under an account.
     doc_subpath example: "settings/app_settings", "info/birthdays"
     """
+    # Invalidate the read cache so the next load reflects the new write.
+    _invalidate_firestore_doc_cache(account_id, aac_user_id, doc_subpath)
+
     global firestore_db
     if not firestore_db:
         logging.error(f"Firestore DB client not initialized. Cannot save document for AAC user {aac_user_id}.")
@@ -4152,6 +6225,7 @@ async def lifespan(app: FastAPI):
     # Code to run on startup
     logging.info("Application startup: Initializing shared backend services...")
     initialize_backend_services() # This now only initializes global, shared items
+    _ensure_email_security_configuration()
     # REMOVE THESE:
     # load_settings_from_file() # Settings loaded per user now
     # load_birthdays_from_file() # Birthdays loaded per user now
@@ -5504,6 +7578,10 @@ async def get_current_events(request: Request, current_ids: Annotated[Dict[str, 
 class PlayAudioRequest(BaseModel):
     text: str
     routing_target: Optional[RoutingTarget] = "default"
+    voice_name_override: Optional[str] = None
+    language_code_override: Optional[str] = None
+    use_system_voice: bool = False
+    speech_rate_override: Optional[int] = Field(None, gt=49, lt=401)
 
 
 
@@ -5518,16 +7596,24 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
         # NEW: Load user-specific settings for voice and rate
         user_settings = await load_settings_from_file(account_id, aac_user_id) # Load settings
 
-        # Use settings, falling back to global defaults if setting is missing
-        voice_to_use = user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
-        rate_to_use = user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
+        # Use explicit overrides first. Otherwise, scan/system prompts can opt into the
+        # default system voice while normal announcements continue using the selected TTS voice.
+        if request.voice_name_override:
+            voice_to_use = request.voice_name_override
+        elif request.use_system_voice:
+            voice_to_use = DEFAULT_TTS_VOICE
+        else:
+            voice_to_use = user_settings.get("defaultPartnerVoice") or user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
+        rate_to_use = request.speech_rate_override or user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
+        language_code_to_use = _normalize_locale_tag(request.language_code_override)
 
         logging.info(f"Synthesizing speech for account {account_id} user {aac_user_id} with text: '{request.text[:50]}...' for routing target: {request.routing_target}")
 
         audio_bytes, sample_rate = await synthesize_speech_to_bytes(
             text=request.text,
             voice_name=voice_to_use, # Pass the value from settings
-            wpm_rate=rate_to_use      # Pass the value from settings
+            wpm_rate=rate_to_use,      # Pass the value from settings
+            language_code=language_code_to_use,
         )
         import base64
         encoded_audio = base64.b64encode(audio_bytes).decode('utf-8')
@@ -5566,7 +7652,18 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
 
 # Ensure this function (synthesize_speech_to_bytes) is in your server.py file,
 # unindented at the global scope, and has this full body.
-async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int) -> tuple[bytes, int]:
+def _infer_language_code_from_voice(voice_name: str, fallback_locale: str = "en-US") -> str:
+    if not voice_name:
+        return fallback_locale
+    match = re.match(r"^([a-z]{2})[-_]([A-Za-z]{2,4})", voice_name)
+    if not match:
+        return fallback_locale
+    lang = match.group(1).lower()
+    region = match.group(2).upper()
+    return f"{lang}-{region}"
+
+
+async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int, language_code: Optional[str] = None) -> tuple[bytes, int]:
     """
     Synthesizes speech using the provided parameters. No DB lookups.
     """
@@ -5595,7 +7692,8 @@ async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int) 
         else:
             synthesis_input = google_tts.SynthesisInput(text=segment_text)
 
-        voice_params = google_tts.VoiceSelectionParams(language_code="en-US", name=voice_name)
+        effective_language_code = _normalize_locale_tag(language_code) or _infer_language_code_from_voice(voice_name)
+        voice_params = google_tts.VoiceSelectionParams(language_code=effective_language_code, name=voice_name)
 
         sample_rate_hertz = 24000
         if "Standard" in voice_name:
@@ -6389,13 +8487,20 @@ class SettingsModel(BaseModel):
     wakeWordName: Optional[str] = Field(None, description="The name part of the wake word (e.g., 'Brady').", min_length=1, max_length=50)
     CountryCode: Optional[str] = Field(None, description="Country code for holiday lookups (e.g., US, CA).", min_length=2, max_length=2)
     speech_rate: Optional[int] = Field(None, description="Speech rate in WPM (e.g., 100-300).", gt=49, lt=401) # Added speech_rate
-    LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 1-50)", ge=1, le=50) 
+    LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 0-50)", ge=0, le=50) 
     FreestyleOptions: Optional[int] = Field(20, description="Number of word options returned for freestyle communication (e.g., 1-50)", ge=1, le=50)
     llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
+    scanMode: Optional[str] = Field(None, description="Scanning mode: 'auto' or 'step'")
     waitForSwitchToScan: Optional[bool] = Field(None, description="Enable/disable waiting for switch press before starting scanning on initial page load.") # Added waitForSwitchToScan
+    playWaitForSwitchChime: Optional[bool] = Field(None, description="Play a chime after page load when waiting for the switch to begin scanning.")
     SummaryOff: Optional[bool] = Field(None, description="Enable/disable summary generation.") # Added SummaryOff    
     selected_tts_voice_name: Optional[str] = None
+    userLanguage: Optional[str] = Field(None, description="Primary user language locale (e.g., es-ES).")
+    defaultPartnerLanguage: Optional[str] = Field(None, description="Default partner language locale (e.g., en-US).")
+    defaultPartnerVoice: Optional[str] = Field(None, description="Default partner language TTS voice name.")
+    locationOverrideLanguages: Optional[List[str]] = Field(None, description="Admin-defined location override language locales.")
+    locationOverrideVoices: Optional[Dict[str, str]] = Field(None, description="Voice mapping for each location override language locale.")
     gridColumns: Optional[int] = Field(None, description="Number of columns displayed in grid", ge=2, le=18)
     lightColorValue: Optional[int] = Field(None, description="Color value for light theme (e.g., 4294779156).", gt=0)
     darkColorValue: Optional[int] = Field(None, description="Color value for dark theme (e.g., 4294901764).", gt=0)
@@ -6406,12 +8511,23 @@ class SettingsModel(BaseModel):
     displaySplashTime: Optional[int] = Field(None, description="Duration in milliseconds to display splash screen.", ge=500, le=10000)
     enableMoodSelection: Optional[bool] = Field(None, description="Enable/disable mood selection at session start.")
     enablePictograms: Optional[bool] = Field(None, description="Enable/disable AAC pictogram display on buttons.")
+    disableTapPictograms: Optional[bool] = Field(None, description="When true, Tap Interface shows text-only buttons (no pictograms/images and no sight word formatting).")
     enableSightWords: Optional[bool] = Field(None, description="Enable/disable sight word logic for text-only display")
     sightWordGradeLevel: Optional[str] = Field(None, description="Dolch sight word grade level for text-only buttons (pre_k, kindergarten, first_grade, second_grade, third_grade, third_grade_with_nouns)")
     useTapInterface: Optional[bool] = Field(None, description="Use tap interface as main interface instead of gridpage")
     applicationVolume: Optional[int] = Field(None, description="Application volume level 0-10", ge=0, le=10)
     spellLetterOrder: Optional[str] = Field(None, description="Letter order for spell page: 'alphabetical', 'qwerty', or 'frequency'")
     vocabularyLevel: Optional[str] = Field(None, description="Vocabulary complexity level for LLM outputs: 'emergent', 'functional', 'developing', or 'proficient'")
+    specialPageTranslations: Optional[Dict[str, Dict[str, Dict[str, str]]]] = Field(None, description="Pretranslated static UI strings for special pages by page and locale.")
+    voice_style: Optional[str] = Field(None, description="Voice age style: 'adult', 'teen', or 'child'.")
+    tapWordsRows: Optional[int] = Field(None, description="Number of words rows in Tap Interface.")
+    tapPhrasesRows: Optional[int] = Field(None, description="Number of phrases rows in Tap Interface.")
+    useHybridPages: Optional[bool] = Field(None, description="Whether to use hybrid pages.")
+    tapDynamicRows: Optional[int] = Field(None, description="Number of dynamic rows in Tap Interface.")
+    useBravoBuild: Optional[bool] = Field(None, description="Whether to use BravoBuild algorithm.")
+    defaultButtonAction: Optional[str] = Field(None, description="Default action type for Tap Interface options.")
+    hasLoggedIn: Optional[bool] = Field(None, description="Whether the user profile has completed initial setup/login.")
+    regenerate_boards: Optional[bool] = Field(None, description="Trigger board regeneration on settings save.")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -6450,6 +8566,70 @@ class SettingsModel(BaseModel):
             else:
                 raise ValueError(f"Invalid vocabularyLevel value: {value}. Must be 'emergent', 'functional', 'developing', or 'proficient'")
         return value
+
+    @field_validator('voice_style', mode='before')
+    @classmethod
+    def validate_voice_style(cls, value: Any) -> Optional[str]:
+        if isinstance(value, str) and value:
+            value = value.strip().lower()
+            if value in ['adult', 'teen', 'child']:
+                return value
+            else:
+                raise ValueError(f"Invalid voice_style value: {value}. Must be 'adult', 'teen', or 'child'")
+        return value
+
+    @field_validator('scanMode', mode='before')
+    @classmethod
+    def validate_scan_mode(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ['auto', 'step']:
+                return normalized
+        raise ValueError("Invalid scanMode value. Must be 'auto' or 'step'")
+
+    @field_validator('userLanguage', 'defaultPartnerLanguage', mode='before')
+    @classmethod
+    def validate_language_locale(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = _normalize_locale_tag(value)
+        if not normalized:
+            raise ValueError("Invalid locale format. Use BCP-47 style like en-US or es-MX")
+        return normalized
+
+    @field_validator('locationOverrideLanguages', mode='before')
+    @classmethod
+    def validate_location_override_languages(cls, value: Any) -> Optional[List[str]]:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            raise ValueError("locationOverrideLanguages must be a list of locale strings")
+        normalized: List[str] = []
+        for item in value:
+            locale = _normalize_locale_tag(item)
+            if not locale:
+                raise ValueError("locationOverrideLanguages contains an invalid locale")
+            if locale not in normalized:
+                normalized.append(locale)
+        return normalized
+
+    @field_validator('locationOverrideVoices', mode='before')
+    @classmethod
+    def validate_location_override_voices(cls, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("locationOverrideVoices must be a locale-to-voice map")
+        normalized: Dict[str, str] = {}
+        for locale_key, voice_name in value.items():
+            locale = _normalize_locale_tag(locale_key)
+            voice = str(voice_name or "").strip()
+            if not locale or not voice:
+                raise ValueError("locationOverrideVoices contains invalid locale or empty voice")
+            normalized[locale] = voice
+        return normalized
     
 
 class VoiceDetail(BaseModel):
@@ -6469,12 +8649,13 @@ async def load_settings_from_file(account_id: str, aac_user_id: str) -> Dict:
     """
     Loads settings from Firestore for a specific user, returning defaults if error/missing.
     """
-    return await load_firestore_document(
+    loaded = await load_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath="settings/app_settings",
         default_data=DEFAULT_SETTINGS.copy()
     )
+    return _normalize_language_settings(loaded)
 
 
 @app.get("/api/interface-preference")
@@ -6538,6 +8719,7 @@ async def save_settings_to_file(account_id: str, aac_user_id: str, settings_data
     
     # Merge (update existing defaults with new sanitized data)
     current_settings.update(sanitized_data_to_save)
+    current_settings = _normalize_language_settings(current_settings)
     
     # DEBUG: Log FreestyleOptions in final merged settings
     logging.warning(f"DEBUG save_settings_to_file - FreestyleOptions in final merged settings: {current_settings.get('FreestyleOptions', 'NOT_FOUND')}")
@@ -6557,12 +8739,61 @@ async def get_settings(current_ids: Annotated[Dict[str, str], Depends(get_curren
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     logging.info(f"GET /api/settings request received for acccount {account_id} and user {aac_user_id}.")
-    settings_dict = await load_settings_from_file(account_id, aac_user_id) # Get as dict
-    # Create an instance of SettingsModel from the dict
-    settings_model_instance = SettingsModel(**settings_dict) 
-    # FastAPI will handle the serialization to JSON, no need for .model_dump() here
-    # because response_model=SettingsModel is already specified
-    return settings_model_instance # Return the Pydantic instance directly
+    settings_dict = await load_settings_from_file(account_id, aac_user_id)
+
+    # Backward-compatibility for profiles created before hasLoggedIn was introduced.
+    # New profiles have hasLoggedIn explicitly set to False in Firestore (via the template).
+    # Legacy profiles (created before the field existed) have NO hasLoggedIn key in Firestore
+    # at all — the False we see in settings_dict comes only from DEFAULT_SETTINGS merging.
+    # We detect legacy profiles by reading the raw Firestore document and checking whether
+    # the key is absent. If absent, the profile predates the wizard → treat as already set up.
+    if not settings_dict.get('hasLoggedIn', False) and firestore_db:
+        try:
+            settings_doc_path = (
+                f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/"
+                f"{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/settings/app_settings"
+            )
+            raw_doc = await asyncio.to_thread(firestore_db.document(settings_doc_path).get)
+            if raw_doc.exists:
+                raw_data = raw_doc.to_dict() or {}
+                # Key absent from raw data → legacy profile (field predates the wizard)
+                is_legacy_profile = raw_data and 'hasLoggedIn' not in raw_data
+                if is_legacy_profile:
+                    settings_dict['hasLoggedIn'] = True
+
+                    # Derive tapWordsRows / tapPhrasesRows from legacy FreestyleOptions /
+                    # LLMOptions if the profile pre-dates those row-count settings.
+                    legacy_patches: Dict[str, Any] = {'hasLoggedIn': True}
+                    if 'tapWordsRows' not in raw_data:
+                        grid_cols = int(raw_data.get('gridColumns') or settings_dict.get('gridColumns') or DEFAULT_COLUMNS or 10)
+                        freestyle = int(raw_data.get('FreestyleOptions') or settings_dict.get('FreestyleOptions') or 20)
+                        llm_opts = int(raw_data.get('LLMOptions') or settings_dict.get('LLMOptions') or DEFAULT_LLM_OPTIONS or 10)
+                        if grid_cols > 0:
+                            words_rows = max(1, round(freestyle / grid_cols))
+                            phrases_rows = max(0, round(llm_opts / grid_cols))
+                        else:
+                            words_rows = 4
+                            phrases_rows = 1
+                        settings_dict['tapWordsRows'] = words_rows
+                        settings_dict['tapPhrasesRows'] = phrases_rows
+                        legacy_patches['tapWordsRows'] = words_rows
+                        legacy_patches['tapPhrasesRows'] = phrases_rows
+
+                    # Persist so this extra Firestore read is never needed again
+                    try:
+                        await asyncio.to_thread(
+                            firestore_db.document(settings_doc_path).set,
+                            legacy_patches,
+                            merge=True
+                        )
+                    except Exception:
+                        pass
+                # else: hasLoggedIn is explicitly False in raw data → new profile, wizard should run
+        except Exception:
+            pass
+
+    settings_model_instance = SettingsModel(**settings_dict)
+    return settings_model_instance
 
 @app.post("/api/settings", response_model=SettingsModel)
 async def save_settings_endpoint(settings_update: SettingsModel, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
@@ -6572,6 +8803,21 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
 
     update_data = settings_update.model_dump(exclude_unset=True)
     logging.info(f"POST /api/settings request received for account {account_id} and user {aac_user_id} with update data: {update_data}")
+
+    current_settings_snapshot = await load_settings_from_file(account_id, aac_user_id)
+    merged_preview = _normalize_language_settings({**current_settings_snapshot, **update_data})
+    default_partner_voice = str(merged_preview.get("defaultPartnerVoice") or "").strip()
+    if not default_partner_voice:
+        raise HTTPException(status_code=400, detail="Default partner voice is required when partner language is configured")
+
+    override_languages = merged_preview.get("locationOverrideLanguages") or []
+    override_voices = merged_preview.get("locationOverrideVoices") or {}
+    missing_voice_locales = [locale for locale in override_languages if not str(override_voices.get(locale) or "").strip()]
+    if missing_voice_locales:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing voice selection for location override language(s): {', '.join(missing_voice_locales)}"
+        )
     
     # DEBUG: Log FreestyleOptions specifically
     if 'FreestyleOptions' in update_data:
@@ -6583,6 +8829,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
         # Return the requested settings as if they were saved (temporary session behavior)
         current_settings = await load_settings_from_file(account_id, aac_user_id)
         current_settings.update(update_data)  # Apply changes temporarily
+        current_settings = _normalize_language_settings(current_settings)
         return JSONResponse(content=SettingsModel(**current_settings).model_dump())
     
     # Regular mode: save settings normally
@@ -6591,14 +8838,104 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
     if success:
         # Await load_settings_from_file to get the actual dictionary
         saved_settings_dict = await load_settings_from_file(account_id, aac_user_id)
-        
+
+        # If the wizard (or any caller) requests board regeneration, rebuild the tap board
+        # config from scratch using the freshly saved settings so that board types and
+        # dynamic_rows counts reflect the current grid configuration.
+        if update_data.get('regenerate_boards'):
+            try:
+                use_hybrid_pages = bool(saved_settings_dict.get('useHybridPages', False))
+                tap_dynamic_rows = int(saved_settings_dict.get('tapDynamicRows', 0) or 0)
+
+                tap_words_rows = int(saved_settings_dict.get('tapWordsRows', 4) or 4)
+                grid_cols = int(saved_settings_dict.get('gridColumns', 6) or 6)
+                static_rows = max(0, tap_words_rows - tap_dynamic_rows)
+                default_button_action = str(saved_settings_dict.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+
+                logging.warning(
+                    f"DEBUG regenerate_boards: update_data tapDynamicRows={update_data.get('tapDynamicRows')!r} "
+                    f"useHybridPages={update_data.get('useHybridPages')!r} | "
+                    f"saved tapDynamicRows={saved_settings_dict.get('tapDynamicRows')!r} "
+                    f"useHybridPages={saved_settings_dict.get('useHybridPages')!r} | "
+                    f"computed use_hybrid_pages={use_hybrid_pages} tap_dynamic_rows={tap_dynamic_rows}"
+                )
+
+                # When tap_dynamic_rows == 0 the user wants fully static boards.
+                # use_hybrid_pages may be False in that case (wizard sets it = dynamic > 0),
+                # but boards still need board_type='static' so static pool pre-population works.
+                # Pass use_hybrid_pages=True to create_default_tap_config whenever we want
+                # 'static' board types (i.e. whenever tap_dynamic_rows == 0 OR use_hybrid_pages).
+                create_as_hybrid = use_hybrid_pages or (tap_dynamic_rows == 0)
+                new_tap_config = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=create_as_hybrid)
+                logging.warning(
+                    f"DEBUG regenerate_boards: create_as_hybrid={create_as_hybrid} "
+                    f"board_types_sample={[b.get('board_type') for b in new_tap_config.get('boards', []) if isinstance(b, dict)][:5]}"
+                )
+
+                for board in new_tap_config.get('boards', []):
+                    if not isinstance(board, dict):
+                        continue
+                    # Always record the explicit dynamic_rows count on static boards so the
+                    # tap interface and board builder both reflect the chosen value (0 = all static).
+                    if board.get('board_type') == 'static':
+                        board['dynamic_rows'] = tap_dynamic_rows
+                    # Pre-populate empty static rows with vocabulary from the pool
+                    if (
+                        board.get('board_type') == 'static'
+                        and static_rows > 0
+                        and not board.get('buttons')
+                        and CATEGORY_STATIC_POOLS
+                    ):
+                        raw_key = str(board.get('prompt_category') or board.get('label') or '').strip().lower()
+                        pool_key = ''.join(ch if ch.isalnum() else '_' for ch in raw_key)
+                        while '__' in pool_key:
+                            pool_key = pool_key.replace('__', '_')
+                        pool_key = pool_key.strip('_')
+                        pool = CATEGORY_STATIC_POOLS.get(pool_key, [])
+                        if pool:
+                            max_buttons = static_rows * grid_cols
+                            pool_words = pool[:max_buttons]
+                            def _make_pool_button(idx, word, board_id):
+                                variants = WORD_VARIANTS.get(str(word).strip().lower(), {})
+                                btn = {
+                                    'id': f"btn_{board_id}_{idx // grid_cols}_{idx % grid_cols}",
+                                    'label': word,
+                                    'row': idx // grid_cols,
+                                    'col': idx % grid_cols,
+                                    'background_color': '#FFFFFF',
+                                    'text_color': '#000000',
+                                    'after_selection': default_button_action,
+                                    'button_type': 'static',
+                                }
+                                if variants.get('past_tense'):
+                                    btn['past_tense'] = variants['past_tense']
+                                if variants.get('plural'):
+                                    btn['plural'] = variants['plural']
+                                return btn
+                            board['buttons'] = [
+                                _make_pool_button(idx, word, board['id'])
+                                for idx, word in enumerate(pool_words)
+                            ]
+
+                logging.warning(
+                    f"DEBUG regenerate_boards after loop: "
+                    f"dynamic_rows_sample={[(b.get('board_type'), b.get('dynamic_rows')) for b in new_tap_config.get('boards', []) if isinstance(b, dict)][:5]}"
+                )
+                await save_tap_nav_config(account_id, aac_user_id, new_tap_config)
+                logging.info(
+                    f"✅ Regenerated tap boards for {account_id}/{aac_user_id}: "
+                    f"use_hybrid_pages={use_hybrid_pages}, tap_dynamic_rows={tap_dynamic_rows}"
+                )
+            except Exception as e:
+                logging.error(f"Failed to regenerate tap boards after settings update: {e}", exc_info=True)
+
         # Invalidate cache - settings ARE in base context (cached)
         try:
             await cache_manager.invalidate_cache(account_id, aac_user_id)
             logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after settings update (base context change)")
         except Exception as e:
             logging.error(f"Failed to invalidate caches after settings update: {e}")
-        
+
         # JSONResponse expects a dictionary, not a Pydantic model here.
         # Using model_dump on the SettingsModel with saved_settings_dict will structure it correctly for JSON.
         return JSONResponse(content=SettingsModel(**saved_settings_dict).model_dump())
@@ -6637,6 +8974,400 @@ async def update_toolbar_pin(
     except Exception as e:
         logging.error(f"Error updating toolbar PIN: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to update toolbar PIN: {str(e)}")
+
+
+PROFILE_SETTINGS_EXPORT_TYPE = "bravo_profile_settings"
+PROFILE_SETTINGS_SCHEMA_VERSION = 1
+PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS = (
+    "guess_who_categories",
+    "guess_where_categories",
+    "guess_what_categories",
+    "hangman_categories",
+)
+
+
+async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    """Load a transferable bundle of profile settings/configuration data."""
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    birthdays = await load_birthdays_from_file(account_id, aac_user_id)
+    user_narrative = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy(),
+    )
+    current_state = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/current_state",
+        default_data=DEFAULT_USER_CURRENT.copy(),
+    )
+    scraping_config = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="config/scraping_config",
+        default_data={"news_sources": [], "sports_sources": [], "entertainment_sources": []},
+    )
+    favorites_config = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="config/favorites_config",
+        default_data=DEFAULT_FAVORITES_CONFIG.copy(),
+    )
+    audio_config = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="config/audio_config",
+        default_data={"personal_device": None, "system_device": None},
+    )
+    pages = await load_pages_from_file(account_id, aac_user_id)
+    tap_interface_config = await load_tap_nav_config(account_id, aac_user_id)
+
+    tap_interface_boards: List[Dict[str, Any]] = []
+    tap_interface_boards_menu: List[Dict[str, Any]] = []
+    tap_interface_board_settings: Dict[str, Any] = {}
+    if isinstance(tap_interface_config, dict):
+        tap_interface_config, _ = normalize_compose_tap_config(tap_interface_config)
+        tap_interface_config, _ = ensure_tap_boards_structure(tap_interface_config, use_hybrid_pages=settings.get("useHybridPages", False))
+        tap_interface_boards = [
+            dict(b) for b in tap_interface_config.get("boards", [])
+            if isinstance(b, dict)
+        ]
+        tap_interface_boards_menu = dedupe_boards_menu_tree(
+            tap_interface_config.get("boards_menu") if isinstance(tap_interface_config.get("boards_menu"), list) else []
+        )
+        tap_interface_board_settings = (
+            dict(tap_interface_config.get("board_settings"))
+            if isinstance(tap_interface_config.get("board_settings"), dict)
+            else {}
+        )
+
+    display_name = None
+    custom_categories: Dict[str, List[str]] = {}
+    try:
+        user_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        user_doc = await asyncio.to_thread(user_doc_ref.get)
+        if user_doc.exists:
+            user_data = user_doc.to_dict() or {}
+            display_name = user_data.get("display_name")
+            for field_name in PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS:
+                field_value = user_data.get(field_name)
+                if isinstance(field_value, list):
+                    custom_categories[field_name] = field_value
+    except Exception as e:
+        logging.warning(
+            f"Could not load profile metadata/custom categories for {account_id}/{aac_user_id}: {e}"
+        )
+
+    return {
+        "display_name": display_name,
+        "settings": settings,
+        "birthdays": birthdays,
+        "user_narrative": user_narrative,
+        "current_state": current_state,
+        "scraping_config": scraping_config,
+        "favorites_config": favorites_config,
+        "audio_config": audio_config,
+        "pages": pages,
+        # Preferred transfer format: split tap boards/menu/settings sections.
+        "tap_interface_boards": tap_interface_boards,
+        "tap_interface_boards_menu": tap_interface_boards_menu,
+        "tap_interface_board_settings": tap_interface_board_settings,
+        # Legacy full object retained for backward compatibility with older imports.
+        "tap_interface_config": tap_interface_config,
+        "custom_categories": custom_categories,
+    }
+
+
+async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bundle: Dict[str, Any]) -> List[str]:
+    """Apply a transferred profile settings bundle to target account/user."""
+    imported_sections: List[str] = []
+
+    if "settings" in bundle:
+        settings_data = bundle["settings"]
+        if not isinstance(settings_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid settings payload format.")
+        if not await save_settings_to_file(account_id, aac_user_id, settings_data):
+            raise HTTPException(status_code=500, detail="Failed to import settings.")
+        imported_sections.append("settings")
+
+    if "birthdays" in bundle:
+        birthdays_data = bundle["birthdays"]
+        if not isinstance(birthdays_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid birthdays payload format.")
+        if not await save_birthdays_to_file(account_id, aac_user_id, birthdays_data):
+            raise HTTPException(status_code=500, detail="Failed to import birthdays.")
+        imported_sections.append("birthdays")
+
+    if "user_narrative" in bundle:
+        user_narrative_data = bundle["user_narrative"]
+        if not isinstance(user_narrative_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid user_narrative payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/user_narrative",
+            data_to_save=user_narrative_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import user narrative.")
+        imported_sections.append("user_narrative")
+
+    if "current_state" in bundle:
+        current_state_data = bundle["current_state"]
+        if not isinstance(current_state_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid current_state payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/current_state",
+            data_to_save=current_state_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import current state.")
+        imported_sections.append("current_state")
+
+    if "scraping_config" in bundle:
+        scraping_config_data = bundle["scraping_config"]
+        if not isinstance(scraping_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid scraping_config payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/scraping_config",
+            data_to_save=scraping_config_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import scraping config.")
+        imported_sections.append("scraping_config")
+
+    if "favorites_config" in bundle:
+        favorites_config_data = bundle["favorites_config"]
+        if not isinstance(favorites_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid favorites_config payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/favorites_config",
+            data_to_save=favorites_config_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import favorites config.")
+        imported_sections.append("favorites_config")
+
+    if "audio_config" in bundle:
+        audio_config_data = bundle["audio_config"]
+        if not isinstance(audio_config_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid audio_config payload format.")
+        if not await save_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="config/audio_config",
+            data_to_save=audio_config_data,
+        ):
+            raise HTTPException(status_code=500, detail="Failed to import audio config.")
+        imported_sections.append("audio_config")
+
+    if "pages" in bundle:
+        pages_data = bundle["pages"]
+        if not isinstance(pages_data, list):
+            raise HTTPException(status_code=400, detail="Invalid pages payload format.")
+        if not await save_pages_to_file(account_id, aac_user_id, pages_data):
+            raise HTTPException(status_code=500, detail="Failed to import pages config.")
+        imported_sections.append("pages")
+
+    tap_sections_present = any(
+        key in bundle
+        for key in (
+            "tap_interface_boards",
+            "tap_interface_boards_menu",
+            "tap_interface_board_settings",
+            "tap_interface_config",
+        )
+    )
+    if tap_sections_present:
+        settings = bundle.get("settings")
+        if not isinstance(settings, dict):
+            settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+
+        existing_tap_config = await load_tap_nav_config(account_id, aac_user_id)
+        if not isinstance(existing_tap_config, dict):
+            existing_tap_config = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+
+        existing_tap_config, _ = normalize_compose_tap_config(existing_tap_config)
+        existing_tap_config, _ = ensure_tap_boards_structure(existing_tap_config, use_hybrid_pages=use_hybrid_pages)
+
+        # Backward compatibility: accept either split sections or legacy full object.
+        legacy_tap_payload = bundle.get("tap_interface_config")
+        if legacy_tap_payload is not None and not isinstance(legacy_tap_payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid tap_interface_config payload format.")
+
+        incoming_boards = bundle.get("tap_interface_boards")
+        incoming_menu = bundle.get("tap_interface_boards_menu")
+        incoming_settings = bundle.get("tap_interface_board_settings")
+
+        if incoming_boards is None and isinstance(legacy_tap_payload, dict):
+            incoming_boards = legacy_tap_payload.get("boards")
+        if incoming_menu is None and isinstance(legacy_tap_payload, dict):
+            incoming_menu = legacy_tap_payload.get("boards_menu")
+        if incoming_settings is None and isinstance(legacy_tap_payload, dict):
+            incoming_settings = legacy_tap_payload.get("board_settings")
+
+        merged_tap_config = dict(existing_tap_config)
+
+        if incoming_boards is not None:
+            if not isinstance(incoming_boards, list):
+                raise HTTPException(status_code=400, detail="Invalid tap_interface_boards payload format.")
+            deduped_boards, _ = dedupe_tap_boards(incoming_boards)
+            merged_tap_config["boards"] = deduped_boards
+
+        board_ids_for_menu = {
+            str(board.get("id")).strip()
+            for board in merged_tap_config.get("boards", [])
+            if isinstance(board, dict) and str(board.get("id") or "").strip()
+        }
+
+        if incoming_menu is not None:
+            if not isinstance(incoming_menu, list):
+                raise HTTPException(status_code=400, detail="Invalid tap_interface_boards_menu payload format.")
+            normalized_menu = normalize_boards_menu_items(incoming_menu, board_ids_for_menu)
+            merged_tap_config["boards_menu"] = normalized_menu
+
+        if incoming_settings is not None:
+            if not isinstance(incoming_settings, dict):
+                raise HTTPException(status_code=400, detail="Invalid tap_interface_board_settings payload format.")
+            merged_tap_config["board_settings"] = incoming_settings
+
+        merged_tap_config["boards_schema_version"] = 1
+        merged_tap_config["updated_at"] = dt.now().isoformat()
+        merged_tap_config, _ = ensure_tap_boards_structure(merged_tap_config, existing_config=existing_tap_config, use_hybrid_pages=use_hybrid_pages)
+        merged_tap_config["buttons"] = compose_legacy_buttons_from_boards_menu(merged_tap_config)
+
+        if not await save_tap_nav_config(account_id, aac_user_id, merged_tap_config):
+            raise HTTPException(status_code=500, detail="Failed to import tap interface config.")
+        imported_sections.append("tap_interface_config")
+
+    if "custom_categories" in bundle:
+        custom_categories = bundle["custom_categories"]
+        if not isinstance(custom_categories, dict):
+            raise HTTPException(status_code=400, detail="Invalid custom_categories payload format.")
+
+        user_updates = {}
+        for field_name in PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS:
+            if field_name not in custom_categories:
+                continue
+
+            field_value = custom_categories[field_name]
+            if field_value is None:
+                user_updates[field_name] = firestore.DELETE_FIELD
+                continue
+
+            if not isinstance(field_value, list):
+                raise HTTPException(status_code=400, detail=f"Invalid custom category field '{field_name}'.")
+
+            normalized_values = []
+            seen = set()
+            for item in field_value:
+                item_text = str(item).strip()
+                if not item_text:
+                    continue
+                item_key = item_text.lower()
+                if item_key in seen:
+                    continue
+                seen.add(item_key)
+                normalized_values.append(item_text)
+            user_updates[field_name] = normalized_values
+
+        if user_updates:
+            user_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+                account_id
+            ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+            await asyncio.to_thread(user_doc_ref.set, user_updates, merge=True)
+            imported_sections.append("custom_categories")
+
+    return imported_sections
+
+
+@app.get("/api/profile-settings/export")
+async def export_profile_settings(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Export profile settings/configuration for transfer to another account/profile."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        bundle = await _load_profile_settings_bundle(account_id, aac_user_id)
+        export_payload = {
+            "export_type": PROFILE_SETTINGS_EXPORT_TYPE,
+            "schema_version": PROFILE_SETTINGS_SCHEMA_VERSION,
+            "exported_at": dt.now(timezone.utc).isoformat(),
+            "profile": {
+                "aac_user_id": aac_user_id,
+                "display_name": bundle.get("display_name"),
+            },
+            "payload": bundle,
+        }
+        return JSONResponse(content=export_payload)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(
+            f"Error exporting profile settings for account {account_id}, user {aac_user_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to export profile settings.")
+
+
+@app.post("/api/profile-settings/import")
+async def import_profile_settings(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Import profile settings/configuration from a previously exported file."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        incoming = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=400, detail="Invalid import payload format.")
+
+    # Accept either a wrapped export file or a direct payload object.
+    if "payload" in incoming:
+        export_type = incoming.get("export_type")
+        schema_version = incoming.get("schema_version")
+
+        if export_type is not None and export_type != PROFILE_SETTINGS_EXPORT_TYPE:
+            raise HTTPException(status_code=400, detail="Unsupported export_type in import file.")
+        if schema_version is not None and schema_version != PROFILE_SETTINGS_SCHEMA_VERSION:
+            raise HTTPException(status_code=400, detail="Unsupported schema_version in import file.")
+
+        bundle = incoming.get("payload")
+    else:
+        bundle = incoming
+
+    if not isinstance(bundle, dict):
+        raise HTTPException(status_code=400, detail="Import payload missing valid 'payload' object.")
+
+    imported_sections = await _apply_profile_settings_bundle(account_id, aac_user_id, bundle)
+
+    # Imported settings affect user context and option generation; clear cache.
+    try:
+        await cache_manager.invalidate_cache(account_id, aac_user_id)
+        logging.info(f"✅ Invalidated cache for {account_id}/{aac_user_id} after profile settings import")
+    except Exception as e:
+        logging.error(f"Failed to invalidate cache after profile settings import: {e}")
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "Profile settings imported successfully.",
+            "imported_sections": imported_sections,
+        }
+    )
 
 # NEW: Model for account update requests
 class UpdateAccountRequest(BaseModel):
@@ -6766,9 +9497,17 @@ async def get_accessible_accounts(current_account: Annotated[Dict[str, str], Dep
                         "account_name": account_data.get("account_name", ""),
                         "email": account_data.get("email", "")
                     })
-            # Therapists can access accounts where they're listed as therapist_email
+            # Therapists can access their own account and accounts where they're listed as therapist_email
             elif is_therapist:
-                if account_data.get("therapist_email") == user_email:
+                # Include therapist's own account
+                if account_doc.id == account_id:
+                    accessible_accounts.append({
+                        "account_id": account_doc.id,
+                        "account_name": account_data.get("account_name", ""),
+                        "email": account_data.get("email", "")
+                    })
+                # Also include accounts where they're listed as therapist_email (client accounts)
+                elif account_data.get("therapist_email") == user_email:
                     accessible_accounts.append({
                         "account_id": account_doc.id,
                         "account_name": account_data.get("account_name", ""),
@@ -6825,8 +9564,10 @@ async def select_account_for_access(
         has_access = False
         if is_admin and target_account_data.get("allow_admin_access", True):
             has_access = True
-        elif is_therapist and target_account_data.get("therapist_email") == user_email:
-            has_access = True
+        elif is_therapist:
+            # Therapists can access their own account or client accounts where they're listed as therapist_email
+            if target_account_id == current_account_id or target_account_data.get("therapist_email") == user_email:
+                has_access = True
         
         if not has_access:
             raise HTTPException(status_code=403, detail="Access denied to this account")
@@ -6886,8 +9627,10 @@ async def get_admin_account_users(
         has_access = False
         if is_admin and target_account_data.get("allow_admin_access", True):
             has_access = True
-        elif is_therapist and target_account_data.get("therapist_email") == user_email:
-            has_access = True
+        elif is_therapist:
+            # Therapists can access their own account or client accounts where they're listed as therapist_email
+            if admin_firebase_uid == account_id or target_account_data.get("therapist_email") == user_email:
+                has_access = True
         
         if not has_access:
             raise HTTPException(status_code=403, detail="Access denied to this account")
@@ -6951,11 +9694,12 @@ async def get_available_llm_models():
 
 
 @app.get("/api/tts-voices", response_model=List[VoiceDetail])
-async def get_tts_voices_endpoint():
+async def get_tts_voices_endpoint(locale: Optional[str] = None):
     if not tts_client:
         raise HTTPException(status_code=503, detail="TTS client not available")
     try:
-        response = tts_client.list_voices(language_code="en-US") # Filter for en-US directly
+        normalized_locale = _normalize_locale_tag(locale) if locale else None
+        response = tts_client.list_voices(language_code=normalized_locale) if normalized_locale else tts_client.list_voices()
         voices = []
         for voice in response.voices:
             voices.append(VoiceDetail(
@@ -6969,6 +9713,896 @@ async def get_tts_voices_endpoint():
     except Exception as e:
         logging.error(f"Error fetching TTS voices: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching TTS voices: {str(e)}")
+
+
+class TranslateLinesRequest(BaseModel):
+    lines: List[str]
+    source_locale: Optional[str] = None
+    target_locale: str
+
+
+class TranslatePagesRequest(BaseModel):
+    source_locale: Optional[str] = None
+    target_locale: str
+    scope: Literal["current", "all", "tap_boards"] = "current"
+    page_name: Optional[str] = None
+    include_display_name: bool = True
+    include_button_text: bool = True
+    include_speech_phrase: bool = True
+    include_llm_query: bool = False
+
+
+def _extract_translated_lines_from_model_text(response_text: str, expected_count: int) -> List[str]:
+    """Parse translated lines from model output text with tolerant JSON extraction."""
+    raw_text = str(response_text or "").strip()
+    if not raw_text:
+        raise ValueError("Empty translation response text")
+
+
+    candidate_payloads: List[str] = [raw_text]
+
+    # Markdown fenced JSON blocks
+    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw_text, re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        candidate_payloads.append(fence_match.group(1).strip())
+
+    # First JSON array-like region
+    array_match = re.search(r"\[.*\]", raw_text, re.DOTALL)
+    if array_match:
+        candidate_payloads.append(array_match.group(0).strip())
+
+    for payload_text in candidate_payloads:
+        try:
+            parsed = json.loads(payload_text)
+        except Exception:
+            try:
+                import ast
+
+                parsed = ast.literal_eval(payload_text)
+            except Exception:
+                continue
+
+        # Accept either plain list or wrapped object.
+        if isinstance(parsed, dict):
+            parsed = parsed.get("translated_lines")
+
+        if isinstance(parsed, str) and expected_count == 1:
+            return [_sanitize_translated_text(parsed)]
+
+        if isinstance(parsed, list):
+            translated_lines = [_sanitize_translated_text(item) for item in parsed]
+            if len(translated_lines) == expected_count:
+                return translated_lines
+
+    # Last-resort fallback: accept one translation per line when the model
+    # returns plain text instead of structured JSON.
+    fallback_lines = [
+        _sanitize_translated_text(re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line))
+        for line in raw_text.splitlines()
+        if line.strip()
+    ]
+    if len(fallback_lines) == expected_count:
+        return fallback_lines
+
+    if len(fallback_lines) > expected_count:
+        return fallback_lines[-expected_count:]
+
+    if expected_count == 1:
+        return [_sanitize_translated_text(raw_text)]
+
+    raise ValueError("Unable to parse translated lines with expected shape")
+
+
+async def _translate_lines_with_models(
+    lines: List[str],
+    source_locale: Optional[str],
+    target_locale: str
+) -> List[str]:
+    if not lines:
+        return []
+
+    locale_label_map = {
+        "en-US": "English (US)",
+        "es-US": "Spanish (US)",
+        "fr-FR": "French (France)",
+        "de-DE": "German (Germany)",
+        "it-IT": "Italian (Italy)",
+        "pt-BR": "Portuguese (Brazil)",
+        "ar-XA": "Arabic"
+    }
+
+    source_instruction = locale_label_map.get(source_locale, source_locale) if source_locale else "auto-detect"
+    target_instruction = locale_label_map.get(target_locale, target_locale)
+    trimmed_lines = [str(line or "").strip() for line in lines]
+
+    if all(not line for line in trimmed_lines):
+        return trimmed_lines
+
+    prompt = (
+        "You are a translation engine for AAC communication. "
+        f"Translate each line from {source_instruction} to {target_instruction}. "
+        "If a line is already in the target language, keep it as-is. "
+        "Do not transliterate unless required by the target language. "
+        "Return ONLY valid JSON as an array of strings with exactly the same number of items and same order. "
+        "Do not add explanations. Preserve punctuation and intent.\n\n"
+        f"LINES_JSON:\n{json.dumps(trimmed_lines, ensure_ascii=False)}"
+    )
+
+    model_candidates: List[genai.GenerativeModel] = []
+    if primary_llm_model_instance:
+        model_candidates.append(primary_llm_model_instance)
+    if fallback_llm_model_instance and fallback_llm_model_instance is not primary_llm_model_instance:
+        model_candidates.append(fallback_llm_model_instance)
+
+    if not model_candidates:
+        raise HTTPException(status_code=503, detail="Translation model unavailable")
+
+    last_error: Optional[Exception] = None
+    for model in model_candidates:
+        try:
+            strict_cfg = genai.GenerationConfig(
+                temperature=0,
+                response_mime_type="application/json"
+            )
+            response = await asyncio.to_thread(
+                model.generate_content,
+                prompt,
+                generation_config=strict_cfg
+            )
+            response_text = (getattr(response, "text", "") or "").strip()
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE LENGTH (%s->%s): %s chars",
+                source_locale or "auto",
+                target_locale,
+                len(response_text),
+            )
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE PREVIEW (%s->%s): %s",
+                source_locale or "auto",
+                target_locale,
+                response_text[:500] if response_text else "EMPTY",
+            )
+            return _extract_translated_lines_from_model_text(response_text, len(trimmed_lines))
+        except Exception as strict_error:
+            last_error = strict_error
+
+        try:
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            response_text = (getattr(response, "text", "") or "").strip()
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE LENGTH (retry %s->%s): %s chars",
+                source_locale or "auto",
+                target_locale,
+                len(response_text),
+            )
+            logging.info(
+                "TRANSLATION BATCH RAW RESPONSE PREVIEW (retry %s->%s): %s",
+                source_locale or "auto",
+                target_locale,
+                response_text[:500] if response_text else "EMPTY",
+            )
+            return _extract_translated_lines_from_model_text(response_text, len(trimmed_lines))
+        except Exception as retry_error:
+            last_error = retry_error
+
+    logging.warning(
+        "Batch translation failed for %s line(s); falling back to per-line translation. Last error: %s",
+        len(trimmed_lines),
+        last_error,
+    )
+
+    fallback_translated_lines: List[str] = []
+    for source_line in trimmed_lines:
+        translated_line = source_line
+        if source_line:
+            single_line_prompt = (
+                "You are a translation engine for AAC communication. "
+                f"Translate this line from {source_instruction} to {target_instruction}. "
+                "If the line is already in the target language, keep it as-is. "
+                "Return ONLY the translated line with no explanation, numbering, or markdown.\n\n"
+                f"LINE:\n{json.dumps(source_line, ensure_ascii=False)}"
+            )
+
+            for model in model_candidates:
+                try:
+                    strict_cfg = genai.GenerationConfig(
+                        temperature=0,
+                        response_mime_type="application/json"
+                    )
+                    response = await asyncio.to_thread(
+                        model.generate_content,
+                        single_line_prompt,
+                        generation_config=strict_cfg
+                    )
+                    response_text = (getattr(response, "text", "") or "").strip()
+                    parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
+                    translated_line = str(parsed_line[0] or "").strip() or source_line
+                    break
+                except Exception:
+                    try:
+                        response = await asyncio.to_thread(model.generate_content, single_line_prompt)
+                        response_text = (getattr(response, "text", "") or "").strip()
+                        parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
+                        translated_line = str(parsed_line[0] or "").strip() or source_line
+                        break
+                    except Exception:
+                        continue
+
+        fallback_translated_lines.append(translated_line)
+
+    if any(line for line in fallback_translated_lines):
+        return fallback_translated_lines
+
+    if last_error:
+        raise last_error
+    raise ValueError("Unknown translation failure")
+
+
+FREESTYLE_UI_TEXT_DEFAULTS: Dict[str, str] = {
+    "baseTitle": "Free Style Communication",
+    "baseTitleShort": "Free Style",
+    "exitFreestyle": "Exit Freestyle",
+    "buildSpace": "Build Space",
+    "buildMessagePlaceholder": "Build your message here...",
+    "speakDisplay": "Speak Display",
+    "backspace": "Backspace",
+    "clearDisplay": "Clear Display",
+    "cleanUp": "Clean Up",
+    "newRow": "New Row",
+    "goBack": "Go Back",
+    "somethingElse": "Something Else",
+    "somethingElseAz": "Something Else A-Z",
+    "suggestedWords": "Suggested Words",
+    "tools": "Tools",
+    "wordCategories": "Word Categories",
+    "spelling": "Spelling",
+    "numbers": "Numbers",
+    "numbersAdd": "Add",
+    "numbersReset": "Reset to",
+    "actionSection": "Action",
+    "chooseWordSection": "Choose Word",
+    "loading": "Loading...",
+    # Audio prompts spoken to the user
+    "promptDisplayEmpty": "Display is empty.",
+    "promptUnableToSpeak": "Unable to speak display right now.",
+    "promptStartedNewRow": "Started new row.",
+    "promptUnableToStartRow": "Unable to start a new row right now.",
+    "promptNoOtherOptions": "I could not find other word options.",
+    "promptNoMoreNumbers": "No more numbers in this range.",
+}
+
+GAMES_UI_TEXT_DEFAULTS: Dict[str, str] = {
+    "gamesHubTitle": "Games",
+    "loadingGames": "Loading Games...",
+    "menuHome": "Home",
+    "menu20Questions": "20 Questions",
+    "menuGuessWho": "Guess Who",
+    "menuGuessWhere": "Guess Where",
+    "menuGuessWhat": "Guess What",
+    "menuHangman": "Hangman",
+    "menuStoryBuilder": "Story Builder",
+    "storyEntryGoBack": "Go Back",
+    "storyEntryCreateNewStory": "Create a New Story",
+    "storyEntryReadExistingStory": "Read an Existing Story",
+    "storyNoSavedStoriesFound": "No saved stories found",
+    "untitledStory": "Untitled Story",
+    "statusChooseHowToPlay": "Choose how you want to play:",
+    "roleAsk": "I ask the questions",
+    "roleAnswer": "They ask the questions",
+    "categoryPerson": "Person",
+    "categoryPlace": "Place",
+    "categoryThing": "Thing",
+    "statusSayReadySelected": "Say \"ready\" when you have selected something for me to guess",
+    "statusWhatTypeThing": "What type of thing are you thinking of?",
+    "statusSayReadySelectedYour": "Say \"ready\" when you have selected your",
+    "statusThinkingQuestions": "Let me think of some questions...",
+    "statusQuestionsRemaining": "Questions remaining:",
+    "statusGuessesRemaining": "Guesses remaining:",
+    "statusChooseYour": "Choose your",
+    "statusReadyWithWakeWord": "I'm ready. To ask a question or make a guess, start with",
+    "statusListeningNext": "Listening for next question or guess...",
+    "statusWhatNext": "What would you like to do next?",
+    "somethingElse": "Something Else",
+    "exitGame": "Exit Game",
+    "isItPrefix": "Is it",
+    "questionsAsked": "Questions Asked:",
+    "listening": "Listening...",
+    "generatingOptions": "Generating options...",
+    "oops": "Oops!",
+    "genericError": "Something went wrong. Please try again.",
+    "askAnotherQuestion": "Ask Another Question",
+    "makeGuess": "Make a Guess",
+    "storyQa": "Story Q&A",
+    "savedStories": "Saved Stories",
+    "readAgain": "Read Again",
+    "exportAudio": "Export Audio",
+    "createIllustration": "Create Illustration",
+    "regenerateIllustration": "Regenerate Illustration",
+    "backToStories": "Back to Stories",
+    "storyDetail": "Story Detail",
+    "storyTitlePlaceholder": "Story title",
+    "storyTextPlaceholder": "Story text",
+    "noIllustrationYet": "No illustration yet.",
+    "readStory": "Read Story",
+    "saveEdits": "Save Edits",
+    "deleteStory": "Delete Story",
+    "backToBuilder": "Back to Builder",
+    "deleteStories": "Delete Stories",
+    "close": "Close",
+    "selectStoriesToDelete": "Select stories to delete.",
+    "cancel": "Cancel",
+    "deleteSelected": "Delete Selected",
+    "storyWakePrompt": "Say the wake word to ask the next question or complete the story.",
+    "noSavedStoriesYet": "No saved stories yet.",
+    "qPrefix": "Q:",
+    "aPrefix": "A:",
+    "failedLoadOptions": "Failed to load options. Please try again.",
+    "failedLoadQuestions": "Failed to load questions. Please try again.",
+    "failedLoadGuesses": "Failed to load guesses. Please try again.",
+    "failedLoadDifferentOptions": "Failed to load different options. Please try again.",
+    "guessGameTitle": "Guess Game",
+    "guessWhoTitle": "Guess Who",
+    "guessWhereTitle": "Guess Where",
+    "guessWhatTitle": "Guess What",
+    "selectCategoryTitle": "Select a Category",
+    "selectCategorySubtitle": "Choose a category for this game",
+    "chooseModeTitle": "Choose a Game Mode",
+    "chooseModeSubtitle": "How do you want to play?",
+    "selectYourItemTitle": "Select Your Person",
+    "selectYourItemSubtitle": "Choose who you want Player 2 to guess",
+    "selectClueTitle": "Select a Clue to Give",
+    "clueTargetPrefix": "Player 2 needs to guess:",
+    "playerGuessTitle": "Player 2's Guess",
+    "isThisCorrect": "Is this correct?",
+    "gameOverTitle": "Game Over!",
+    "cluesGiven": "Clues given:",
+    "guessesLeft": "Guesses left:",
+    "goBack": "Go Back",
+    "iPick": "I pick",
+    "youPick": "You pick",
+    "somethingElse": "Something Else",
+    "makeYourGuess": "Make your guess:",
+    "playerGuessedPrefix": "Player 2 guessed:",
+    "enterAdminPin": "Enter Admin PIN",
+    "pinPlaceholder": "Enter PIN",
+    "invalidPin": "Invalid PIN. Please try again.",
+    "pinLengthError": "PIN must be 3-10 characters.",
+    "cancel": "Cancel",
+    "submit": "Submit",
+    "manageCustomCategories": "Manage Custom Categories",
+    "resetToDefaults": "Reset to Defaults",
+    "saveCategories": "Save Categories",
+    "startTypingPreview": "Start typing to see preview...",
+    "noCategoriesEntered": "No categories entered yet...",
+    "playAgain": "Play Again",
+    "failedLoadCategories": "Failed to load categories. Please try again.",
+    "failedGeneratePeople": "Failed to generate people. Please try again.",
+    "failedGenerateClues": "Failed to generate clues. Please try again.",
+    "failedGenerateGuesses": "Failed to generate guesses. Please try again.",
+    "enterAtLeastOneCategory": "Please enter at least one category.",
+    "saveCategoriesSuccessPrefix": "Successfully saved",
+    "saveCategoriesSuccessSuffix": "custom categories!",
+    "failedSaveCategories": "Failed to save categories. Please try again.",
+    "resetToDefaultsConfirm": "Are you sure you want to reset to default categories? This will remove all custom categories.",
+    "resetToDefaultsSuccess": "Successfully reset to default categories!",
+    "failedResetCategories": "Failed to reset categories. Please try again.",
+    "hangmanTitle": "Hangman",
+    "hangmanLoading": "Loading Hangman...",
+    "hangmanSelectCategory": "Select a Category",
+    "hangmanChooseCategory": "Choose a category for Hangman",
+    "hangmanChooseMode": "Choose a Game Mode",
+    "hangmanWhoIsGuessing": "Who is guessing?",
+    "hangmanPickWord": "Pick a Word",
+    "hangmanPickWordSubtitle": "Choose a word for your partner to guess",
+    "hangmanGuessTheWord": "Guess the word!",
+    "hangmanWrongGuesses": "Wrong guesses:",
+    "hangmanDone": "Done",
+    "hangmanWaitingPartner": "Waiting for your partner",
+    "hangmanSetupSubtitle": "Get ready to play Hangman.",
+    "hangmanGameOver": "Game Over!",
+    "hangmanPlayAgain": "Play Again",
+    "hangmanModeIGuess": "I guess",
+    "hangmanModeYouGuess": "You guess",
+    "hangmanLetterCountReady": "Say \"ready\" when you have your word.",
+    "hangmanListeningReady": "Listening for: \"ready\"",
+    "hangmanListeningLetterCount": "Listening for: letter count",
+    "hangmanGreatHowMany": "Great! How many letters are in your word? Say the number.",
+    "hangmanLetterCountTooSmall": "Please say a number between 1 and 20.",
+    "hangmanGotItKeepGuessing": "Got it. Keep guessing!",
+    "hangmanOutOfGuessesYouWin": "Oh no! I'm out of guesses. You win!",
+    "hangmanWrongGuessesLeft": "wrong guesses left.",
+    "hangmanIsLetterInWord": "Is the letter",
+    "hangmanSayYesNo": "in your word? Say yes or no.",
+    "hangmanGreatTapBlanks": "Great! Tap the blanks where",
+    "hangmanTapDone": "goes, then tap Done.",
+    "hangmanNeedAtLeastOneBlank": "You need to tap at least one blank. Try again.",
+    "hangmanIWinWordIs": "I win! The word is",
+    "hangmanNopeLetterNotInWord": "is not in the word.",
+    "hangmanTooBad": "Too bad!",
+    "hangmanNoWrongGuess": "wrong guess",
+    "hangmanNoWrongGuesses": "wrong guesses",
+    "hangmanBetterLuck": "Better luck next time!",
+    "hangmanYouGotIt": "You got it! The word was",
+    "hangmanWrongAllowed": "wrong guesses allowed.",
+    "hangmanIPickedWord": "I picked my word! It has",
+    "hangmanLetters": "letters. Say",
+    "hangmanThenGuess": "then guess a letter!",
+    "hangmanAlreadyGuessed": "You already guessed",
+    "hangmanTryAnotherLetter": "Try another letter.",
+    "hangmanNoSavedStoriesYet": "No saved stories yet."
+}
+
+
+@app.post("/api/translate-lines")
+async def translate_lines_endpoint(request_data: TranslateLinesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    if not request_data.lines:
+        return JSONResponse(content={"translated_lines": []})
+
+    target_locale = _normalize_locale_tag(request_data.target_locale)
+    if not target_locale:
+        raise HTTPException(status_code=400, detail="Invalid target_locale")
+
+    source_locale = _normalize_locale_tag(request_data.source_locale) if request_data.source_locale else None
+    try:
+        translated_lines = await _translate_lines_with_models(
+            lines=request_data.lines,
+            source_locale=source_locale,
+            target_locale=target_locale
+        )
+        return JSONResponse(content={"translated_lines": translated_lines})
+    except Exception as e:
+        logging.error(f"Error translating lines: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to translate lines")
+
+
+@app.post("/api/admin/translate-pages")
+async def translate_pages_endpoint(
+    request_data: TranslatePagesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    target_locale = _normalize_locale_tag(request_data.target_locale)
+    if not target_locale:
+        raise HTTPException(status_code=400, detail="Invalid target_locale")
+
+    source_locale = _normalize_locale_tag(request_data.source_locale) if request_data.source_locale else None
+
+    if source_locale and source_locale.lower() == target_locale.lower():
+        raise HTTPException(status_code=400, detail="source_locale and target_locale must be different")
+
+    if not any([
+        request_data.include_display_name,
+        request_data.include_button_text,
+        request_data.include_speech_phrase,
+        request_data.include_llm_query
+    ]):
+        raise HTTPException(status_code=400, detail="Select at least one field to translate")
+
+    if request_data.scope == "tap_boards":
+        if not request_data.include_llm_query:
+            raise HTTPException(status_code=400, detail="Tap boards translation requires AI query prompts")
+
+        tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not isinstance(tap_config_data, dict):
+            raise HTTPException(status_code=404, detail="Tap interface configuration not found")
+
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
+        tap_config_data, _ = ensure_tap_boards_structure(tap_config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
+        prompt_jobs: List[Dict[str, Any]] = []
+        for board in boards:
+            if not isinstance(board, dict):
+                continue
+
+            llm_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+            if llm_prompt:
+                prompt_jobs.append({
+                    "board": board,
+                    "text": llm_prompt,
+                })
+
+        if not prompt_jobs:
+            return JSONResponse(content={
+                "message": "No Tap board prompts found.",
+                "scope": request_data.scope,
+                "pages_processed": 0,
+                "strings_seen": 0,
+                "unique_strings": 0,
+                "strings_changed": 0,
+                "tap_boards_prompts_changed": 0,
+                "special_pages_changed": 0,
+            })
+
+        unique_prompts: List[str] = []
+        prompt_to_index: Dict[str, int] = {}
+        for job in prompt_jobs:
+            key = job["text"]
+            if key not in prompt_to_index:
+                prompt_to_index[key] = len(unique_prompts)
+                unique_prompts.append(key)
+            job["unique_index"] = prompt_to_index[key]
+
+        translated_prompts: List[str] = [""] * len(unique_prompts)
+        batch_size = 60
+        try:
+            for start_idx in range(0, len(unique_prompts), batch_size):
+                batch = unique_prompts[start_idx:start_idx + batch_size]
+                translated_batch = await _translate_lines_with_models(
+                    lines=batch,
+                    source_locale=source_locale,
+                    target_locale=target_locale
+                )
+                if len(translated_batch) != len(batch):
+                    raise ValueError("Tap board prompt translation returned unexpected line count")
+
+                for offset, translated_text in enumerate(translated_batch):
+                    translated_prompts[start_idx + offset] = str(translated_text or "").strip()
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error(f"Error translating tap board prompts for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to translate tap board prompts")
+
+        tap_boards_prompts_changed = 0
+        for job in prompt_jobs:
+            translated_value = _sanitize_translated_text(translated_prompts[job["unique_index"]])
+            if translated_value and translated_value != job["text"]:
+                board = job["board"]
+                board["llm_prompt"] = translated_value
+                if "llm_query" in board:
+                    board["llm_query"] = translated_value
+                tap_boards_prompts_changed += 1
+
+        tap_config_data["updated_at"] = dt.now().isoformat()
+        await save_tap_nav_config(account_id, aac_user_id, tap_config_data)
+
+        return JSONResponse(content={
+            "message": "Tap board prompt translation complete.",
+            "scope": request_data.scope,
+            "pages_processed": 0,
+            "strings_seen": len(prompt_jobs),
+            "unique_strings": len(unique_prompts),
+            "strings_changed": tap_boards_prompts_changed,
+            "tap_boards_prompts_changed": tap_boards_prompts_changed,
+            "special_pages_changed": 0,
+        })
+
+    pages = await load_pages_from_file(account_id, aac_user_id)
+    if not isinstance(pages, list):
+        raise HTTPException(status_code=500, detail="Invalid pages data")
+
+    selected_page_name = None
+    pages_to_process = pages
+    if request_data.scope == "current":
+        selected_page_name = str(request_data.page_name or "").strip().lower()
+        if not selected_page_name:
+            raise HTTPException(status_code=400, detail="page_name is required when scope is current")
+        page_match = next((p for p in pages if str(p.get("name") or "").lower() == selected_page_name), None)
+        if not page_match:
+            raise HTTPException(status_code=404, detail=f"Page '{selected_page_name}' not found")
+        pages_to_process = [page_match]
+
+    has_games_target_in_scope = False
+    for page in pages_to_process:
+        page_name_token = str(page.get("name") or "").strip().lower()
+        if "game" in page_name_token:
+            has_games_target_in_scope = True
+            break
+
+        buttons = page.get("buttons")
+        if not isinstance(buttons, list):
+            continue
+
+        for button in buttons:
+            if not isinstance(button, dict):
+                continue
+            target_raw = str(button.get("targetPage") or "").strip().lower()
+            special_raw = str(button.get("special_function") or "").strip().lower()
+            if (
+                "!games" in target_raw
+                or "games.html" in target_raw
+                or "guess_games" in target_raw
+                or "guess" in target_raw and "game" in target_raw
+                or special_raw in {"games", "guess_games"}
+            ):
+                has_games_target_in_scope = True
+                break
+
+        if has_games_target_in_scope:
+            break
+
+    translation_jobs: List[Dict[str, Any]] = []
+
+    for page in pages_to_process:
+        if request_data.include_display_name:
+            page_display_name = str(page.get("displayName") or "").strip()
+            if page_display_name:
+                translation_jobs.append({
+                    "container": page,
+                    "field": "displayName",
+                    "text": page_display_name
+                })
+
+        buttons = page.get("buttons")
+        if not isinstance(buttons, list):
+            continue
+
+        for button in buttons:
+            if not isinstance(button, dict):
+                continue
+
+            if request_data.include_button_text:
+                button_text = str(button.get("text") or "").strip()
+                if button_text:
+                    translation_jobs.append({
+                        "container": button,
+                        "field": "text",
+                        "text": button_text
+                    })
+
+            if request_data.include_speech_phrase:
+                speech_phrase = str(button.get("speechPhrase") or "").strip()
+                if speech_phrase:
+                    translation_jobs.append({
+                        "container": button,
+                        "field": "speechPhrase",
+                        "text": speech_phrase
+                    })
+
+            if request_data.include_llm_query:
+                llm_query = str(button.get("LLMQuery") or "").strip()
+                if llm_query:
+                    translation_jobs.append({
+                        "container": button,
+                        "field": "LLMQuery",
+                        "text": llm_query
+                    })
+
+    if not translation_jobs:
+        return JSONResponse(content={
+            "message": "No translatable content found.",
+            "scope": request_data.scope,
+            "pages_processed": len(pages_to_process),
+            "strings_seen": 0,
+            "unique_strings": 0,
+            "strings_changed": 0
+        })
+
+    unique_texts: List[str] = []
+    text_to_index: Dict[str, int] = {}
+    for job in translation_jobs:
+        key = job["text"]
+        if key not in text_to_index:
+            text_to_index[key] = len(unique_texts)
+            unique_texts.append(key)
+        job["unique_index"] = text_to_index[key]
+
+    translated_unique: List[str] = [""] * len(unique_texts)
+    batch_size = 60
+
+    try:
+        for start_idx in range(0, len(unique_texts), batch_size):
+            batch = unique_texts[start_idx:start_idx + batch_size]
+            translated_batch = await _translate_lines_with_models(
+                lines=batch,
+                source_locale=source_locale,
+                target_locale=target_locale
+            )
+
+            if len(translated_batch) != len(batch):
+                raise ValueError("Translation batch returned unexpected line count")
+
+            for offset, translated_text in enumerate(translated_batch):
+                translated_unique[start_idx + offset] = str(translated_text or "").strip()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error translating pages for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to translate page content")
+
+    strings_changed = 0
+    for job in translation_jobs:
+        translated_value = _sanitize_translated_text(translated_unique[job["unique_index"]])
+        if translated_value and translated_value != job["text"]:
+            job["container"][job["field"]] = translated_value
+            strings_changed += 1
+
+    await save_pages_to_file(account_id, aac_user_id, pages)
+
+    tap_boards_prompts_changed = 0
+    selected_page_token = str(selected_page_name or "").strip().lower()
+    should_translate_tap_board_prompts = (
+        request_data.include_llm_query and (
+            request_data.scope == "all"
+            or selected_page_token in {"tap", "tap interface", "tap_interface", "tap boards", "tap board"}
+        )
+    )
+    if should_translate_tap_board_prompts:
+        tap_config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if isinstance(tap_config_data, dict):
+            settings = await load_settings_from_file(account_id, aac_user_id)
+            use_hybrid_pages = settings.get("useHybridPages", False)
+            tap_config_data, _ = normalize_compose_tap_config(tap_config_data)
+            tap_config_data, _ = ensure_tap_boards_structure(tap_config_data, use_hybrid_pages=use_hybrid_pages)
+
+            boards = tap_config_data.get("boards") if isinstance(tap_config_data.get("boards"), list) else []
+            prompt_jobs: List[Dict[str, Any]] = []
+            for board in boards:
+                if not isinstance(board, dict):
+                    continue
+
+                llm_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+                if llm_prompt:
+                    prompt_jobs.append({
+                        "board": board,
+                        "text": llm_prompt,
+                    })
+
+            if prompt_jobs:
+                unique_prompts: List[str] = []
+                prompt_to_index: Dict[str, int] = {}
+                for job in prompt_jobs:
+                    key = job["text"]
+                    if key not in prompt_to_index:
+                        prompt_to_index[key] = len(unique_prompts)
+                        unique_prompts.append(key)
+                    job["unique_index"] = prompt_to_index[key]
+
+                translated_prompts: List[str] = [""] * len(unique_prompts)
+                for start_idx in range(0, len(unique_prompts), batch_size):
+                    batch = unique_prompts[start_idx:start_idx + batch_size]
+                    translated_batch = await _translate_lines_with_models(
+                        lines=batch,
+                        source_locale=source_locale,
+                        target_locale=target_locale
+                    )
+                    if len(translated_batch) != len(batch):
+                        raise ValueError("Tap board prompt translation returned unexpected line count")
+
+                    for offset, translated_text in enumerate(translated_batch):
+                        translated_prompts[start_idx + offset] = str(translated_text or "").strip()
+
+                for job in prompt_jobs:
+                    translated_value = _sanitize_translated_text(translated_prompts[job["unique_index"]])
+                    if not translated_value:
+                        continue
+
+                    board = job["board"]
+                    previous_prompt = str(board.get("llm_prompt") or board.get("llm_query") or "").strip()
+                    if translated_value != previous_prompt:
+                        board["llm_prompt"] = translated_value
+                        if "llm_query" in board:
+                            board["llm_query"] = translated_value
+                        tap_boards_prompts_changed += 1
+
+                if tap_boards_prompts_changed > 0:
+                    tap_config_data["updated_at"] = dt.now().isoformat()
+                    await save_tap_nav_config(account_id, aac_user_id, tap_config_data)
+                    strings_changed += tap_boards_prompts_changed
+
+    special_pages_changed = 0
+    should_translate_freestyle_ui = request_data.scope == "all" or selected_page_name == "freestyle"
+    if should_translate_freestyle_ui:
+        freestyle_keys = list(FREESTYLE_UI_TEXT_DEFAULTS.keys())
+        freestyle_lines = [FREESTYLE_UI_TEXT_DEFAULTS[key] for key in freestyle_keys]
+        freestyle_translated_lines = await _translate_lines_with_models(
+            lines=freestyle_lines,
+            source_locale=source_locale,
+            target_locale=target_locale
+        )
+
+        freestyle_bundle: Dict[str, str] = {}
+        for index, key in enumerate(freestyle_keys):
+            translated_value = _sanitize_translated_text(freestyle_translated_lines[index])
+            fallback_value = FREESTYLE_UI_TEXT_DEFAULTS[key]
+            freestyle_bundle[key] = translated_value or fallback_value
+
+        current_settings = await load_settings_from_file(account_id, aac_user_id)
+        existing_special = current_settings.get("specialPageTranslations")
+        if not isinstance(existing_special, dict):
+            existing_special = {}
+
+        freestyle_locale_map = existing_special.get("freestyle")
+        if not isinstance(freestyle_locale_map, dict):
+            freestyle_locale_map = {}
+
+        previous_bundle = freestyle_locale_map.get(target_locale)
+        if previous_bundle != freestyle_bundle:
+            special_pages_changed = 1
+
+        freestyle_locale_map[target_locale] = freestyle_bundle
+        existing_special["freestyle"] = freestyle_locale_map
+        await save_settings_to_file(account_id, aac_user_id, {
+            "specialPageTranslations": existing_special
+        })
+
+    should_translate_games_ui = (
+        request_data.scope == "all"
+        or selected_page_token in {"games", "guess who", "guess where", "guess what"}
+        or selected_page_token.startswith("guess ")
+        or has_games_target_in_scope
+    )
+    if should_translate_games_ui:
+        games_keys = list(GAMES_UI_TEXT_DEFAULTS.keys())
+        games_lines = [GAMES_UI_TEXT_DEFAULTS[key] for key in games_keys]
+        games_translated_lines = await _translate_lines_with_models(
+            lines=games_lines,
+            source_locale=source_locale,
+            target_locale=target_locale
+        )
+
+        games_bundle: Dict[str, str] = {}
+        for index, key in enumerate(games_keys):
+            translated_value = _sanitize_translated_text(games_translated_lines[index])
+            fallback_value = GAMES_UI_TEXT_DEFAULTS[key]
+            games_bundle[key] = translated_value or fallback_value
+
+        current_settings = await load_settings_from_file(account_id, aac_user_id)
+        existing_special = current_settings.get("specialPageTranslations")
+        if not isinstance(existing_special, dict):
+            existing_special = {}
+
+        games_locale_map = existing_special.get("games")
+        if not isinstance(games_locale_map, dict):
+            games_locale_map = {}
+
+        previous_bundle = games_locale_map.get(target_locale)
+        if previous_bundle != games_bundle:
+            special_pages_changed += 1
+
+        games_locale_map[target_locale] = games_bundle
+        existing_special["games"] = games_locale_map
+
+        games_button_labels_changed = 0
+        localized_games_label = _sanitize_translated_text(games_bundle.get("gamesHubTitle"))
+        if localized_games_label and target_locale.lower() != "en-us":
+            for page in pages_to_process:
+                buttons = page.get("buttons")
+                if not isinstance(buttons, list):
+                    continue
+
+                for button in buttons:
+                    if not isinstance(button, dict):
+                        continue
+
+                    target_raw = str(button.get("targetPage") or "").strip().lower()
+                    is_games_target = (
+                        "!games" in target_raw
+                        or "games.html" in target_raw
+                        or "guess_games" in target_raw
+                    )
+                    if not is_games_target:
+                        continue
+
+                    current_text = str(button.get("text") or "").strip()
+                    if current_text.lower() == "games" and current_text != localized_games_label:
+                        button["text"] = localized_games_label
+                        games_button_labels_changed += 1
+
+        if games_button_labels_changed > 0:
+            strings_changed += games_button_labels_changed
+            await save_pages_to_file(account_id, aac_user_id, pages)
+
+        await save_settings_to_file(account_id, aac_user_id, {
+            "specialPageTranslations": existing_special
+        })
+
+    return JSONResponse(content={
+        "message": "Page translation complete.",
+        "scope": request_data.scope,
+        "page_name": selected_page_name,
+        "pages_processed": len(pages_to_process),
+        "strings_seen": len(translation_jobs),
+        "unique_strings": len(unique_texts),
+        "strings_changed": strings_changed,
+        "tap_boards_prompts_changed": tap_boards_prompts_changed,
+        "special_pages_changed": special_pages_changed
+    })
     
 
 
@@ -7880,7 +11514,11 @@ async def get_user_info_api(current_ids: Annotated[Dict[str, str], Depends(get_c
         "userInfo": user_info_content_dict.get("narrative", ""),
         "currentMood": user_info_content_dict.get("currentMood"),
         "name": user_info_content_dict.get("name", ""),
-        "profileImageUrl": user_info_content_dict.get("profileImageUrl")
+        "profileImageUrl": _display_image_url(
+            user_info_content_dict.get("profileImageUrl"),
+            user_info_content_dict.get("profileImageStoragePath")
+        ),
+        "aiOptionOverrides": normalize_ai_option_overrides(user_info_content_dict.get("aiOptionOverrides", {}))
     }
     
     # Debug: log what name we are returning
@@ -7962,6 +11600,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     avatar_config = request.get("avatarConfig")  # Add support for avatar configuration
     user_name = request.get("name", "")  # Add support for user name
     profile_image_url = request.get("profileImageUrl")  # Add support for profile image URL
+    ai_option_overrides = request.get("aiOptionOverrides")
     
     # Debug: log what name we received and extracted
     logging.warning(f"🔍 BACKEND SAVE DEBUG - Name received in request: '{request.get('name', 'NOT_FOUND')}', extracted name: '{user_name}'")
@@ -7972,6 +11611,7 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
     logging.warning(f"👤 Avatar config: {avatar_config}")
     logging.warning(f"👤 User name: {user_name}")
     logging.warning(f"🖼️ Profile image URL: {profile_image_url}")
+    logging.warning(f"🛡️ AI option overrides provided: {ai_option_overrides is not None}")
     
     # Log the raw request for debugging
     logging.warning(f"🔍 Raw request data: {request}")
@@ -7995,6 +11635,8 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         existing_data["avatarConfig"] = avatar_config
     if profile_image_url:
         existing_data["profileImageUrl"] = profile_image_url
+    if ai_option_overrides is not None:
+        existing_data["aiOptionOverrides"] = normalize_ai_option_overrides(ai_option_overrides)
     
     existing_data["updated_at"] = dt.now().isoformat()
     
@@ -8025,13 +11667,113 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
         except Exception as cache_error:
             logging.error(f"❌ Failed to invalidate cache for {account_id}/{aac_user_id}: {cache_error}", exc_info=True)
         
-        response_data = {"narrative": user_info, "currentMood": current_mood, "name": user_name}
+        response_data = {
+            "narrative": user_info,
+            "currentMood": current_mood,
+            "name": user_name,
+            "aiOptionOverrides": normalize_ai_option_overrides(existing_data.get("aiOptionOverrides", {}))
+        }
         if avatar_config:
             response_data["avatarConfig"] = avatar_config
         
         return JSONResponse(content=response_data)
     else:
         raise HTTPException(status_code=500, detail="Failed to save user info.")
+
+
+# ---------------------------------------------------------------------------
+# Custom Images helpers
+# ---------------------------------------------------------------------------
+
+def _gcs_storage_path_from_url(image_url: str) -> str | None:
+    """Extract the GCS object path from a storage.googleapis.com URL."""
+    prefix = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
+    if image_url and image_url.startswith(prefix):
+        return image_url[len(prefix):]
+    return None
+
+
+def _signed_image_url_from_path(storage_path: str) -> str:
+    """Generate a time-limited signed URL for a GCS image object."""
+    if not storage_client or not AAC_IMAGES_BUCKET_NAME:
+        return storage_path
+
+    bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+    blob = bucket.blob(storage_path)
+
+    from datetime import timedelta
+    return blob.generate_signed_url(version="v4", expiration=timedelta(hours=6), method="GET")
+
+
+def _display_image_url(image_url: str | None = None, storage_path: str | None = None) -> str | None:
+    """Return a browser-loadable image URL for stored GCS images."""
+    from urllib.parse import quote
+
+    if storage_path:
+        try:
+            return _signed_image_url_from_path(storage_path)
+        except Exception as e:
+            logging.warning(f"Failed to sign image URL for path '{storage_path}': {e}")
+            return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+
+    if not image_url:
+        return image_url
+
+    path = _gcs_storage_path_from_url(image_url)
+    if path is None:
+        return image_url
+
+    try:
+        return _signed_image_url_from_path(path)
+    except Exception as e:
+        logging.warning(f"Failed to sign image URL for '{image_url}': {e}")
+        return f"/api/image-proxy?path={quote(path, safe='')}"
+
+
+@app.get("/api/image-proxy")
+async def proxy_custom_image(
+    path: str
+):
+    """Proxy a custom-image object from GCS so browser image tags can load it."""
+    try:
+        if not storage_client or not AAC_IMAGES_BUCKET_NAME:
+            raise HTTPException(status_code=503, detail="Storage not available")
+
+        # Basic path sanity-check to prevent traversal attacks
+        import posixpath
+        normalised = posixpath.normpath(path).lstrip("/")
+        if ".." in normalised or normalised != path.lstrip("/"):
+            raise HTTPException(status_code=400, detail="Invalid path")
+
+        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+        blob = bucket.blob(normalised)
+
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        image_bytes = blob.download_as_bytes()
+
+        # Use stored content-type if available, otherwise guess from extension
+        content_type = blob.content_type or "application/octet-stream"
+        if content_type == "application/octet-stream":
+            ext = normalised.rsplit(".", 1)[-1].lower() if "." in normalised else ""
+            content_type = {
+                "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "png": "image/png", "gif": "image/gif",
+                "webp": "image/webp"
+            }.get(ext, "application/octet-stream")
+
+        from fastapi.responses import Response
+        return Response(
+            content=image_bytes,
+            media_type=content_type,
+            headers={"Cache-Control": "private, max-age=86400"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error proxying image '{path}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch image")
 
 
 # Custom Images API Endpoints
@@ -8088,10 +11830,10 @@ async def upload_custom_image(
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
         
-        # Upload with proper content type
+        # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
-            content_type=image.content_type
+            content_type=image.content_type or "image/png"
         )
         
         # Construct public URL
@@ -8126,6 +11868,9 @@ async def upload_custom_image(
             doc_data["updated_at"] = doc_data["updated_at"].isoformat()
         
         logging.info(f"Custom image uploaded successfully: {doc_ref.id}")
+
+        if doc_data.get("image_url"):
+            doc_data["image_url"] = _display_image_url(doc_data["image_url"], doc_data.get("storage_path"))
         
         return JSONResponse(content={
             "success": True,
@@ -8174,6 +11919,10 @@ async def get_custom_images(
         
         # Sort by created_at in Python (newest first) to avoid needing composite index
         images.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+        # Rewrite GCS URLs to go through the authenticated proxy
+        for img in images:
+            img["image_url"] = _display_image_url(img.get("image_url"), img.get("storage_path"))
         
         logging.info(f"Found {len(images)} custom images for user")
         
@@ -8367,10 +12116,10 @@ async def upload_user_profile_image(
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
         
-        # Upload with proper content type
+        # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
-            content_type=image.content_type
+            content_type=image.content_type or "image/png"
         )
         
         # Construct public URL
@@ -8435,6 +12184,9 @@ async def upload_user_profile_image(
             "updated_at": datetime.now(timezone.utc)
         }
         profile_doc_ref.set(profile_image_data)
+
+        # Keep the canonical storage path in user info so display URLs can be regenerated later.
+        user_info_dict["profileImageStoragePath"] = storage_path
         
         # Also store in custom_images with hierarchical structure for symbol lookup
         custom_image_ref = firestore_db.collection("accounts").document(account_id)\
@@ -8459,11 +12211,14 @@ async def upload_user_profile_image(
             doc_data["updated_at"] = doc_data["updated_at"].isoformat()
         
         logging.info(f"User profile image uploaded successfully: {custom_image_ref.id} for user {user_name}")
+
+        if doc_data.get("image_url"):
+            doc_data["image_url"] = _display_image_url(doc_data["image_url"], doc_data.get("storage_path"))
         
         return JSONResponse(content={
             "success": True,
             "image_data": doc_data,
-            "profileImageUrl": image_url,
+            "profileImageUrl": _display_image_url(image_url, storage_path),
             "message": f"Profile image uploaded successfully and tagged with '{user_name}' and personal pronouns. Image will now appear when using words like 'I', 'me', 'myself', or '{user_name}'."
         })
         
@@ -8504,6 +12259,12 @@ async def get_profile_image(
             profile_image["created_at"] = profile_image["created_at"].isoformat()
         if "updated_at" in profile_image:
             profile_image["updated_at"] = profile_image["updated_at"].isoformat()
+
+        # Rewrite URL to a browser-loadable signed URL
+        profile_image["image_url"] = _display_image_url(
+            profile_image.get("image_url"),
+            profile_image.get("storage_path")
+        )
         
         return JSONResponse(content={
             "success": True,
@@ -8576,6 +12337,8 @@ async def remove_profile_image(
         
         if "profileImageUrl" in user_info_dict:
             user_info_dict["profileImageUrl"] = None
+        if "profileImageStoragePath" in user_info_dict:
+            user_info_dict["profileImageStoragePath"] = None
             await save_firestore_document(
                 account_id=account_id,
                 aac_user_id=aac_user_id,
@@ -9061,12 +12824,12 @@ async def verify_firebase_token_only(
         decoded_token = await asyncio.to_thread(auth.verify_id_token, token.credentials)
         # Return Firebase UID and email from the token
         return {"account_id": decoded_token['uid'], "email": decoded_token.get('email')}
-    except auth.InvalidIdTokenError:
-        logging.warning("Invalid Firebase ID token received during token-only verification.")
-        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except auth.ExpiredIdTokenError:
         logging.warning("Expired Firebase ID token received during token-only verification.")
         raise HTTPException(status_code=401, detail="Authentication token expired. Please log in again.")
+    except auth.InvalidIdTokenError:
+        logging.warning("Invalid Firebase ID token received during token-only verification.")
+        raise HTTPException(status_code=401, detail="Invalid authentication token.")
     except Exception as e:
         logging.error(f"Error during token-only verification: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Authentication error during token verification: {e}")
@@ -9399,9 +13162,9 @@ async def get_freestyle_word_prediction(
         user_context = user_info.get("narrative", "")
         
         if context_text:
-            prompt = f"Given the user context: '{user_context}' and the existing text: '{context_text}', provide {freestyle_options} complete words that start with '{partial_word}'. The words should be contextually appropriate and commonly used. Return only the complete words, one per line."
+            prompt = f"Given the user context: '{user_context}' and the existing text: '{context_text}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         else:
-            prompt = f"Given the user context: '{user_context}', provide {freestyle_options} complete words that start with '{partial_word}'. The words should be commonly used. Return only the complete words, one per line."
+            prompt = f"Given the user context: '{user_context}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
         
         # Use LLM to generate predictions
         response_text = await _generate_gemini_content_with_fallback(prompt)
@@ -9409,13 +13172,23 @@ async def get_freestyle_word_prediction(
         # Parse predictions - ensure they are complete words starting with the partial word
         raw_predictions = [line.strip() for line in response_text.split('\n') if line.strip()]
         predictions = []
+        seen_predictions = set()
         
         for pred in raw_predictions[:freestyle_options * 2]:  # Get extra to filter
+            normalized_pred = pred.strip()
+            normalized_key = normalized_pred.lower()
+            if not normalized_pred or normalized_key in seen_predictions:
+                continue
             # Ensure the prediction starts with the partial word and is a complete word
-            if pred.lower().startswith(partial_word.lower()) and len(pred) > len(partial_word):
-                predictions.append(pred)
+            if normalized_key == partial_word.lower():
+                predictions.append(normalized_pred)
+                seen_predictions.add(normalized_key)
+            elif normalized_key.startswith(partial_word.lower()) and len(normalized_pred) > len(partial_word):
+                predictions.append(normalized_pred)
+                seen_predictions.add(normalized_key)
             elif not partial_word and pred:  # If no partial word, just add valid predictions
-                predictions.append(pred)
+                predictions.append(normalized_pred)
+                seen_predictions.add(normalized_key)
         
         # Limit to freestyle_options predictions
         predictions = predictions[:freestyle_options]
@@ -9443,10 +13216,11 @@ async def get_freestyle_word_options(
     logging.warning(f"DEBUG Freestyle API - Received request: context='{request.context}', source_page='{request.source_page}', is_llm_generated={request.is_llm_generated}, originating_button='{request.originating_button_text}', build_space='{request.build_space_text}', max_options='{request.max_options}'")
     
     try:
-        # Load user settings to get FreestyleOptions
+        # Load user settings to get FreestyleOptions and user language
         settings = await load_settings_from_file(account_id, aac_user_id)
         # Use max_options from request if provided, otherwise use user's FreestyleOptions setting
         freestyle_options = request.max_options if request.max_options else settings.get("FreestyleOptions", 20)
+        configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
         
         # Load user context
         user_info = await load_firestore_document(
@@ -9462,18 +13236,37 @@ async def get_freestyle_word_options(
             doc_subpath="info/current_state",
             default_data=DEFAULT_USER_CURRENT.copy()
         )
+
+        requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
+        location_override_locale = _normalize_locale_tag(str(user_current.get("locationLanguageOverride") or "").strip())
+        user_language = requested_target_locale or location_override_locale or configured_user_language
+        language_instruction = (
+            f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All words and phrases you return must be in that language. Do not use English unless '{user_language}' is English."
+            if not user_language.lower().startswith("en")
+            else ""
+        )
         
         # Create context-aware prompt
         context_parts = []
+        live_context_parts = []
         if user_info.get("narrative"):
             context_parts.append(f"User info: {user_info['narrative']}")
         if user_current.get("location"):
-            context_parts.append(f"Current location: {user_current['location']}")
+            location_value = str(user_current['location']).strip()
+            if location_value and location_value.lower() not in {"unknown", "none", "n/a", "na"}:
+                context_parts.append(f"Current location: {location_value}")
+                live_context_parts.append(f"location={location_value}")
         if user_current.get("people"):
-            context_parts.append(f"People present: {user_current['people']}")
+            people_value = str(user_current['people']).strip()
+            if people_value and people_value.lower() not in {"unknown", "none", "n/a", "na"}:
+                context_parts.append(f"People present: {people_value}")
+                live_context_parts.append(f"people={people_value}")
         if user_current.get("activity"):
-            context_parts.append(f"Current activity: {user_current['activity']}")
-        
+            activity_value = str(user_current['activity']).strip()
+            if activity_value and activity_value.lower() not in {"unknown", "none", "idle", "n/a", "na"}:
+                context_parts.append(f"Current activity: {activity_value}")
+                live_context_parts.append(f"activity={activity_value}")
+
         context_str = " | ".join(context_parts) if context_parts else "General conversation"
         
         # Handle build space context for dynamic suggestions
@@ -9488,13 +13281,29 @@ async def get_freestyle_word_options(
         
         # Build contextual information for the prompt
         contextual_info = context_str
+        navigation_parts = []
         if request.context and request.source_page:
             if request.is_llm_generated:
+                navigation_parts.append(f"LLM page={request.source_page}")
+                navigation_parts.append(f"LLM topic={request.context}")
                 contextual_info += f" | Coming from LLM-generated page '{request.source_page}' with context: {request.context}"
             else:
+                navigation_parts.append(f"page={request.source_page}")
+                navigation_parts.append(f"topic={request.context}")
                 contextual_info += f" | Coming from page '{request.source_page}' with topic: {request.context}"
+        elif request.source_page and request.source_page.lower() not in ('home', 'unknownpage', ''):
+            # Static page with no LLM context — use page name as topic hint
+            navigation_parts.append(f"page={request.source_page}")
+            contextual_info += f" | Coming from page '{request.source_page}'"
+            if request.originating_button_text:
+                navigation_parts.append(f"button={request.originating_button_text}")
+                contextual_info += f" (via button: {request.originating_button_text})"
         elif request.originating_button_text:
+            navigation_parts.append(f"button={request.originating_button_text}")
             contextual_info += f" | Coming from button: {request.originating_button_text}"
+
+        live_context_summary = ", ".join(live_context_parts) if live_context_parts else "none"
+        navigation_context_summary = ", ".join(navigation_parts) if navigation_parts else "none"
         
         # Add mood context if available
         if request.current_mood and request.current_mood != 'none':
@@ -9523,6 +13332,8 @@ Requirements:
 - The keyword should help find relevant images that represent the continuation concept
 - Make each option distinct and useful for completing communication
 - Consider natural sentence flow and common AAC patterns
+- Treat the live context as a PRIMARY signal for ranking. When the current location, people present, activity, or source page clearly suggest what the user is doing right now, prefer continuations that fit that real situation.
+- If there is meaningful live context, at least half of the options should feel appropriate for that immediate situation unless the existing build space clearly points elsewhere.{language_instruction}
 
 CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 - If build_space_text is "Who is here to play", provide options like "with friends|friendship", "games|games", "outside|outdoors"
@@ -9533,46 +13344,110 @@ CRITICAL: Only provide the NEW words to add, not the full sentence. For example:
 - If build_space_text is "When", provide options like "is|time", "are we|schedule", "do you|timing", "will you|future"
 - Never repeat words already in the build space text
 
-Context (use only for word relevance): {contextual_info}"""
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
+Context (use for relevance and ranking): {contextual_info}"""
         else:
-            # If no build space text, provide core AAC words for starting communication
+            # If no build space text, provide words for starting communication
             variation_text = "different and alternative" if request.request_different_options else "varied and diverse"
-            
-            # Focus on core AAC vocabulary regardless of source context
-            base_aac_words = [
-                "I", "want", "need", "like", "go", "see", "eat", "drink", "play", "help",
-                "more", "stop", "done", "good", "bad", "yes", "no", "please", "thank", "you",
-                "me", "my", "we", "they", "this", "that", "here", "there", "now", "later"
-            ]
-            
-            # Create context-aware but AAC-focused prompt
-            if request.context and request.is_llm_generated:
-                # User came from an LLM-generated page - provide AAC words that could relate to that topic
-                context_hint = f"The user came from a page about '{request.context}', so include some words that might relate to this topic alongside core AAC words."
-            else:
-                context_hint = "Focus on core AAC communication words that can start any conversation."
             
             # Add mood context
             mood_instruction = ""
             if request.current_mood and request.current_mood != 'none':
                 mood_instruction = f"\n\nIMPORTANT: The user is currently feeling {request.current_mood}. Include words that would be relevant for someone in this emotional state. For example, if angry: frustrated, upset, mad, annoyed; if happy: excited, joyful, pleased, great; if sad: down, hurt, disappointed, blue."
             
-            prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
+            # Determine if we have meaningful source page context
+            has_llm_context = request.context and request.is_llm_generated
+            has_source_page = request.source_page and request.source_page.lower() not in ('home', 'unknownpage', '')
+            has_originating_button = request.originating_button_text and request.originating_button_text.strip()
+            
+            if has_llm_context:
+                # USER CAME FROM AN LLM-GENERATED PAGE — generate topic-relevant words
+                # The context contains the LLM query that built the source page (e.g., "Do Something", "Tell me about animals")
+                # This should work like category-words: most words relate to the topic
+                topic_description = request.context
+                button_hint = f" (the user pressed the '{request.originating_button_text}' button to get there)" if has_originating_button else ""
+                source_hint = f" The page was called '{request.source_page}'." if has_source_page else ""
+                
+                logging.info(f"Freestyle context-aware generation: LLM context='{topic_description}', source_page='{request.source_page}', originating_button='{request.originating_button_text}'")
+                
+                prompt = f"""The user is on a freestyle communication page. They navigated here from a page that was generated by the query: "{topic_description}"{button_hint}.{source_hint}
 
-{context_hint}{mood_instruction}
+Generate exactly {freestyle_options} {variation_text} words or short phrases that are relevant to this topic and useful for AAC communication about it.{mood_instruction}
+
+Requirements:
+- Generate words that relate to the topic "{topic_description}" so the user can communicate about it
+- Include a MIX of: topic-specific nouns, relevant verbs/actions, descriptive words, and a few essential AAC words (I, want, like, need)
+- About 60-70% of words should be directly related to the topic
+- About 30-40% should be core AAC words useful for building sentences about the topic (pronouns, common verbs, question words)
+- Words should be useful for STARTING phrases about this topic
+- Treat current location, people present, activity, and the originating page/button as first-class context. If that live context clearly narrows the topic, bias the list toward what is relevant right now.
+- When meaningful live context exists, at least half of the options should feel specific to the user's immediate situation, not just generic topic words.
+- Keep words simple and appropriate for AAC communication
+- For each word, provide a related keyword for image searching
+- Format: "word|keyword" (e.g., "play|games", "outside|outdoors", "fun|happy")
+- The keyword should help find relevant images that represent the word
+- If the word itself is the best keyword, use the same word (e.g., "car|car")
+- Make each word distinct and commonly used
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line{language_instruction}
+
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
+User context: {contextual_info}"""
+            
+            elif has_source_page:
+                # USER CAME FROM A STATIC (non-LLM) PAGE — use page name as topic hint
+                page_name = request.source_page.replace('_', ' ').replace('-', ' ')
+                button_hint = f" (via the '{request.originating_button_text}' button)" if has_originating_button else ""
+                
+                logging.info(f"Freestyle page-context generation: source_page='{request.source_page}', originating_button='{request.originating_button_text}'")
+                
+                prompt = f"""The user is on a freestyle communication page. They navigated here from a page called "{page_name}"{button_hint}.
+
+Generate exactly {freestyle_options} {variation_text} words that help the user communicate about topics related to "{page_name}".{mood_instruction}
+
+Requirements:
+- Generate words that relate to the "{page_name}" topic so the user can communicate about it
+- Include a MIX of: topic-relevant words and core AAC sentence starters (I, want, like, need, go)
+- About 50% topic-relevant words, 50% core AAC words
+- Words should be useful for STARTING phrases related to this page topic
+- Treat current location, people present, activity, and the originating button as first-class context. Use them to make the topic words feel specific to what is happening right now.
+- When meaningful live context exists, at least half of the options should feel grounded in that immediate situation rather than generic page vocabulary.
+- Keep words simple and appropriate for AAC communication
+- For each word, provide a related keyword for image searching
+- Format: "word|keyword" (e.g., "I|person", "want|desire", "go|arrow", "happy|smile")
+- The keyword should help find relevant images that represent the word
+- If the word itself is the best keyword, use the same word (e.g., "car|car")
+- Make each word distinct and commonly used in AAC
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line{language_instruction}
+
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
+User context: {contextual_info}"""
+            
+            else:
+                # NO CONTEXT — generic AAC words (home page or unknown source)
+                prompt = f"""Provide exactly {freestyle_options} {variation_text} single AAC communication words for building phrases.
+
+Focus on core AAC communication words that can start any conversation.{mood_instruction}
 
 Requirements:
 - ONLY provide single words (no phrases or sentences)
 - Focus on core AAC vocabulary: pronouns (I, you, we), basic verbs (want, need, like, go), common nouns, simple adjectives
 - Include essential communication starters: "I", "want", "need", "like", "go", "see", "help", "more", "please"
 - Provide variety across word types: pronouns, verbs, nouns, adjectives, question words
+- If current location, people present, or current activity are known, use them as the primary signal for which otherwise-generic AAC words are most useful right now.
+- Favor words that the user could immediately use in the current situation over abstract filler.
 - For each word, provide a related keyword for image searching
 - Format: "word|keyword" (e.g., "I|person", "want|desire", "go|arrow", "happy|smile", "food|food")
 - The keyword should help find relevant images that represent the word
 - Each option should be useful for starting or building communication
 - Include both basic needs words and descriptive words
 - Make each word distinct and commonly used in AAC
+- DO NOT use numbered lists - just provide word|keyword pairs, one per line{language_instruction}
 
+Live context: {live_context_summary}
+Navigation context: {navigation_context_summary}
 Context for word selection: {contextual_info}"""
         
         logging.info(f"Generated prompt for LLM: {prompt}")
@@ -9588,30 +13463,63 @@ Context for word selection: {contextual_info}"""
         response_text = await _generate_gemini_content_with_fallback(prompt, generation_config, account_id, aac_user_id)
         logging.warning(f"DEBUG Freestyle API - LLM response length: {len(response_text)}, content: {response_text[:500]}...")
         
-        # Parse options with keywords and ensure uniqueness  
+        # Parse options with keywords and ensure uniqueness.
         all_lines = [line.strip() for line in response_text.split('\n') if line.strip()]
         
-        # Filter out preamble/instructional lines that aren't actual options
+        # Filter out preamble/instructional lines that aren't actual options.
         def is_preamble_line(line):
             preamble_indicators = [
                 "here are", "here's", "i'll provide", "providing", "below are",
                 "the following", "these are", "let me give", "i can offer",
                 "varied and diverse", "different and unique", "suggestions:",
                 "options:", "words:", "phrases:", "requirements:",
-                "format:", "examples:", "note:", "remember:"
+                "format:", "examples:", "note:", "remember:",
+                "let's brainstorm", "brainstorm continuations", "continuations for",
+                "live context:", "navigation context:", "user context:", "context:"
             ]
             line_lower = line.lower()
             # Check if line is too long (likely explanatory text)
             if len(line) > 50:
+                return True
+            if line.endswith(':'):
                 return True
             # Check for preamble indicators
             for indicator in preamble_indicators:
                 if indicator in line_lower:
                     return True
             return False
+
+        def normalize_candidate_line(line):
+            cleaned = re.sub(r'^\s*(?:[-*•]+|\d+[.)])\s*', '', line).strip()
+            return cleaned.strip('"\'` ').strip()
+
+        def is_valid_option_text(text):
+            if not text:
+                return False
+
+            text_lower = text.lower()
+            invalid_indicators = [
+                "let's brainstorm", "brainstorm", "continuations for", "provide exactly",
+                "generate exactly", "requirements", "format", "example", "live context",
+                "navigation context", "user context", "the user is", "aac communication"
+            ]
+
+            if any(indicator in text_lower for indicator in invalid_indicators):
+                return False
+            if any(char in text for char in ['"', '“', '”']):
+                return False
+            if text.endswith((':', '.', '?', '!')):
+                return False
+
+            word_count = len([part for part in text.split() if part])
+            if word_count == 0 or word_count > 3:
+                return False
+
+            return True
         
         # Filter out preamble lines
-        word_lines = [line for line in all_lines if not is_preamble_line(line)]
+        word_lines = [normalize_candidate_line(line) for line in all_lines if not is_preamble_line(line)]
+        word_lines = [line for line in word_lines if line]
         
         # Remove duplicates while preserving order and parse word|keyword format
         unique_options = []
@@ -9620,8 +13528,8 @@ Context for word selection: {contextual_info}"""
             if '|' in line:
                 # Parse word|keyword format
                 parts = line.split('|', 1)
-                first_part = parts[0].strip()
-                second_part = parts[1].strip() if len(parts) > 1 else first_part
+                first_part = normalize_candidate_line(parts[0])
+                second_part = normalize_candidate_line(parts[1]) if len(parts) > 1 else first_part
                 
                 # For build space continuation, first part is the continuation text to display
                 # For initial generation, first part is also the word to display
@@ -9629,7 +13537,7 @@ Context for word selection: {contextual_info}"""
                 keyword = second_part  # Always use the second part as the keyword for images
                 unique_key = word.lower().strip()  # Use the word text for uniqueness
                 
-                if unique_key not in seen and word:
+                if unique_key not in seen and is_valid_option_text(word):
                     unique_options.append({
                         "text": word,
                         "keywords": [keyword] if keyword != word else []
@@ -9637,9 +13545,9 @@ Context for word selection: {contextual_info}"""
                     seen.add(unique_key)
             else:
                 # Fallback for lines without keyword format
-                word = line.strip()
+                word = normalize_candidate_line(line)
                 unique_key = word.lower()
-                if unique_key not in seen and word:
+                if unique_key not in seen and is_valid_option_text(word):
                     unique_options.append({
                         "text": word,
                         "keywords": []
@@ -9665,6 +13573,7 @@ Context for word selection: {contextual_info}"""
 
 class FreestyleCleanupRequest(BaseModel):
     text_to_cleanup: str = Field(..., min_length=1, description="Text to clean up and improve")
+    target_locale: Optional[str] = Field(None, description="Optional locale override for cleaned output (e.g., es-US)")
 
 @app.post("/api/freestyle/cleanup-text")
 async def cleanup_freestyle_text(
@@ -9679,6 +13588,26 @@ async def cleanup_freestyle_text(
     account_id = current_ids["account_id"]
     
     try:
+        settings, user_current = await asyncio.gather(
+            load_settings_from_file(account_id, aac_user_id),
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/current_state",
+                default_data=DEFAULT_USER_CURRENT.copy()
+            )
+        )
+
+        configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
+        location_override_locale = _normalize_locale_tag(str(user_current.get("locationLanguageOverride") or "").strip())
+        cleanup_locale = requested_target_locale or location_override_locale or configured_user_language
+        language_instruction = (
+            f"\n8. Return the improved text ONLY in locale '{cleanup_locale}'. Do not translate to English unless '{cleanup_locale}' is English."
+            if cleanup_locale
+            else ""
+        )
+
         # Create lightweight user query for the caching function
         user_query_only = f"""Clean up and improve this text while preserving the original meaning and intent. Use my personal context to make the cleanup more personalized and appropriate.
 
@@ -9692,6 +13621,7 @@ Please:
 5. Keep it concise and clear
 6. The phrase should be structured like it is coming from me
 7. Consider my current situation, recent activities, and personal context when cleaning up
+{language_instruction}
 
 For example:
 - "dad beekeeping" → "My dad is a beekeeper"
@@ -9724,6 +13654,1546 @@ Return only the improved text, nothing else."""
         logging.error(f"Error cleaning up text for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
         # Return original text if cleanup fails
         return JSONResponse(content={"cleaned_text": request.text_to_cleanup})
+
+
+# ===== BRAVO EMAIL PHASE 2 BEGIN (WEB APP REVIEW BLOCK) =====
+
+EMAIL_PROVIDER_DOC_SUBPATH = "integrations/email"
+EMAIL_PROVIDER_NAME = "gmail"
+EMAIL_OAUTH_STATE_TTL_SECONDS = 900
+EMAIL_CONNECT_SUCCESS_HTML = "<html><body><h2>Email connected</h2><p>You can close this tab and return to Bravo.</p></body></html>"
+EMAIL_CONNECT_CANCELED_HTML = "<html><body><h2>Email connection canceled</h2><p>You can close this tab and return to Bravo.</p></body></html>"
+GMAIL_OAUTH_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/contacts.readonly",
+]
+
+GMAIL_INBOX_EXCLUDED_CATEGORIES = {
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_UPDATES",
+    "CATEGORY_FORUMS",
+}
+GMAIL_INBOX_CATEGORY_LABELS = {
+    "CATEGORY_PERSONAL",
+    "CATEGORY_PROMOTIONS",
+    "CATEGORY_SOCIAL",
+    "CATEGORY_UPDATES",
+    "CATEGORY_FORUMS",
+}
+
+DEFAULT_EMAIL_PROVIDER_STATE = {
+    "provider": EMAIL_PROVIDER_NAME,
+    "connected": False,
+    "connected_at": None,
+    "email_address": None,
+    "token_encrypted": None,
+    "refresh_token_encrypted": None,
+    "token": None,
+    "refresh_token": None,
+    "token_expires_at": None,
+    "scope": [],
+    "last_error": None,
+}
+
+
+class EmailConnectUrlRequest(BaseModel):
+    provider: Literal["gmail"] = Field(default="gmail")
+
+
+class EmailSendRequest(BaseModel):
+    to: List[str] = Field(default_factory=list)
+    cc: List[str] = Field(default_factory=list)
+    bcc: List[str] = Field(default_factory=list)
+    subject: str = ""
+    body: str = ""
+    thread_id: Optional[str] = ""
+    in_reply_to: Optional[str] = ""
+    references: Optional[str] = ""
+
+    @field_validator("to", "cc", "bcc")
+    @classmethod
+    def _validate_email_list(cls, values: List[str]) -> List[str]:
+        validated: List[str] = []
+        for raw_value in values or []:
+            candidate = str(raw_value or "").strip()
+            if not candidate:
+                continue
+            _, parsed_email = parseaddr(candidate)
+            if not parsed_email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", parsed_email):
+                raise ValueError(f"Invalid email address: {candidate}")
+            validated.append(parsed_email)
+        return validated
+
+
+class ComposeDocumentCreateRequest(BaseModel):
+    document_type: Literal["story", "email"] = Field(default="story", description="Compose document type")
+    title: Optional[str] = Field(default="", description="Saved document title")
+    body: Optional[str] = Field(default="", description="Main composition text")
+    to: List[str] = Field(default_factory=list, description="Email To recipients")
+    cc: List[str] = Field(default_factory=list, description="Email Cc recipients")
+    bcc: List[str] = Field(default_factory=list, description="Email Bcc recipients")
+    subject: Optional[str] = Field(default="", description="Email subject")
+    reply_to_message_id: Optional[str] = Field(default="", description="Original Gmail message id for reply")
+    reply_to_thread_id: Optional[str] = Field(default="", description="Original Gmail thread id for reply")
+    in_reply_to: Optional[str] = Field(default="", description="RFC 5322 Message-ID for In-Reply-To header")
+    references: Optional[str] = Field(default="", description="RFC 5322 References header value")
+
+    @field_validator("to", "cc", "bcc")
+    @classmethod
+    def _validate_email_recipients(cls, values: List[str]) -> List[str]:
+        validated: List[str] = []
+        for raw_value in values or []:
+            candidate = str(raw_value or "").strip()
+            if not candidate:
+                continue
+            _, parsed_email = parseaddr(candidate)
+            if not parsed_email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", parsed_email):
+                raise ValueError(f"Invalid email address: {candidate}")
+            validated.append(parsed_email)
+        return validated
+
+
+class ComposeDocumentUpdateRequest(BaseModel):
+    document_type: Optional[Literal["story", "email"]] = Field(default=None, description="Compose document type")
+    title: Optional[str] = Field(default=None, description="Saved document title")
+    body: Optional[str] = Field(default=None, description="Main composition text")
+    to: Optional[List[str]] = Field(default=None, description="Email To recipients")
+    cc: Optional[List[str]] = Field(default=None, description="Email Cc recipients")
+    bcc: Optional[List[str]] = Field(default=None, description="Email Bcc recipients")
+    subject: Optional[str] = Field(default=None, description="Email subject")
+    reply_to_message_id: Optional[str] = Field(default=None, description="Original Gmail message id for reply")
+    reply_to_thread_id: Optional[str] = Field(default=None, description="Original Gmail thread id for reply")
+    in_reply_to: Optional[str] = Field(default=None, description="RFC 5322 Message-ID for In-Reply-To header")
+    references: Optional[str] = Field(default=None, description="RFC 5322 References header value")
+
+    @field_validator("to", "cc", "bcc")
+    @classmethod
+    def _validate_optional_email_recipients(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        if values is None:
+            return None
+        validated: List[str] = []
+        for raw_value in values:
+            candidate = str(raw_value or "").strip()
+            if not candidate:
+                continue
+            _, parsed_email = parseaddr(candidate)
+            if not parsed_email or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", parsed_email):
+                raise ValueError(f"Invalid email address: {candidate}")
+            validated.append(parsed_email)
+        return validated
+
+
+class ComposeIllustrationRequest(BaseModel):
+    style: Optional[str] = Field(default="storybook illustration", description="Visual style for generated illustration")
+    regenerate: Optional[bool] = Field(default=False, description="Whether to force regeneration if an illustration already exists")
+
+
+class ComposeContentRequest(BaseModel):
+    body: str = Field(..., description="Current composition body text")
+
+
+class ComposeFromEmailRequest(BaseModel):
+    include_body_quote: bool = Field(default=False, description="Whether to include original email body text in draft")
+
+
+def _is_truthy_env(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _require_email_oauth_state_secret() -> str:
+    secret = os.getenv("EMAIL_OAUTH_STATE_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=500,
+            detail="EMAIL_OAUTH_STATE_SECRET is required for signed OAuth state",
+        )
+    return secret
+
+
+def _require_email_token_encryption_key() -> str:
+    key = os.getenv("EMAIL_TOKEN_ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=500,
+            detail="EMAIL_TOKEN_ENCRYPTION_KEY is required for encrypted token storage",
+        )
+    return key
+
+
+def _get_email_token_cipher():
+    key = _require_email_token_encryption_key()
+    try:
+        from cryptography.fernet import Fernet
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="cryptography package is required for email token encryption") from exc
+    try:
+        return Fernet(key.encode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Invalid EMAIL_TOKEN_ENCRYPTION_KEY value") from exc
+
+
+def _encrypt_email_token(raw_value: Optional[str]) -> Optional[str]:
+    if not raw_value:
+        return None
+    cipher = _get_email_token_cipher()
+    return cipher.encrypt(raw_value.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_email_token(encrypted_value: Optional[str]) -> Optional[str]:
+    if not encrypted_value:
+        return None
+    cipher = _get_email_token_cipher()
+    try:
+        decrypted = cipher.decrypt(encrypted_value.encode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to decrypt stored email token") from exc
+    return decrypted.decode("utf-8")
+
+
+def _ensure_email_security_configuration() -> None:
+    enforce_config = _is_truthy_env(os.getenv("EMAIL_FEATURE_ENABLED", "true"))
+    if not enforce_config:
+        return
+
+    oauth_secret = os.getenv("EMAIL_OAUTH_STATE_SECRET", "").strip()
+    if not oauth_secret:
+        raise RuntimeError("EMAIL_OAUTH_STATE_SECRET is required when EMAIL_FEATURE_ENABLED=true")
+
+    token_encryption_key = os.getenv("EMAIL_TOKEN_ENCRYPTION_KEY", "").strip()
+    if not token_encryption_key:
+        raise RuntimeError("EMAIL_TOKEN_ENCRYPTION_KEY is required when EMAIL_FEATURE_ENABLED=true")
+
+    oauth_client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    if not oauth_client_id:
+        raise RuntimeError("GOOGLE_OAUTH_CLIENT_ID is required when EMAIL_FEATURE_ENABLED=true")
+
+    oauth_client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    if not oauth_client_secret:
+        raise RuntimeError("GOOGLE_OAUTH_CLIENT_SECRET is required when EMAIL_FEATURE_ENABLED=true")
+
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(token_encryption_key.encode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError("EMAIL_TOKEN_ENCRYPTION_KEY must be a valid Fernet key and cryptography must be installed") from exc
+
+
+def _email_backend_origin() -> str:
+    domain_value = (os.getenv("DOMAIN") or DOMAIN or "").strip()
+    if domain_value.startswith("http://") or domain_value.startswith("https://"):
+        return domain_value.rstrip("/")
+    if domain_value:
+        return f"https://{domain_value}".rstrip("/")
+    return "http://localhost:8000"
+
+
+def _email_oauth_settings() -> Dict[str, str]:
+    client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    redirect_uri = os.getenv("EMAIL_OAUTH_REDIRECT_URI", "").strip()
+    if not redirect_uri:
+        redirect_uri = f"{_email_backend_origin()}/api/email/oauth/callback"
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+    }
+
+
+def _parse_iso_utc(iso_text: Optional[str]) -> Optional[dt]:
+    if not iso_text:
+        return None
+    try:
+        return dt.fromisoformat(iso_text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _iso_utc_after_seconds(seconds: int) -> str:
+    return (dt.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
+def _serialize_email_oauth_state(payload: Dict[str, Any]) -> str:
+    serialized = json.dumps(payload, separators=(",", ":"))
+    encoded = base64.urlsafe_b64encode(serialized.encode("utf-8")).decode("utf-8").rstrip("=")
+    state_secret = _require_email_oauth_state_secret()
+    signature = hmac.new(state_secret.encode("utf-8"), encoded.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _deserialize_email_oauth_state(state_token: str) -> Dict[str, Any]:
+    state_secret = _require_email_oauth_state_secret()
+    encoded_part = state_token
+
+    if "." in state_token:
+        encoded_part, signature = state_token.rsplit(".", 1)
+        expected_signature = hmac.new(
+            state_secret.encode("utf-8"),
+            encoded_part.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            raise HTTPException(status_code=400, detail="Invalid OAuth state signature")
+    else:
+        raise HTTPException(status_code=400, detail="Missing OAuth state signature")
+
+    padded = encoded_part + "=" * (-len(encoded_part) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8")
+        payload = json.loads(decoded)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state payload") from exc
+
+    issued_at = payload.get("issued_at")
+    if not isinstance(issued_at, (int, float)):
+        raise HTTPException(status_code=400, detail="OAuth state missing issued_at")
+
+    now_epoch = int(time.time())
+    if now_epoch - int(issued_at) > EMAIL_OAUTH_STATE_TTL_SECONDS:
+        raise HTTPException(status_code=400, detail="OAuth state expired")
+
+    if not payload.get("account_id") or not payload.get("aac_user_id"):
+        raise HTTPException(status_code=400, detail="OAuth state missing identity fields")
+
+    return payload
+
+
+async def _load_email_provider_state(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    saved_state = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=EMAIL_PROVIDER_DOC_SUBPATH,
+        default_data=copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE),
+    )
+    if not isinstance(saved_state, dict):
+        saved_state = copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE)
+
+    merged_state = copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE)
+    merged_state.update(saved_state)
+    return merged_state
+
+
+async def _save_email_provider_state(account_id: str, aac_user_id: str, state_data: Dict[str, Any]) -> None:
+    await save_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=EMAIL_PROVIDER_DOC_SUBPATH,
+        data_to_save=state_data,
+    )
+
+
+def _state_access_token(state: Dict[str, Any]) -> Optional[str]:
+    encrypted = state.get("token_encrypted")
+    if encrypted:
+        return _decrypt_email_token(encrypted)
+    legacy = state.get("token")
+    return str(legacy).strip() if legacy else None
+
+
+def _state_refresh_token(state: Dict[str, Any]) -> Optional[str]:
+    encrypted = state.get("refresh_token_encrypted")
+    if encrypted:
+        return _decrypt_email_token(encrypted)
+    legacy = state.get("refresh_token")
+    return str(legacy).strip() if legacy else None
+
+
+def _gmail_token_endpoint_payload(
+    grant_type: str,
+    oauth_settings: Dict[str, str],
+    code: Optional[str] = None,
+    refresh_token: Optional[str] = None,
+) -> Dict[str, str]:
+    payload = {
+        "client_id": oauth_settings["client_id"],
+        "client_secret": oauth_settings["client_secret"],
+        "grant_type": grant_type,
+    }
+    if grant_type == "authorization_code":
+        payload["code"] = code or ""
+        payload["redirect_uri"] = oauth_settings["redirect_uri"]
+    elif grant_type == "refresh_token":
+        payload["refresh_token"] = refresh_token or ""
+    return payload
+
+
+async def _async_http_request_json(
+    method: str,
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    json_body: Optional[Dict[str, Any]] = None,
+    timeout_seconds: int = 20,
+) -> Dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.request(method, url, headers=headers, params=params, data=data, json=json_body) as response:
+            body_text = await response.text()
+            try:
+                parsed = json.loads(body_text) if body_text else {}
+            except json.JSONDecodeError:
+                parsed = {}
+            return {
+                "status": response.status,
+                "text": body_text,
+                "json": parsed,
+            }
+
+
+async def _gmail_exchange_code_for_tokens(code: str, oauth_settings: Dict[str, str]) -> Dict[str, Any]:
+    token_response = await _async_http_request_json(
+        "POST",
+        "https://oauth2.googleapis.com/token",
+        data=_gmail_token_endpoint_payload(
+            grant_type="authorization_code",
+            oauth_settings=oauth_settings,
+            code=code,
+        ),
+        timeout_seconds=15,
+    )
+    if token_response["status"] != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to exchange auth code: {token_response['text']}",
+        )
+    return token_response["json"]
+
+
+async def _gmail_refresh_access_token(refresh_token: str, oauth_settings: Dict[str, str]) -> Dict[str, Any]:
+    refresh_response = await _async_http_request_json(
+        "POST",
+        "https://oauth2.googleapis.com/token",
+        data=_gmail_token_endpoint_payload(
+            grant_type="refresh_token",
+            oauth_settings=oauth_settings,
+            refresh_token=refresh_token,
+        ),
+        timeout_seconds=15,
+    )
+    if refresh_response["status"] != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to refresh access token: {refresh_response['text']}",
+        )
+    return refresh_response["json"]
+
+
+def _gmail_scope_list(raw_scope: Any) -> List[str]:
+    if isinstance(raw_scope, str):
+        return [scope for scope in raw_scope.split() if scope.strip()]
+    if isinstance(raw_scope, list):
+        return [str(scope) for scope in raw_scope if str(scope).strip()]
+    return []
+
+
+def _decode_gmail_base64url(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8"))
+        return decoded.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _extract_plaintext_from_gmail_payload(payload: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(payload, dict):
+        return ""
+
+    mime_type = str(payload.get("mimeType") or "").lower()
+    body_data = (payload.get("body") or {}).get("data")
+    parts = payload.get("parts") or []
+
+    if mime_type.startswith("text/plain") and body_data:
+        return _decode_gmail_base64url(body_data)
+
+    for part in parts:
+        part_text = _extract_plaintext_from_gmail_payload(part)
+        if part_text:
+            return part_text
+
+    if body_data:
+        return _decode_gmail_base64url(body_data)
+
+    return ""
+
+
+def _extract_latest_email_body(body_text: Optional[str]) -> str:
+    if not body_text:
+        return ""
+
+    lines = str(body_text).splitlines()
+    latest_lines: List[str] = []
+    reply_chain_markers = [
+        re.compile(r"^\s*>"),
+        re.compile(r"^\s*On\s.+wrote:\s*$", re.IGNORECASE),
+        re.compile(r"^\s*-{2,}\s*Original Message\s*-{2,}\s*$", re.IGNORECASE),
+        re.compile(r"^\s*From:\s", re.IGNORECASE),
+        re.compile(r"^\s*Sent:\s", re.IGNORECASE),
+        re.compile(r"^\s*To:\s", re.IGNORECASE),
+        re.compile(r"^\s*Subject:\s", re.IGNORECASE),
+    ]
+
+    for index, line in enumerate(lines):
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        stripped = line.strip()
+        normalized = stripped.lower()
+        next_normalized = next_line.strip().lower()
+
+        if any(pattern.search(line) for pattern in reply_chain_markers):
+            break
+
+        if normalized.startswith("on ") and (
+            " wrote:" in normalized
+            or next_normalized == "wrote:"
+            or next_normalized.startswith("wrote:")
+            or next_normalized.startswith("wrote ")
+        ):
+            break
+
+        if normalized.startswith("-----forwarded message-----"):
+            break
+
+        if normalized.startswith("from:") and any(
+            marker in "\n".join([normalized, next_normalized])
+            for marker in ["@", "sent:", "subject:", "to:"]
+        ):
+            break
+        latest_lines.append(line)
+
+    cleaned = "\n".join(latest_lines).strip()
+    return cleaned or str(body_text).strip()
+
+
+def _gmail_header_map(payload: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    headers = (payload or {}).get("headers", [])
+    header_map: Dict[str, str] = {}
+    for header in headers:
+        header_name = str(header.get("name", "")).lower()
+        if header_name:
+            header_map[header_name] = header.get("value", "")
+    return header_map
+
+
+def _normalize_reply_subject(subject: str) -> str:
+    safe_subject = re.sub(r"\s+", " ", str(subject or "").strip())
+    if not safe_subject:
+        return "Re:"
+    if safe_subject.lower().startswith("re:"):
+        return safe_subject
+    return f"Re: {safe_subject}"
+
+
+def _clean_header_token(value: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+async def _ensure_valid_gmail_access_token(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    state = await _load_email_provider_state(account_id, aac_user_id)
+    current_access_token = _state_access_token(state)
+    if not state.get("connected") or not current_access_token:
+        raise HTTPException(status_code=400, detail="Gmail provider is not connected")
+
+    expires_at = _parse_iso_utc(state.get("token_expires_at"))
+    should_refresh = not expires_at or expires_at <= (dt.now(timezone.utc) + timedelta(seconds=60))
+
+    if should_refresh:
+        refresh_token = _state_refresh_token(state)
+        if not refresh_token:
+            raise HTTPException(status_code=400, detail="Gmail refresh token missing")
+
+        oauth_settings = _email_oauth_settings()
+        if not oauth_settings["client_id"] or not oauth_settings["client_secret"]:
+            raise HTTPException(status_code=500, detail="Missing Google OAuth client configuration")
+
+        refreshed = await _gmail_refresh_access_token(refresh_token, oauth_settings)
+        refreshed_access_token = refreshed.get("access_token")
+        if not refreshed_access_token:
+            raise HTTPException(status_code=400, detail="Refresh response missing access_token")
+
+        state["token_encrypted"] = _encrypt_email_token(refreshed_access_token)
+        state["token"] = None
+        state["token_expires_at"] = _iso_utc_after_seconds(int(refreshed.get("expires_in", 3600)))
+        state["scope"] = _gmail_scope_list(refreshed.get("scope") or state.get("scope"))
+        await _save_email_provider_state(account_id, aac_user_id, state)
+    elif state.get("token") and not state.get("token_encrypted"):
+        state["token_encrypted"] = _encrypt_email_token(state["token"])
+        state["token"] = None
+        await _save_email_provider_state(account_id, aac_user_id, state)
+
+    return state
+
+
+async def _gmail_get_json(
+    account_id: str,
+    aac_user_id: str,
+    endpoint_url: str,
+    params: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+    access_token = _state_access_token(state)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = await _async_http_request_json(
+        "GET",
+        endpoint_url,
+        headers=headers,
+        params=params or {},
+        timeout_seconds=20,
+    )
+
+    if response["status"] == 401 and _state_refresh_token(state):
+        state["token_expires_at"] = _iso_utc_after_seconds(-1)
+        await _save_email_provider_state(account_id, aac_user_id, state)
+        refreshed_state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+        refreshed_token = _state_access_token(refreshed_state)
+        headers = {"Authorization": f"Bearer {refreshed_token}"}
+        response = await _async_http_request_json(
+            "GET",
+            endpoint_url,
+            headers=headers,
+            params=params or {},
+            timeout_seconds=20,
+        )
+
+    if response["status"] >= 400:
+        raise HTTPException(status_code=400, detail=f"Google API request failed: {response['text']}")
+
+    return response["json"]
+
+
+async def _gmail_post_json(
+    account_id: str,
+    aac_user_id: str,
+    endpoint_url: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+    access_token = _state_access_token(state)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    response = await _async_http_request_json(
+        "POST",
+        endpoint_url,
+        headers=headers,
+        json_body=payload,
+        timeout_seconds=20,
+    )
+
+    if response["status"] == 401 and _state_refresh_token(state):
+        state["token_expires_at"] = _iso_utc_after_seconds(-1)
+        await _save_email_provider_state(account_id, aac_user_id, state)
+        refreshed_state = await _ensure_valid_gmail_access_token(account_id, aac_user_id)
+        refreshed_token = _state_access_token(refreshed_state)
+        headers = {"Authorization": f"Bearer {refreshed_token}"}
+        response = await _async_http_request_json(
+            "POST",
+            endpoint_url,
+            headers=headers,
+            json_body=payload,
+            timeout_seconds=20,
+        )
+
+    if response["status"] >= 400:
+        raise HTTPException(status_code=400, detail=f"Google API request failed: {response['text']}")
+
+    return response["json"]
+
+
+@app.get("/api/email/status")
+async def get_email_status(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    state = await _load_email_provider_state(account_id, aac_user_id)
+    provider_status = {
+        "gmail": {
+            "connected": bool(state.get("connected")),
+            "email_address": state.get("email_address"),
+            "connected_at": state.get("connected_at"),
+            "has_refresh_token": bool(_state_refresh_token(state)),
+            "scope": state.get("scope") or [],
+        }
+    }
+
+    return JSONResponse(content={"provider_status": provider_status})
+
+
+@app.post("/api/email/connect-url")
+async def get_email_connect_url(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    request: Optional[EmailConnectUrlRequest] = Body(default=None),
+):
+    request_payload = request or EmailConnectUrlRequest()
+    if request_payload.provider != EMAIL_PROVIDER_NAME:
+        raise HTTPException(status_code=400, detail="Only Gmail provider is currently supported")
+
+    oauth_settings = _email_oauth_settings()
+    if not oauth_settings["client_id"] or not oauth_settings["client_secret"]:
+        raise HTTPException(status_code=500, detail="Missing Google OAuth client configuration")
+
+    state_payload = {
+        "account_id": current_ids["account_id"],
+        "aac_user_id": current_ids["aac_user_id"],
+        "provider": EMAIL_PROVIDER_NAME,
+        "issued_at": int(time.time()),
+        "nonce": secrets.token_urlsafe(24),
+    }
+    serialized_state = _serialize_email_oauth_state(state_payload)
+
+    auth_query = {
+        "client_id": oauth_settings["client_id"],
+        "redirect_uri": oauth_settings["redirect_uri"],
+        "response_type": "code",
+        "scope": " ".join(GMAIL_OAUTH_SCOPES),
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+        "state": serialized_state,
+    }
+    connect_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(auth_query)}"
+    return JSONResponse(content={"connect_url": connect_url})
+
+
+@app.get("/api/email/oauth/callback")
+async def email_oauth_callback(
+    state: str,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    state_payload = _deserialize_email_oauth_state(state)
+    account_id = state_payload["account_id"]
+    aac_user_id = state_payload["aac_user_id"]
+
+    if error:
+        previous_state = await _load_email_provider_state(account_id, aac_user_id)
+        previous_state["connected"] = False
+        previous_state["last_error"] = error
+        await _save_email_provider_state(account_id, aac_user_id, previous_state)
+        return HTMLResponse(content=EMAIL_CONNECT_CANCELED_HTML, status_code=200)
+
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    oauth_settings = _email_oauth_settings()
+    if not oauth_settings["client_id"] or not oauth_settings["client_secret"]:
+        raise HTTPException(status_code=500, detail="Missing Google OAuth client configuration")
+
+    token_data = await _gmail_exchange_code_for_tokens(code, oauth_settings)
+    access_token = token_data.get("access_token")
+    refresh_token = token_data.get("refresh_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Google OAuth token exchange returned no access_token")
+
+    profile_response = await _async_http_request_json(
+        "GET",
+        "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout_seconds=20,
+    )
+    if profile_response["status"] != 200:
+        previous_state = await _load_email_provider_state(account_id, aac_user_id)
+        previous_state["connected"] = False
+        previous_state["last_error"] = f"Profile fetch failed: {profile_response['text']}"
+        await _save_email_provider_state(account_id, aac_user_id, previous_state)
+        raise HTTPException(status_code=502, detail="Failed to verify Gmail profile after OAuth")
+
+    profile_json = profile_response["json"]
+    email_address = profile_json.get("emailAddress")
+    if not email_address:
+        previous_state = await _load_email_provider_state(account_id, aac_user_id)
+        previous_state["connected"] = False
+        previous_state["last_error"] = "Profile response missing emailAddress"
+        await _save_email_provider_state(account_id, aac_user_id, previous_state)
+        raise HTTPException(status_code=502, detail="Gmail profile missing email address")
+
+    next_state = await _load_email_provider_state(account_id, aac_user_id)
+    next_state.update(
+        {
+            "provider": EMAIL_PROVIDER_NAME,
+            "connected": True,
+            "connected_at": dt.now(timezone.utc).isoformat(),
+            "email_address": email_address,
+            "token_encrypted": _encrypt_email_token(access_token),
+            "refresh_token_encrypted": _encrypt_email_token(refresh_token or _state_refresh_token(next_state)),
+            "token": None,
+            "refresh_token": None,
+            "token_expires_at": _iso_utc_after_seconds(int(token_data.get("expires_in", 3600))),
+            "scope": _gmail_scope_list(token_data.get("scope")),
+            "last_error": None,
+        }
+    )
+    await _save_email_provider_state(account_id, aac_user_id, next_state)
+
+    return HTMLResponse(content=EMAIL_CONNECT_SUCCESS_HTML, status_code=200)
+
+
+@app.get("/api/email/inbox")
+async def get_email_inbox(
+    max_results: int = 20,
+    page_token: Optional[str] = None,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    clamped_max = max(1, min(max_results, 50))
+    state = await _load_email_provider_state(account_id, aac_user_id)
+
+    message_list = await _gmail_get_json(
+        account_id,
+        aac_user_id,
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        params={
+            "maxResults": clamped_max,
+            "labelIds": "INBOX",
+            "q": "in:inbox category:primary -category:promotions -category:social -category:updates -category:forums",
+            **({"pageToken": page_token} if page_token else {}),
+        },
+    )
+
+    messages = []
+    seen_thread_ids: Set[str] = set()
+    message_ids = [item.get("id") for item in message_list.get("messages", []) if item.get("id")]
+    semaphore = asyncio.Semaphore(8)
+
+    async def _fetch_message_metadata(message_id: str) -> Optional[Dict[str, Any]]:
+        async with semaphore:
+            return await _gmail_get_json(
+                account_id,
+                aac_user_id,
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+                params={
+                    "format": "metadata",
+                    "metadataHeaders": ["From", "Subject", "Date"],
+                },
+            )
+
+    metadata_results = await asyncio.gather(*[_fetch_message_metadata(message_id) for message_id in message_ids])
+    for metadata in metadata_results:
+        if not metadata:
+            continue
+
+        thread_id = str(metadata.get("threadId") or "").strip()
+        if thread_id and thread_id in seen_thread_ids:
+            continue
+
+        message_labels = set(metadata.get("labelIds") or [])
+        if message_labels.intersection(GMAIL_INBOX_EXCLUDED_CATEGORIES):
+            continue
+
+        category_labels = message_labels.intersection(GMAIL_INBOX_CATEGORY_LABELS)
+        if category_labels and "CATEGORY_PERSONAL" not in category_labels:
+            continue
+
+        header_map = _gmail_header_map(metadata.get("payload"))
+
+        from_value = header_map.get("from", "")
+        sender_name, sender_email = parseaddr(from_value)
+
+        if thread_id:
+            seen_thread_ids.add(thread_id)
+
+        messages.append(
+            {
+                "id": metadata.get("id"),
+                "thread_id": thread_id,
+                "subject": header_map.get("subject", "(No subject)"),
+                "from": from_value,
+                "sender_name": sender_name or None,
+                "sender_email": sender_email or None,
+                "date": header_map.get("date"),
+                "snippet": metadata.get("snippet", ""),
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "messages": messages,
+            "next_page_token": message_list.get("nextPageToken"),
+            "provider_status": {
+                "connected": bool(state.get("connected")),
+                "email_address": state.get("email_address"),
+                "connected_at": state.get("connected_at"),
+                "has_refresh_token": bool(_state_refresh_token(state)),
+                "scope": state.get("scope") or [],
+            },
+        }
+    )
+
+
+@app.get("/api/email/messages/{message_id}")
+async def get_email_message_detail(
+    message_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    message = await _gmail_get_json(
+        account_id,
+        aac_user_id,
+        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+        params={"format": "full"},
+    )
+
+    payload = message.get("payload") or {}
+    header_map = _gmail_header_map(payload)
+    body_text = _extract_latest_email_body(_extract_plaintext_from_gmail_payload(payload))
+
+    return JSONResponse(
+        content={
+            "message": {
+                "id": message.get("id"),
+                "thread_id": message.get("threadId"),
+                "subject": header_map.get("subject", "(No subject)"),
+                "from": header_map.get("from", ""),
+                "to": header_map.get("to", ""),
+                "date": header_map.get("date"),
+                "message_id_header": header_map.get("message-id", ""),
+                "references": header_map.get("references", ""),
+                "snippet": message.get("snippet", ""),
+                "body_text": body_text,
+            }
+        }
+    )
+
+
+@app.post("/api/compose/from-email/{message_id}")
+async def create_compose_document_from_email(
+    message_id: str,
+    request: ComposeFromEmailRequest = Body(default=ComposeFromEmailRequest()),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        message = await _gmail_get_json(
+            account_id,
+            aac_user_id,
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+            params={"format": "full"},
+        )
+
+        payload = message.get("payload") or {}
+        header_map = _gmail_header_map(payload)
+        body_text = _extract_latest_email_body(_extract_plaintext_from_gmail_payload(payload)).strip()
+
+        from_header = header_map.get("from", "")
+        sender_name, sender_email = parseaddr(from_header)
+        recipient_email = str(sender_email or "").strip()
+        subject = _normalize_reply_subject(header_map.get("subject", ""))
+        in_reply_to = _clean_header_token(header_map.get("message-id", ""))
+        references = _clean_header_token(header_map.get("references", ""))
+        if in_reply_to and (not references or in_reply_to not in references):
+            references = f"{references} {in_reply_to}".strip() if references else in_reply_to
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        doc_id = str(uuid.uuid4())
+
+        draft_body = ""
+        if bool(request.include_body_quote) and body_text:
+            quoted = "\n".join([f"> {line}" for line in body_text.splitlines()])
+            draft_body = f"\n\nOn {header_map.get('date', 'an earlier date')}, {sender_name or recipient_email} wrote:\n{quoted}".strip()
+
+        compose_doc = {
+            "id": doc_id,
+            "document_type": "email",
+            "title": f"Reply: {(header_map.get('subject') or '(No subject)').strip()}",
+            "body": draft_body,
+            "subject": subject,
+            "to": [recipient_email] if recipient_email else [],
+            "cc": [],
+            "bcc": [],
+            "reply_to_message_id": str(message.get("id") or "").strip(),
+            "reply_to_thread_id": str(message.get("threadId") or "").strip(),
+            "in_reply_to": in_reply_to,
+            "references": references,
+            "illustration_url": "",
+            "illustration_status": "not_created",
+            "illustration_prompt": "",
+            "illustration_style": "",
+            "illustration_updated_at": None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(doc_id)
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(compose_doc))
+
+        return JSONResponse(content={
+            "success": True,
+            "document": _normalize_compose_doc_for_response(doc_id, compose_doc),
+        })
+    except HTTPException as http_error:
+        return JSONResponse(content={"success": False, "error": str(http_error.detail)}, status_code=http_error.status_code)
+    except Exception as e:
+        logging.error(f"Error creating compose draft from email {message_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/email/messages/{message_id}/delete")
+async def delete_email_message(
+    message_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    await _gmail_post_json(
+        account_id,
+        aac_user_id,
+        f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/trash",
+        payload={},
+    )
+
+    return JSONResponse(content={"status": "deleted", "id": message_id})
+
+
+@app.get("/api/email/contacts")
+async def get_email_contacts(
+    max_results: int = 50,
+    page_token: Optional[str] = None,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    clamped_max = max(1, min(max_results, 200))
+    state = await _load_email_provider_state(account_id, aac_user_id)
+
+    connections_json = await _gmail_get_json(
+        account_id,
+        aac_user_id,
+        "https://people.googleapis.com/v1/people/me/connections",
+        params={
+            "personFields": "names,emailAddresses",
+            "pageSize": clamped_max,
+            **({"pageToken": page_token} if page_token else {}),
+        },
+    )
+
+    contacts = []
+    seen_emails = set()
+    for person in connections_json.get("connections", []):
+        names = person.get("names") or []
+        display_name = names[0].get("displayName") if names else None
+        for email_obj in person.get("emailAddresses") or []:
+            email_value = str(email_obj.get("value", "")).strip()
+            if not email_value:
+                continue
+            dedupe_key = email_value.lower()
+            if dedupe_key in seen_emails:
+                continue
+            seen_emails.add(dedupe_key)
+            contacts.append(
+                {
+                    "name": display_name,
+                    "email": email_value,
+                }
+            )
+
+    return JSONResponse(
+        content={
+            "contacts": contacts,
+            "next_page_token": connections_json.get("nextPageToken"),
+            "provider_status": {
+                "connected": bool(state.get("connected")),
+                "email_address": state.get("email_address"),
+                "connected_at": state.get("connected_at"),
+                "has_refresh_token": bool(_state_refresh_token(state)),
+                "scope": state.get("scope") or [],
+            },
+        }
+    )
+
+
+@app.post("/api/email/send")
+async def send_email_message(
+    request: EmailSendRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    recipients = [address.strip() for address in (request.to + request.cc + request.bcc) if address and address.strip()]
+    if not recipients:
+        raise HTTPException(status_code=400, detail="At least one recipient is required")
+
+    provider_state = await _load_email_provider_state(account_id, aac_user_id)
+    from_address = provider_state.get("email_address")
+    if not from_address:
+        raise HTTPException(status_code=400, detail="Connected Gmail address is missing")
+
+    message = EmailMessage()
+    message["From"] = from_address
+    message["To"] = ", ".join(request.to) if request.to else "undisclosed-recipients:;"
+    if request.cc:
+        message["Cc"] = ", ".join(request.cc)
+    if request.bcc:
+        message["Bcc"] = ", ".join(request.bcc)
+    message["Subject"] = request.subject or ""
+    clean_in_reply_to = _clean_header_token(request.in_reply_to)
+    clean_references = _clean_header_token(request.references)
+    if clean_in_reply_to:
+        message["In-Reply-To"] = clean_in_reply_to
+    if clean_references:
+        message["References"] = clean_references
+    message.set_content(request.body or "")
+
+    encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+    send_payload: Dict[str, Any] = {"raw": encoded_message}
+    clean_thread_id = _clean_header_token(request.thread_id)
+    if clean_thread_id:
+        send_payload["threadId"] = clean_thread_id
+    send_result = await _gmail_post_json(
+        account_id,
+        aac_user_id,
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        payload=send_payload,
+    )
+
+    return JSONResponse(
+        content={
+            "status": "sent",
+            "id": send_result.get("id"),
+            "thread_id": send_result.get("threadId"),
+            "label_ids": send_result.get("labelIds", []),
+        }
+    )
+
+
+@app.post("/api/email/disconnect")
+async def disconnect_email_provider(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    state = await _load_email_provider_state(account_id, aac_user_id)
+    refresh_token = _state_refresh_token(state)
+    access_token = _state_access_token(state)
+    token_for_revoke = refresh_token or access_token
+
+    if token_for_revoke:
+        try:
+            await _async_http_request_json(
+                "POST",
+                "https://oauth2.googleapis.com/revoke",
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                data={"token": token_for_revoke},
+                timeout_seconds=15,
+            )
+        except Exception:
+            logging.warning("Failed to revoke Google token during disconnect", exc_info=True)
+
+    await _save_email_provider_state(
+        account_id,
+        aac_user_id,
+        {
+            **copy.deepcopy(DEFAULT_EMAIL_PROVIDER_STATE),
+            "provider": EMAIL_PROVIDER_NAME,
+            "connected": False,
+            "last_error": None,
+        },
+    )
+
+    return JSONResponse(content={"status": "disconnected", "provider": EMAIL_PROVIDER_NAME})
+
+
+# ===== BRAVO EMAIL PHASE 2 END (WEB APP REVIEW BLOCK) =====
+
+
+@app.get("/api/compose/documents")
+async def list_compose_documents(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        docs = await load_firestore_collection(account_id, aac_user_id, "compose_documents")
+        docs_sorted = sorted(
+            docs,
+            key=lambda item: item.get("updated_at") or item.get("created_at") or "",
+            reverse=True
+        )
+
+        response_docs: List[Dict[str, Any]] = []
+        for compose_doc in docs_sorted:
+            doc_id = str(compose_doc.get("id") or "").strip()
+            if not doc_id:
+                continue
+            normalized = _normalize_compose_doc_for_response(doc_id, compose_doc)
+            body_text = normalized.get("body", "")
+            normalized["preview"] = body_text[:180]
+            response_docs.append(normalized)
+
+        return JSONResponse(content={"success": True, "documents": response_docs})
+    except Exception as e:
+        logging.error(f"Error listing compose documents: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/compose/documents")
+async def create_compose_document(
+    request: ComposeDocumentCreateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        now_iso = dt.now(timezone.utc).isoformat()
+        doc_id = str(uuid.uuid4())
+        safe_type = request.document_type if request.document_type in {"story", "email"} else "story"
+        safe_title = re.sub(r"\s+", " ", str(request.title or "").strip())
+        safe_subject = re.sub(r"\s+", " ", str(request.subject or "").strip())
+
+        compose_doc = {
+            "id": doc_id,
+            "document_type": safe_type,
+            "title": safe_title or ("Untitled Email" if safe_type == "email" else "Untitled Composition"),
+            "body": str(request.body or ""),
+            "subject": safe_subject,
+            "to": request.to or [],
+            "cc": request.cc or [],
+            "bcc": request.bcc or [],
+            "reply_to_message_id": _clean_header_token(request.reply_to_message_id),
+            "reply_to_thread_id": _clean_header_token(request.reply_to_thread_id),
+            "in_reply_to": _clean_header_token(request.in_reply_to),
+            "references": _clean_header_token(request.references),
+            "illustration_url": "",
+            "illustration_status": "not_created",
+            "illustration_prompt": "",
+            "illustration_style": "",
+            "illustration_updated_at": None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(doc_id)
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(compose_doc))
+        return JSONResponse(content={"success": True, "document": _normalize_compose_doc_for_response(doc_id, compose_doc)})
+    except Exception as e:
+        logging.error(f"Error creating compose document: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/compose/documents/{document_id}")
+async def get_compose_document(
+    document_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(document_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Document not found"}, status_code=404)
+        compose_doc = doc.to_dict() or {}
+        return JSONResponse(content={"success": True, "document": _normalize_compose_doc_for_response(doc.id, compose_doc)})
+    except Exception as e:
+        logging.error(f"Error loading compose document {document_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/compose/documents/{document_id}")
+async def update_compose_document(
+    document_id: str,
+    request: ComposeDocumentUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(document_id)
+        existing_doc = await asyncio.to_thread(doc_ref.get)
+        if not existing_doc.exists:
+            return JSONResponse(content={"success": False, "error": "Document not found"}, status_code=404)
+
+        update_data: Dict[str, Any] = {"updated_at": dt.now(timezone.utc).isoformat()}
+
+        if request.document_type is not None:
+            update_data["document_type"] = request.document_type
+        if request.title is not None:
+            normalized_title = re.sub(r"\s+", " ", str(request.title).strip())
+            update_data["title"] = normalized_title
+        if request.body is not None:
+            update_data["body"] = str(request.body)
+        if request.subject is not None:
+            update_data["subject"] = re.sub(r"\s+", " ", str(request.subject).strip())
+        if request.to is not None:
+            update_data["to"] = request.to
+        if request.cc is not None:
+            update_data["cc"] = request.cc
+        if request.bcc is not None:
+            update_data["bcc"] = request.bcc
+        if request.reply_to_message_id is not None:
+            update_data["reply_to_message_id"] = _clean_header_token(request.reply_to_message_id)
+        if request.reply_to_thread_id is not None:
+            update_data["reply_to_thread_id"] = _clean_header_token(request.reply_to_thread_id)
+        if request.in_reply_to is not None:
+            update_data["in_reply_to"] = _clean_header_token(request.in_reply_to)
+        if request.references is not None:
+            update_data["references"] = _clean_header_token(request.references)
+
+        if len(update_data.keys()) == 1:
+            return JSONResponse(content={"success": False, "error": "No fields provided"}, status_code=400)
+
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_data), merge=True)
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_payload = updated_doc.to_dict() or {}
+        return JSONResponse(content={"success": True, "document": _normalize_compose_doc_for_response(updated_doc.id, updated_payload)})
+    except Exception as e:
+        logging.error(f"Error updating compose document {document_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/compose/documents/{document_id}")
+async def delete_compose_document(
+    document_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(document_id)
+        existing_doc = await asyncio.to_thread(doc_ref.get)
+        if not existing_doc.exists:
+            return JSONResponse(content={"success": False, "error": "Document not found"}, status_code=404)
+        await asyncio.to_thread(doc_ref.delete)
+        return JSONResponse(content={"success": True, "status": "deleted", "id": document_id})
+    except Exception as e:
+        logging.error(f"Error deleting compose document {document_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/compose/documents/{document_id}/illustrate")
+async def generate_compose_document_illustration(
+    document_id: str,
+    request: ComposeIllustrationRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(document_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Document not found"}, status_code=404)
+
+        compose_doc = doc.to_dict() or {}
+        existing_url = str(compose_doc.get("illustration_url", "")).strip()
+        if existing_url and not bool(request.regenerate):
+            return JSONResponse(content={
+                "success": True,
+                "document": _normalize_compose_doc_for_response(doc.id, compose_doc),
+                "reused_existing": True
+            })
+
+        title = re.sub(r"\s+", " ", str(compose_doc.get("title", "Untitled Composition")).strip()) or "Untitled Composition"
+        body = str(compose_doc.get("body", "")).strip()
+        if not body:
+            return JSONResponse(content={"success": False, "error": "Composition body is empty"}, status_code=400)
+
+        safe_style = re.sub(r"\s+", " ", str(request.style or "storybook illustration").strip()) or "storybook illustration"
+        excerpt = " ".join(body.split())[:550]
+        illustration_prompt = (
+            f"{safe_style}, create a single clean illustration for a composition titled '{title}'. "
+            f"Represent the meaning with clear, expressive visual storytelling. "
+            f"No text, words, letters, or logos in the image. "
+            f"Composition summary: {excerpt}"
+        )
+
+        image_bytes = await generate_story_illustration_image(illustration_prompt)
+        safe_doc_id = re.sub(r"[^\w\-]", "_", document_id)
+        filename = f"compose_illustration_{safe_doc_id}_{uuid.uuid4().hex[:8]}.png"
+        image_url = await upload_image_to_storage(image_bytes, filename)
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        update_payload = {
+            "illustration_url": image_url,
+            "illustration_status": "ready",
+            "illustration_prompt": illustration_prompt,
+            "illustration_style": safe_style,
+            "illustration_updated_at": now_iso,
+            "updated_at": now_iso,
+        }
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_payload), merge=True)
+
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_payload = updated_doc.to_dict() or {}
+        return JSONResponse(content={"success": True, "document": _normalize_compose_doc_for_response(updated_doc.id, updated_payload)})
+    except HTTPException as http_error:
+        return JSONResponse(content={"success": False, "error": str(http_error.detail)}, status_code=http_error.status_code)
+    except Exception as e:
+        logging.error(f"Error generating compose illustration for {document_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/compose/documents/{document_id}/send-email")
+async def send_compose_document_email(
+    document_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _compose_documents_collection_ref(account_id, aac_user_id).document(document_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Document not found"}, status_code=404)
+
+        compose_doc = doc.to_dict() or {}
+        to_list = [str(item).strip() for item in (compose_doc.get("to") or []) if str(item).strip()]
+        cc_list = [str(item).strip() for item in (compose_doc.get("cc") or []) if str(item).strip()]
+        bcc_list = [str(item).strip() for item in (compose_doc.get("bcc") or []) if str(item).strip()]
+        subject = re.sub(r"\s+", " ", str(compose_doc.get("subject", "")).strip())
+        body = str(compose_doc.get("body", ""))
+        reply_to_thread_id = _clean_header_token(compose_doc.get("reply_to_thread_id", ""))
+        in_reply_to = _clean_header_token(compose_doc.get("in_reply_to", ""))
+        references = _clean_header_token(compose_doc.get("references", ""))
+
+        recipients = to_list + cc_list + bcc_list
+        if not recipients:
+            return JSONResponse(content={"success": False, "error": "At least one recipient is required"}, status_code=400)
+
+        provider_state = await _load_email_provider_state(account_id, aac_user_id)
+        from_address = provider_state.get("email_address")
+        if not from_address:
+            return JSONResponse(content={"success": False, "error": "Connected Gmail address is missing"}, status_code=400)
+
+        message = EmailMessage()
+        message["From"] = from_address
+        message["To"] = ", ".join(to_list) if to_list else "undisclosed-recipients:;"
+        if cc_list:
+            message["Cc"] = ", ".join(cc_list)
+        if bcc_list:
+            message["Bcc"] = ", ".join(bcc_list)
+        message["Subject"] = subject
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+        if references:
+            message["References"] = references
+        message.set_content(body)
+
+        encoded_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+        send_payload: Dict[str, Any] = {"raw": encoded_message}
+        if reply_to_thread_id:
+            send_payload["threadId"] = reply_to_thread_id
+        send_result = await _gmail_post_json(
+            account_id,
+            aac_user_id,
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+            payload=send_payload,
+        )
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore({"updated_at": now_iso}), merge=True)
+
+        return JSONResponse(content={
+            "success": True,
+            "status": "sent",
+            "id": send_result.get("id"),
+            "thread_id": send_result.get("threadId"),
+            "label_ids": send_result.get("labelIds", []),
+        })
+    except HTTPException as http_error:
+        return JSONResponse(content={"success": False, "error": str(http_error.detail)}, status_code=http_error.status_code)
+    except Exception as e:
+        logging.error(f"Error sending compose email for {document_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/compose/generate-title")
+async def generate_compose_title(
+    request: ComposeContentRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        body_text = re.sub(r"\s+", " ", str(request.body or "").strip())
+        if not body_text:
+            return JSONResponse(content={"success": False, "error": "Composition body is empty"}, status_code=400)
+
+        excerpt = body_text[:800]
+        llm_query = f"""Generate a concise title (2 to 6 words) for this AAC composition.
+
+Composition:
+{excerpt}
+
+Rules:
+- Return only the title text.
+- No punctuation at the end.
+- Keep wording clear and natural.
+"""
+
+        generated = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        generated = _strip_markdown_code_fences(str(generated or "")).strip()
+        generated = re.sub(r"\s+", " ", generated).strip('"\'` ')
+
+        if not generated:
+            generated = "Untitled Letter"
+
+        words = generated.split()
+        if len(words) > 6:
+            generated = " ".join(words[:6])
+
+        return JSONResponse(content={"success": True, "title": generated})
+    except Exception as e:
+        logging.error(f"Error generating compose title: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/compose/ai-edit")
+async def ai_edit_compose_content(
+    request: ComposeContentRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        body_text = str(request.body or "").strip()
+        if not body_text:
+            return JSONResponse(content={"success": False, "error": "Composition body is empty"}, status_code=400)
+
+        llm_query = f"""You are editing an AAC-composed letter.
+
+Original composition:
+{body_text}
+
+Tasks:
+- Clean up grammar and punctuation.
+- Resolve incomplete thoughts where possible while preserving meaning.
+- Keep the tone and message intact.
+- Return only the revised composition text.
+"""
+
+        edited = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        edited = _strip_markdown_code_fences(str(edited or "")).strip()
+        edited = re.sub(r"\s+\n", "\n", edited).strip()
+
+        if not edited:
+            edited = body_text
+
+        return JSONResponse(content={"success": True, "edited_body": edited})
+    except Exception as e:
+        logging.error(f"Error AI editing composition: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
 # --- Mood Selection Endpoint ---
@@ -9949,6 +15419,8 @@ class GameQuestionRequest(BaseModel):
     category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
     asked_questions: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Previously asked questions and answers")
     question_count: Optional[int] = Field(default=0, description="Number of questions asked so far")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Questions to exclude from generation")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Questions to exclude from generation")
 
 class GameGuessRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
@@ -9956,16 +15428,103 @@ class GameGuessRequest(BaseModel):
     asked_questions: List[Dict[str, str]] = Field(..., description="All asked questions and answers")
     guess_count: Optional[int] = Field(default=0, description="Number of guesses made so far")
     previous_guesses: Optional[List[str]] = Field(default_factory=list, description="Previously guessed items that were wrong")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Guesses to exclude from generation")
 
 class GameOptionsRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
     category: str = Field(..., description="Category: 'person', 'place', or 'thing'")
     request_different: Optional[bool] = Field(default=False, description="Request different options from previous")
+    exclude_options: Optional[List[str]] = Field(default=None, description="Options to exclude from generation")
 
 class GameAnswerRequest(BaseModel):
     game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
     selected_item: str = Field(..., description="The person, place, or thing selected by user")
     player_question: str = Field(..., description="The yes/no question asked by the player")
+
+
+class StoryBuilderOptionsRequest(BaseModel):
+    partner_question: str = Field(..., description="Partner's spoken question for story building")
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript so far")
+    exclude_existing_options: Optional[List[str]] = Field(default_factory=list, description="Previously shown Story Builder options to exclude from regeneration")
+
+
+class StoryBuilderTitleRequest(BaseModel):
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript")
+
+
+class StoryBuilderFinalizeRequest(BaseModel):
+    title: str = Field(..., description="Selected story title")
+    transcript: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="Story Q&A transcript")
+
+
+class StoryBuilderUpdateRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Updated story title")
+    story_text: Optional[str] = Field(default=None, description="Updated story text")
+    transcript: Optional[List[Dict[str, str]]] = Field(default=None, description="Updated story transcript")
+
+
+class StoryBuilderIllustrationRequest(BaseModel):
+    style: Optional[str] = Field(default="storybook illustration", description="Visual style for generated illustration")
+    regenerate: Optional[bool] = Field(default=False, description="Whether to force regeneration if an illustration already exists")
+
+
+class StoryBuilderExportAudioRequest(BaseModel):
+    title: Optional[str] = Field(default=None, description="Optional story title override for filename")
+    story_text: Optional[str] = Field(default=None, description="Optional story text override (supports unsaved edits)")
+
+
+# --- Guess Who Game Models ---
+class GuessWhoCategoriesRequest(BaseModel):
+    pass  # No parameters needed, retrieves default + user custom categories
+
+class GuessWhoGeneratePeopleRequest(BaseModel):
+    category: str = Field(..., description="Category name (e.g., 'Animals', 'Sports', 'History')")
+    previous_people: Optional[List[str]] = Field(default_factory=list, description="Previously generated people to exclude")
+
+class GuessWhoGenerateCluesRequest(BaseModel):
+    category: str = Field(..., description="Category name")
+    selected_person: str = Field(..., description="The person/character selected in the game")
+    previous_clues: Optional[List[str]] = Field(default_factory=list, description="Previously used clues to exclude")
+
+class GuessWhoGenerateGuessesRequest(BaseModel):
+    category: str = Field(..., description="Category name")
+    clues: List[str] = Field(..., description="The 3 clues that Player 2 gave about the mystery person")
+    previous_guesses: Optional[List[str]] = Field(default_factory=list, description="Previously guessed people to exclude")
+
+
+# --- Jokes Database Models ---
+class JokeQueryRequest(BaseModel):
+    location: Optional[str] = Field(None, description="Location tag filter (e.g., 'home', 'beach')")
+    time_period: Optional[str] = Field(None, description="Time tag filter (e.g., 'winter', 'holiday')")
+    limit: int = Field(default=10, description="Number of jokes to return")
+
+class AddJokeRequest(BaseModel):
+    text: str = Field(..., description="The joke text")
+    tags: Optional[List[str]] = Field(None, description="Manual tags (optional; auto-tagged otherwise)")
+    auto_tag: bool = Field(default=True, description="Use LLM to auto-tag")
+
+class UpdateJokeRequest(BaseModel):
+    text: Optional[str] = Field(None, description="Updated joke text")
+    tags: Optional[List[str]] = Field(None, description="Updated tags")
+    enabled: Optional[bool] = Field(None, description="Enable/disable joke")
+    summary: Optional[str] = Field(None, description="Updated joke summary (5 words or less)")
+
+class ImportJokesRequest(BaseModel):
+    csv_content: str = Field(..., description="CSV content: one joke per line or 'joke text,tag1,tag2'")
+
+def _coerce_question_summary(question: str, summary: Optional[str]) -> str:
+    if summary:
+        summary_text = re.sub(r"\s+", " ", summary.strip())
+    else:
+        summary_text = ""
+
+    if not summary_text:
+        summary_text = re.sub(r"[?]+$", "", question.strip())
+
+    words = [word for word in summary_text.split() if word]
+    if len(words) <= 5:
+        return " ".join(words)
+    return " ".join(words[:5])
 
 @app.post("/api/games/questions")
 async def generate_game_questions(
@@ -9989,6 +15548,12 @@ async def generate_game_questions(
             for qa in request.asked_questions:
                 qa_pairs.append(f"Q: {qa.get('question', '')} A: {qa.get('answer', '')}")
             previous_qa_context = f"\n\nPreviously asked questions and answers:\n" + "\n".join(qa_pairs)
+        
+        # Build exclusion instruction for current options
+        exclusion_instruction = ""
+        if request.exclude_options and len(request.exclude_options) > 0:
+            excluded_list = ", ".join(f'"{opt}"' for opt in request.exclude_options)
+            exclusion_instruction = f"\n\nDo NOT include any of these questions: {excluded_list}. Generate completely different questions."
         
         # Determine if this is the initial round (no previous questions) or we need category-determining questions
         is_initial_round = not request.asked_questions or len(request.asked_questions) == 0
@@ -10027,7 +15592,7 @@ Then include broader questions that work across categories:
 - Is it something you can eat?
 - Is it something you use every day?
 
-{previous_qa_context}
+{previous_qa_context}{exclusion_instruction}
 
 The questions should:
 1. Be simple, clear yes/no questions
@@ -10037,11 +15602,15 @@ The questions should:
 5. Avoid repeating information from previous questions
 6. Progress logically from general to more specific
 
-Return your response as a simple JSON array of strings. Each question should be a complete sentence ending with a question mark. Example format:
+Return your response as a JSON array of objects with two fields:
+- "text": the full question, a complete sentence ending with a question mark
+- "summary": a short label, 5 words or fewer
+
+Example format:
 [
-  "Is it a person?",
-  "Is it a place?",
-  "Is it a thing?"
+    {{"text": "Is it a person?", "summary": "Person?"}},
+    {{"text": "Is it a place?", "summary": "Place?"}},
+    {{"text": "Is it a thing?", "summary": "Thing?"}}
 ]
 
 Make them varied in approach and difficulty."""
@@ -10061,7 +15630,7 @@ Make them varied in approach and difficulty."""
 
 IMPORTANT: Use the previous answers as ESTABLISHED FACTS about the target {request.category}. Build upon what we already know to ask more specific, targeted questions that will help narrow down the exact answer.
 
-{previous_qa_context}
+{previous_qa_context}{exclusion_instruction}
 
 STRATEGIC LOGIC RULES:
 - If something is NOT found indoors, don't ask if it's found outdoors (it must be)
@@ -10088,20 +15657,23 @@ For example, if we know "It is a person" and "It is NOT alive", the next questio
 
 NOT: "How old is this person?" (they're not alive)
 
-Return your response as a simple JSON array of strings. Each question should be a complete sentence ending with a question mark. Example format:
+Return your response as a JSON array of objects with two fields:
+- "text": the full question, a complete sentence ending with a question mark
+- "summary": a short label, 5 words or fewer
+
+Example format:
 [
-  "Is it a man?",
-  "Is this person famous?",
-  "Is this person still alive?"
+    {{"text": "Is it a man?", "summary": "Man?"}},
+    {{"text": "Is this person famous?", "summary": "Famous?"}},
+    {{"text": "Is this person still alive?", "summary": "Still alive?"}}
 ]
 
 Make them build strategically on the established facts using logical deduction."""
 
-        # Generate response using the same pattern as /llm endpoint
+        # Generate response using direct LLM call (NOT using AAC system prompt wrapper)
+        # This avoids conflicts with the AAC response format requirements for game requests
         try:
-            full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-            logging.info(f"Games questions prompt built successfully, length: {len(full_prompt)}")
-            response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+            response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
             logging.info(f"Games questions LLM response received, length: {len(response_text)}")
             
             # DEBUG: Log the LLM response
@@ -10112,6 +15684,7 @@ Make them build strategically on the established facts using logical deduction."
         
         # Parse questions from response
         questions = []
+        question_summaries = {}
         
         # First try to parse as JSON in case LLM returned structured data
         try:
@@ -10139,11 +15712,40 @@ Make them build strategically on the established facts using logical deduction."
             
             parsed_json = json.loads(json_text)
             if isinstance(parsed_json, list):
-                questions = [q for q in parsed_json if isinstance(q, str) and q.endswith('?')]
-                logging.info(f"Successfully parsed {len(questions)} questions from JSON format")
+                if parsed_json and isinstance(parsed_json[0], dict):
+                    for item in parsed_json:
+                        if not isinstance(item, dict):
+                            continue
+                        question_text = item.get("text") or item.get("question") or ""
+                        question_text = question_text.strip()
+                        if question_text and not question_text.endswith("?"):
+                            question_text = f"{question_text}?"
+                        if question_text:
+                            summary_text = item.get("summary") or item.get("label") or ""
+                            questions.append(question_text)
+                            question_summaries[question_text] = summary_text
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON object list")
+                else:
+                    questions = [q for q in parsed_json if isinstance(q, str) and q.endswith('?')]
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON format")
             elif isinstance(parsed_json, dict) and 'questions' in parsed_json:
-                questions = [q for q in parsed_json['questions'] if isinstance(q, str) and q.endswith('?')]
-                logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
+                raw_questions = parsed_json['questions']
+                if raw_questions and isinstance(raw_questions[0], dict):
+                    for item in raw_questions:
+                        if not isinstance(item, dict):
+                            continue
+                        question_text = item.get("text") or item.get("question") or ""
+                        question_text = question_text.strip()
+                        if question_text and not question_text.endswith("?"):
+                            question_text = f"{question_text}?"
+                        if question_text:
+                            summary_text = item.get("summary") or item.get("label") or ""
+                            questions.append(question_text)
+                            question_summaries[question_text] = summary_text
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
+                else:
+                    questions = [q for q in raw_questions if isinstance(q, str) and q.endswith('?')]
+                    logging.info(f"Successfully parsed {len(questions)} questions from JSON object format")
         except (json.JSONDecodeError, TypeError) as e:
             logging.info(f"JSON parsing failed: {e}, trying text parsing")
         
@@ -10189,9 +15791,15 @@ Make them build strategically on the established facts using logical deduction."
                     "Is it made of metal?"
                 ][:llm_options]
         
+        question_options = []
+        for question in questions[:llm_options]:
+            summary = _coerce_question_summary(question, question_summaries.get(question))
+            question_options.append({"text": question, "summary": summary})
+
         return JSONResponse(content={
             "success": True,
-            "questions": questions[:llm_options],
+            "questions": question_options,
+            "question_texts": [item["text"] for item in question_options],
             "question_count": request.question_count
         })
         
@@ -10227,6 +15835,11 @@ async def generate_game_guesses(
             exclusion_list = ", ".join(f'"{guess}"' for guess in request.previous_guesses)
             exclusion_context = f"\n\nIMPORTANT: Do NOT include these previously guessed (wrong) options: {exclusion_list}\nThese have already been tried and were incorrect."
         
+        # Add context for exclude_options (currently displayed guesses to exclude)
+        if request.exclude_options and len(request.exclude_options) > 0:
+            excluded_list = ", ".join(f'"{guess}"' for guess in request.exclude_options)
+            exclusion_context += f"\n\nAlso, do NOT include any of these currently displayed options: {excluded_list}. Generate completely different guesses."
+        
         llm_query = f"""Based on the following 20 Questions game Q&A session, generate exactly {llm_options} specific {request.category} guesses that match ALL the given answers.
 
 Question and Answer History:
@@ -10254,9 +15867,9 @@ Return your response as a simple JSON array of strings. Each guess should be jus
 
 Do NOT use objects with "option" or "summary" fields. Just return a simple array of {request.category} names."""
 
-        # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        # For game requests, use direct LLM call without AAC system prompts
+        # This avoids conflicts with the AAC response format requirements
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
         
         logging.info(f"Games guesses LLM response: {response_text[:500]}...")
         
@@ -10363,6 +15976,12 @@ async def generate_game_options(
         if request.request_different:
             variety_instruction = " Generate completely different options from what might have been shown before. Be creative and varied."
         
+        # Build exclusion instruction if options to exclude are provided
+        exclusion_instruction = ""
+        if request.exclude_options and len(request.exclude_options) > 0:
+            excluded_list = ", ".join(f'"{opt}"' for opt in request.exclude_options)
+            exclusion_instruction = f"\n\nDo NOT include any of these options: {excluded_list}. Generate completely different options."
+        
         category_descriptions = {
             "person": "famous people, historical figures, fictional characters, or well-known individuals",
             "place": "locations, landmarks, cities, buildings, or geographical features", 
@@ -10380,7 +15999,7 @@ Focus on {category_desc} that are:
 4. Specific (not generic categories)
 5. Fun and engaging for games
 
-{variety_instruction}
+{variety_instruction}{exclusion_instruction}
 
 Format as just the name/title, one per line. Examples:
 - Person: "Albert Einstein", "Wonder Woman", "Michael Jordan"
@@ -10389,11 +16008,9 @@ Format as just the name/title, one per line. Examples:
 
 Provide exactly {llm_options} options:"""
 
-        # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
-        
-        # Parse options from response (handle JSON or plain text)
+        # Generate response using direct LLM call (NOT using AAC system prompt wrapper)
+        # This avoids conflicts with the AAC response format requirements for game requests
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
         options = []
         response_text = response_text.strip()
         
@@ -10485,9 +16102,9 @@ Be accurate and consistent. If the question is ambiguous, answer based on the mo
 
 Answer:"""
 
-        # Generate response using the same pattern as /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(account_id, aac_user_id, llm_query)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, account_id, aac_user_id)
+        # Generate response using direct LLM call (NOT using AAC system prompt wrapper)
+        # This avoids conflicts with the AAC response format requirements for game requests
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
         
         # Extract yes/no answer
         answer = response_text.strip().lower()
@@ -10511,12 +16128,1453 @@ Answer:"""
         return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
 
+class GameResponseOptionsRequest(BaseModel):
+    game_type: str = Field(..., description="Type of game (e.g., '20_questions')")
+    response_type: str = Field(..., description="Type of response: 'question_response', 'guess_response', 'player1_win', 'player2_win'")
+    category: Optional[str] = Field(None, description="Category of the selected item")
+    selected_item: Optional[str] = Field(None, description="The selected person, place, or thing")
+    player_question_or_guess: Optional[str] = Field(None, description="The question asked or guess made")
+    questions_remaining: Optional[int] = Field(None, description="Number of questions remaining")
+    guesses_remaining: Optional[int] = Field(None, description="Number of guesses remaining")
+    questions_asked: Optional[int] = Field(None, description="Total questions asked so far")
+    guesses_made: Optional[int] = Field(None, description="Total guesses made so far")
+
+
+@app.post("/api/games/response-options")
+async def generate_response_options(
+    request: GameResponseOptionsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate fun, conversational response options for Player 1 in 20 Questions game
+    
+    Response types:
+    - question_response: Mixed yes/no response options for Player 1 to answer a question
+    - guess_response: Mixed correct/incorrect response options for Player 1 to respond to a guess
+    - player1_win: Player 1 selected item was guessed
+    - player2_win: Player 2 ran out of guesses
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 5)
+        
+        # Ensure we have at least 5-7 response options
+        num_options = max(5, min(llm_options, 7))  # 5-7 response options
+
+        # Decide the answer type first so all options are consistent
+        target_answer_type = None
+        if request.response_type == 'question_response':
+            target_answer_type = await decide_question_answer_type(
+                request.player_question_or_guess,
+                request.selected_item,
+                request.category,
+                account_id,
+                aac_user_id
+            )
+        elif request.response_type == 'guess_response':
+            target_answer_type = decide_guess_answer_type(
+                request.player_question_or_guess,
+                request.selected_item
+            )
+            if not target_answer_type:
+                target_answer_type = await decide_guess_answer_type_with_llm(
+                    request.player_question_or_guess,
+                    request.selected_item,
+                    account_id,
+                    aac_user_id
+                )
+        
+        # Build context message based on response type
+        context_message = ""
+        if request.response_type == 'question_response':
+            context_message = f"""Player 2 asked you a yes/no question: "{request.player_question_or_guess}"
+
+Your selected {request.category} is: "{request.selected_item}"
+
+You must respond with ONLY '{target_answer_type.upper()}' to answer their question."""
+        elif request.response_type == 'guess_response':
+            context_message = f"""Player 2 just made a guess: "{request.player_question_or_guess}"
+
+Your selected item is: "{request.selected_item}"
+
+You must respond with ONLY '{target_answer_type.upper()}' to answer their guess."""
+        elif request.response_type == 'player1_win':
+            context_message = f"Congratulations! Player 2 successfully guessed your selected item!"
+            if request.selected_item:
+                context_message += f"\nYour item: {request.selected_item}"
+            context_message += f"\nThey used {request.guesses_made} out of {request.guesses_made + request.guesses_remaining} guesses"
+        elif request.response_type == 'player2_win':
+            context_message = f"Player 2 ran out of guesses and did not figure out your item."
+            if request.selected_item:
+                context_message += f"\nYour item was: {request.selected_item}"
+        
+        llm_query = f"""You are helping a person using an AAC (Augmentative and Alternative Communication) device play 20 Questions.
+
+{context_message}
+
+Generate exactly {num_options} FUN and CONVERSATIONAL response options for them to choose from. These should be natural, engaging responses that make the game more interactive and entertaining.
+
+CRITICAL: All responses must communicate ONLY "{target_answer_type}". Do NOT include the opposite type.
+
+Guidelines for response options:
+1. Make them conversational and fun - avoid robotic responses
+2. Vary the tone within each type - mix playful, witty, encouraging, and surprised responses
+3. Use natural language a person would actually say
+4. Keep each response SHORT (1-5 words preferred)
+5. Keep all options consistent with the same answer type
+6. Make it obvious which type they belong to through word choice
+
+Examples for question responses:
+- YES type: "You got it!", "That's right!", "Exactly!", "Yes!", "Well done!", "Correct!"
+- NO type: "Not quite", "You're close", "Wrong!", "Nope", "Not that one", "Incorrect"
+
+Examples for guess responses:
+- CORRECT type: "You got it!", "Nice guess!", "That's it!", "Exactly right!", "Correct!", "Nailed it!"
+- INCORRECT type: "Not quite", "Good try!", "Keep guessing!", "That's not it", "Try again!", "Nope"
+
+IMPORTANT FORMATTING: Return your response as a simple JSON array of objects. Each object MUST have:
+- "text": the response option (string)  
+- "answer_type": one of ["yes", "no"] for questions, or ["correct", "incorrect"] for guesses
+
+Example format for questions (must have exactly {num_options} items, all the same type):
+[
+    {{"text": "You got it!", "answer_type": "yes"}},
+    {{"text": "That's right!", "answer_type": "yes"}},
+    {{"text": "Exactly!", "answer_type": "yes"}},
+    {{"text": "Well done!", "answer_type": "yes"}},
+    {{"text": "Correct!", "answer_type": "yes"}}
+]
+
+Return ONLY the JSON array, no other text. Make sure to include the answer_type for each option."""
+
+        # Generate response using direct LLM call
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        
+        # Parse JSON response
+        try:
+            response_text = response_text.strip()
+            if response_text.startswith('['):
+                options = json.loads(response_text)
+            else:
+                # If not a JSON array, try to find JSON in the response
+                start_idx = response_text.find('[')
+                end_idx = response_text.rfind(']') + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = response_text[start_idx:end_idx]
+                    options = json.loads(json_str)
+                else:
+                    # Fallback to predefined options
+                    options = generate_default_response_options_with_types(request.response_type, num_options)
+        except (json.JSONDecodeError, ValueError) as e:
+            logging.warning(f"Failed to parse response options JSON: {e}. Using defaults.")
+            options = generate_default_response_options_with_types(request.response_type, num_options)
+        
+        # Validate options format and ensure they match target_answer_type
+        validated_options = []
+        for opt in options:
+            if isinstance(opt, dict) and 'text' in opt and 'answer_type' in opt:
+                if target_answer_type and opt['answer_type'] != target_answer_type:
+                    continue
+                validated_options.append(opt)
+            elif isinstance(opt, str):
+                # If just a string, assume target type
+                if target_answer_type:
+                    validated_options.append({"text": opt, "answer_type": target_answer_type})
+        
+        if not validated_options:
+            validated_options = generate_default_response_options_with_types(
+                request.response_type,
+                num_options,
+                target_answer_type=target_answer_type
+            )
+        
+        # Trim to requested number
+        validated_options = validated_options[:num_options]
+        
+        return JSONResponse(content={
+            "success": True,
+            "response_options": validated_options,
+            "response_type": request.response_type,
+            "answer_type": target_answer_type
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating response options: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+def generate_default_response_options_with_types(
+    response_type: str,
+    num_options: int = 5,
+    target_answer_type: Optional[str] = None
+) -> List[Dict[str, str]]:
+    """Fallback function to generate default response options with answer types"""
+    defaults = {
+        'question_response': [
+            {"text": "You got it!", "answer_type": "yes"},
+            {"text": "That's right!", "answer_type": "yes"},
+            {"text": "Exactly!", "answer_type": "yes"},
+            {"text": "Well done!", "answer_type": "yes"},
+            {"text": "Not quite", "answer_type": "no"},
+            {"text": "You're close", "answer_type": "no"},
+            {"text": "Nope, try again", "answer_type": "no"}
+        ][:num_options],
+        'guess_response': [
+            {"text": "You got it!", "answer_type": "correct"},
+            {"text": "That's it!", "answer_type": "correct"},
+            {"text": "You're brilliant!", "answer_type": "correct"},
+            {"text": "Wow, nice guess!", "answer_type": "correct"},
+            {"text": "Not quite", "answer_type": "incorrect"},
+            {"text": "Good try!", "answer_type": "incorrect"},
+            {"text": "Keep guessing!", "answer_type": "incorrect"}
+        ][:num_options],
+        'player1_win': [
+            {"text": "Well done!", "answer_type": "correct"},
+            {"text": "You solved it!", "answer_type": "correct"},
+            {"text": "Fantastic!", "answer_type": "correct"},
+            {"text": "Amazing work!", "answer_type": "correct"},
+            {"text": "Great game!", "answer_type": "correct"}
+        ][:num_options],
+        'player2_win': [
+            {"text": "Better luck next time!", "answer_type": "incorrect"},
+            {"text": "You were close!", "answer_type": "incorrect"},
+            {"text": "Nice try!", "answer_type": "incorrect"},
+            {"text": "That was tricky!", "answer_type": "incorrect"},
+            {"text": "Good effort!", "answer_type": "incorrect"}
+        ][:num_options]
+    }
+    
+    options = defaults.get(response_type, defaults['question_response'])
+
+    if target_answer_type:
+        options = [opt for opt in options if opt.get("answer_type") == target_answer_type]
+        if not options:
+            options = defaults.get(response_type, defaults['question_response'])
+
+    return options[:num_options]
+
+
+def _normalize_guess_text(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    lowered = text.lower().strip()
+    for prefix in ["is it ", "is it a ", "is it an ", "is it the ", "is it my "]:
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix):]
+            break
+    cleaned = re.sub(r"[^a-z0-9]+", "", lowered)
+    return cleaned
+
+
+async def decide_question_answer_type(
+    question: Optional[str],
+    selected_item: Optional[str],
+    category: Optional[str],
+    account_id: str,
+    aac_user_id: str
+) -> str:
+    if not question or not selected_item or not category:
+        return "no"
+
+    llm_query = f"""Answer this yes/no question for 20 Questions.
+
+Selected {category}: "{selected_item}"
+Question: "{question}"
+
+Respond ONLY with "yes" or "no". No other words."""
+
+    response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+    normalized = response_text.strip().lower()
+    if normalized.startswith("y"):
+        return "yes"
+    if normalized.startswith("n"):
+        return "no"
+    return "no"
+
+
+def decide_guess_answer_type(guess: Optional[str], selected_item: Optional[str]) -> Optional[str]:
+    if not guess or not selected_item:
+        return None
+    normalized_guess = _normalize_guess_text(guess)
+    normalized_item = _normalize_guess_text(selected_item)
+    if normalized_guess and normalized_item and normalized_guess == normalized_item:
+        return "correct"
+    return "incorrect"
+
+
+async def decide_guess_answer_type_with_llm(
+    guess: Optional[str],
+    selected_item: Optional[str],
+    account_id: str,
+    aac_user_id: str
+) -> str:
+    if not guess or not selected_item:
+        return "incorrect"
+
+    llm_query = f"""Determine if the guess matches the selected item.
+
+Selected item: "{selected_item}"
+Guess: "{guess}"
+
+Respond ONLY with "correct" or "incorrect". No other words."""
+
+    response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+    normalized = response_text.strip().lower()
+    if normalized.startswith("c"):
+        return "correct"
+    if normalized.startswith("i"):
+        return "incorrect"
+    return "incorrect"
+
+
+def _strip_markdown_code_fences(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 2:
+            lines = lines[1:]
+            while lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+    return cleaned
+
+
+def _dedupe_keep_order(values: List[str]) -> List[str]:
+    seen = set()
+    deduped: List[str] = []
+    for value in values:
+        item = re.sub(r"\s+", " ", (value or "").strip())
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _parse_llm_string_list(response_text: str) -> List[str]:
+    parsed_values: List[str] = []
+    candidate_text = _strip_markdown_code_fences(response_text)
+
+    try:
+        parsed_json = json.loads(candidate_text)
+        if isinstance(parsed_json, list):
+            for item in parsed_json:
+                if isinstance(item, str):
+                    parsed_values.append(item)
+                elif isinstance(item, dict):
+                    for key in ["text", "title", "option", "question", "label"]:
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            parsed_values.append(value)
+                            break
+        elif isinstance(parsed_json, dict):
+            for key in ["options", "titles", "questions", "items", "user_options", "partner_suggestions"]:
+                candidate_list = parsed_json.get(key)
+                if isinstance(candidate_list, list):
+                    for item in candidate_list:
+                        if isinstance(item, str):
+                            parsed_values.append(item)
+                        elif isinstance(item, dict):
+                            for nested_key in ["text", "title", "option", "question", "label"]:
+                                value = item.get(nested_key)
+                                if isinstance(value, str) and value.strip():
+                                    parsed_values.append(value)
+                                    break
+    except Exception:
+        pass
+
+    if not parsed_values:
+        for line in candidate_text.split("\n"):
+            cleaned_line = re.sub(r"^\s*(?:[-•]|\d+[\.)])\s*", "", line).strip()
+            if cleaned_line:
+                parsed_values.append(cleaned_line.strip('"\''))
+
+    return _dedupe_keep_order(parsed_values)
+
+
+async def _load_story_builder_generation_context(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    user_info_doc = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath="info/user_narrative",
+        default_data=DEFAULT_USER_INFO.copy()
+    )
+
+    llm_options = max(2, min(int(settings.get("LLMOptions", DEFAULT_LLM_OPTIONS)), 20))
+    vocabulary_level = settings.get("vocabularyLevel", "functional")
+    vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
+    ai_option_overrides = normalize_ai_option_overrides(user_info_doc.get("aiOptionOverrides", {}))
+    ai_override_prompt_block = build_ai_option_overrides_prompt_block(ai_option_overrides)
+
+    return {
+        "llm_options": llm_options,
+        "vocabulary_level": vocabulary_level,
+        "vocab_instruction": vocab_instruction,
+        "ai_option_overrides": ai_option_overrides,
+        "ai_override_prompt_block": ai_override_prompt_block,
+    }
+
+
+def _story_builder_collection_ref(account_id: str, aac_user_id: str):
+    return firestore_db.collection(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/stories"
+    )
+
+
+def _compose_documents_collection_ref(account_id: str, aac_user_id: str):
+    return firestore_db.collection(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/compose_documents"
+    )
+
+
+def _normalize_compose_doc_for_response(doc_id: str, compose_doc: Dict[str, Any]) -> Dict[str, Any]:
+    doc_data = compose_doc if isinstance(compose_doc, dict) else {}
+    safe_type = str(doc_data.get("document_type", "story")).strip().lower()
+    if safe_type not in {"story", "email"}:
+        safe_type = "story"
+
+    title = re.sub(r"\s+", " ", str(doc_data.get("title", "")).strip())
+    body = str(doc_data.get("body", ""))
+    subject = re.sub(r"\s+", " ", str(doc_data.get("subject", "")).strip())
+
+    to_list = [str(item).strip() for item in (doc_data.get("to") or []) if str(item).strip()]
+    cc_list = [str(item).strip() for item in (doc_data.get("cc") or []) if str(item).strip()]
+    bcc_list = [str(item).strip() for item in (doc_data.get("bcc") or []) if str(item).strip()]
+    reply_to_message_id = _clean_header_token(doc_data.get("reply_to_message_id", ""))
+    reply_to_thread_id = _clean_header_token(doc_data.get("reply_to_thread_id", ""))
+    in_reply_to = _clean_header_token(doc_data.get("in_reply_to", ""))
+    references = _clean_header_token(doc_data.get("references", ""))
+
+    return {
+        "id": doc_id,
+        "document_type": safe_type,
+        "title": title,
+        "body": body,
+        "subject": subject,
+        "to": to_list,
+        "cc": cc_list,
+        "bcc": bcc_list,
+        "reply_to_message_id": reply_to_message_id,
+        "reply_to_thread_id": reply_to_thread_id,
+        "in_reply_to": in_reply_to,
+        "references": references,
+        "created_at": doc_data.get("created_at"),
+        "updated_at": doc_data.get("updated_at"),
+        "illustration_url": str(doc_data.get("illustration_url", "")).strip(),
+        "illustration_status": str(doc_data.get("illustration_status", "not_created")).strip() or "not_created",
+        "illustration_style": str(doc_data.get("illustration_style", "")).strip(),
+    }
+
+
+def _build_story_transcript_context(transcript: Optional[List[Dict[str, str]]]) -> str:
+    if not transcript:
+        return "No prior story Q&A yet."
+
+    transcript_lines = []
+    for entry in transcript[-40:]:
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question", "")).strip()
+        answer = str(entry.get("answer", "")).strip()
+        if not question and not answer:
+            continue
+        transcript_lines.append(f"Q: {question}\nA: {answer}")
+
+    if not transcript_lines:
+        return "No prior story Q&A yet."
+
+    return "\n\n".join(transcript_lines)
+
+
+@app.post("/api/games/story/options")
+async def generate_story_builder_options(
+    request: StoryBuilderOptionsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        llm_options = context["llm_options"]
+        partner_suggestion_count = max(3, min(6, llm_options))
+
+        transcript_context = _build_story_transcript_context(request.transcript)
+        partner_question = re.sub(r"\s+", " ", request.partner_question.strip())
+        excluded_option_texts = _dedupe_keep_order([
+            re.sub(r"\s+", " ", str(item).strip())
+            for item in (request.exclude_existing_options or [])
+            if isinstance(item, (str, int, float)) and str(item).strip()
+        ])
+        excluded_options_block = ""
+        if excluded_option_texts:
+            excluded_options_block = "\nPreviously shown options to exclude:\n" + "\n".join(
+                [f'- "{item}"' for item in excluded_option_texts]
+            )
+
+        llm_query = f"""You are generating AAC-friendly Story Builder options.
+
+Current partner question:
+"{partner_question}"
+
+Story Q&A transcript so far:
+{transcript_context}
+
+{excluded_options_block}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+TASKS:
+1) Generate exactly {llm_options} answer option objects for the AAC user to select.
+2) Generate exactly {partner_suggestion_count} recommended follow-up questions for the partner.
+
+STRICT FORMAT & STYLE:
+- Each user option must have two fields:
+  - "option": Full conversational response the user is expressing (e.g. "I feel like going on a grand adventure"). This is spoken aloud when the user selects it.
+  - "summary": 1-3 word label used on the scanning button (e.g. "Adventure"). Must be the key descriptive word(s) from the option.
+- If excluded options are provided, do not repeat them and do not return close paraphrases of them.
+- Partner suggestions are helper prompts only (questions the partner can ask next).
+- Avoid repeating transcript content verbatim.
+- Keep options safe and age-appropriate.
+
+Return ONLY valid JSON with this exact structure:
+{{
+  "user_options": [
+    {{"option": "I feel like going on a grand adventure", "summary": "Adventure"}},
+    {{"option": "...", "summary": "..."}}
+  ],
+  "partner_suggestions": ["...", "..."]
+}}"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        cleaned_text = _strip_markdown_code_fences(response_text)
+
+        user_options: List[Dict[str, str]] = []
+        partner_suggestions: List[str] = []
+
+        def _normalize_story_option(item: Any) -> Optional[Dict[str, str]]:
+            """Normalize a raw LLM item into {option, summary} dict."""
+            if isinstance(item, dict) and item.get("option"):
+                option_text = str(item["option"]).strip()
+                summary_text = str(item.get("summary", option_text)).strip()
+                return {"option": option_text, "summary": summary_text or option_text}
+            elif isinstance(item, (str, int, float)):
+                text = str(item).strip()
+                if text:
+                    return {"option": text, "summary": text}
+            return None
+
+        try:
+            parsed = json.loads(cleaned_text)
+            if isinstance(parsed, dict):
+                raw_user_options = parsed.get("user_options", [])
+                raw_partner_suggestions = parsed.get("partner_suggestions", [])
+                if isinstance(raw_user_options, list):
+                    user_options = [n for item in raw_user_options if (n := _normalize_story_option(item)) is not None]
+                if isinstance(raw_partner_suggestions, list):
+                    partner_suggestions = _dedupe_keep_order([str(item) for item in raw_partner_suggestions if isinstance(item, (str, int, float))])
+        except Exception:
+            parsed_list = _parse_llm_string_list(cleaned_text)
+            user_options = [{"option": t, "summary": t} for t in parsed_list[:llm_options] if t.strip()]
+
+        if not user_options:
+            fallback_strings = _parse_llm_string_list(cleaned_text)[:llm_options]
+            user_options = [{"option": t, "summary": t} for t in fallback_strings if t.strip()]
+
+        if not partner_suggestions:
+            partner_suggestion_prompt = f"""Generate exactly {partner_suggestion_count} concise partner follow-up questions for story building.
+Current partner question: "{partner_question}"
+Transcript:\n{transcript_context}
+Return a simple JSON array of strings."""
+            partner_response = await _generate_gemini_content_with_fallback(partner_suggestion_prompt, None, account_id, aac_user_id)
+            partner_suggestions = _parse_llm_string_list(partner_response)[:partner_suggestion_count]
+
+        if user_options:
+            enforced = enforce_ai_option_overrides(user_options, context["ai_option_overrides"], llm_options)
+            excluded_lookup = {item.lower() for item in excluded_option_texts}
+            seen_options: set = set()
+            deduped: List[Dict[str, str]] = []
+            for item in enforced:
+                normalized = _normalize_story_option(item)
+                if not normalized:
+                    continue
+
+                option_key = normalized["option"].lower()
+                summary_key = normalized["summary"].lower()
+                if option_key in excluded_lookup or summary_key in excluded_lookup:
+                    continue
+                if option_key not in seen_options:
+                    seen_options.add(option_key)
+                    deduped.append(normalized)
+            user_options = deduped
+
+        if not user_options:
+            user_options = [
+                {"option": "I want to go on an adventure", "summary": "Adventure"},
+                {"option": "I want a funny comedy story", "summary": "Comedy"},
+                {"option": "I want to solve a mystery", "summary": "Mystery"},
+                {"option": "I want a story about friendship", "summary": "Friendship"},
+            ][:llm_options]
+
+        if not partner_suggestions:
+            partner_suggestions = [
+                "Who is in the story?",
+                "Where does it happen?",
+                "What problem starts the story?",
+                "How should it end?"
+            ][:partner_suggestion_count]
+
+        return JSONResponse(content={
+            "success": True,
+            "partner_question": partner_question,
+            "user_options": user_options[:llm_options],  # [{"option": "...", "summary": "..."}]
+            "partner_suggestions": partner_suggestions[:partner_suggestion_count]
+        })
+    except Exception as e:
+        logging.error(f"Error generating Story Builder options: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/title-options")
+async def generate_story_builder_title_options(
+    request: StoryBuilderTitleRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        llm_options = context["llm_options"]
+        transcript_context = _build_story_transcript_context(request.transcript)
+
+        llm_query = f"""Generate exactly {llm_options} story title options based on this Story Builder transcript.
+
+Transcript:
+{transcript_context}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+Rules:
+- Keep each title concise and clear.
+- Titles should be shareable and engaging.
+- Return ONLY a JSON array of strings.
+"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        title_options = _parse_llm_string_list(response_text)
+        title_options = [
+            item if isinstance(item, str) else _extract_option_text(item)
+            for item in enforce_ai_option_overrides(title_options, context["ai_option_overrides"], llm_options)
+        ]
+        title_options = _dedupe_keep_order([item for item in title_options if isinstance(item, str) and item.strip()])
+
+        if not title_options:
+            title_options = ["My Story", "A New Adventure", "Our Big Day", "The Great Journey"]
+
+        return JSONResponse(content={
+            "success": True,
+            "title_options": title_options[:llm_options]
+        })
+    except Exception as e:
+        logging.error(f"Error generating Story Builder titles: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/finalize")
+async def finalize_story_builder_story(
+    request: StoryBuilderFinalizeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        context = await _load_story_builder_generation_context(account_id, aac_user_id)
+        transcript_context = _build_story_transcript_context(request.transcript)
+        safe_title = re.sub(r"\s+", " ", request.title.strip()) or "Untitled Story"
+
+        llm_query = f"""You are writing a complete narrative story from a partner/user Q&A transcript.
+
+Chosen title: "{safe_title}"
+
+Transcript:
+{transcript_context}
+
+{context['ai_override_prompt_block']}
+
+Vocabulary instruction:
+{context['vocab_instruction']}
+
+Requirements:
+- Write a coherent narrative that uses the transcript details.
+- Keep the story clear, natural, and easy to read aloud in AAC settings.
+- Use a strong beginning, middle, and ending.
+- Do not include bullet points.
+- Return ONLY the final story text.
+"""
+
+        story_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+        story_text = _strip_markdown_code_fences(story_text)
+        story_text = re.sub(r"\s+\n", "\n", story_text).strip()
+
+        if not story_text:
+            story_text = "This is our story. We built it together by asking questions and choosing answers."
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        story_id = str(uuid.uuid4())
+        story_doc = {
+            "id": story_id,
+            "title": safe_title,
+            "story_text": story_text,
+            "transcript": request.transcript or [],
+            "illustration_url": "",
+            "illustration_status": "not_created",
+            "illustration_prompt": "",
+            "illustration_style": "",
+            "illustration_updated_at": None,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+
+        collection_ref = _story_builder_collection_ref(account_id, aac_user_id)
+        await asyncio.to_thread(collection_ref.document(story_id).set, sanitize_for_firestore(story_doc))
+
+        return JSONResponse(content={
+            "success": True,
+            "story": story_doc
+        })
+    except Exception as e:
+        logging.error(f"Error finalizing Story Builder story: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/games/story/list")
+async def list_story_builder_stories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        stories = await load_firestore_collection(account_id, aac_user_id, "stories")
+        stories_sorted = sorted(
+            stories,
+            key=lambda item: item.get("updated_at") or item.get("created_at") or "",
+            reverse=True
+        )
+
+        response_stories = []
+        for story in stories_sorted:
+            story_text = str(story.get("story_text", ""))
+            response_stories.append({
+                "id": story.get("id"),
+                "title": story.get("title", "Untitled Story"),
+                "created_at": story.get("created_at"),
+                "updated_at": story.get("updated_at"),
+                "story_preview": story_text[:180],
+                "transcript_count": len(story.get("transcript", []) or []),
+                "illustration_url": story.get("illustration_url", ""),
+                "illustration_status": story.get("illustration_status", "not_created")
+            })
+
+        return JSONResponse(content={"success": True, "stories": response_stories})
+    except Exception as e:
+        logging.error(f"Error listing Story Builder stories: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/games/story/{story_id}")
+async def get_story_builder_story(
+    story_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        story_data["id"] = doc.id
+        return JSONResponse(content={"success": True, "story": story_data})
+    except Exception as e:
+        logging.error(f"Error loading Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/games/story/{story_id}")
+async def update_story_builder_story(
+    story_id: str,
+    request: StoryBuilderUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        update_data: Dict[str, Any] = {"updated_at": dt.now(timezone.utc).isoformat()}
+        if request.title is not None:
+            normalized_title = re.sub(r"\s+", " ", request.title.strip())
+            update_data["title"] = normalized_title or "Untitled Story"
+        if request.story_text is not None:
+            update_data["story_text"] = request.story_text.strip()
+        if request.transcript is not None:
+            update_data["transcript"] = request.transcript
+
+        if len(update_data.keys()) == 1:
+            return JSONResponse(content={"success": False, "error": "No story fields provided"}, status_code=400)
+
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_data), merge=True)
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_story = updated_doc.to_dict() or {}
+        updated_story["id"] = updated_doc.id
+
+        return JSONResponse(content={"success": True, "story": updated_story})
+    except Exception as e:
+        logging.error(f"Error updating Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/{story_id}/illustrate")
+async def generate_story_builder_illustration(
+    story_id: str,
+    request: StoryBuilderIllustrationRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        safe_title = re.sub(r"\s+", " ", str(story_data.get("title", "Untitled Story")).strip()) or "Untitled Story"
+        story_text = str(story_data.get("story_text", "")).strip()
+        existing_url = str(story_data.get("illustration_url", "")).strip()
+
+        if existing_url and not bool(request.regenerate):
+            story_data["id"] = doc.id
+            return JSONResponse(content={
+                "success": True,
+                "story": story_data,
+                "reused_existing": True
+            })
+
+        if not story_text:
+            return JSONResponse(content={"success": False, "error": "Story text is empty"}, status_code=400)
+
+        safe_style = re.sub(r"\s+", " ", str(request.style or "storybook illustration").strip()) or "storybook illustration"
+        story_excerpt = " ".join(story_text.split())[:550]
+
+        illustration_prompt = (
+            f"{safe_style}, create a single clean cover-style image for a children's story titled '{safe_title}'. "
+            f"Represent the story with simple, clear visual storytelling and expressive characters. "
+            f"No text, words, letters, or logos in the image. "
+            f"Story content summary: {story_excerpt}"
+        )
+
+        image_bytes = await generate_story_illustration_image(illustration_prompt)
+        safe_story_id = re.sub(r"[^\w\-]", "_", story_id)
+        filename = f"story_illustration_{safe_story_id}_{uuid.uuid4().hex[:8]}.png"
+        image_url = await upload_image_to_storage(image_bytes, filename)
+
+        now_iso = dt.now(timezone.utc).isoformat()
+        update_payload = {
+            "illustration_url": image_url,
+            "illustration_status": "ready",
+            "illustration_prompt": illustration_prompt,
+            "illustration_style": safe_style,
+            "illustration_updated_at": now_iso,
+            "updated_at": now_iso,
+        }
+        await asyncio.to_thread(doc_ref.set, sanitize_for_firestore(update_payload), merge=True)
+
+        updated_doc = await asyncio.to_thread(doc_ref.get)
+        updated_story = updated_doc.to_dict() or {}
+        updated_story["id"] = updated_doc.id
+
+        return JSONResponse(content={"success": True, "story": updated_story})
+    except HTTPException as http_error:
+        return JSONResponse(
+            content={"success": False, "error": str(http_error.detail)},
+            status_code=http_error.status_code
+        )
+    except Exception as e:
+        logging.error(f"Error generating Story Builder illustration for {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/{story_id}/export-audio")
+async def export_story_builder_audio(
+    story_id: str,
+    request: StoryBuilderExportAudioRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        stored_title = str(story_data.get("title", "Untitled Story")).strip() or "Untitled Story"
+        stored_text = str(story_data.get("story_text", "")).strip()
+
+        requested_title = str(request.title or "").strip()
+        requested_text = str(request.story_text or "").strip()
+        safe_title = re.sub(r"\s+", " ", requested_title or stored_title) or "Untitled Story"
+        story_text = requested_text if requested_text else stored_text
+
+        if not story_text:
+            return JSONResponse(content={"success": False, "error": "Story text is empty"}, status_code=400)
+
+        user_settings = await load_settings_from_file(account_id, aac_user_id)
+        voice_to_use = user_settings.get("selected_tts_voice_name", DEFAULT_TTS_VOICE)
+        rate_to_use = user_settings.get("speech_rate", DEFAULT_SPEECH_RATE)
+
+        audio_bytes, sample_rate = await synthesize_speech_to_bytes(
+            text=story_text,
+            voice_name=voice_to_use,
+            wpm_rate=rate_to_use
+        )
+
+        import io
+        import wave
+
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_bytes)
+
+        safe_filename_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", safe_title).strip("_") or "story"
+        filename = f"{safe_filename_base}_audio.wav"
+
+        return Response(
+            content=wav_buffer.getvalue(),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store"
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error exporting Story Builder audio for {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/games/story/{story_id}/export-pdf")
+async def export_story_builder_pdf(
+    story_id: str,
+    request: StoryBuilderExportAudioRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Export a story to PDF with text and illustration (if available)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        import io
+
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        story_data = doc.to_dict() or {}
+        stored_title = str(story_data.get("title", "Untitled Story")).strip() or "Untitled Story"
+        stored_text = str(story_data.get("story_text", "")).strip()
+        illustration_url = str(story_data.get("illustration_url", "")).strip()
+
+        requested_title = str(request.title or "").strip()
+        safe_title = re.sub(r"\s+", " ", requested_title or stored_title) or "Untitled Story"
+        story_text = str(request.story_text or "").strip() if request.story_text else stored_text
+
+        if not story_text:
+            return JSONResponse(content={"success": False, "error": "Story text is empty"}, status_code=400)
+
+        # Prepare PDF
+        pdf_buffer = io.BytesIO()
+        doc_pdf = SimpleDocTemplate(
+            pdf_buffer,
+            pagesize=letter,
+            leftMargin=0.75*inch,
+            rightMargin=0.75*inch,
+            topMargin=0.75*inch,
+            bottomMargin=0.75*inch
+        )
+
+        story_elements = []
+
+        # Add title
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=(0, 0, 0),
+            spaceAfter=12,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        story_elements.append(Paragraph(safe_title, title_style))
+        story_elements.append(Spacer(1, 0.2*inch))
+
+        # Fetch and add illustration if available
+        if illustration_url:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(illustration_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            image_data = await resp.read()
+                            image_buffer = io.BytesIO(image_data)
+                            img = Image(image_buffer, width=4.5*inch, height=3*inch)
+                            story_elements.append(img)
+                            story_elements.append(Spacer(1, 0.2*inch))
+            except Exception as img_error:
+                logging.warning(f"Failed to fetch illustration for story {story_id}: {img_error}")
+
+        # Add story text
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['BodyText'],
+            fontSize=11,
+            leading=14,
+            alignment=TA_LEFT,
+            spaceAfter=12
+        )
+        # Replace newlines with <br/> for proper paragraph breaks
+        story_text_html = story_text.replace("\n", "<br/><br/>")
+        story_elements.append(Paragraph(story_text_html, body_style))
+
+        # Build PDF
+        await asyncio.to_thread(doc_pdf.build, story_elements)
+
+        safe_filename_base = re.sub(r"[^a-zA-Z0-9_-]+", "_", safe_title).strip("_") or "story"
+        filename = f"{safe_filename_base}.pdf"
+
+        return Response(
+            content=pdf_buffer.getvalue(),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-store"
+            }
+        )
+    except Exception as e:
+        logging.error(f"Error exporting Story Builder PDF for {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/games/story/{story_id}")
+async def delete_story_builder_story(
+    story_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    try:
+        doc_ref = _story_builder_collection_ref(account_id, aac_user_id).document(story_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            return JSONResponse(content={"success": False, "error": "Story not found"}, status_code=404)
+
+        await asyncio.to_thread(doc_ref.delete)
+        return JSONResponse(content={"success": True, "deleted_id": story_id})
+    except Exception as e:
+        logging.error(f"Error deleting Story Builder story {story_id}: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+# --- Jokes API Endpoints ---
+
+@app.post("/api/jokes/query")
+async def query_jokes(
+    request: JokeQueryRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Query jokes by location/time tags, with fallback to random jokes."""
+    try:
+        jokes = await jokes_db.get_jokes_by_tags(
+            location=request.location,
+            time_period=request.time_period,
+            limit=request.limit
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "jokes": jokes,
+            "count": len(jokes)
+        })
+    except Exception as e:
+        logging.error(f"Error querying jokes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/jokes/contextual")
+async def get_contextual_jokes_endpoint(
+    limit: int = 10,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Return jokes tailored to current location, people, activity, and time."""
+    try:
+        if current_ids is None:
+            current_ids = {}
+
+        aac_user_id = current_ids.get("aac_user_id", "")
+        account_id = current_ids.get("account_id", "")
+
+        limit = max(1, min(50, int(limit)))
+
+        user_current_content_dict = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/current_state",
+            default_data=DEFAULT_USER_CURRENT.copy()
+        )
+
+        jokes = await jokes_db.get_contextual_jokes(
+            location=user_current_content_dict.get("location", ""),
+            people=user_current_content_dict.get("people", ""),
+            activity=user_current_content_dict.get("activity", ""),
+            limit=limit
+        )
+
+        return JSONResponse(content={
+            "success": True,
+            "jokes": jokes,
+            "count": len(jokes)
+        })
+    except Exception as e:
+        logging.error(f"Error fetching contextual jokes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/jokes/add")
+async def add_joke_endpoint(
+    request: AddJokeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Add a new joke (admin only)."""
+    try:
+        logging.info(f"🎯 /api/jokes/add endpoint START")
+        
+        aac_user_id = current_ids.get("aac_user_id", "")
+        user_email = current_ids.get("email", "")
+        
+        logging.info(f"📝 Admin check: aac_user_id={aac_user_id}, email={user_email}")
+        
+        # Check if user is admin
+        if user_email != "admin@talkwithbravo.com":
+            logging.warning(f"❌ Non-admin user {user_email} attempted to add joke")
+            return JSONResponse(
+                content={"success": False, "error": "Admin access required"},
+                status_code=403
+            )
+        
+        logging.info(f"📝 Validated admin. Processing joke...")
+        logging.info(f"  text: {request.text[:50]}...")
+        logging.info(f"  tags: {request.tags}")
+        logging.info(f"  auto_tag: {request.auto_tag}")
+        
+        logging.info(f"📝 Calling jokes_db.add_joke()...")
+        result = await jokes_db.add_joke(
+            text=request.text,
+            tags=request.tags,
+            auto_tag=request.auto_tag
+        )
+        logging.info(f"✅ Joke added successfully: {result}")
+        return JSONResponse(content=result)
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logging.error(f"❌ Error adding joke: {e}")
+        logging.error(f"Traceback:\n{error_trace}")
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": str(e),
+                "details": error_trace
+            },
+            status_code=500
+        )
+
+
+@app.put("/api/jokes/{joke_id}")
+async def update_joke_endpoint(
+    joke_id: str,
+    request: UpdateJokeRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Update a joke (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await jokes_db.update_joke(
+            joke_id=joke_id,
+            text=request.text,
+            tags=request.tags,
+            enabled=request.enabled,
+            summary=request.summary
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error updating joke: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/jokes/{joke_id}")
+async def delete_joke_endpoint(
+    joke_id: str,
+    retire: bool = True,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Delete or retire a joke (admin only)."""
+    if current_ids is None:
+        current_ids = {}
+    
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await jokes_db.delete_joke(joke_id=joke_id, retire=retire)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error deleting joke: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/jokes")
+async def get_all_jokes_endpoint(
+    include_disabled: bool = False,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None
+):
+    """Get all jokes for admin management (admin only)."""
+    try:
+        if current_ids is None:
+            current_ids = {}
+        
+        user_email = current_ids.get("email", "")
+        
+        logging.info(f"🎯 /api/jokes endpoint called - include_disabled={include_disabled}, user={user_email}")
+        
+        # Check if user is admin
+        if user_email != "admin@talkwithbravo.com":
+            logging.warning(f"❌ Non-admin user {user_email} attempted to fetch jokes")
+            return JSONResponse(
+                content={"success": False, "error": "Admin access required"},
+                status_code=403
+            )
+        
+        logging.info(f"📝 Fetching jokes from database...")
+        jokes = await jokes_db.get_all_jokes(include_disabled=include_disabled)
+        logging.info(f"✅ Retrieved {len(jokes)} jokes")
+        
+        return JSONResponse(content={
+            "success": True,
+            "jokes": jokes,
+            "count": len(jokes)
+        })
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logging.error(f"❌ Error fetching all jokes: {e}")
+        logging.error(f"Traceback:\n{error_trace}")
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": str(e),
+                "details": error_trace
+            },
+            status_code=500
+        )
+
+
+@app.post("/api/jokes/import")
+async def import_jokes_endpoint(
+    request: ImportJokesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Import jokes from CSV (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        result = await jokes_db.import_jokes_from_csv(request.csv_content)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error importing jokes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/jokes/import-icanhazdadjoke")
+async def import_icanhazdadjoke_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """One-time bulk import from icanhazdadjoke API (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        logging.info(f"🎯 Starting icanhazdadjoke import for admin user...")
+        # Run import with timeout to prevent 504
+        result = await asyncio.wait_for(bulk_import_icanhazdadjoke(), timeout=300)  # 5 minute timeout
+        logging.info(f"✅ Import completed: {result}")
+        return JSONResponse(content=result)
+    except asyncio.TimeoutError:
+        logging.error(f"❌ Import timed out after 5 minutes")
+        return JSONResponse(
+            content={"success": False, "error": "Import timed out. Try again with fewer jokes or check the API.", "imported_count": 0},
+            status_code=504
+        )
+    except Exception as e:
+        logging.error(f"❌ Error importing from icanhazdadjoke: {e}", exc_info=True)
+        return JSONResponse(
+            content={"success": False, "error": str(e), "imported_count": 0},
+            status_code=500
+        )
+
+
+@app.post("/api/jokes/cleanup-quotes")
+async def cleanup_quotes_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Clean up extra quotes from all jokes in the database (admin only)."""
+    aac_user_id = current_ids["aac_user_id"]
+    user_email = current_ids.get("email", "")
+    
+    # Check if user is admin
+    if user_email != "admin@talkwithbravo.com":
+        return JSONResponse(
+            content={"success": False, "error": "Admin access required"},
+            status_code=403
+        )
+    
+    try:
+        logging.info("🧹 Admin requested quote cleanup")
+        result = await cleanup_joke_quotes()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logging.error(f"Error cleaning up quotes: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
 class FreestyleCategoryWordsRequest(BaseModel):
     category: str = Field(..., min_length=1, description="Category name for word generation")
+    max_options: Optional[int] = Field(None, description="Override FreestyleOptions for this request", ge=1, le=50)
     build_space_content: Optional[str] = Field("", description="Current build space content for context")
     exclude_words: Optional[List[str]] = Field(default_factory=list, description="Words to exclude from generation")
     current_mood: Optional[str] = Field(None, description="Current user mood to influence word generation")
     custom_prompt: Optional[str] = Field(None, description="Custom prompt instructions that take priority over general category handling")
+    context: Optional[str] = Field(None, description="Context from LLM query or button label")
+    source_page: Optional[str] = Field(None, description="Page name the user navigated from")
+    is_llm_generated: bool = Field(default=False, description="Whether the source page was LLM-generated")
+    originating_button_text: Optional[str] = Field(None, description="Text of the button that originated the freestyle navigation")
+    prefer_generic_fast: bool = Field(default=False, description="When true and no custom prompt is provided, return fast generic category words without LLM generation")
+    target_locale: Optional[str] = Field(None, description="Optional locale override for generated words (e.g., es-US)")
+
+
+def build_category_fallback_word_objects(
+    category: str,
+    desired_count: int,
+    excluded_words: Optional[set[str]] = None,
+    seen_words: Optional[set[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Build category-aware fallback word objects up to the desired count."""
+    target_count = max(1, int(desired_count or 1))
+    excluded = set(excluded_words or set())
+    seen = set(seen_words or set())
+    category_lower = str(category or "").lower()
+
+    supplemental_words = [
+        "I", "you", "we", "me", "my", "your", "our", "this", "that", "here", "there",
+        "want", "need", "like", "help", "go", "come", "see", "look", "talk", "play", "stop",
+        "more", "all", "some", "none", "yes", "no", "please", "okay", "again", "now", "later",
+        "today", "tomorrow", "good", "bad", "happy", "sad", "big", "small", "fast", "slow",
+        "home", "school", "outside", "inside", "friend", "family", "people", "who", "what", "where", "when", "why", "how"
+    ]
+
+    fallback_candidates = list(get_generic_category_words(category))
+    if any(token in category_lower for token in ["home", "general", "general_conversation", "conversation"]):
+        fallback_candidates.extend(supplemental_words)
+
+    result: List[Dict[str, Any]] = []
+    for candidate in fallback_candidates:
+        clean_word = str(candidate or "").strip()
+        clean_lower = clean_word.lower()
+        if not clean_word or clean_lower in excluded or clean_lower in seen:
+            continue
+        seen.add(clean_lower)
+        result.append({"text": clean_word, "keywords": []})
+        if len(result) >= target_count:
+            break
+
+    return result
 
 @app.post("/api/freestyle/category-words")
 async def generate_category_words(
@@ -10526,498 +17584,457 @@ async def generate_category_words(
     """
     Generates word options for a specific category using LLM with user context
     """
-    # TEMPORARY DEBUG: Log the exact category being received
     logging.info(f"CATEGORY_DEBUG: Received category request: '{request.category}'")
-    
-    aac_user_id = current_ids["aac_user_id"]
+
     account_id = current_ids["account_id"]
-    
+    aac_user_id = current_ids["aac_user_id"]
+    request_start_time = time.perf_counter()
+
     try:
-        # Load user settings to get FreestyleOptions and vocabulary level
-        settings = await load_settings_from_file(account_id, aac_user_id)
-        freestyle_options = settings.get("FreestyleOptions", 6)  # Default to 6 if not set
+        settings, user_info, user_current = await asyncio.gather(
+            load_settings_from_file(account_id, aac_user_id),
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data={"narrative": ""}
+            ),
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/current_state",
+                default_data=DEFAULT_USER_CURRENT.copy()
+            )
+        )
+
+        configured_freestyle_options = settings.get("FreestyleOptions", 6)
+        requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
+        freestyle_options = max(1, min(50, int(requested_freestyle_options or 6)))
         vocabulary_level = settings.get("vocabularyLevel", "functional")
-        
-        # Detect if this is a NOUN category (objects, animals, places, people)
-        # These categories need specific vocabulary even at emergent level
+        configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
+        requested_target_locale = _normalize_locale_tag(str(request.target_locale or "").strip())
+        location_override_locale = _normalize_locale_tag(str(user_current.get("locationLanguageOverride") or "").strip())
+        user_language = requested_target_locale or location_override_locale or configured_user_language
+        language_instruction = (
+            f"\n- CRITICAL: You MUST respond ONLY in the language with locale tag '{user_language}'. All text values must be in that language. Do not use English unless '{user_language}' is English."
+            if not user_language.lower().startswith("en")
+            else ""
+        )
+        prep_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+
+        excluded_words = {
+            str(word).strip().lower()
+            for word in (request.exclude_words or [])
+            if str(word).strip()
+        }
+
+        if request.prefer_generic_fast and not (request.custom_prompt and str(request.custom_prompt).strip()):
+            generic_words = get_generic_category_words(request.category)
+            final_words: List[Dict[str, Any]] = []
+            seen_words: set[str] = set()
+            for generic_word in generic_words:
+                cleaned_word = str(generic_word).strip()
+                lowered_word = cleaned_word.lower()
+                if not cleaned_word or lowered_word in excluded_words or lowered_word in seen_words:
+                    continue
+                seen_words.add(lowered_word)
+                final_words.append({"text": cleaned_word, "keywords": []})
+                if len(final_words) >= freestyle_options:
+                    break
+
+            total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+            logging.info(
+                f"Fast generic category-words response for '{request.category}' with {len(final_words)} words "
+                f"for account {account_id}, user {aac_user_id} in {total_elapsed_ms:.1f}ms"
+            )
+            return JSONResponse(
+                content={"words": final_words},
+                headers={
+                    "X-LLM-Cache": "generic-fast",
+                    "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                    "X-LLM-Profile": "CATEGORY_WORDS_GENERIC_FAST",
+                },
+            )
+
         category_lower = request.category.lower()
         noun_categories = [
-            'animals', 'pets', 'insects', 'reptiles', 'birds', 'fish', 'wild',
+            'animals', 'pets', 'insects', 'reptiles', 'birds', 'fish', 'wild', 'dinosaur', 'dinosaurs',
             'food', 'drink', 'fruit', 'vegetable', 'snack', 'meal',
             'people', 'family', 'friends', 'person',
             'places', 'location', 'room', 'building',
             'things', 'objects', 'items', 'toys', 'games', 'tools', 'vehicles',
+            'science', 'space', 'planet', 'planets', 'imaginary', 'fantasy', 'mythical',
             'body parts', 'clothes', 'technology', 'furniture', 'school', 'work',
             'outside', 'nature', 'sports', 'hobbies', 'hardware', 'transportation',
             'money', 'shopping', 'entertainment', 'movies', 'tv', 'music', 'books'
         ]
-        is_noun_category = any(noun_cat in category_lower for noun_cat in noun_categories)
-        
-        # Get vocabulary level instruction - use relaxed version for noun categories
-        if is_noun_category:
-            # For noun categories, use lighter vocabulary constraints
-            # Users need specific nouns even at emergent level (e.g., "butterfly" not "pretty bug")
-            vocab_instruction = f"""VOCABULARY GUIDANCE for {vocabulary_level.upper()} level:
-While maintaining a {vocabulary_level} level approach, prioritize SPECIFIC NOUNS over generic descriptions.
-- Generate concrete, specific names rather than descriptive phrases
-- It's better to use a specific noun (e.g., "butterfly", "grasshopper") than a vague description (e.g., "pretty bug", "jumping bug")
-- Images will help users understand specific nouns even if the word is advanced
-- Focus on commonly known items within this category
-"""
-        else:
-            # For non-noun categories (adjectives, actions, etc.), use full vocabulary constraints
-            vocab_instruction = get_vocabulary_level_instruction(vocabulary_level)
-        
-        # Load user context for better word generation
-        user_info = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data={"narrative": ""}
-        )
-        
-        user_current = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/current_state",
-            default_data=DEFAULT_USER_CURRENT.copy()
-        )
-        
-        # Build exclude words clause
-        exclude_clause = ""
-        if request.exclude_words:
-            exclude_words_str = ", ".join(request.exclude_words)
-            exclude_clause = f" Do not include these words that were already shown: {exclude_words_str}."
-        
-        # Build context clause
-        context_clause = ""
-        if request.build_space_content:
-            context_clause = f" Current message being built: '{request.build_space_content}'."
-        
-        # Get comprehensive user context
-        user_context_parts = []
-        if user_info.get("narrative"):
-            user_context_parts.append(f"User info: {user_info['narrative']}")
-        if user_current.get("location"):
-            user_context_parts.append(f"Current location: {user_current['location']}")
-        if user_current.get("people"):
-            user_context_parts.append(f"People present: {user_current['people']}")
-        if user_current.get("activity"):
-            user_context_parts.append(f"Current activity: {user_current['activity']}")
-            
-        user_context = " | ".join(user_context_parts) if user_context_parts else "General conversation"
-        
-        # Detect if this is an adjective-only category (descriptive attributes)
-        category_lower = request.category.lower()
         adjective_only_categories = [
-            'rating', 'emotions', 'touch', 'sight', 'taste', 'color', 'size', 
+            'rating', 'emotions', 'touch', 'sight', 'taste', 'color', 'size',
             'shape', 'age', 'smell', 'character', 'temperature', 'sound'
         ]
+        is_noun_category = any(noun_cat in category_lower for noun_cat in noun_categories)
         is_adjective_category = any(adj_cat in category_lower for adj_cat in adjective_only_categories)
-        
-        # Build adjective-only constraint if needed
-        adjective_constraint = ""
-        if is_adjective_category:
-            adjective_constraint = """
-CRITICAL CONSTRAINT - ADJECTIVES ONLY:
-- Generate ONLY single adjectives or adjective phrases (1-2 words maximum)
-- Do NOT include nouns in your responses
-- Do NOT include verbs in your responses  
-- Do NOT combine adjectives with nouns (e.g., "good" NOT "good food", "big" NOT "big house")
-- Examples of CORRECT responses: "good", "bad", "happy", "soft", "bright", "hot", "large"
-- Examples of INCORRECT responses: "good time", "bad day", "happy person", "soft pillow"
-"""
-        
-        # Add mood context only if semantically relevant to the category
+
+        user_context_parts = []
+        if user_info.get("narrative"):
+            user_context_parts.append(f"user={user_info['narrative']}")
+        if user_current.get("location"):
+            user_context_parts.append(f"location={user_current['location']}")
+        if user_current.get("people"):
+            user_context_parts.append(f"people={user_current['people']}")
+        if user_current.get("activity"):
+            user_context_parts.append(f"activity={user_current['activity']}")
+        user_context = " | ".join(user_context_parts) if user_context_parts else "general"
+
+        live_context_summary = ", ".join(
+            part for part in [
+                f"location={user_current.get('location')}" if user_current.get('location') else "",
+                f"people={user_current.get('people')}" if user_current.get('people') else "",
+                f"activity={user_current.get('activity')}" if user_current.get('activity') else "",
+            ]
+            if part and not part.endswith(('=None', '=Unknown', '=Idle'))
+        ) or "none"
+
+        navigation_context = ""
+        if request.context and request.source_page:
+            if request.is_llm_generated:
+                navigation_context = f"page={request.source_page};context={request.context};origin=llm"
+            else:
+                navigation_context = f"page={request.source_page};topic={request.context}"
+        elif request.source_page and request.source_page.lower() not in ('home', 'unknownpage', ''):
+            navigation_context = f"page={request.source_page}"
+            if request.originating_button_text:
+                navigation_context += f";button={request.originating_button_text}"
+        elif request.originating_button_text:
+            navigation_context = f"button={request.originating_button_text}"
+
         mood_context = ""
         if request.current_mood and request.current_mood != 'none':
-            # Only apply mood context for categories that are inherently about emotions/feelings
-            # Avoid applying mood to descriptive categories (like "positive adjectives" which describe objects, not feelings)
             mood_relevant_categories = [
-                'feeling', 'emotion', 'mood', 'how i feel', 'my feelings', 
+                'feeling', 'emotion', 'mood', 'how i feel', 'my feelings',
                 'emotional', 'mental state', 'how are you'
             ]
-            
-            # Check if this category is actually about the user's emotional state
-            is_mood_relevant = any(mood_keyword in category_lower for mood_keyword in mood_relevant_categories)
-            
-            if is_mood_relevant:
-                mood_context = f" The user is currently feeling {request.current_mood}, so prioritize words that match this emotional state."
-            # For non-mood categories, don't inject mood context as it can interfere with specific category requirements
-        
-        # Create the prompt - use custom prompt if provided, otherwise use general template
-        if request.custom_prompt:
-            logging.info(f"DEBUG: Using custom prompt for category '{request.category}': {request.custom_prompt[:50]}...")
-            # Custom prompt takes priority - use it directly with minimal server additions
-            # IMPORTANT: Do NOT inject mood_context here as it overrides the custom prompt's intent
-            
-            prompt = f"""{vocab_instruction}
+            if any(mood_keyword in category_lower for mood_keyword in mood_relevant_categories):
+                mood_context = f"mood={request.current_mood}"
 
-TASK: Generate words based on the following specific instructions.
-            
-INSTRUCTIONS:
-{request.custom_prompt}
-{adjective_constraint}
+        vocab_instruction = (
+            f"Vocab level: {vocabulary_level}. Use specific nouns only."
+            if is_noun_category
+            else f"Vocab level: {vocabulary_level}. Use common everyday AAC-friendly words."
+        )
+        adjective_constraint = "Adjectives only. No nouns or verbs." if is_adjective_category else ""
+        noun_constraint = "Category members only. No parts, habitats, accessories, or related objects." if is_noun_category else ""
+        instruction_text = str(request.custom_prompt or f"Generate useful AAC words for category '{request.category}'.").strip()
+        build_space_text = str(request.build_space_content or "").strip()
+        exclude_words_text = ", ".join(sorted(excluded_words)) if excluded_words else "none"
 
-CONSTRAINTS:
-- You MUST follow all "Do not" or "Exclude" instructions in the prompt above.
-- Provide exactly {freestyle_options} words or short phrases (1-3 words each).
-- STRICTLY ADHERE to the user's instructions.
-- PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words (e.g., use "loud" instead of "cacophonous").
-- Do NOT include mood or emotion words (like "happy", "sad", "melancholy") unless the instructions specifically ask for feelings. Focus on describing the object, event, or experience itself.
-{context_clause}
-{exclude_clause}
-
-FORMAT:
-- word|keyword (one per line)
-- No numbering, no headers.
-- If the word itself is the best keyword, use the same word (e.g., "car|car")"""
+        # When the user has already said something, reframe the task: generate words that
+        # continue/extend the partial sentence rather than words that describe the category.
+        if build_space_text:
+            task_framing = (
+                f"The AAC user has already said: \"{build_space_text}\"\n"
+                f"Generate {freestyle_options} short words or phrases that would naturally FOLLOW and EXTEND "
+                f"what was already said, completing or adding to the thought.\n"
+                f"Category context (for domain guidance only): {request.category}"
+            )
+            follow_up_rule = (
+                "Generate natural follow-up completions to the partial message. "
+                "Do NOT repeat, rephrase, or restate words already in the current message."
+            )
         else:
-            # Use general template for categories without specific instructions
-            prompt = f"""{vocab_instruction}
+            task_framing = (
+                f"Category: {request.category}\n"
+                f"Instruction: {instruction_text}"
+            )
+            follow_up_rule = "Stay tightly on the requested category"
 
-Generate {freestyle_options} words or short phrases for the category '{request.category}'.{mood_context}{context_clause}{exclude_clause}
+        cache_payload = {
+            "category": request.category,
+            "build_space": build_space_text,
+            "exclude": sorted(excluded_words),
+            "target_locale": user_language,
+            "current_mood": request.current_mood or "",
+            "custom_prompt": instruction_text,
+            "context": request.context or "",
+            "source_page": request.source_page or "",
+            "originating_button_text": request.originating_button_text or "",
+            "is_llm_generated": bool(request.is_llm_generated),
+            "freestyle_options": freestyle_options,
+            "vocabulary_level": vocabulary_level,
+            "noun_only": is_noun_category,
+            "adjective_only": is_adjective_category,
+        }
+        quick_cache_key = (
+            f"{account_id}|{aac_user_id}|cw|"
+            f"{hashlib.sha1(json.dumps(cache_payload, sort_keys=True).encode('utf-8')).hexdigest()[:24]}"
+        )
 
-You are helping someone communicate by providing words that fit the category '{request.category}'. Use the user context below to personalize your suggestions, but ONLY when the personal information semantically fits the category type.
+        now_ts = time.time()
+        if len(category_words_quick_response_cache) > 600:
+            expired_keys = [
+                key
+                for key, value in category_words_quick_response_cache.items()
+                if (now_ts - float(value.get("created_at", 0))) >= CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS
+            ]
+            for key in expired_keys:
+                category_words_quick_response_cache.pop(key, None)
 
+        cached_response_entry = category_words_quick_response_cache.get(quick_cache_key)
+        if cached_response_entry and (now_ts - float(cached_response_entry.get("created_at", 0))) < CATEGORY_WORDS_QUICK_RESPONSE_CACHE_TTL_SECONDS:
+            cached_words = copy.deepcopy(cached_response_entry.get("response", []))
+            total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+            logging.info(
+                f"⚡ /api/freestyle/category-words quick-cache HIT for {account_id}/{aac_user_id} "
+                f"key={quick_cache_key[-24:]} in {total_elapsed_ms:.1f}ms"
+            )
+            return JSONResponse(
+                content={"words": cached_words},
+                headers={
+                    "X-LLM-Cache": "quick-hit",
+                    "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate=0.0;total={total_elapsed_ms:.1f}",
+                    "X-LLM-Profile": "CATEGORY_WORDS_JSON",
+                },
+            )
+
+        estimated_max_output_tokens = min(768, max(220, freestyle_options * 28 + 120))
+        temperature_value = 0.35 if is_noun_category else 0.5
+        generation_config = {
+            "response_mime_type": "application/json",
+            "temperature": temperature_value,
+            "max_output_tokens": estimated_max_output_tokens,
+        }
+
+        full_prompt = f"""{vocab_instruction}
+Generate AAC word options.
+Return ONLY a valid JSON array with exactly {freestyle_options} objects.
+Each object must have:
+- text: a 1-3 word AAC-friendly option
+- keywords: an array of 0-3 short image-search hints
+
+{task_framing}
 User context: {user_context}
+Live context: {live_context_summary}
+Navigation context: {navigation_context or 'none'}
+Exclude: {exclude_words_text}
+{mood_context}
 {adjective_constraint}
+{noun_constraint}
 
-DECISION FRAMEWORK for using personal context:
-- For SEMANTIC categories (adjectives, emotions, actions, descriptions): Use personal context to choose which appropriate words to prioritize, but don't include personal nouns that don't fit the semantic type
-- For OBJECT categories (animals, food, places, people): Personal preferences can be included as objects (e.g., user's favorite restaurant for "places")
-- For ABSTRACT categories (feelings, activities): Personal context helps choose relevant options from the category
+Rules:
+- Use common, useful, everyday AAC vocabulary
+- {follow_up_rule}
+- No markdown or commentary{language_instruction}
 
-EXAMPLES of appropriate personalization:
-- "Positive adjectives" + user likes Disney → "magical, wonderful, exciting" (Disney-inspired adjectives, not "Disney" itself)
-- "Animals" + user likes dogs → include "puppy, retriever, beagle" (specific dog types)
-- "Food" + user likes Italian → "pizza, pasta, gelato" (actual Italian foods)
-Requirements:
-- Provide exactly {freestyle_options} words or short phrases (1-3 words each)
-- ALL words must semantically belong to the category type '{request.category}'
-- PRIORITIZE common, everyday conversational words. Avoid complex, obscure, or overly unique words.
-- Do NOT include mood or emotion words unless the category is explicitly about feelings.
-- Use personal context to choose the most relevant and useful words from the category
-- Words should be commonly used and appropriate for AAC communication
-- For each word, provide a related keyword for image searching
-- Format: "word|keyword" (e.g., "butterfly|insect", "snake|reptile", "gecko|lizard")
-- The keyword should be a single word that would help find relevant images
-- If the word itself is the best keyword, use the same word (e.g., "car|car")
-- DO NOT use numbered lists (1., 2., etc.) - just provide the words one per line
-- DO NOT include explanatory text or headers - only the word|keyword pairs
+Example:
+[{{"text":"park","keywords":["outside"]}},{{"text":"school","keywords":["building"]}}]"""
 
-Category: {request.category}"""
+        user_query_only = f"""{task_framing}
+Count={freestyle_options}
+Live={live_context_summary}
+Navigation={navigation_context or 'none'}
+Exclude={exclude_words_text}
+{mood_context}
+{adjective_constraint}
+{noun_constraint}
+Return only JSON array of objects with text and keywords."""
 
-        # Generate words using LLM
-        words_response = await _generate_gemini_content_with_fallback(prompt, None, account_id, aac_user_id)
-        
-        # Debug logging for AI response
-        logging.info(f"DEBUG: Category '{request.category}' - AI response length: {len(words_response) if words_response else 0}")
-        if words_response:
-            logging.info(f"DEBUG: Category '{request.category}' - AI response preview: {words_response[:200]}...")
-            logging.info(f"DEBUG: Category '{request.category}' - Full AI response: {words_response}")
-        else:
-            logging.info(f"DEBUG: Category '{request.category}' - AI response was empty/None")
-        
-        # Parse the response into individual words with keywords
-        words = []
-        if words_response:
-            lines = words_response.strip().split('\n')
-            for line in lines:
-                # Clean the line: remove numbers, bullets, quotes, etc.
-                clean_line = line.strip()
-                # Remove numbered list formatting (1., 2., etc.)
-                import re
-                clean_line = re.sub(r'^\d+\.?\s*', '', clean_line)
-                # Remove bullet points and other formatting
-                clean_line = clean_line.strip('-').strip('*').strip('•').strip().strip('"').strip("'")
-                
-                if '|' in clean_line:
-                    # Parse word|keyword format
-                    parts = clean_line.split('|', 1)
-                    word = parts[0].strip()
-                    keyword = parts[1].strip() if len(parts) > 1 else word
-                    
-                    if word and len(word.split()) <= 3:  # Allow words and short phrases (1-3 words)
-                        words.append({
-                            "text": word,
-                            "keywords": [keyword] if keyword != word else []
-                        })
-                else:
-                    # Fallback for lines without keyword format
-                    word = clean_line
-                    if word and len(word.split()) <= 3:  # Allow words and short phrases (1-3 words)
-                        words.append({
-                            "text": word,
-                            "keywords": []
-                        })
-        
-        # Ensure we have the right number of words
-        if len(words) < freestyle_options:
-            # If we don't have enough, pad with generic words for the category
-            logging.info(f"DEBUG: Category '{request.category}' - Only got {len(words)} words from AI, padding with fallback words")
-            generic_words = get_generic_category_words(request.category)
-            existing_word_texts_lower = [w.get("text", w).lower() if isinstance(w, dict) else w.lower() for w in words]
-            
-            for generic_word in generic_words:
-                # Case-insensitive check to prevent duplicates
-                if (generic_word.lower() not in existing_word_texts_lower and 
-                    generic_word.lower() not in [w.lower() for w in request.exclude_words]):
-                    words.append({
-                        "text": generic_word,
+        llm_generate_start_time = time.perf_counter()
+        words_response = await _generate_gemini_content_with_caching(
+            account_id,
+            aac_user_id,
+            full_prompt,
+            generation_config=generation_config,
+            cache_manager=cache_manager,
+            user_query_only=user_query_only,
+        )
+        llm_generate_elapsed_ms = (time.perf_counter() - llm_generate_start_time) * 1000
+        logging.info(
+            f"⏱️ /api/freestyle/category-words generation stage: {llm_generate_elapsed_ms:.1f}ms "
+            f"for {account_id}/{aac_user_id}"
+        )
+
+        import re
+        clean_json_str = str(words_response or "").strip()
+        if not clean_json_str.startswith('['):
+            json_match = re.search(r'\[.*\]', clean_json_str, re.DOTALL)
+            if json_match:
+                clean_json_str = json_match.group(0)
+
+        try:
+            parsed_output = json.loads(clean_json_str) if clean_json_str else []
+        except json.JSONDecodeError:
+            parsed_output = []
+            # Fallback: tolerate non-JSON model text by parsing line-based word|keyword or plain lines.
+            for raw_line in str(words_response or "").splitlines():
+                clean_line = re.sub(r'^\d+\.?\s*', '', str(raw_line).strip()).strip('-').strip('*').strip('•').strip().strip('"').strip("'")
+                if not clean_line:
+                    continue
+                # Ignore bare JSON syntax fragments that should never be interpreted as options.
+                if clean_line in {'[', ']', '{', '}', ',', '},', '],'}:
+                    continue
+
+                text_field_match = re.search(r'"text"\s*:\s*"([^"]+)"', clean_line)
+                if text_field_match:
+                    parsed_output.append({
+                        "text": text_field_match.group(1).strip(),
                         "keywords": []
                     })
-                    existing_word_texts_lower.append(generic_word.lower())  # Update the tracking set
-                    if len(words) >= freestyle_options:
-                        break
-        
-        # Deduplicate words (case-insensitive) to prevent "Please"/"please" duplicates
-        deduplicated_words = []
-        seen_words = set()
-        for word_obj in words:
-            word_text = word_obj.get("text", "").strip()
+                    continue
+
+                if '|' in clean_line:
+                    word_part, keyword_part = clean_line.split('|', 1)
+                    parsed_output.append({
+                        "text": word_part.strip(),
+                        "keywords": [keyword_part.strip()] if keyword_part.strip() else []
+                    })
+                else:
+                    parsed_output.append({"text": clean_line, "keywords": []})
+        if isinstance(parsed_output, dict):
+            parsed_items = (
+                parsed_output.get("words")
+                or parsed_output.get("options")
+                or parsed_output.get("results")
+                or []
+            )
+        elif isinstance(parsed_output, list):
+            parsed_items = parsed_output
+        else:
+            parsed_items = []
+
+        normalized_words: List[Dict[str, Any]] = []
+        seen_words: set[str] = set()
+        for item in parsed_items:
+            if isinstance(item, dict):
+                word_text = str(item.get("text") or item.get("word") or item.get("option") or item.get("summary") or "").strip()
+                raw_keywords = item.get("keywords") or []
+            else:
+                word_text = str(item or "").strip()
+                raw_keywords = []
+
+            word_text = re.sub(r'^\d+\.?\s*', '', word_text).strip().strip('"').strip("'")
             word_lower = word_text.lower()
-            if word_lower not in seen_words:
-                seen_words.add(word_lower)
-                deduplicated_words.append(word_obj)
-        
-        # Trim to exact number requested
-        final_words = deduplicated_words[:freestyle_options]
-        
-        logging.info(f"Generated {len(words)} words (deduplicated to {len(final_words)}) for category '{request.category}' for account {account_id}, user {aac_user_id}")
-        return JSONResponse(content={"words": final_words})
-        
+            if not word_text or len(word_text.split()) > 3 or word_lower in excluded_words or word_lower in seen_words:
+                continue
+            # Reject non-word JSON fragments (for example "[", "{", "text:").
+            if re.fullmatch(r'[\[\]\{\}:,]+', word_text):
+                continue
+            if not re.search(r'[a-zA-Z0-9]', word_text):
+                continue
+
+            keyword_list = raw_keywords if isinstance(raw_keywords, list) else [raw_keywords]
+            normalized_keywords: List[str] = []
+            seen_keywords: set[str] = set()
+            for keyword in keyword_list:
+                clean_keyword = str(keyword or "").strip()
+                clean_keyword_lower = clean_keyword.lower()
+                if not clean_keyword or clean_keyword_lower == word_lower or clean_keyword_lower in seen_keywords:
+                    continue
+                seen_keywords.add(clean_keyword_lower)
+                normalized_keywords.append(clean_keyword)
+                if len(normalized_keywords) >= 3:
+                    break
+
+            seen_words.add(word_lower)
+            normalized_words.append({
+                "text": word_text,
+                "keywords": normalized_keywords,
+            })
+            if len(normalized_words) >= freestyle_options:
+                break
+
+        if len(normalized_words) < freestyle_options:
+            logging.info(
+                f"DEBUG: Category '{request.category}' - Only got {len(normalized_words)} words from AI, padding with fallback words"
+            )
+            normalized_words.extend(
+                build_category_fallback_word_objects(
+                    request.category,
+                    freestyle_options - len(normalized_words),
+                    excluded_words=excluded_words,
+                    seen_words=seen_words,
+                )
+            )
+
+        final_words = normalized_words[:freestyle_options]
+        category_words_quick_response_cache[quick_cache_key] = {
+            "created_at": time.time(),
+            "response": copy.deepcopy(final_words),
+        }
+
+        total_elapsed_ms = (time.perf_counter() - request_start_time) * 1000
+        logging.info(
+            f"⏱️ /api/freestyle/category-words total: {total_elapsed_ms:.1f}ms "
+            f"(prep={prep_elapsed_ms:.1f}ms, generate={llm_generate_elapsed_ms:.1f}ms) "
+            f"for {account_id}/{aac_user_id}"
+        )
+        return JSONResponse(
+            content={"words": final_words},
+            headers={
+                "X-LLM-Cache": "quick-store",
+                "X-LLM-Timing": f"prep={prep_elapsed_ms:.1f};generate={llm_generate_elapsed_ms:.1f};total={total_elapsed_ms:.1f}",
+                "X-LLM-Profile": "CATEGORY_WORDS_JSON",
+            },
+        )
+
     except Exception as e:
         logging.error(f"Error generating category words for account {account_id}, user {aac_user_id}: {e}", exc_info=True)
-        return JSONResponse(content={"words": []})
+        fallback_target_count = max(1, int(locals().get("freestyle_options", 29) or 29))
+        fallback_words = build_category_fallback_word_objects(request.category, fallback_target_count)
+        return JSONResponse(
+            content={"words": fallback_words},
+            headers={
+                "X-LLM-Cache": "error-fallback",
+                "X-LLM-Timing": "prep=0.0;generate=0.0;total=0.0",
+                "X-LLM-Profile": "CATEGORY_WORDS_ERROR_FALLBACK",
+                "X-LLM-Error": type(e).__name__,
+            },
+        )
+
 
 def get_generic_category_words(category: str) -> List[str]:
-    """Get generic fallback words for a category with flexible matching"""
-    
-    # Log the exact category name for debugging
-    logging.info(f"DEBUG: get_generic_category_words called with category: '{category}'")
-    
-    # Flexible category mapping - check for keywords in category name
-    category_lower = category.lower()
-    
-    # Insect-related categories (most specific first)
-    if any(keyword in category_lower for keyword in ['insect', 'bug', 'beetles', 'butterfly', 'bee']):
-        logging.info(f"DEBUG: Matched insects category for '{category}'")
+    """Get generic fallback words for a category with flexible matching."""
+    category_lower = str(category or "").lower()
+
+    if any(keyword in category_lower for keyword in ['insect', 'bug', 'beetle', 'butterfly', 'bee']):
         return ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper", "beetle", "moth"]
-    
-    # Reptile-related categories
     if any(keyword in category_lower for keyword in ['reptile', 'snake', 'lizard', 'turtle']):
-        logging.info(f"DEBUG: Matched reptiles category for '{category}'")
         return ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon", "alligator", "crocodile"]
-    
-    # Fish and sea life
     if any(keyword in category_lower for keyword in ['fish', 'sea', 'ocean', 'marine', 'aquatic']):
-        logging.info(f"DEBUG: Matched fish/sea category for '{category}'")
         return ["fish", "shark", "whale", "dolphin", "octopus", "crab", "lobster", "seahorse"]
-    
-    # Birds
-    if any(keyword in category_lower for keyword in ['bird', 'flying', 'wings', 'feather']):
-        logging.info(f"DEBUG: Matched birds category for '{category}'")
-        return ["bird", "eagle", "robin", "owl", "parrot", "penguin", "chicken", "duck"]
-    
-    # Wild animals
-    if any(keyword in category_lower for keyword in ['wild', 'jungle', 'safari', 'zoo']):
-        logging.info(f"DEBUG: Matched wild animals category for '{category}'")
-        return ["lion", "tiger", "elephant", "giraffe", "zebra", "monkey", "bear", "deer"]
-    
-    # Exact match fallback for common categories
-    generic_words = {
-        "People": ["mom", "dad", "friend", "teacher", "doctor", "family"],
-        "Places": ["home", "school", "store", "park", "hospital", "library"],
-        "Animals": ["dog", "cat", "bird", "fish", "horse", "rabbit"],
-        "Insects": ["butterfly", "bee", "ant", "spider", "ladybug", "grasshopper"],
-        "Reptiles": ["snake", "lizard", "turtle", "gecko", "iguana", "chameleon"],
-        "Around the House": ["kitchen", "bedroom", "bathroom", "living", "garage", "yard"],
-        "In the Room": ["chair", "table", "bed", "lamp", "window", "door"],
-        "General things": ["book", "phone", "keys", "bag", "water", "food"],
-        "Actions": ["go", "come", "eat", "drink", "sleep", "play"],
-        "Feelings & Emotions": ["happy", "sad", "angry", "excited", "tired", "scared"],
-        "Questions & Comments": ["what", "where", "when", "how", "why", "please"],
-        "Times and Dates": ["today", "tomorrow", "morning", "night", "week", "month"],
-        "Activities & Hobbies": ["read", "music", "games", "sports", "art", "cooking"],
-        "Medical & Health": ["medicine", "doctor", "hurt", "sick", "better", "hospital"],
-        "Food & Drinks": ["water", "milk", "bread", "apple", "sandwich", "juice"],
-        "Colors & Descriptions": ["red", "blue", "big", "small", "hot", "cold"],
-        "Numbers & Quantities": ["one", "two", "many", "few", "more", "less"],
-        "School & Learning": ["book", "pencil", "teacher", "class", "homework", "test"],
-        "Transportation": ["car", "bus", "train", "bike", "walk", "plane"],
-        "Weather": ["sunny", "rainy", "cold", "hot", "cloudy", "windy"],
-        "Technology": ["computer", "phone", "tablet", "internet", "email", "game"],
-        "Sports & Games": ["ball", "team", "play", "win", "run", "jump"]
-    }
-    
-    # Try exact match first
-    exact_match = generic_words.get(category)
-    if exact_match:
-        logging.info(f"DEBUG: Found exact match for '{category}'")
-        return exact_match
-    
-    # Log when falling back to generic words
-    logging.info(f"DEBUG: No match found for '{category}', using generic fallback")
-    return ["thing", "stuff", "item", "object", "something", "anything"]
+    if any(keyword in category_lower for keyword in ['bird', 'flying', 'wing', 'feather']):
+        return ["bird", "eagle", "duck", "owl", "parrot", "robin", "penguin", "sparrow"]
+    if any(keyword in category_lower for keyword in ['dinosaur', 'dino']):
+        return [
+            "T-rex", "triceratops", "stegosaurus", "brontosaurus", "velociraptor", "spinosaurus", "ankylosaurus", "brachiosaurus",
+            "diplodocus", "allosaurus", "parasaurolophus", "iguanodon", "carnotaurus", "pachycephalosaurus", "oviraptor", "gallimimus",
+            "microraptor", "deinonychus", "utahraptor", "compsognathus", "dilophosaurus", "acrocanthosaurus", "ceratosaurus", "argentinosaurus",
+            "apatosaurus", "megalosaurus", "hadrosaur", "sauropod", "theropod", "herbivore dinosaur", "carnivore dinosaur", "dinosaur egg",
+            "fossil", "fossil bone", "skeleton", "extinct", "prehistoric", "jurassic", "cretaceous", "triassic"
+        ]
+    if any(keyword in category_lower for keyword in ['animal', 'pet', 'wild']):
+        return ["dog", "cat", "horse", "bear", "lion", "tiger", "rabbit", "elephant"]
+    if any(keyword in category_lower for keyword in ['people', 'person', 'family', 'friend']):
+        return ["mom", "dad", "friend", "teacher", "baby", "doctor", "brother", "sister"]
+    if any(keyword in category_lower for keyword in ['place', 'location', 'room', 'building']):
+        return ["home", "school", "park", "store", "restaurant", "hospital", "church", "library"]
+    if any(keyword in category_lower for keyword in ['thing', 'object', 'item']):
+        return ["book", "chair", "phone", "toy", "ball", "computer", "blanket", "backpack"]
+    if any(keyword in category_lower for keyword in ['food', 'meal', 'snack']):
+        return ["pizza", "apple", "sandwich", "pasta", "cookie", "banana", "chicken", "fries"]
+    if any(keyword in category_lower for keyword in ['drink', 'beverage']):
+        return ["water", "juice", "milk", "soda", "coffee", "tea", "smoothie", "lemonade"]
+    if any(keyword in category_lower for keyword in ['action', 'verb']):
+        return ["go", "eat", "play", "help", "want", "need", "stop", "look"]
+    if any(keyword in category_lower for keyword in ['describe', 'adjective', 'color', 'size', 'shape']):
+        return ["big", "small", "red", "blue", "round", "soft", "fast", "hot"]
+    if any(keyword in category_lower for keyword in ['number', 'count']):
+        return ["one", "two", "three", "four", "five", "more", "all", "none"]
+    if any(keyword in category_lower for keyword in ['weather']):
+        return ["sunny", "rain", "cloud", "snow", "windy", "storm", "hot", "cold"]
+    if any(keyword in category_lower for keyword in ['date', 'time', 'calendar']):
+        return ["today", "tomorrow", "morning", "night", "Monday", "birthday", "weekend", "later"]
 
-
-# --- ADMIN ENDPOINTS ---
-
-class CopyProfilesBetweenAccountsRequest(BaseModel):
-    source_email: str
-    target_email: str
-    admin_password: str = "admin123"  # Simple password protection
-
-@app.post("/api/admin/copy-profiles-between-accounts")
-async def copy_profiles_between_accounts(request: CopyProfilesBetweenAccountsRequest):
-    """
-    Admin endpoint to copy all AAC user profiles from one Firebase account to another.
-    This is specifically for setting up the demo readonly account.
-    """
-    
-    # Simple password protection
-    if request.admin_password != "admin123":
-        raise HTTPException(status_code=403, detail="Invalid admin password")
-    
-    try:
-        logging.info(f"Starting profile copy from {request.source_email} to {request.target_email}")
-        
-        # Get account IDs from Firebase Auth
-        source_account_id = None
-        target_account_id = None
-        
-        try:
-            source_user_record = auth.get_user_by_email(request.source_email)
-            source_account_id = source_user_record.uid
-            logging.info(f"Found source account ID: {source_account_id}")
-        except auth.UserNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Source email {request.source_email} not found")
-        
-        try:
-            target_user_record = auth.get_user_by_email(request.target_email)
-            target_account_id = target_user_record.uid
-            logging.info(f"Found target account ID: {target_account_id}")
-        except auth.UserNotFoundError:
-            raise HTTPException(status_code=404, detail=f"Target email {request.target_email} not found")
-        
-        # Get all users from source account
-        source_users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(source_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
-        source_users_docs = await asyncio.to_thread(source_users_ref.stream)
-        
-        source_users = []
-        for doc in source_users_docs:
-            user_data = doc.to_dict()
-            user_data['aac_user_id'] = doc.id
-            source_users.append(user_data)
-        
-        if not source_users:
-            raise HTTPException(status_code=404, detail=f"No profiles found in source account {request.source_email}")
-        
-        logging.info(f"Found {len(source_users)} profiles to copy")
-        
-        # Check existing users in target account and clean them up
-        target_users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
-        existing_target_docs = await asyncio.to_thread(target_users_ref.stream)
-        existing_target_users = list(existing_target_docs)
-        existing_count = len(existing_target_users)
-        
-        # Clean up existing profiles in target account to avoid duplicates
-        if existing_count > 0:
-            logging.info(f"Found {existing_count} existing profiles in target account. Cleaning up before copying...")
-            
-            for existing_doc in existing_target_users:
-                try:
-                    # Delete all user data subcollections first
-                    existing_user_id = existing_doc.id
-                    
-                    # Delete user data subcollections
-                    subcollections = ['info', 'settings', 'favorites', 'threads', 'birthdays', 'user_current', 'user_narrative']
-                    for subcoll in subcollections:
-                        subcoll_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(existing_user_id).collection(subcoll)
-                        docs = await asyncio.to_thread(subcoll_ref.stream)
-                        for doc in docs:
-                            await asyncio.to_thread(doc.reference.delete)
-                    
-                    # Delete the user document itself
-                    await asyncio.to_thread(existing_doc.reference.delete)
-                    logging.info(f"Deleted existing profile: {existing_doc.to_dict().get('display_name', existing_user_id)}")
-                    
-                except Exception as e:
-                    logging.error(f"Error deleting existing profile {existing_user_id}: {e}")
-            
-            logging.info(f"Cleanup completed. Removed {existing_count} existing profiles.")
-        else:
-            logging.info("No existing profiles found in target account.")
-        
-        copied_profiles = []
-        failed_profiles = []
-        
-        # Copy each user
-        for user in source_users:
-            display_name = user.get('display_name', 'Unknown')
-            source_user_id = user['aac_user_id']
-            
-            try:
-                logging.info(f"Copying profile: {display_name}")
-                
-                # Generate new user ID for target account
-                new_user_id = str(uuid.uuid4())
-                
-                # Create user document in target account
-                target_user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(new_user_id)
-                
-                # Prepare user data (remove old aac_user_id)
-                clean_user_data = {k: v for k, v in user.items() if k != 'aac_user_id'}
-                clean_user_data['created_at'] = dt.now().isoformat()
-                clean_user_data['last_updated'] = dt.now().isoformat()
-                
-                # Set the user document
-                await asyncio.to_thread(target_user_ref.set, clean_user_data)
-                
-                # Copy all user data across accounts
-                await _copy_user_data_cross_account(source_account_id, source_user_id, target_account_id, new_user_id)
-                
-                copied_profiles.append({
-                    "display_name": display_name,
-                    "source_id": source_user_id,
-                    "target_id": new_user_id
-                })
-                
-                logging.info(f"Successfully copied profile: {display_name}")
-                
-            except Exception as e:
-                logging.error(f"Failed to copy profile {display_name}: {e}", exc_info=True)
-                failed_profiles.append({
-                    "display_name": display_name,
-                    "error": str(e)
-                })
-        
-        # Update target account user limit
-        new_user_limit = existing_count + len(copied_profiles) + 2  # +2 for buffer
-        target_account_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(target_account_id)
-        await asyncio.to_thread(target_account_ref.update, {
-            "num_users_allowed": new_user_limit,
-            "last_updated": dt.now().isoformat()
-        })
-        
-        logging.info(f"Profile copy complete. Copied {len(copied_profiles)} profiles, failed {len(failed_profiles)}")
-        
-        return JSONResponse(content={
-            "success": True,
-            "message": f"Successfully copied {len(copied_profiles)} out of {len(source_users)} profiles",
-            "source_email": request.source_email,
-            "target_email": request.target_email,
-            "copied_count": len(copied_profiles),
-            "failed_count": len(failed_profiles),
-            "copied_profiles": copied_profiles,
-            "failed_profiles": failed_profiles,
-            "new_user_limit": new_user_limit
-        })
-        
-    except Exception as e:
-        logging.error(f"Error copying profiles between accounts: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to copy profiles: {str(e)}")
+    return ["more", "help", "go", "stop", "want", "like", "here", "there"]
 
 
 class DebugUserInfoRequest(BaseModel):
@@ -11454,27 +18471,36 @@ async def generate_image_with_openai_if_available(prompt: str, max_retries: int 
         # Fall back to placeholder if OpenAI is not available
         return await generate_image_with_gemini_fallback(prompt, max_retries)
 
-async def generate_image_with_vertex_ai_imagen(prompt: str, max_retries: int = 2) -> bytes:
+async def generate_image_with_vertex_ai_imagen(
+    prompt: str,
+    max_retries: int = 2,
+    allow_placeholder_fallback: bool = True
+) -> bytes:
     """Generate image using Vertex AI Imagen model"""
+    model_candidates = [
+        "imagegeneration@006",
+        "imagen-3.0-fast-generate-001",
+        "imagen-3.0-generate-002",
+    ]
+    last_error = "unknown error"
+
     for attempt in range(max_retries + 1):
         try:
             import requests
             import base64
-            import json
-            
+
             # Get access token for Vertex AI
             import google.auth.transport.requests
-            import google.oauth2.service_account
-            
+
             # Use default credentials
             from google.auth import default
             credentials, project_id = default()
-            
+
             # Refresh credentials to get access token
             auth_req = google.auth.transport.requests.Request()
             credentials.refresh(auth_req)
             access_token = credentials.token
-            
+
             # AAC-focused prompt with even stronger simplicity and icon directives
             enhanced_prompt = f'''
 Create an extremely simple image for the AAC symbol representing "{prompt}".
@@ -11486,56 +18512,80 @@ The image should be a clean, minimalistic icon or cartoon that clearly conveys t
 The image will be used on buttons in an AAC app, so it must be easily recognizable at small sizes.
 Use bold lines, simple shapes, and a limited color palette to ensure the image is easily recognizable at small sizes. 
 The background should be plain or transparent to avoid distractions. Focus on the core concept of "{prompt}" and avoid any abstract or artistic interpretations. 
-'''          
-            # Vertex AI Imagen endpoint
-            endpoint = f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}/locations/us-central1/publishers/google/models/imagegeneration@006:predict"
-            
-            # Request payload with improved parameters
-            payload = {
-                "instances": [
-                    {
-                        "prompt": enhanced_prompt
-                    }
-                ],
-                "parameters": {
-                    "sampleCount": 1,
-                    "aspectRatio": "1:1",
-                    "safetyFilterLevel": "block_none"  # Less restrictive to allow more stylized results
-                    # Note: seed parameter removed because it's not supported when watermark is enabled
-                }
-            }
-            
-            # Headers (fix the authorization bug)
+'''
+
+            # Headers
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json"
             }
-            
-            # Make the request
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                # Extract image data
-                if 'predictions' in result and len(result['predictions']) > 0:
-                    prediction = result['predictions'][0]
-                    
-                    # Try different response formats
-                    if 'bytesBase64Encoded' in prediction:
-                        return base64.b64decode(prediction['bytesBase64Encoded'])
-                    elif 'generated_image' in prediction and 'bytesBase64Encoded' in prediction['generated_image']:
-                        return base64.b64decode(prediction['generated_image']['bytesBase64Encoded'])
-                    elif 'image' in prediction:
-                        return base64.b64decode(prediction['image'])
-                
-            raise Exception(f"Vertex AI request failed: {response.status_code} - {response.text}")
-                
+
+            for model_name in model_candidates:
+                endpoint = (
+                    f"https://us-central1-aiplatform.googleapis.com/v1/projects/{CONFIG['gcp_project_id']}"
+                    f"/locations/us-central1/publishers/google/models/{model_name}:predict"
+                )
+
+                payload = {
+                    "instances": [
+                        {
+                            "prompt": enhanced_prompt
+                        }
+                    ],
+                    "parameters": {
+                        "sampleCount": 1,
+                        "aspectRatio": "1:1",
+                        "safetyFilterLevel": "block_none"
+                    }
+                }
+
+                response = requests.post(endpoint, json=payload, headers=headers, timeout=120)
+
+                if response.status_code == 200:
+                    result = response.json()
+
+                    if 'predictions' in result and len(result['predictions']) > 0:
+                        prediction = result['predictions'][0]
+
+                        if 'bytesBase64Encoded' in prediction:
+                            return base64.b64decode(prediction['bytesBase64Encoded'])
+                        elif 'generated_image' in prediction and 'bytesBase64Encoded' in prediction['generated_image']:
+                            return base64.b64decode(prediction['generated_image']['bytesBase64Encoded'])
+                        elif 'image' in prediction:
+                            return base64.b64decode(prediction['image'])
+
+                    last_error = f"model {model_name} returned 200 but no image bytes"
+                    continue
+
+                last_error = f"model {model_name} failed: {response.status_code} - {response.text[:600]}"
+
+            raise Exception(last_error)
+
         except Exception as e:
+            last_error = str(e)
             logging.warning(f"Vertex AI Imagen generation attempt {attempt + 1} failed: {e}")
             if attempt == max_retries:
-                # Fall back to placeholder if Vertex AI fails
-                return await generate_image_with_gemini_fallback(prompt, 0)
+                if allow_placeholder_fallback:
+                    # Fall back to placeholder if Vertex AI fails
+                    return await generate_image_with_gemini_fallback(prompt, 0)
+                raise HTTPException(status_code=503, detail=f"Vertex image generation unavailable: {last_error}")
+
+
+async def generate_story_illustration_image(prompt: str, max_retries: int = 2) -> bytes:
+    """Generate Story Builder illustrations using Gemini/Vertex only (no placeholder fallback)."""
+    try:
+        return await generate_image_with_vertex_ai_imagen(
+            prompt,
+            max_retries=max_retries,
+            allow_placeholder_fallback=False
+        )
+    except Exception as vertex_error:
+        vertex_error_message = str(getattr(vertex_error, "detail", "") or str(vertex_error) or "unknown Gemini/Vertex error")
+        logging.warning(f"Story illustration Gemini/Vertex generation failed: {vertex_error}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gemini image generation unavailable right now: {vertex_error_message}"
+        )
 
 # Update the main function to use Vertex AI Imagen directly
 generate_image_with_gemini = generate_image_with_vertex_ai_imagen
@@ -12043,8 +19093,14 @@ def normalize_search_term(term: str) -> str:
         else:
             # jokes → joke
             return term[:-1]
-    elif term_lower.endswith('s') and len(term_lower) > 2 and not term_lower.endswith('ss'):
-        # questions → question, foods → food, but not "bass"
+    elif term_lower.endswith('s') and len(term_lower) > 2:
+        # Preserve common singular words that naturally end in 's'
+        # (e.g., calculus, genius, status, lens, bass)
+        singular_s_endings = ('us', 'is', 'ss', 'ns')
+        if term_lower.endswith(singular_s_endings):
+            return term
+
+        # questions → question, foods → food
         return term[:-1]
     
     return term
@@ -12105,7 +19161,7 @@ async def log_missing_image(search_term: str, search_context: dict = None):
             
     except Exception as e:
         logging.error(f"❌ Error logging missing image '{search_term}': {e}")
-        raise  # Re-raise so the caller can handle it
+        # Do not re-raise - missing image logging is non-critical and must not 500 the caller
 
 # Redis cache helper functions
 async def clear_image_cache(pattern: str = "bravo_images:*"):
@@ -12231,8 +19287,8 @@ async def browse_images_for_admin(
                     continue
         else:
             # No search term, get all matching images up to limit
-            if limit > 5000:  # Cap at reasonable limit for performance
-                limit = 5000
+            if limit > 20000:  # Cap at reasonable limit for performance
+                limit = 20000
             query = base_query.limit(limit)
             all_docs = await asyncio.to_thread(query.get)
         
@@ -12260,8 +19316,11 @@ async def browse_images_for_admin(
                 "concept": data.get("concept", ""),
                 "tags": data.get("tags", []),
                 "keywords": data.get("keywords", []),
-                "created_at": data.get("created_at"),
-                "preview_url": data.get("image_url", "")
+                "created_at": data.get("created_at") or data.get("updated_at"),
+                "preview_url": data.get("image_url", ""),
+                "aliases": data.get("aliases", []),
+                "localized_tags": data.get("localized_tags", {}),
+                "localized_labels": data.get("localized_labels", {}),
             }
             images.append(admin_data)
         
@@ -12329,6 +19388,72 @@ async def api_update_image_tags(
     except Exception as e:
         logging.error(f"Error in update image tags API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/imagecreator/images/{image_id}/multilingual")
+async def api_update_image_multilingual(
+    image_id: str,
+    payload: Dict = Body(...),
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """Update multilingual metadata for an AAC image: localized_tags, localized_labels, aliases"""
+    try:
+        doc_ref = firestore_db.collection("aac_images").document(image_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        update_data: Dict[str, Any] = {}
+
+        # aliases: flat list of alternate search terms
+        if "aliases" in payload:
+            raw_aliases = payload["aliases"]
+            if isinstance(raw_aliases, list):
+                update_data["aliases"] = [str(a).strip() for a in raw_aliases if str(a).strip()]
+            else:
+                update_data["aliases"] = []
+
+        # localized_tags: {locale: [tag, ...]}
+        if "localized_tags" in payload:
+            raw_lt = payload["localized_tags"]
+            normalized_lt: Dict[str, List[str]] = {}
+            if isinstance(raw_lt, dict):
+                for locale_key, tag_list in raw_lt.items():
+                    locale = _normalize_locale_tag(str(locale_key))
+                    if not locale:
+                        continue
+                    if isinstance(tag_list, list):
+                        normalized_lt[locale] = [str(t).strip() for t in tag_list if str(t).strip()]
+            update_data["localized_tags"] = normalized_lt
+
+        # localized_labels: {locale: label_string}
+        if "localized_labels" in payload:
+            raw_ll = payload["localized_labels"]
+            normalized_ll: Dict[str, str] = {}
+            if isinstance(raw_ll, dict):
+                for locale_key, label in raw_ll.items():
+                    locale = _normalize_locale_tag(str(locale_key))
+                    if not locale:
+                        continue
+                    label_str = _sanitize_translated_text(label)
+                    if label_str:
+                        normalized_ll[locale] = label_str
+            update_data["localized_labels"] = normalized_ll
+
+        if not update_data:
+            return {"success": True, "message": "No changes provided"}
+
+        await asyncio.to_thread(doc_ref.update, update_data)
+        logging.info(f"Updated multilingual metadata for image {image_id}: {list(update_data.keys())}")
+
+        return {"success": True, "message": "Multilingual metadata updated successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating multilingual metadata for image {image_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/api/admin/images/bulk-delete")
 async def api_bulk_delete_images(
@@ -13543,6 +20668,7 @@ async def button_symbol_search(
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
     q: str = "",
     keywords: str = "",
+    locale: str = "en-US",
     limit: int = 5
 ):
     """
@@ -13560,6 +20686,50 @@ async def button_symbol_search(
             })
         
         query_lower = q.lower().strip()
+        locale_norm = str(locale or "en-US").strip().lower()
+        locale_base = locale_norm.split('-')[0] if '-' in locale_norm else locale_norm
+
+        # Normalize inflected forms (e.g., "quiero" -> "querer") for locale-aware lookup.
+        normalized_query = query_lower
+        if locale_base and locale_base != "en":
+            try:
+                from aac_inflection_utils import normalize_search_term
+                inflection_normalized = str(normalize_search_term(query_lower, locale_base) or "").strip().lower()
+                if inflection_normalized:
+                    normalized_query = inflection_normalized
+            except Exception as inflection_error:
+                logging.debug(f"Inflection normalization skipped for '{query_lower}' ({locale_base}): {inflection_error}")
+
+        def _allowed_locale_keys():
+            keys = {"en", "en-us", locale_norm, locale_base}
+            return {k for k in keys if k}
+
+        allowed_locale_keys = _allowed_locale_keys()
+
+        def _extract_localized_terms_for_locale(localized_tags_raw, localized_labels_raw):
+            localized_terms = []
+
+            if isinstance(localized_tags_raw, dict):
+                for locale_key, locale_tags in localized_tags_raw.items():
+                    locale_key_norm = str(locale_key or "").strip().lower()
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    if isinstance(locale_tags, list):
+                        localized_terms.extend([
+                            str(tag).strip().lower()
+                            for tag in locale_tags
+                            if str(tag).strip()
+                        ])
+
+            if isinstance(localized_labels_raw, dict):
+                for locale_key, locale_label in localized_labels_raw.items():
+                    locale_key_norm = str(locale_key or "").strip().lower()
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    if isinstance(locale_label, str) and locale_label.strip():
+                        localized_terms.append(locale_label.strip().lower())
+
+            return localized_terms
         
         # Process keywords if provided (for LLM-generated content)
         keyword_list = []
@@ -13581,7 +20751,7 @@ async def button_symbol_search(
                 except:
                     pass
         
-        logging.info(f"Symbol search: query='{query_lower}', keywords={keyword_list}")
+        logging.info(f"Symbol search: query='{query_lower}', locale='{locale_norm}', keywords={keyword_list}")
         
         # Semantic mapping for common AAC terms
         semantic_mappings = {
@@ -13617,12 +20787,15 @@ async def button_symbol_search(
         search_terms_for_images = []
         if query_lower:
             search_terms_for_images.append(query_lower)
+        if normalized_query and normalized_query != query_lower:
+            search_terms_for_images.append(normalized_query)
         search_terms_for_images.extend(keyword_list[:3])  # Add up to 3 keywords
         search_terms_for_images = list(dict.fromkeys(search_terms_for_images))  # Remove duplicates
         
         for i, term in enumerate(search_terms_for_images[:3]):  # Check up to 3 terms for images
             try:
-                # Search bravo_images in aac_images collection using multiple case variations like the imagecreator endpoint
+                # Search bravo_images in aac_images collection using precomputed search_terms first,
+                # then legacy tags as fallback.
                 term_variations = [
                     term,                    # Original case
                     term.lower(),            # All lowercase  
@@ -13642,17 +20815,54 @@ async def button_symbol_search(
                 image_docs = []
                 for variation in unique_variations:
                     try:
-                        variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(max(20, limit * 5))
+                        variation_lower = variation.lower().strip()
+                        if not variation_lower:
+                            continue
+
+                        # Preferred path: language-friendly array field
+                        variation_query = images_ref.where("search_terms", "array_contains", variation_lower).limit(max(30, limit * 8))
                         variation_docs = list(variation_query.stream())
-                        image_docs.extend(variation_docs)
+                        for d in variation_docs:
+                            data = d.to_dict() or {}
+                            if data.get("source") == "bravo_images":
+                                image_docs.append(d)
+
+                        # Locale-aware fallback path for migrated data where localized tags/labels exist
+                        # but search_terms may be incomplete/stale.
+                        if locale_base and locale_base != "en":
+                            localized_tags_field = f"localized_tags.{locale_base}"
+                            localized_labels_field = f"localized_labels.{locale_base}"
+
+                            localized_tag_query = images_ref.where("source", "==", "bravo_images").where(
+                                localized_tags_field, "array_contains", variation_lower
+                            ).limit(max(20, limit * 5))
+                            image_docs.extend(list(localized_tag_query.stream()))
+
+                            for label_candidate in [variation.strip(), variation_lower]:
+                                if not label_candidate:
+                                    continue
+                                localized_label_query = images_ref.where("source", "==", "bravo_images").where(
+                                    localized_labels_field, "==", label_candidate
+                                ).limit(max(10, limit * 3))
+                                image_docs.extend(list(localized_label_query.stream()))
+
+                        # Legacy fallback path
+                        if not variation_docs:
+                            legacy_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(max(20, limit * 5))
+                            legacy_docs = list(legacy_query.stream())
+                            image_docs.extend(legacy_docs)
                         
                         # Don't stop at first match - collect from all variations for better scoring
                     except Exception as e:
                         logging.debug(f"Query failed for variation '{variation}': {e}")
                         continue
-                # Process all collected docs
+                # Process all collected docs (dedupe by document id first)
+                deduped_docs = {}
+                for d in image_docs:
+                    deduped_docs[d.id] = d
+
                 weight = 1.0 if i == 0 else 0.8
-                for doc in image_docs:
+                for doc in deduped_docs.values():
                     image = doc.to_dict()
                     image_id = doc.id
                     
@@ -13662,6 +20872,9 @@ async def button_symbol_search(
                         
                         # Calculate tag position bonus - first tag gets highest score
                         tags = image.get('tags', [])
+                        tags_lower = [str(tag).lower() for tag in tags]
+                        image_subconcept = str(image.get('subconcept', '')).lower().strip()
+                        image_concept = str(image.get('concept', '')).lower().strip()
                         tag_position_bonus = 0
                         for pos, tag in enumerate(tags):
                             if tag.lower() == term.lower():
@@ -13673,9 +20886,17 @@ async def button_symbol_search(
                                     tag_position_bonus = 5   # Early tags get small bonus
                                 break
                         
-                        # BravoImages get higher base scores than symbols
-                        base_score = 50 * weight  # Higher than symbol scores
-                        image['match_score'] = base_score + tag_position_bonus
+                        # PRIORITY RULE: exact subconcept match must outrank tag matches.
+                        if image_subconcept and image_subconcept == term.lower():
+                            image['match_score'] = (95 * weight) + tag_position_bonus
+                        elif image_concept and image_concept == term.lower():
+                            image['match_score'] = (85 * weight) + tag_position_bonus
+                        elif term.lower() in tags_lower:
+                            # Keep tag-only matches below subconcept/concept exact matches.
+                            base_score = 50 * weight
+                            image['match_score'] = base_score + tag_position_bonus
+                        else:
+                            image['match_score'] = 40 * weight
                         image['matched_term'] = term
                         image['search_phase'] = "bravo_image_match"
                         
@@ -13696,8 +20917,10 @@ async def button_symbol_search(
                 logging.debug(f"BravoImages search failed for term '{term}': {e}")
         
         logging.info(f"Found {len(matched_symbols)} BravoImages matches")
-        
+
         # Phase -0.5: Search user's custom images (including profile images)
+        # NOTE: Must happen BEFORE the fast-return path so custom subconcept matches
+        # can outrank BravoImage tag matches even when limit=1 (Tap interface).
         account_id = current_ids["account_id"]
         aac_user_id = current_ids["aac_user_id"]
         
@@ -13706,24 +20929,89 @@ async def button_symbol_search(
             custom_images_ref = firestore_db.collection("accounts").document(account_id)\
                                           .collection("profiles").document(aac_user_id)\
                                           .collection("custom_images")
-            
-            # Search for active custom images (including profile images)
-            custom_query = custom_images_ref.where("active", "==", True).limit(limit * 3)
-            custom_docs = list(custom_query.stream())
-            
-            logging.info(f"Found {len(custom_docs)} active custom images for search matching")
-            
-            logging.info(f"Found {len(custom_docs)} active custom images for user")
+
+            # Build a targeted candidate set first so exact subconcept matches are not
+            # missed when limit=1 (Tap calls often request only one result).
+            custom_doc_map: Dict[str, Any] = {}
+
+            def _collect_custom_docs(doc_iterable):
+                for custom_doc in doc_iterable:
+                    custom_doc_map[custom_doc.id] = custom_doc
+
+            targeted_limit = max(50, limit * 20)
+
+            # Single-field queries avoid composite-index requirements and are reliable.
+            try:
+                _collect_custom_docs(custom_images_ref.where("subconcept", "==", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom subconcept query failed: {e}")
+
+            try:
+                _collect_custom_docs(custom_images_ref.where("concept", "==", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom concept query failed: {e}")
+
+            try:
+                _collect_custom_docs(custom_images_ref.where("tags", "array_contains", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom tags query failed: {e}")
+
+            try:
+                _collect_custom_docs(custom_images_ref.where("aliases", "array_contains", query_lower).limit(targeted_limit).stream())
+            except Exception as e:
+                logging.debug(f"Custom aliases query failed: {e}")
+
+            if locale_base and locale_base != "en":
+                localized_tags_field = f"localized_tags.{locale_base}"
+                localized_labels_field = f"localized_labels.{locale_base}"
+
+                try:
+                    _collect_custom_docs(custom_images_ref.where(localized_tags_field, "array_contains", query_lower).limit(targeted_limit).stream())
+                except Exception as e:
+                    logging.debug(f"Custom localized tags query failed: {e}")
+
+                for label_candidate in [query_lower, q.strip()]:
+                    if not label_candidate:
+                        continue
+                    try:
+                        _collect_custom_docs(custom_images_ref.where(localized_labels_field, "==", label_candidate).limit(targeted_limit).stream())
+                    except Exception as e:
+                        logging.debug(f"Custom localized label query failed for '{label_candidate}': {e}")
+
+            # Fallback broad scan to preserve previous behavior for legacy data where
+            # searchable fields may be incomplete.
+            fallback_scan_limit = max(200, limit * 60)
+            if len(custom_doc_map) < max(20, limit * 10):
+                try:
+                    fallback_query = custom_images_ref.where("active", "==", True).limit(fallback_scan_limit)
+                    _collect_custom_docs(fallback_query.stream())
+                except Exception as e:
+                    logging.debug(f"Custom fallback active query failed: {e}")
+
+            custom_docs = list(custom_doc_map.values())
+            logging.info(f"Collected {len(custom_docs)} custom image candidates for search matching")
             
             for doc in custom_docs:
                 custom_image = doc.to_dict()
                 custom_image_id = doc.id
+
+                # Enforce active-only behavior after collecting candidates.
+                if not custom_image.get('active', False):
+                    continue
                 
                 # Get all searchable fields
                 tags = custom_image.get('tags', [])
                 tags_lower = [tag.lower() for tag in tags]
                 concept = custom_image.get('concept', '').lower()
                 subconcept = custom_image.get('subconcept', '').lower()
+                aliases = custom_image.get('aliases', [])
+                aliases_lower = [str(alias).strip().lower() for alias in aliases if isinstance(alias, (str, int, float)) and str(alias).strip()]
+
+                localized_tags_raw = custom_image.get('localized_tags')
+                localized_labels_raw = custom_image.get('localized_labels')
+                localized_terms_lower = _extract_localized_terms_for_locale(localized_tags_raw, localized_labels_raw)
+
+                all_search_terms_lower = [term for term in [concept, subconcept, *tags_lower, *aliases_lower, *localized_terms_lower] if term]
                 
                 # Debug logging for each image
                 logging.info(f"Checking custom image {custom_image_id}: concept='{concept}', subconcept='{subconcept}', tags={tags}")
@@ -13736,11 +21024,11 @@ async def button_symbol_search(
                 # Check primary query against all fields
                 if query_lower == concept:
                     matched_term = query_lower
-                    match_score = 70  # Highest for exact concept match
+                    match_score = 70
                     logging.info(f"✅ EXACT CONCEPT MATCH: '{query_lower}' == '{concept}' (score: {match_score})")
                 elif query_lower == subconcept:
                     matched_term = query_lower  
-                    match_score = 65  # High for exact subconcept match
+                    match_score = 95  # Highest priority for exact subcategory/subconcept match
                     logging.info(f"✅ EXACT SUBCONCEPT MATCH: '{query_lower}' == '{subconcept}' (score: {match_score})")
                 elif query_lower in tags_lower:
                     matched_term = query_lower
@@ -13754,13 +21042,22 @@ async def button_symbol_search(
                             elif pos <= 3:
                                 tag_position_bonus = 8
                             break
-                    match_score = 60 + tag_position_bonus  # Higher than BravoImages
+                    match_score = 60 + tag_position_bonus
+                elif query_lower in aliases_lower:
+                    matched_term = query_lower
+                    match_score = 58
+                elif query_lower in localized_terms_lower:
+                    matched_term = query_lower
+                    match_score = 56
                 elif query_lower in concept:
                     matched_term = query_lower
                     match_score = 45  # Partial concept match
                 elif query_lower in subconcept:
                     matched_term = query_lower
                     match_score = 40  # Partial subconcept match
+                elif any(query_lower in term for term in all_search_terms_lower):
+                    matched_term = query_lower
+                    match_score = 36
                 
                 # Check keyword list if no primary match
                 if not matched_term:
@@ -13771,7 +21068,7 @@ async def button_symbol_search(
                             break
                         elif keyword == subconcept:
                             matched_term = keyword
-                            match_score = 60
+                            match_score = 90  # Keep keyword-driven subconcept exact above tag hits
                             break
                         elif keyword in tags_lower:
                             matched_term = keyword
@@ -13786,6 +21083,14 @@ async def button_symbol_search(
                                     break
                             match_score = 55 + tag_position_bonus
                             break
+                        elif keyword in aliases_lower:
+                            matched_term = keyword
+                            match_score = 52
+                            break
+                        elif keyword in localized_terms_lower:
+                            matched_term = keyword
+                            match_score = 50
+                            break
                         elif keyword in concept:
                             matched_term = keyword
                             match_score = 35
@@ -13793,6 +21098,10 @@ async def button_symbol_search(
                         elif keyword in subconcept:
                             matched_term = keyword
                             match_score = 30
+                            break
+                        elif any(keyword in term for term in all_search_terms_lower):
+                            matched_term = keyword
+                            match_score = 28
                             break
                 
                 if matched_term:
@@ -13820,7 +21129,18 @@ async def button_symbol_search(
             
         except Exception as e:
             logging.debug(f"Custom images search failed: {e}")
-        
+
+        # Fast return path for Tap interface (limit=1): avoid expensive fallback phases.
+        # Placed here (after custom images) so custom subconcept/concept matches are included.
+        if limit <= 1 and matched_symbols:
+            matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+            return JSONResponse(content={
+                "symbols": matched_symbols[:1],
+                "total_found": len(matched_symbols),
+                "query": q,
+                "search_type": "bravo_image_fast"
+            })
+
         # Phase 0: Enhanced keyword array matching for LLM-generated content (when keywords are provided)
         if keyword_list:
             try:
@@ -13938,8 +21258,10 @@ async def button_symbol_search(
             except Exception as e:
                 logging.debug(f"Tag search failed for term '{term}': {e}")
         
-        # Phase 3: If we still don't have results, do comprehensive fallback search
-        if len(matched_symbols) == 0:
+        # Phase 3: If we still don't have results, do comprehensive fallback search.
+        # Skip this expensive path for limit=1 lookups (Tap/Games single-symbol fetches)
+        # to prevent timeout/abort cascades under load.
+        if len(matched_symbols) == 0 and limit > 1:
             logging.info(f"No matches found for '{query_lower}', doing comprehensive search")
             try:
                 # Get a larger sample for thorough matching
@@ -14003,18 +21325,30 @@ async def button_symbol_search(
         
         # Sort by match score and clean up response
         matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
-        
-        # Clean datetime objects for JSON serialization
-        for symbol in matched_symbols:
-            for field in ['created_at', 'updated_at', 'last_used']:
-                if field in symbol and symbol[field]:
-                    symbol[field] = symbol[field].isoformat() if hasattr(symbol[field], 'isoformat') else str(symbol[field])
+
+        # Recursively clean non-JSON-native values (e.g., Firestore DatetimeWithNanoseconds)
+        # so rare timestamp fields never crash button search responses.
+        def _json_safe(value):
+            if isinstance(value, dict):
+                return {k: _json_safe(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_json_safe(v) for v in value]
+            if hasattr(value, 'isoformat'):
+                try:
+                    return value.isoformat()
+                except Exception:
+                    return str(value)
+            return value
+
+        matched_symbols = [_json_safe(symbol) for symbol in matched_symbols]
         
         search_type = "keyword_array_fast" if keyword_list else ("semantic_fast" if query_lower in semantic_mappings else "keyword_fast")
         
-        # Log missing images when no symbols are found
-        # Use the processed query_lower which is the canonical search term
+        # Log missing images ONLY when NO matches found across entire search
+        # This includes main query, keywords, and all fallback phases.
+        # Individual keywords that fail are NOT logged if other keywords/phrases succeed.
         if len(matched_symbols) == 0:
+            logging.warning(f"🚨 No image found for query '{query_lower}' (with keywords: {keyword_list}) - logging to missing_images")
             await log_missing_image(query_lower)
         
         return JSONResponse(content={
@@ -14026,10 +21360,22 @@ async def button_symbol_search(
         
     except Exception as e:
         logging.error(f"Error in fast button symbol search: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Button search failed", "details": str(e)}
-        )
+        # Fail soft for UI image lookup calls: return empty results instead of 500
+        # so phrase rendering and announcements are never blocked by symbol search errors.
+        return JSONResponse(content={
+            "symbols": [],
+            "total_found": 0,
+            "query": q,
+            "search_type": "button_search_error_fallback",
+            "error": "Button search failed",
+            "details": str(e)
+        })
+
+
+# Module-level in-memory cache for batch symbol lookups.
+# Key: "{locale_base}:{normalized_term}" → (image_url_or_None, expires_epoch)
+_batch_search_cache: dict = {}
+_BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 
 
 @app.post("/api/symbols/batch-search")
@@ -14045,6 +21391,36 @@ async def batch_symbol_search(
     try:
         data = await request.json()
         terms = data.get('terms', [])
+        locale = str(data.get('locale') or 'en-US').strip().lower()
+        locale_base = locale.split('-')[0] if '-' in locale else locale
+
+        def _normalize_quotes_and_space(v):
+            text = str(v or '').strip().lower()
+            if not text:
+                return ''
+            text = (
+                text.replace('’', "'")
+                .replace('‘', "'")
+                .replace('`', "'")
+                .replace('“', '"')
+                .replace('”', '"')
+            )
+            return ' '.join(text.split())
+
+        def _normalize_term(v):
+            """Canonical matcher term: lowercase, normalized quotes, punctuation-insensitive."""
+            text = _normalize_quotes_and_space(v)
+            if not text:
+                return ''
+            import re
+            text = re.sub(r"[^a-z0-9]+", " ", text)
+            return ' '.join(text.split())
+
+        def _allowed_locale_keys():
+            keys = {"en", "en-us", locale, locale_base}
+            return {k for k in keys if k}
+
+        allowed_locale_keys = _allowed_locale_keys()
         
         logging.info(f"🔍 BATCH SEARCH: Received request with {len(terms) if terms else 0} terms")
         if terms:
@@ -14059,103 +21435,418 @@ async def batch_symbol_search(
         
         aac_user_id = current_ids["aac_user_id"]
         account_id = current_ids["account_id"]
-        
+
         logging.info(f"🔍 BATCH SEARCH: User ID: {aac_user_id}, Account ID: {account_id}")
-        
-        # Function to search for a single term (will be run in parallel)
-        def search_single_term(item):
+
+        normalize_search_term = None
+        if locale_base and locale_base != "en":
+            try:
+                from aac_inflection_utils import normalize_search_term as _normalize_search_term
+                normalize_search_term = _normalize_search_term
+            except Exception as inflection_import_error:
+                logging.debug(f"🔍 BATCH: inflection module unavailable: {inflection_import_error}")
+
+        def _chunked(values, size=10):
+            values_list = list(values)
+            for i in range(0, len(values_list), size):
+                chunk = values_list[i:i + size]
+                if chunk:
+                    yield chunk
+
+        TOKEN_STOP_WORDS = {
+            'the', 'a', 'an', 'and', 'or', 'to', 'of', 'on', 'in', 'at', 'for', 'with',
+            'if', 'you', 'your', 'are', 'is', 'it', 're', 's'
+        }
+
+        def _expand_terms(text_value, keywords_value):
+            query_raw = str(text_value or '').strip()
+            query_lower = _normalize_quotes_and_space(query_raw)
+            normalized_query = query_lower
+            if normalize_search_term and query_lower:
+                try:
+                    inflection_normalized = _normalize_quotes_and_space(normalize_search_term(query_lower, locale_base))
+                    if inflection_normalized:
+                        normalized_query = inflection_normalized
+                except Exception as inflection_error:
+                    logging.debug(f"🔍 BATCH: inflection normalization skipped for '{query_lower}': {inflection_error}")
+
+            query_norm = _normalize_term(query_lower)
+            normalized_query_norm = _normalize_term(normalized_query)
+
+            out = []
+            if query_lower:
+                out.append(query_lower)
+                if normalized_query and normalized_query != query_lower:
+                    out.append(normalized_query)
+                if query_norm and query_norm not in out:
+                    out.append(query_norm)
+                if normalized_query_norm and normalized_query_norm not in out:
+                    out.append(normalized_query_norm)
+                for part in query_lower.split():
+                    part = part.strip().lower()
+                    if len(part) >= 3 and part not in TOKEN_STOP_WORDS:
+                        out.append(part)
+                for part in query_norm.split():
+                    part = part.strip().lower()
+                    if len(part) >= 3 and part not in TOKEN_STOP_WORDS:
+                        out.append(part)
+
+            for kw in (keywords_value or [])[:3]:
+                kw_lower = _normalize_quotes_and_space(kw)
+                kw_norm = _normalize_term(kw)
+                if not kw_lower and not kw_norm:
+                    continue
+                if kw_lower:
+                    out.append(kw_lower)
+                if kw_norm:
+                    out.append(kw_norm)
+                for part in kw_norm.split():
+                    part = part.strip().lower()
+                    if len(part) >= 3 and part not in TOKEN_STOP_WORDS:
+                        out.append(part)
+
+            deduped = []
+            seen = set()
+            for term in out:
+                if term and term not in seen:
+                    seen.add(term)
+                    deduped.append(term)
+            return query_lower, normalized_query, deduped[:10]
+
+        request_items = []
+        all_search_terms = set()
+        for item in terms:
             if isinstance(item, dict):
-                text = item.get('text', '').strip()
+                text = str(item.get('text', '')).strip()
                 keywords = item.get('keywords', [])
             else:
                 text = str(item).strip()
                 keywords = []
-            
+
             if not text:
-                logging.debug(f"🔍 BATCH: Empty text, skipping")
-                return (text, None)
+                continue
+
+            query_lower, normalized_query, search_terms = _expand_terms(text, keywords)
+            if not search_terms and query_lower:
+                search_terms = [query_lower]
+
+            request_items.append({
+                "text": text,
+                "query_lower": query_lower,
+                "normalized_query": normalized_query,
+                "search_terms": search_terms,
+            })
+            for term in search_terms:
+                if term:
+                    all_search_terms.add(term)
+
+        if not request_items:
+            return JSONResponse(content={"results": {}})
+
+        def _batch_cache_key(item_rec):
+            # Scope cache per account/profile/locale and search-term set.
+            # This prevents stale generic mappings (e.g. red->color) from leaking
+            # across users or keyword contexts.
+            terms_sig = "|".join(item_rec.get("search_terms", []))
+            return f"v2:{account_id}:{aac_user_id}:{locale_base}:{item_rec.get('query_lower', '')}:{terms_sig}"
+
+        # --- Serve cached results without hitting Firestore ---
+        now_ts = time.time()
+        cached_results = {}
+        uncached_items = []
+        for item_rec in request_items:
+            cache_key = _batch_cache_key(item_rec)
+            cached_entry = _batch_search_cache.get(cache_key)
+            if cached_entry and cached_entry[1] > now_ts:
+                cached_results[item_rec["text"]] = cached_entry[0]
+            else:
+                uncached_items.append(item_rec)
+
+        if not uncached_items:
+            logging.info(f"🔍 BATCH SEARCH: All {len(request_items)} terms served from cache (no Firestore)")
+            return JSONResponse(content={"results": cached_results})
+
+        # Narrow Firestore search to only the terms we don't have cached yet
+        all_search_terms = set()
+        for item_rec in uncached_items:
+            for term in item_rec["search_terms"]:
+                if term:
+                    all_search_terms.add(term)
+
+        # Collect all unique exact search terms from uncached items globally
+        all_exact_terms = set()
+        for item_rec in uncached_items:
+            query_lower = item_rec.get("query_lower", "")
+            normalized_term = item_rec.get("normalized_query", "")
+            raw_text = str(item_rec.get("text", "")).strip()
+
+            exact_terms = [raw_text, query_lower, normalized_term]
+            if raw_text:
+                exact_terms.extend([
+                    raw_text.lower(),
+                    raw_text.capitalize(),
+                    raw_text.title(),
+                    _normalize_quotes_and_space(raw_text),
+                    _normalize_term(raw_text),
+                ])
+            for t in exact_terms:
+                tt = str(t or '').strip()
+                if tt:
+                    all_exact_terms.add(tt)
+
+        images_ref = firestore_db.collection("aac_images")
+        candidate_docs = {}
+
+        # Build list of queries to run in parallel
+        queries = []
+        
+        # 1. Grouped query path 1: precomputed normalized search terms
+        for chunk in _chunked(all_search_terms, 10):
+            queries.append(("path1", images_ref.where("search_terms", "array_contains_any", chunk).limit(300)))
             
-            logging.info(f"🔍 BATCH: Searching for '{text}' with keywords {keywords}")
-                
-            query_lower = text.lower()
+        # 2. Per-item exact term fetches using batch 'in' operator to query concept and subconcept in parallel
+        for chunk in _chunked(all_exact_terms, 10):
+            queries.append(("exact_subconcept", images_ref.where("source", "==", "bravo_images").where("subconcept", "in", chunk).limit(100)))
+            queries.append(("exact_concept", images_ref.where("source", "==", "bravo_images").where("concept", "in", chunk).limit(100)))
+            if locale_base and locale_base != "en":
+                localized_labels_field = f"localized_labels.{locale_base}"
+                queries.append(("exact_localized_labels", images_ref.where("source", "==", "bravo_images").where(localized_labels_field, "in", chunk).limit(100)))
+
+        # 3. Grouped query path 2: localized tags fallback
+        if locale_base and locale_base != "en":
+            localized_tags_field = f"localized_tags.{locale_base}"
+            for chunk in _chunked(all_search_terms, 10):
+                queries.append(("localized_tags", images_ref.where("source", "==", "bravo_images").where(localized_tags_field, "array_contains_any", chunk).limit(250)))
+
+        # 4. Grouped query path 3: legacy tags fallback
+        for chunk in _chunked(all_search_terms, 10):
+            queries.append(("legacy_tags", images_ref.where("source", "==", "bravo_images").where("tags", "array_contains_any", chunk).limit(250)))
+
+        # Helper to execute query stream block in thread pool
+        def _execute_query_stream(query):
+            return list(query.stream())
+
+        # Execute all queries in parallel
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            tasks = [asyncio.to_thread(_execute_query_stream, q) for q_type, q in queries]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        else:
+            results = [_execute_query_stream(q) for q_type, q in queries]
+
+        # Process results
+        for (q_type, q), result in zip(queries, results):
+            if isinstance(result, Exception):
+                logging.warning(f"🔍 BATCH: Query {q_type} failed with error: {result}")
+                continue
             
-            # Search BravoImages first
-            images_ref = firestore_db.collection("aac_images")
-            term_variations = [
-                text,                    # Original case (might be "tree", "Tree", etc.)
-                text.lower(),            # All lowercase
-                text.capitalize(),       # First letter capitalized
-                text.title()             # Title case (capitalizes each word)
-            ]
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            unique_variations = []
-            for variation in term_variations:
-                if variation not in seen:
-                    seen.add(variation)
-                    unique_variations.append(variation)
-            term_variations = unique_variations
-            
-            logging.info(f"🔍 BATCH: Trying variations for '{text}': {term_variations}")
-            
-            for variation in term_variations:
-                try:
-                    variation_query = images_ref.where("source", "==", "bravo_images").where("tags", "array_contains", variation).limit(1)
-                    variation_docs = list(variation_query.stream())
-                    
-                    if variation_docs:
-                        image = variation_docs[0].to_dict()
-                        image_url = image.get('image_url')  # Use 'image_url' not 'url'
-                        if image_url:
-                            logging.info(f"🔍 BATCH: ✅ Found image for '{text}' (variation '{variation}'): {image_url}")
-                            return (text, image_url)
-                except Exception as e:
-                    logging.error(f"🔍 BATCH: Query failed for variation '{variation}': {e}")
+            for doc in result:
+                data = doc.to_dict() or {}
+                if not data.get("image_url"):
                     continue
-            
-            logging.info(f"🔍 BATCH: ❌ No image found for '{text}' in BravoImages")
-            
-            # If BravoImages didn't match, try custom images
-            try:
-                custom_ref = firestore_db.collection("accounts").document(account_id).collection("users").document(aac_user_id).collection("custom_images")
-                custom_query = custom_ref.where("status", "==", "active").where("tags", "array_contains", query_lower).limit(1)
-                custom_docs = list(custom_query.stream())
                 
-                if custom_docs:
-                    custom_image = custom_docs[0].to_dict()
-                    image_url = custom_image.get('url')
-                    if image_url:
-                        logging.info(f"🔍 BATCH: ✅ Found custom image for '{text}': {image_url}")
-                        return (text, image_url)
-            except Exception as e:
-                logging.error(f"🔍 BATCH: Custom search failed for '{query_lower}': {e}")
-            
-            logging.info(f"🔍 BATCH: ❌ No custom image found for '{text}'")
-            return (text, None)
+                # Path 1 check: legacy code requires source == "bravo_images"
+                if q_type == "path1":
+                    if data.get("source") == "bravo_images":
+                        candidate_docs[doc.id] = data
+                else:
+                    candidate_docs[doc.id] = data
+
+        def _extract_localized_terms_for_doc(doc_data):
+            localized_terms = []
+            localized_tags_raw = doc_data.get('localized_tags')
+            localized_labels_raw = doc_data.get('localized_labels')
+
+            if isinstance(localized_tags_raw, dict):
+                for locale_key, locale_tags in localized_tags_raw.items():
+                    locale_key_norm = _normalize_term(locale_key)
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    if isinstance(locale_tags, list):
+                        localized_terms.extend([_normalize_term(tag) for tag in locale_tags if _normalize_term(tag)])
+
+            if isinstance(localized_labels_raw, dict):
+                for locale_key, locale_label in localized_labels_raw.items():
+                    locale_key_norm = _normalize_term(locale_key)
+                    if locale_key_norm not in allowed_locale_keys:
+                        continue
+                    label_norm = _normalize_term(locale_label)
+                    if label_norm:
+                        localized_terms.append(label_norm)
+
+            return localized_terms
+
+        processed_candidates = []
+        term_index = {}
+        for image_id, image in candidate_docs.items():
+            tags = [_normalize_term(t) for t in image.get('tags', []) if _normalize_term(t)]
+            concept = _normalize_term(image.get('concept'))
+            subconcept = _normalize_term(image.get('subconcept'))
+            localized_terms = _extract_localized_terms_for_doc(image)
+            searchable_terms = set([*tags, concept, subconcept, *localized_terms])
+
+            record = {
+                "id": image_id,
+                "url": image.get("image_url"),
+                "tags": tags,
+                "concept": concept,
+                "subconcept": subconcept,
+                "searchable_terms": searchable_terms,
+            }
+            processed_candidates.append(record)
+
+            for term in searchable_terms:
+                if not term:
+                    continue
+                if term not in term_index:
+                    term_index[term] = set()
+                term_index[term].add(image_id)
+
+        candidate_by_id = {c["id"]: c for c in processed_candidates}
+
+        # Load active custom images once, then score in-memory as fallback.
+        custom_candidates = []
+        custom_term_index = {}
+        try:
+            custom_ref = firestore_db.collection("accounts").document(account_id).collection("profiles").document(aac_user_id).collection("custom_images")
+            custom_docs = list(custom_ref.where("active", "==", True).limit(500).stream())
+            for doc in custom_docs:
+                custom_image = doc.to_dict() or {}
+                image_url = custom_image.get('image_url')
+                if not image_url:
+                    continue
+
+                tags = [_normalize_term(t) for t in custom_image.get('tags', []) if _normalize_term(t)]
+                concept = _normalize_term(custom_image.get('concept'))
+                subconcept = _normalize_term(custom_image.get('subconcept'))
+                aliases = [_normalize_term(a) for a in custom_image.get('aliases', []) if _normalize_term(a)]
+                localized_terms = _extract_localized_terms_for_doc(custom_image)
+                searchable_terms = set([*tags, *aliases, concept, subconcept, *localized_terms])
+
+                rec = {
+                    "id": doc.id,
+                    "url": image_url,
+                    "tags": tags,
+                    "concept": concept,
+                    "subconcept": subconcept,
+                    "searchable_terms": searchable_terms,
+                }
+                custom_candidates.append(rec)
+                for term in searchable_terms:
+                    if not term:
+                        continue
+                    if term not in custom_term_index:
+                        custom_term_index[term] = set()
+                    custom_term_index[term].add(doc.id)
+        except Exception as custom_load_error:
+            logging.debug(f"🔍 BATCH: failed to preload custom images ({custom_load_error})")
+
+        custom_by_id = {c["id"]: c for c in custom_candidates}
+
+        def _score_candidate(item_rec, cand):
+            """
+            Priority order (strict):
+            1) Exact subconcept match
+            2) Exact concept match
+            3) Tag/alias/localized term matches
+            This prevents tag-only hits (e.g. "queen" tagged "red")
+            from outranking true subconcept matches for "red".
+            """
+            score = 0
+            query_lower = item_rec["query_lower"]
+            normalized_query = item_rec["normalized_query"]
+            search_terms = item_rec["search_terms"]
+
+            query_norm = _normalize_term(normalized_query or query_lower)
+
+            subconcept = cand.get("subconcept") or ""
+            concept = cand.get("concept") or ""
+            searchable_terms = cand.get("searchable_terms") or set()
+            tags = cand.get("tags") or []
+
+            exact_subconcept = bool(
+                (query_norm and query_norm == subconcept)
+                or (normalized_query and _normalize_term(normalized_query) == subconcept)
+                or (query_lower and _normalize_term(query_lower) == subconcept)
+            )
+            exact_concept = bool(
+                (query_norm and query_norm == concept)
+                or (normalized_query and _normalize_term(normalized_query) == concept)
+                or (query_lower and _normalize_term(query_lower) == concept)
+            )
+
+            # Large tiered bases to guarantee ordering.
+            if exact_subconcept:
+                score += 1000
+            elif exact_concept:
+                score += 900
+
+            # Strongly prefer candidates that contain the full normalized phrase
+            # in any searchable field (tags, aliases, localized labels/tags, concept, subconcept).
+            if query_norm and query_norm in searchable_terms:
+                score += 780
+
+            for idx, term in enumerate(search_terms):
+                if term in searchable_terms:
+                    # Keep generic searchable-term points below concept tiers.
+                    score += max(8, 24 - (idx * 2))
+                if tags and tags[0] == term:
+                    score += 6
+
+            # Mild source preference: custom images win close ties.
+            if cand.get("source") == "custom_images":
+                score += 4
+
+            return score
+
+        results = {**cached_results}  # start with cache hits
+        expires_at = time.time() + _BATCH_SEARCH_CACHE_TTL
+        for item_rec in uncached_items:
+            text = item_rec["text"]
+
+            candidate_ids = set()
+            custom_ids = set()
+            for term in item_rec["search_terms"]:
+                candidate_ids.update(term_index.get(term, set()))
+                custom_ids.update(custom_term_index.get(term, set()))
+
+            best_url = None
+            best_score = -1
+            for candidate_id in candidate_ids:
+                cand = candidate_by_id.get(candidate_id)
+                if not cand:
+                    continue
+                score = _score_candidate(item_rec, cand)
+                if score > best_score:
+                    best_score = score
+                    best_url = cand["url"]
+
+            # Evaluate custom candidates in the same competition (not fallback-only).
+            for custom_id in custom_ids:
+                cand = custom_by_id.get(custom_id)
+                if not cand:
+                    continue
+                score = _score_candidate(item_rec, cand)
+                if score > best_score:
+                    best_score = score
+                    best_url = cand["url"]
+
+            results[text] = best_url
+            # Store in TTL cache (None results too, to avoid repeated Firestore misses)
+            _batch_search_cache[_batch_cache_key(item_rec)] = (best_url, expires_at)
+
+        # Evict stale entries periodically to prevent unbounded memory growth
+        if len(_batch_search_cache) > 2000:
+            now_ts2 = time.time()
+            stale_keys = [k for k, v in _batch_search_cache.items() if v[1] <= now_ts2]
+            for k in stale_keys:
+                del _batch_search_cache[k]
         
-        # Run all searches in parallel using ThreadPoolExecutor
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import asyncio
-        
-        results = {}
-        
-        # Use ThreadPoolExecutor to parallelize Firestore queries
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            # Submit all tasks
-            future_to_term = {executor.submit(search_single_term, item): item for item in terms}
-            
-            # Collect results as they complete
-            for future in as_completed(future_to_term):
-                try:
-                    text, image_url = future.result()
-                    if text:
-                        results[text] = image_url
-                except Exception as e:
-                    logging.error(f"Error in batch search task: {e}")
-        
-        logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results out of {len(terms)} terms")
+        logging.info(f"🔍 BATCH SEARCH: Completed - {len(results)} results ({len(cached_results)} from cache, {len(uncached_items)} from Firestore)")
         logging.info(f"🔍 BATCH SEARCH: Results summary: {list(results.keys())[:10]}")
         return JSONResponse(content={"results": results})
         
@@ -14183,15 +21874,52 @@ async def download_image_library(
         images_ref = firestore_db.collection('aac_images')
         query = images_ref.where('source', '==', 'bravo_images')
         docs = query.stream()
+
+        def _flatten_search_terms(value):
+            if isinstance(value, (str, int, float)):
+                text = str(value).strip()
+                return [text] if text else []
+            if isinstance(value, list):
+                output = []
+                for item in value:
+                    output.extend(_flatten_search_terms(item))
+                return output
+            if isinstance(value, dict):
+                output = []
+                for item in value.values():
+                    output.extend(_flatten_search_terms(item))
+                return output
+            return []
         
         library = []
         for doc in docs:
             data = doc.to_dict()
+            localized_tags = data.get('localized_tags', {})
+            localized_labels = data.get('localized_labels', {})
+            aliases = data.get('aliases', [])
+
+            search_terms = []
+            search_terms.extend(_flatten_search_terms(data.get('concept')))
+            search_terms.extend(_flatten_search_terms(data.get('subconcept')))
+            search_terms.extend(_flatten_search_terms(data.get('tags', [])))
+            search_terms.extend(_flatten_search_terms(aliases))
+            search_terms.extend(_flatten_search_terms(localized_tags))
+            search_terms.extend(_flatten_search_terms(localized_labels))
+
+            search_terms = [str(term).strip().lower() for term in search_terms if str(term).strip()]
+            search_terms = list(dict.fromkeys(search_terms))
+
             # Only include essential fields to minimize download size
             library.append({
                 'id': doc.id,
                 'image_url': data.get('image_url'),
+                'concept': data.get('concept'),
+                'subconcept': data.get('subconcept'),
                 'tags': data.get('tags', []),
+                'aliases': aliases,
+                'localized_tags': localized_tags,
+                'localized_labels': localized_labels,
+                'search_terms': search_terms,
                 'source': data.get('source'),
                 # Include any other metadata that might be useful for search
                 'category': data.get('category'),
@@ -14774,7 +22502,7 @@ async def export_missing_images(
 # TAP INTERFACE NAVIGATION SYSTEM API
 # =============================================================================
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel, Field
 
 class TapNavigationButton(BaseModel):
@@ -14797,6 +22525,74 @@ class TapNavigationButton(BaseModel):
     hidden: bool = Field(default=False, description="Whether button is hidden")
     children: List["TapNavigationButton"] = Field(default_factory=list, description="Child buttons for submenus")
 
+
+class TapBoardButton(BaseModel):
+    """Static board button definition for board-oriented AAC mode."""
+    id: str = Field(..., description="Unique button ID")
+    label: str = Field(..., description="Display label")
+    row: int = Field(0, ge=0, description="Zero-based row in board grid")
+    col: int = Field(0, ge=0, description="Zero-based column in board grid")
+    speech_text: Optional[str] = Field(None, description="Speech output text")
+    modifier_trigger_id: Optional[int] = Field(None, description="TouchChat modifier id triggered after tapping this button")
+    modifier_variants: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Alternate button states keyed by modifier id")
+    action_type: str = Field("announce", description="announce|navigate|audio|special")
+    after_selection: Optional[str] = Field(None, description="do_nothing|navigate|navigate_home|use_ai")
+    target_board_id: Optional[str] = Field(None, description="Board ID for navigate action")
+    temporary_navigation: bool = Field(False, description="If true, navigate target is temporary and selection should return to previous board")
+    custom_audio_file: Optional[str] = Field(None, description="Audio URL for audio action")
+    special_function: Optional[str] = Field(None, description="Special function for special action")
+    image_url: Optional[str] = Field(None, description="Button image URL")
+    background_color: Optional[str] = Field("#FFFFFF", description="Button background color")
+    text_color: Optional[str] = Field("#000000", description="Button text color")
+    hidden: bool = Field(default=False, description="Whether button is hidden")
+
+
+class TapBoard(BaseModel):
+    """Board definition for tap interface (AI or static)."""
+    id: str = Field(..., description="Unique board ID")
+    label: str = Field(..., description="Board display name")
+    board_type: str = Field("ai", description="ai|static|system")
+    source: str = Field("legacy_category", description="legacy_category|custom")
+    source_button_id: Optional[str] = Field(None, description="Legacy category button ID")
+    owner_scope: str = Field("user", description="global|user")
+    hidden: bool = Field(default=False, description="Whether board is hidden")
+    llm_prompt: Optional[str] = Field(None, description="AI prompt for dynamic options")
+    prompt_category: Optional[str] = Field(None, description="AI prompt category")
+    prompt_topic: Optional[str] = Field(None, description="Custom prompt topic")
+    prompt_examples: Optional[str] = Field(None, description="Custom prompt examples")
+    prompt_exclusions: Optional[str] = Field(None, description="Custom prompt exclusions")
+    static_options: Optional[str] = Field(None, description="Delimited static options")
+    special_function: Optional[str] = Field(None, description="System function for board")
+    default_columns: int = Field(12, description="Board editor columns")
+    max_rows: int = Field(7, description="Board editor max rows")
+    buttons: List[TapBoardButton] = Field(default_factory=list, description="Static board buttons")
+
+
+class TapBoardsMenuItem(BaseModel):
+    """Menu item that places a board into the Boards menu."""
+    id: str = Field(..., description="Unique menu item ID")
+    label: str = Field(..., description="Menu label")
+    board_id: Optional[str] = Field(None, description="Target board ID (None for category-only nodes)")
+    source: str = Field("legacy_category", description="legacy_category|custom")
+    source_button_id: Optional[str] = Field(None, description="Legacy source button ID")
+    sort_order: int = Field(0, description="Display order")
+    hidden: bool = Field(default=False, description="Whether menu item is hidden")
+    image_url: Optional[str] = Field(None, description="Menu image URL")
+    speech_text: Optional[str] = Field(None, description="Speech text when selected")
+    custom_audio_file: Optional[str] = Field(None, description="URL to custom audio file played on activation")
+    background_color: Optional[str] = Field("#FFFFFF", description="Menu tile background")
+    text_color: Optional[str] = Field("#000000", description="Menu tile text color")
+    children: List["TapBoardsMenuItem"] = Field(default_factory=list, description="Nested menu items")
+
+
+class TapBoardSettings(BaseModel):
+    """Shared board system settings."""
+    max_columns: int = Field(12, ge=1, le=24, description="Default board columns")
+    max_rows: int = Field(7, ge=1, le=24, description="Default max rows")
+    allow_user_boards: bool = Field(True, description="Allow per-user custom boards")
+    default_ai_boards_global: bool = Field(True, description="Treat legacy/default AI boards as global")
+    home_board_id: Optional[str] = Field(None, description="Board ID loaded as the default home board")
+
 class TapNavigationConfig(BaseModel):
     """Complete tap interface navigation configuration for a user"""
     id: str = Field(..., description="Configuration ID - always 'user_config'")
@@ -14806,11 +22602,1167 @@ class TapNavigationConfig(BaseModel):
     created_at: str = Field(..., description="ISO timestamp of creation")
     updated_at: str = Field(..., description="ISO timestamp of last update")
     buttons: List[TapNavigationButton] = Field(default_factory=list, description="Top-level navigation buttons")
+    boards_schema_version: Optional[int] = Field(None, description="Parallel board schema version")
+    board_settings: Optional[TapBoardSettings] = Field(None, description="Board system settings")
+    boards_menu: Optional[List[TapBoardsMenuItem]] = Field(None, description="Boards menu configuration")
+    boards: Optional[List[TapBoard]] = Field(None, description="Board definitions")
+
+
+class TapBoardsMenuUpdateRequest(BaseModel):
+    """Payload for updating only the Boards Menu portion of tap configuration."""
+    boards_menu: List[TapBoardsMenuItem] = Field(default_factory=list, description="Ordered menu items")
+    board_settings: Optional[TapBoardSettings] = Field(None, description="Optional board settings update")
+
+
+class TapBoardCreateRequest(BaseModel):
+    """Payload for creating a custom board."""
+    id: Optional[str] = Field(None, description="Optional board ID; autogenerated if omitted")
+    label: str = Field(..., description="Board display name")
+    board_type: str = Field("ai", description="ai|static|system")
+    owner_scope: str = Field("user", description="global|user")
+    hidden: bool = Field(False, description="Whether board is hidden")
+    llm_prompt: Optional[str] = Field(None, description="AI prompt")
+    prompt_category: Optional[str] = Field(None, description="Prompt category")
+    prompt_topic: Optional[str] = Field(None, description="Prompt topic")
+    prompt_examples: Optional[str] = Field(None, description="Prompt examples")
+    prompt_exclusions: Optional[str] = Field(None, description="Prompt exclusions")
+    static_options: Optional[str] = Field(None, description="Static options")
+    special_function: Optional[str] = Field(None, description="Special function")
+    default_columns: int = Field(12, ge=1, le=24, description="Board columns")
+    max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
+    buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
+    set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+    created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
+    dynamic_rows: Optional[int] = Field(None, description="Number of AI-generated dynamic rows at bottom of board; None = use global setting")
+    is_customized: bool = Field(False, description="Whether this board has been manually customized")
+
+
+class TapBoardUpdateRequest(BaseModel):
+    """Payload for updating an existing board."""
+    label: str = Field(..., description="Board display name")
+    board_type: str = Field("ai", description="ai|static|system")
+    owner_scope: str = Field("user", description="global|user")
+    hidden: bool = Field(False, description="Whether board is hidden")
+    llm_prompt: Optional[str] = Field(None, description="AI prompt")
+    prompt_category: Optional[str] = Field(None, description="Prompt category")
+    prompt_topic: Optional[str] = Field(None, description="Prompt topic")
+    prompt_examples: Optional[str] = Field(None, description="Prompt examples")
+    prompt_exclusions: Optional[str] = Field(None, description="Prompt exclusions")
+    static_options: Optional[str] = Field(None, description="Static options")
+    special_function: Optional[str] = Field(None, description="Special function")
+    default_columns: int = Field(12, ge=1, le=24, description="Board columns")
+    max_rows: int = Field(7, ge=1, le=24, description="Board max rows")
+    buttons: List[TapBoardButton] = Field(default_factory=list, description="Board buttons")
+    set_as_home: bool = Field(False, description="Whether this board becomes the default home board")
+    created_during_migration: bool = Field(False, description="Board was created during TouchChat migration and has not yet been configured")
+    dynamic_rows: Optional[int] = Field(None, description="Number of AI-generated dynamic rows at bottom of board; None = use global setting")
+    is_customized: bool = Field(False, description="Whether this board has been manually customized")
+
+
+class ConvertAIBoardsToStaticRequest(BaseModel):
+    """Payload for converting AI boards to static boards."""
+    board_ids: List[str] = Field(..., description="List of AI board IDs to convert")
+    num_options: int = Field(24, ge=1, le=84, description="Number of static options to generate per board")
+    options_per_row: int = Field(6, ge=1, le=12, description="Number of options per row in the button grid")
+    after_selection: str = Field("do_nothing", description="do_nothing|use_ai|navigate_home — action taken after user taps an option")
+
+class CreateAITargetBoardRequest(BaseModel):
+    """Payload for generating a new static target board from a button label using AI."""
+    label: str = Field(..., min_length=1, description="Button label to use as the board name and LLM context")
+    num_options: int = Field(12, ge=1, le=84, description="Number of options to generate")
+    options_per_row: int = Field(4, ge=1, le=12, description="Number of options per row")
+    after_selection: str = Field("do_nothing", description="do_nothing|use_ai|navigate_home — action for the generated buttons")
+
+class BravoBuildRequest(BaseModel):
+    """Payload for dynamically generating a static board based on a clicked button's context."""
+    source_board_id: str = Field(..., description="ID of the board containing the clicked button")
+    button_id: Optional[str] = Field(None, description="ID of the clicked button (used to look up the button's label)")
+    button_label: Optional[str] = Field(None, description="Text label of the clicked button — fallback when button_id lookup fails")
+    context: Optional[str] = Field("", description="Built sentence context so far")
+
+class RegenerateBoardRequest(BaseModel):
+    """Payload for dynamically regenerating options on an AI board based on context."""
+    board_id: str = Field(..., description="ID of the AI board to regenerate")
+    context: Optional[str] = Field("", description="Built sentence context so far")
 
 # Update forward references
 TapNavigationButton.model_rebuild()
+TapBoardsMenuItem.model_rebuild()
+
+
+def _normalize_board_type(value: Any) -> str:
+    normalized = str(value or 'ai').strip().lower()
+    if normalized == 'hybrid':
+        return 'static'
+    if normalized not in {'ai', 'static', 'system'}:
+        return 'ai'
+    return normalized
+
+
+def _normalize_owner_scope(value: Any) -> str:
+    normalized = str(value or 'user').strip().lower()
+    if normalized not in {'global', 'user'}:
+        return 'user'
+    return normalized
+
+
+def _normalize_action_type(value: Any) -> str:
+    normalized = str(value or 'announce').strip().lower()
+    if normalized not in {'announce', 'navigate', 'audio', 'special'}:
+        return 'announce'
+    return normalized
+
+
+def _normalize_after_selection(value: Any) -> Optional[str]:
+    normalized = str(value or '').strip().lower()
+    if not normalized:
+        return None
+    if normalized in {'do_nothing', 'navigate', 'navigate_home', 'use_ai'}:
+        return normalized
+    return None
+
+
+def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[str, Any]:
+    return {
+        'id': str(button.get('id') or f'btn_{index + 1}'),
+        'label': str(button.get('label') or ''),
+        'row': int(button.get('row', index // 12) or 0),
+        'col': int(button.get('col', index % 12) or 0),
+        'speech_text': button.get('speech_text'),
+        'modifier_trigger_id': button.get('modifier_trigger_id'),
+        'modifier_variants': button.get('modifier_variants') if isinstance(button.get('modifier_variants'), dict) else {},
+        'action_type': _normalize_action_type(button.get('action_type')),
+        'after_selection': _normalize_after_selection(button.get('after_selection')),
+        'target_board_id': button.get('target_board_id'),
+        'temporary_navigation': bool(button.get('temporary_navigation', False)),
+        'custom_audio_file': button.get('custom_audio_file'),
+        'special_function': button.get('special_function'),
+        'image_url': button.get('image_url'),
+        'background_color': button.get('background_color') or '#FFFFFF',
+        'text_color': button.get('text_color') or '#000000',
+        'hidden': bool(button.get('hidden', False)),
+        'button_type': button.get('button_type') or 'static',
+    }
+
+
+def _normalize_board_payload(
+    board_data: Dict[str, Any],
+    board_id: str,
+    source: str = 'custom',
+    source_button_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    raw_buttons = board_data.get('buttons')
+    buttons = raw_buttons if isinstance(raw_buttons, list) else []
+    normalized_buttons = [
+        _normalize_board_button_payload(button, index)
+        for index, button in enumerate(buttons)
+        if isinstance(button, dict)
+    ]
+
+    return {
+        'id': board_id,
+        'label': str(board_data.get('label') or board_id),
+        'board_type': _normalize_board_type(board_data.get('board_type')),
+        'source': str(source or 'custom'),
+        'source_button_id': source_button_id,
+        'owner_scope': _normalize_owner_scope(board_data.get('owner_scope')),
+        'hidden': bool(board_data.get('hidden', False)),
+        'llm_prompt': board_data.get('llm_prompt'),
+        'prompt_category': board_data.get('prompt_category'),
+        'prompt_topic': board_data.get('prompt_topic'),
+        'prompt_examples': board_data.get('prompt_examples'),
+        'prompt_exclusions': board_data.get('prompt_exclusions'),
+        'static_options': board_data.get('static_options'),
+        'special_function': board_data.get('special_function'),
+        'default_columns': int(board_data.get('default_columns', 12) or 12),
+        'max_rows': int(board_data.get('max_rows', 7) or 7),
+        'buttons': normalized_buttons,
+        'created_during_migration': bool(board_data.get('created_during_migration', False)) and len(normalized_buttons) == 0,
+        'dynamic_rows': board_data.get('dynamic_rows'),
+        'is_customized': bool(board_data.get('is_customized', False)),
+    }
+
+
+def _sanitize_board_slug(raw_value: Any) -> str:
+    raw = str(raw_value or "").strip().lower()
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in raw)
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    cleaned = cleaned.strip("_")
+    return cleaned or "board"
+
+
+def _derive_action_type(button: Dict[str, Any]) -> str:
+    if button.get('custom_audio_file'):
+        return 'audio'
+    if button.get('special_function'):
+        return 'special'
+    return 'announce'
+
+
+def _convert_children_to_board_buttons(children: Any) -> List[Dict[str, Any]]:
+    if not isinstance(children, list):
+        return []
+
+    board_buttons: List[Dict[str, Any]] = []
+    for index, child in enumerate(children):
+        if not isinstance(child, dict):
+            continue
+        board_buttons.append({
+            'id': str(child.get('id') or _sanitize_board_slug(child.get('label') or 'button')),
+            'label': str(child.get('label') or 'Untitled Button'),
+            'row': index // 12,
+            'col': index % 12,
+            'speech_text': child.get('speech_text'),
+            'action_type': _derive_action_type(child),
+            'target_board_id': None,
+            'temporary_navigation': False,
+            'custom_audio_file': child.get('custom_audio_file'),
+            'special_function': child.get('special_function'),
+            'image_url': child.get('image_url'),
+            'background_color': child.get('background_color', '#FFFFFF'),
+            'text_color': child.get('text_color', '#000000'),
+            'hidden': bool(child.get('hidden', False)),
+        })
+    return board_buttons
+
+
+def ensure_tap_boards_structure(
+    config_data: Optional[Dict[str, Any]],
+    existing_config: Optional[Dict[str, Any]] = None,
+    use_hybrid_pages: bool = False,
+) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """Ensure parallel board-oriented structure exists while preserving legacy config compatibility."""
+    if not isinstance(config_data, dict):
+        return config_data, False
+
+    buttons = config_data.get('buttons')
+    if not isinstance(buttons, list):
+        return config_data, False
+
+    previous_boards = config_data.get('boards')
+    previous_menu = config_data.get('boards_menu')
+    previous_settings = config_data.get('board_settings')
+    previous_version = config_data.get('boards_schema_version')
+    previous_buttons = config_data.get('buttons')
+
+    existing_boards = previous_boards
+    if not isinstance(existing_boards, list) and isinstance(existing_config, dict):
+        candidate = existing_config.get('boards')
+        if isinstance(candidate, list):
+            existing_boards = candidate
+
+    existing_menu = previous_menu
+    if not isinstance(existing_menu, list) and isinstance(existing_config, dict):
+        candidate = existing_config.get('boards_menu')
+        if isinstance(candidate, list):
+            existing_menu = candidate
+
+    has_parallel_schema = (
+        int(previous_version or 0) == 1
+        and isinstance(existing_boards, list)
+        and isinstance(existing_menu, list)
+        and (len(existing_boards) > 0 or len(existing_menu) > 0)
+    )
+
+    if has_parallel_schema:
+        # Already migrated config: keep existing boards/menu as source of truth.
+        # Rebuilding legacy nodes from buttons on every request can duplicate menu entries.
+        custom_boards = [b for b in (existing_boards or []) if isinstance(b, dict)]
+        custom_menu_items = [m for m in (existing_menu or []) if isinstance(m, dict)]
+        legacy_menu_items: List[Dict[str, Any]] = []
+    else:
+        custom_boards = [
+            b for b in (existing_boards or [])
+            if isinstance(b, dict) and b.get('source') != 'legacy_category'
+        ]
+        custom_menu_items = [
+            m for m in (existing_menu or [])
+            if isinstance(m, dict) and m.get('source') != 'legacy_category'
+        ]
+        legacy_menu_items = [
+            m for m in (existing_menu or [])
+            if isinstance(m, dict) and m.get('source') == 'legacy_category'
+        ]
+
+    legacy_menu_by_source_button: Dict[str, Dict[str, Any]] = {}
+    legacy_menu_by_path: Dict[str, Dict[str, Any]] = {}
+
+    def _collect_legacy_menu_items(items: Any, parent_path: Tuple[int, ...] = ()) -> None:
+        if not isinstance(items, list):
+            return
+        for item_index, legacy_item in enumerate(items):
+            if not isinstance(legacy_item, dict):
+                continue
+
+            current_path = parent_path + (item_index,)
+            path_key = '/'.join(str(part) for part in current_path)
+            legacy_menu_by_path[path_key] = legacy_item
+
+            key = str(legacy_item.get('source_button_id') or '').strip()
+            if key:
+                legacy_menu_by_source_button[key] = legacy_item
+            _collect_legacy_menu_items(legacy_item.get('children'), current_path)
+
+    if not has_parallel_schema:
+        _collect_legacy_menu_items(legacy_menu_items)
+
+    derived_boards: List[Dict[str, Any]] = []
+    derived_menu_items: List[Dict[str, Any]] = []
+
+    existing_legacy_boards = [
+        b for b in (existing_boards or [])
+        if isinstance(b, dict) and b.get('source') == 'legacy_category'
+    ]
+    legacy_board_by_source_button: Dict[str, Dict[str, Any]] = {}
+    for legacy_board in existing_legacy_boards:
+        key = str(legacy_board.get('source_button_id') or '').strip()
+        if key:
+            legacy_board_by_source_button[key] = legacy_board
+
+    # map source_button_id -> board_id for all derived legacy boards
+    legacy_board_id_by_source_button: Dict[str, str] = {}
+    used_board_ids: set[str] = {str(b.get('id')) for b in custom_boards if isinstance(b.get('id'), str)}
+
+    def _should_create_legacy_board(button_node: Dict[str, Any], depth: int) -> bool:
+        if depth == 0:
+            return True
+        if str(button_node.get('special_function') or '').strip():
+            return True
+        if str(button_node.get('static_options') or '').strip():
+            return True
+        if str(button_node.get('llm_prompt') or '').strip():
+            return True
+        if str(button_node.get('prompt_category') or '').strip():
+            return True
+        if str(button_node.get('prompt_topic') or '').strip():
+            return True
+        if str(button_node.get('prompt_examples') or '').strip():
+            return True
+        if str(button_node.get('prompt_exclusions') or '').strip():
+            return True
+        return False
+
+    def _next_legacy_board_id(button_node: Dict[str, Any], fallback_index: int) -> str:
+        base_slug = _sanitize_board_slug(button_node.get('id') or button_node.get('label') or f'board_{fallback_index}')
+        board_id = f"board_{base_slug}"
+        suffix = 2
+        while board_id in used_board_ids:
+            board_id = f"board_{base_slug}_{suffix}"
+            suffix += 1
+        return board_id
+
+    def _collect_derived_legacy_boards(button_nodes: Any, depth: int) -> None:
+        if not isinstance(button_nodes, list):
+            return
+
+        for index, button_node in enumerate(button_nodes):
+            if not isinstance(button_node, dict):
+                continue
+
+            source_button_id = button_node.get('id')
+            source_button_key = str(source_button_id or '').strip()
+
+            create_board = _should_create_legacy_board(button_node, depth)
+            board_id: Optional[str] = None
+
+            existing_legacy_board = legacy_board_by_source_button.get(source_button_key) if source_button_key else None
+            if create_board:
+                existing_id = str(existing_legacy_board.get('id') or '').strip() if isinstance(existing_legacy_board, dict) else ''
+                if existing_id and existing_id not in used_board_ids:
+                    board_id = existing_id
+                else:
+                    board_id = _next_legacy_board_id(button_node, index)
+
+                used_board_ids.add(board_id)
+                if source_button_key:
+                    legacy_board_id_by_source_button[source_button_key] = board_id
+
+                special_function = button_node.get('special_function')
+                has_static_options = bool(str(button_node.get('static_options') or '').strip())
+                if special_function:
+                    board_type = 'system'
+                elif has_static_options:
+                    board_type = 'static'
+                else:
+                    board_type = 'static' if use_hybrid_pages else 'ai'
+
+                owner_scope_default = 'global' if str(button_node.get('id') or '').endswith('_btn') else 'user'
+                owner_scope = owner_scope_default
+                if isinstance(existing_legacy_board, dict):
+                    owner_scope = str(existing_legacy_board.get('owner_scope') or owner_scope_default)
+
+                board = {
+                    'id': board_id,
+                    'label': str(button_node.get('label') or f'Board {index + 1}'),
+                    'board_type': board_type,
+                    'source': 'legacy_category',
+                    'source_button_id': source_button_id,
+                    'owner_scope': owner_scope,
+                    'hidden': bool(button_node.get('hidden', False)),
+                    'llm_prompt': button_node.get('llm_prompt'),
+                    'prompt_category': button_node.get('prompt_category'),
+                    'prompt_topic': button_node.get('prompt_topic'),
+                    'prompt_examples': button_node.get('prompt_examples'),
+                    'prompt_exclusions': button_node.get('prompt_exclusions'),
+                    'static_options': button_node.get('static_options'),
+                    'special_function': special_function,
+                    'default_columns': 12,
+                    'max_rows': 7,
+                    'buttons': _convert_children_to_board_buttons(button_node.get('children')),
+                }
+                derived_boards.append(board)
+
+            _collect_derived_legacy_boards(button_node.get('children'), depth + 1)
+
+    if not has_parallel_schema:
+        _collect_derived_legacy_boards(buttons, 0)
+
+    def _build_legacy_menu_node(
+        button_node: Dict[str, Any],
+        sort_order: int,
+        path: Tuple[int, ...] = (),
+    ) -> Dict[str, Any]:
+        source_button_id = button_node.get('id')
+        source_button_key = str(source_button_id or '').strip()
+        path_key = '/'.join(str(part) for part in path)
+        existing_legacy_menu_item = legacy_menu_by_source_button.get(source_button_key) if source_button_key else None
+        if not isinstance(existing_legacy_menu_item, dict):
+            existing_legacy_menu_item = legacy_menu_by_path.get(path_key)
+        derived_board_id = legacy_board_id_by_source_button.get(source_button_key) if source_button_key else None
+
+        menu_node = {
+            'id': f"menu_{_sanitize_board_slug(button_node.get('id') or button_node.get('label') or sort_order)}",
+            'label': str(button_node.get('label') or f'Board {sort_order + 1}'),
+            'board_id': derived_board_id,
+            'source': 'legacy_category',
+            'source_button_id': source_button_id,
+            'sort_order': sort_order,
+            'hidden': bool(button_node.get('hidden', False)),
+            'image_url': button_node.get('image_url'),
+            'speech_text': button_node.get('speech_text'),
+            'custom_audio_file': button_node.get('custom_audio_file'),
+            'background_color': button_node.get('background_color', '#FFFFFF'),
+            'text_color': button_node.get('text_color', '#000000'),
+            'children': [],
+        }
+
+        if isinstance(existing_legacy_menu_item, dict):
+            if existing_legacy_menu_item.get('id'):
+                menu_node['id'] = existing_legacy_menu_item.get('id')
+            menu_node['label'] = str(existing_legacy_menu_item.get('label') or menu_node['label'])
+            menu_node['hidden'] = bool(existing_legacy_menu_item.get('hidden', menu_node['hidden']))
+            menu_node['image_url'] = existing_legacy_menu_item.get('image_url')
+            menu_node['speech_text'] = existing_legacy_menu_item.get('speech_text')
+            menu_node['custom_audio_file'] = existing_legacy_menu_item.get('custom_audio_file')
+            menu_node['background_color'] = existing_legacy_menu_item.get('background_color') or menu_node['background_color']
+            menu_node['text_color'] = existing_legacy_menu_item.get('text_color') or menu_node['text_color']
+            # If a node has a board target, keep that target; otherwise preserve any existing target.
+            if derived_board_id:
+                menu_node['board_id'] = derived_board_id
+            else:
+                menu_node['board_id'] = existing_legacy_menu_item.get('board_id')
+
+        raw_children = button_node.get('children')
+        if isinstance(raw_children, list):
+            built_children: List[Dict[str, Any]] = []
+            for child_index, child_node in enumerate(raw_children):
+                if not isinstance(child_node, dict):
+                    continue
+                built_children.append(_build_legacy_menu_node(child_node, child_index, path + (child_index,)))
+            menu_node['children'] = built_children
+
+        # Enforce leaf-only board target assignment.
+        if isinstance(menu_node.get('children'), list) and len(menu_node['children']) > 0:
+            menu_node['board_id'] = None
+
+        return menu_node
+
+    if not has_parallel_schema:
+        for index, button in enumerate(buttons):
+            if not isinstance(button, dict):
+                continue
+            menu_item = _build_legacy_menu_node(button, index, (index,))
+            derived_menu_items.append(menu_item)
+
+    def _dedupe_legacy_menu_siblings(menu_nodes: Any) -> Tuple[List[Dict[str, Any]], int]:
+        if not isinstance(menu_nodes, list):
+            return [], 0
+
+        deduped: List[Dict[str, Any]] = []
+        removed_count = 0
+        seen_legacy_keys: set[Tuple[str, ...]] = set()
+
+        for raw_node in menu_nodes:
+            if not isinstance(raw_node, dict):
+                continue
+
+            node = dict(raw_node)
+            child_nodes, removed_children = _dedupe_legacy_menu_siblings(node.get('children'))
+            node['children'] = child_nodes
+            removed_count += removed_children
+
+            source = str(node.get('source') or '').strip()
+            if source != 'legacy_category':
+                deduped.append(node)
+                continue
+
+            source_button_id = str(node.get('source_button_id') or '').strip()
+            label_key = str(node.get('label') or '').strip().lower()
+            child_sig = tuple(
+                f"{str(c.get('label') or '').strip().lower()}|{str(c.get('source_button_id') or '').strip()}"
+                for c in child_nodes
+                if isinstance(c, dict)
+            )
+
+            # When source_button_id is missing, repeated nodes can accumulate from
+            # legacy reconstruction; dedupe by label/children to stabilize the tree.
+            if source_button_id:
+                dedupe_key: Tuple[str, ...] = ('legacy_source_button', source_button_id)
+            else:
+                dedupe_key = ('legacy_label_children', label_key, '|'.join(child_sig))
+
+            if dedupe_key in seen_legacy_keys:
+                removed_count += 1
+                continue
+
+            seen_legacy_keys.add(dedupe_key)
+            deduped.append(node)
+
+        return deduped, removed_count
+
+    merged_boards = custom_boards + derived_boards
+    merged_menu, removed_legacy_duplicates = _dedupe_legacy_menu_siblings(custom_menu_items + derived_menu_items)
+    merged_menu = dedupe_boards_menu_tree(merged_menu)
+    if removed_legacy_duplicates > 0:
+        logging.info(
+            "Removed %s duplicate legacy menu item(s) while normalizing tap boards structure",
+            removed_legacy_duplicates,
+        )
+
+    settings = previous_settings
+    if not isinstance(settings, dict) and isinstance(existing_config, dict):
+        candidate = existing_config.get('board_settings')
+        if isinstance(candidate, dict):
+            settings = candidate
+    if not isinstance(settings, dict):
+        settings = {}
+
+    preferred_board_ids = _collect_board_ids_from_menu(merged_menu)
+    existing_home_board_id = str(settings.get('home_board_id') or '').strip()
+    if existing_home_board_id:
+        preferred_board_ids.add(existing_home_board_id)
+
+    merged_boards, removed_duplicate_boards = dedupe_tap_boards(merged_boards, preferred_board_ids)
+    if removed_duplicate_boards > 0:
+        logging.info(
+            "Removed %s duplicate board definition(s) while normalizing tap boards structure",
+            removed_duplicate_boards,
+        )
+
+    merged_board_ids = {
+        str(board.get('id')).strip()
+        for board in merged_boards
+        if isinstance(board, dict) and str(board.get('id') or '').strip()
+    }
+
+    home_board_id = existing_home_board_id if existing_home_board_id in merged_board_ids else ''
+    if not home_board_id:
+        existing_home_board = next(
+            (
+                board for board in merged_boards
+                if isinstance(board, dict) and str(board.get('source') or '') == 'default_home'
+            ),
+            None,
+        )
+        if isinstance(existing_home_board, dict) and str(existing_home_board.get('id') or '').strip():
+            home_board_id = str(existing_home_board.get('id')).strip()
+        else:
+            home_board_id = 'board_home'
+            suffix = 2
+            while home_board_id in merged_board_ids:
+                home_board_id = f'board_home_{suffix}'
+                suffix += 1
+
+            merged_boards.append({
+                'id': home_board_id,
+                'label': 'Home',
+                'board_type': 'static' if use_hybrid_pages else 'ai',
+                'source': 'default_home',
+                'source_button_id': None,
+                'owner_scope': 'user',
+                'hidden': False,
+                'llm_prompt': 'Generate high-frequency general conversation starters and everyday AAC vocabulary for the home/start screen. Include a mix of: common sentence starters (I want, I need, I feel, Can I, Let\'s), social phrases (hi, yes, no, please, thank you, help), and action words (go, stop, more, done, wait, look). Words should be versatile enough to begin any type of conversation.',
+                'prompt_category': 'general_conversation',
+                'prompt_topic': None,
+                'prompt_examples': None,
+                'prompt_exclusions': None,
+                'static_options': None,
+                'special_function': None,
+                'default_columns': 12,
+                'max_rows': 7,
+                'buttons': [],
+            })
+            merged_board_ids.add(home_board_id)
+
+    # Normalize board types: migrate any legacy 'hybrid' boards to the correct type.
+    # 'hybrid' is no longer a valid stored board_type. A static board with dynamic rows
+    # stays 'static'; a fully-AI board stays 'ai'. Never re-introduce 'hybrid'.
+    # When use_hybrid_pages is True, legacy_category AI boards become static because
+    # they represent category boards that should have static rows + dynamic rows at bottom.
+    for board in merged_boards:
+        if isinstance(board, dict):
+            current_bt = board.get('board_type')
+            if current_bt == 'hybrid':
+                board['board_type'] = 'static'
+            elif (current_bt == 'ai' and use_hybrid_pages
+                  and str(board.get('source') or '') == 'legacy_category'
+                  and not board.get('special_function')):
+                board['board_type'] = 'static'
+
+    merged_settings = {
+        'max_columns': int(settings.get('max_columns', 12) or 12),
+        'max_rows': int(settings.get('max_rows', 7) or 7),
+        'allow_user_boards': bool(settings.get('allow_user_boards', True)),
+        'default_ai_boards_global': bool(settings.get('default_ai_boards_global', True)),
+        'home_board_id': home_board_id,
+    }
+
+    # Keep legacy buttons synchronized to the canonical boards/menu structure so persisted
+    # tap_interface_config remains consistent regardless of menu depth.
+    canonical_buttons = compose_legacy_buttons_from_boards_menu({
+        'boards': merged_boards,
+        'boards_menu': merged_menu,
+    })
+
+    changed = False
+    if previous_boards != merged_boards:
+        config_data['boards'] = merged_boards
+        changed = True
+    if previous_menu != merged_menu:
+        config_data['boards_menu'] = merged_menu
+        changed = True
+    if previous_settings != merged_settings:
+        config_data['board_settings'] = merged_settings
+        changed = True
+    if previous_version != 1:
+        config_data['boards_schema_version'] = 1
+        changed = True
+    if previous_buttons != canonical_buttons:
+        config_data['buttons'] = canonical_buttons
+        changed = True
+
+    return config_data, changed
+
+
+def normalize_boards_menu_items(
+    menu_items: Any,
+    valid_board_ids: set[str],
+) -> List[Dict[str, Any]]:
+    """Normalize and validate boards menu items for persistence (tree-aware).
+    board_id is optional — a node may be a category-only parent with no associated board.
+    """
+    def _normalize_level(items: Any, level: int) -> List[Dict[str, Any]]:
+        normalized_level: List[Dict[str, Any]] = []
+        if not isinstance(items, list):
+            return normalized_level
+
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+
+            raw_board_id = str(item.get('board_id') or '').strip()
+            # board_id is optional; only validate if provided
+            board_id: Optional[str] = raw_board_id if raw_board_id and raw_board_id in valid_board_ids else None
+
+            label = str(item.get('label') or board_id or f'Menu Item {index + 1}')
+            item_id = str(item.get('id') or '').strip()
+            if not item_id:
+                item_id = f"menu_{_sanitize_board_slug(label)}_{level}_{index + 1}"
+
+            normalized_children = _normalize_level(item.get('children'), level + 1)
+
+            normalized_item = {
+                'id': item_id,
+                'label': label,
+                'board_id': board_id,
+                'source': str(item.get('source') or 'custom'),
+                'source_button_id': item.get('source_button_id'),
+                'sort_order': index,
+                'hidden': bool(item.get('hidden', False)),
+                'image_url': item.get('image_url'),
+                'speech_text': item.get('speech_text'),
+                'custom_audio_file': item.get('custom_audio_file'),
+                'background_color': item.get('background_color') or '#FFFFFF',
+                'text_color': item.get('text_color') or '#000000',
+                'children': normalized_children,
+            }
+
+            # Enforce leaf-only board target assignment.
+            if len(normalized_children) > 0:
+                normalized_item['board_id'] = None
+
+            normalized_level.append(normalized_item)
+
+        return normalized_level
+
+    return dedupe_boards_menu_tree(_normalize_level(menu_items, 0))
+
+
+def dedupe_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
+    """Recursively dedupe sibling menu nodes while preserving first occurrence.
+
+    Key preference:
+    1) source_button_id (stable for legacy-derived nodes)
+    2) (board_id, label) for custom nodes
+    3) id as fallback
+    """
+    if not isinstance(menu_items, list):
+        return []
+
+    deduped: List[Dict[str, Any]] = []
+    seen_keys: set[Tuple[str, ...]] = set()
+
+    for raw_item in menu_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        item['children'] = dedupe_boards_menu_tree(item.get('children'))
+
+        source_button_id = str(item.get('source_button_id') or '').strip()
+        board_id = str(item.get('board_id') or '').strip()
+        label_key = str(item.get('label') or '').strip().lower()
+        item_id = str(item.get('id') or '').strip()
+
+        if source_button_id:
+            dedupe_key: Tuple[str, ...] = ('source_button_id', source_button_id)
+        elif board_id or label_key:
+            dedupe_key = ('board_label', board_id, label_key)
+        elif item_id:
+            dedupe_key = ('id', item_id)
+        else:
+            dedupe_key = (
+                'shape',
+                str(item.get('speech_text') or ''),
+                str(item.get('image_url') or ''),
+                str(item.get('custom_audio_file') or ''),
+            )
+
+        if dedupe_key in seen_keys:
+            continue
+
+        seen_keys.add(dedupe_key)
+        item['sort_order'] = len(deduped)
+        deduped.append(item)
+
+    return deduped
+
+
+def _collect_board_ids_from_menu(menu_items: Any) -> set[str]:
+    """Collect all board_id references from a nested boards_menu tree."""
+    collected: set[str] = set()
+
+    def _walk(items: Any) -> None:
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            board_id = str(item.get('board_id') or '').strip()
+            if board_id:
+                collected.add(board_id)
+            _walk(item.get('children'))
+
+    _walk(menu_items)
+    return collected
+
+
+def dedupe_tap_boards(
+    boards: Any,
+    preferred_board_ids: Optional[set[str]] = None,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Deduplicate board definitions while preserving referenced/preferred board IDs.
+
+    Priority for duplicate groups:
+    1) Board IDs present in preferred_board_ids (menu/home references)
+    2) First occurrence in list order
+    """
+    if not isinstance(boards, list):
+        return [], 0
+
+    preferred = preferred_board_ids or set()
+    deduped: List[Dict[str, Any]] = []
+    kept_index_by_key: Dict[Tuple[str, ...], int] = {}
+    removed_count = 0
+
+    def _board_dedupe_key(board: Dict[str, Any]) -> Tuple[str, ...]:
+        source = str(board.get('source') or '').strip()
+        source_button_id = str(board.get('source_button_id') or '').strip()
+        board_id = str(board.get('id') or '').strip()
+        label_key = str(board.get('label') or '').strip().lower()
+        board_type = str(board.get('board_type') or '').strip().lower()
+
+        if source == 'legacy_category' and source_button_id:
+            return ('legacy_source_button', source_button_id)
+        if source == 'legacy_category' and label_key:
+            return ('legacy_label_type', label_key, board_type)
+        if board_id:
+            return ('id', board_id)
+        return ('shape', source, label_key, board_type)
+
+    for raw_board in boards:
+        if not isinstance(raw_board, dict):
+            continue
+
+        board = dict(raw_board)
+        key = _board_dedupe_key(board)
+        board_id = str(board.get('id') or '').strip()
+
+        if key not in kept_index_by_key:
+            kept_index_by_key[key] = len(deduped)
+            deduped.append(board)
+            continue
+
+        kept_idx = kept_index_by_key[key]
+        kept_board = deduped[kept_idx]
+        kept_id = str(kept_board.get('id') or '').strip()
+
+        candidate_is_preferred = bool(board_id and board_id in preferred)
+        kept_is_preferred = bool(kept_id and kept_id in preferred)
+
+        if candidate_is_preferred and not kept_is_preferred:
+            deduped[kept_idx] = board
+            removed_count += 1
+        else:
+            removed_count += 1
+
+    return deduped, removed_count
+
+
+def sort_boards_menu_tree(menu_items: Any) -> List[Dict[str, Any]]:
+    """Sort boards menu recursively by sort_order while preserving hierarchy."""
+    if not isinstance(menu_items, list):
+        return []
+
+    sorted_items = sorted(
+        [item for item in menu_items if isinstance(item, dict)],
+        key=lambda item: int(item.get('sort_order', 0)),
+    )
+
+    output: List[Dict[str, Any]] = []
+    for index, item in enumerate(sorted_items):
+        cloned = dict(item)
+        cloned['sort_order'] = index
+        cloned['children'] = sort_boards_menu_tree(item.get('children'))
+        output.append(cloned)
+
+    return output
+
+
+def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build legacy tap-interface buttons from boards_menu/boards so existing UI can render board menu changes."""
+    if not isinstance(config_data, dict):
+        return []
+
+    boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+    boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+    existing_buttons = config_data.get('buttons') if isinstance(config_data.get('buttons'), list) else []
+
+    if not boards_menu:
+        return existing_buttons
+
+    boards_by_id: Dict[str, Dict[str, Any]] = {
+        str(board.get('id')): board
+        for board in boards
+        if isinstance(board, dict) and str(board.get('id') or '').strip()
+    }
+
+    def _build_word_options_from_board(board: Dict[str, Any]) -> List[Dict[str, Any]]:
+        raw_buttons = board.get('buttons') if isinstance(board.get('buttons'), list) else []
+        sorted_buttons = sorted(
+            [b for b in raw_buttons if isinstance(b, dict)],
+            key=lambda b: (int(b.get('row', 0) or 0), int(b.get('col', 0) or 0), str(b.get('id') or '')),
+        )
+        word_options: List[Dict[str, Any]] = []
+        for index, btn in enumerate(sorted_buttons):
+            if bool(btn.get('hidden', False)):
+                continue
+            label = str(btn.get('label') or '').strip()
+            if label:
+                word_options.append({
+                    'text': label,
+                    'row': int(btn.get('row', 0) or 0),
+                    'col': int(btn.get('col', 0) or 0),
+                    'speech_text': (str(btn.get('speech_text') or '').strip() or None),
+                    'modifier_trigger_id': btn.get('modifier_trigger_id'),
+                    'modifier_variants': btn.get('modifier_variants') if isinstance(btn.get('modifier_variants'), dict) else {},
+                    'image_url': btn.get('image_url'),
+                    'custom_audio_file': btn.get('custom_audio_file'),
+                    'action_type': btn.get('action_type'),
+                    'after_selection': btn.get('after_selection') or 'do_nothing',
+                    'target_board_id': btn.get('target_board_id'),
+                    'temporary_navigation': bool(btn.get('temporary_navigation', False)),
+                    'background_color': btn.get('background_color') or '#FFFFFF',
+                    'text_color': btn.get('text_color') or '#000000',
+                    'button_type': btn.get('button_type') or 'static',
+                })
+        return word_options
+
+    def _build_menu_node(menu_item: Dict[str, Any], path_index: str) -> Dict[str, Any]:
+        board_id = str(menu_item.get('board_id') or '').strip()
+        board = boards_by_id.get(board_id) if board_id else None
+        menu_children = menu_item.get('children') if isinstance(menu_item.get('children'), list) else []
+
+        built_children: List[Dict[str, Any]] = []
+        if menu_children:
+            for idx, child in enumerate(menu_children):
+                if isinstance(child, dict):
+                    built_children.append(_build_menu_node(child, f"{path_index}_{idx}"))
+
+        board_word_options = _build_word_options_from_board(board) if isinstance(board, dict) else []
+        board_static_options = ', '.join(
+            option.get('text', '') for option in board_word_options if isinstance(option, dict) and option.get('text')
+        ) or None
+
+        return {
+            'id': str(menu_item.get('id') or f"menu_{path_index}"),
+            'board_id': board_id or None,
+            'label': str(menu_item.get('label') or (board.get('label') if isinstance(board, dict) else f"Menu {path_index}")),
+            'speech_text': menu_item.get('speech_text'),
+            'image_url': menu_item.get('image_url') if menu_item.get('image_url') else (board.get('image_url') if isinstance(board, dict) else None),
+            'background_color': menu_item.get('background_color') or '#FFFFFF',
+            'text_color': menu_item.get('text_color') or '#000000',
+            'llm_prompt': board.get('llm_prompt') if isinstance(board, dict) else None,
+            'words_prompt': None,
+            'prompt_category': board.get('prompt_category') if isinstance(board, dict) else None,
+            'prompt_topic': board.get('prompt_topic') if isinstance(board, dict) else None,
+            'prompt_examples': board.get('prompt_examples') if isinstance(board, dict) else None,
+            'prompt_exclusions': board.get('prompt_exclusions') if isinstance(board, dict) else None,
+            'static_options': board.get('static_options') if isinstance(board, dict) and board.get('static_options') else board_static_options,
+            'board_word_options': board_word_options,
+            'custom_audio_file': menu_item.get('custom_audio_file') if menu_item.get('custom_audio_file') else (board.get('custom_audio_file') if isinstance(board, dict) else None),
+            'special_function': board.get('special_function') if isinstance(board, dict) else None,
+            'hidden': bool(menu_item.get('hidden', False) or (bool(board.get('hidden', False)) if isinstance(board, dict) else False)),
+            'children': built_children,
+        }
+
+    sorted_menu = dedupe_boards_menu_tree(sort_boards_menu_tree(boards_menu))
+    legacy_buttons: List[Dict[str, Any]] = []
+    for index, item in enumerate(sorted_menu):
+        if isinstance(item, dict):
+            legacy_buttons.append(_build_menu_node(item, str(index)))
+
+    return legacy_buttons
 
 # --- Helper Functions ---
+TAP_CONFIG_DOC_SOFT_LIMIT_BYTES = 900_000
+TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES = 300_000
+
+
+def _tap_config_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config"
+    )
+
+
+def _tap_boards_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/boards_config"
+    )
+
+
+def _tap_menu_doc_ref(account_id: str, aac_user_id: str):
+    return firestore_db.document(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/menu_config"
+    )
+
+
+def _estimate_json_size_bytes(value: Any) -> int:
+    try:
+        return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:
+        return len(str(value).encode("utf-8"))
+
+
+def _split_boards_into_chunks(boards: List[Dict[str, Any]], target_bytes: int = TAP_CONFIG_BOARDS_CHUNK_TARGET_BYTES) -> List[List[Dict[str, Any]]]:
+    if not boards:
+        return []
+
+    chunks: List[List[Dict[str, Any]]] = []
+    current_chunk: List[Dict[str, Any]] = []
+    current_size = 2  # []
+
+    for board in boards:
+        board_size = _estimate_json_size_bytes(board) + 1
+        if current_chunk and (current_size + board_size) > target_bytes:
+            chunks.append(current_chunk)
+            current_chunk = [board]
+            current_size = 2 + board_size
+        else:
+            current_chunk.append(board)
+            current_size += board_size
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    return chunks
+
+
+async def _load_chunked_tap_boards(doc_ref) -> List[Dict[str, Any]]:
+    try:
+        chunks_collection = doc_ref.collection("boards_chunks")
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_collection.stream()))
+        ordered_chunks: List[Tuple[int, List[Dict[str, Any]]]] = []
+        for chunk_doc in chunk_docs:
+            chunk_payload = chunk_doc.to_dict() or {}
+            chunk_index = int(chunk_payload.get("index", 10**9))
+            chunk_boards = chunk_payload.get("boards") if isinstance(chunk_payload.get("boards"), list) else []
+            ordered_chunks.append((chunk_index, chunk_boards))
+
+        ordered_chunks.sort(key=lambda item: item[0])
+        boards: List[Dict[str, Any]] = []
+        for _, chunk_boards in ordered_chunks:
+            boards.extend([b for b in chunk_boards if isinstance(b, dict)])
+        return boards
+    except Exception as e:
+        logging.error(f"Error loading chunked tap boards: {e}")
+        return []
+
+
+async def _clear_chunked_tap_boards(doc_ref) -> None:
+    try:
+        chunks_collection = doc_ref.collection("boards_chunks")
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_collection.stream()))
+        for chunk_doc in chunk_docs:
+            await asyncio.to_thread(chunk_doc.reference.delete)
+    except Exception as e:
+        logging.warning(f"Could not clear chunked tap boards: {e}")
+
+
+async def _save_chunked_tap_boards(doc_ref, boards: List[Dict[str, Any]]) -> int:
+    chunks = _split_boards_into_chunks(boards)
+    for idx, chunk in enumerate(chunks):
+        chunk_ref = doc_ref.collection("boards_chunks").document(f"chunk_{idx:04d}")
+        await asyncio.to_thread(
+            chunk_ref.set,
+            {
+                "index": idx,
+                "boards": chunk,
+                "updated_at": dt.now().isoformat(),
+            },
+        )
+
+    # Remove stale chunk documents from previous larger saves.
+    existing_docs = await asyncio.to_thread(lambda: list(doc_ref.collection("boards_chunks").stream()))
+    valid_ids = {f"chunk_{i:04d}" for i in range(len(chunks))}
+    for existing in existing_docs:
+        if existing.id not in valid_ids:
+            await asyncio.to_thread(existing.reference.delete)
+
+    return len(chunks)
+
+
+async def _load_split_tap_docs(account_id: str, aac_user_id: str) -> Optional[Dict[str, Any]]:
+    """Load split tap config documents (boards/menu) and return merged sections."""
+    try:
+        boards_ref = _tap_boards_doc_ref(account_id, aac_user_id)
+        menu_ref = _tap_menu_doc_ref(account_id, aac_user_id)
+
+        boards_doc = await asyncio.to_thread(boards_ref.get)
+        menu_doc = await asyncio.to_thread(menu_ref.get)
+        if not boards_doc.exists and not menu_doc.exists:
+            return None
+
+        merged: Dict[str, Any] = {}
+
+        if boards_doc.exists:
+            boards_data = boards_doc.to_dict() or {}
+            if str(boards_data.get('boards_storage') or '').lower() == 'chunked':
+                merged['boards'] = await _load_chunked_tap_boards(boards_ref)
+            elif isinstance(boards_data.get('boards'), list):
+                merged['boards'] = [b for b in boards_data.get('boards', []) if isinstance(b, dict)]
+
+            if isinstance(boards_data.get('board_settings'), dict):
+                merged['board_settings'] = dict(boards_data['board_settings'])
+
+            if boards_data.get('boards_schema_version') is not None:
+                merged['boards_schema_version'] = boards_data.get('boards_schema_version')
+
+            if boards_data.get('updated_at'):
+                merged['updated_at'] = boards_data.get('updated_at')
+            if boards_data.get('created_at'):
+                merged['created_at'] = boards_data.get('created_at')
+
+        if menu_doc.exists:
+            menu_data = menu_doc.to_dict() or {}
+            if isinstance(menu_data.get('boards_menu'), list):
+                merged['boards_menu'] = dedupe_boards_menu_tree(menu_data.get('boards_menu'))
+
+            # Allow board_settings to be supplied from menu doc as a fallback.
+            if 'board_settings' not in merged and isinstance(menu_data.get('board_settings'), dict):
+                merged['board_settings'] = dict(menu_data['board_settings'])
+
+            if menu_data.get('boards_schema_version') is not None and 'boards_schema_version' not in merged:
+                merged['boards_schema_version'] = menu_data.get('boards_schema_version')
+
+        return merged
+    except Exception as e:
+        logging.error(f"Error loading split tap config docs: {e}")
+        return None
+
+
+async def _save_split_tap_docs(account_id: str, aac_user_id: str, config_data: Dict[str, Any]) -> bool:
+    """Dual-write tap boards/menu into separate docs for phase-1 migration."""
+    try:
+        now_iso = dt.now().isoformat()
+
+        boards_ref = _tap_boards_doc_ref(account_id, aac_user_id)
+        menu_ref = _tap_menu_doc_ref(account_id, aac_user_id)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        boards_schema_version = int(config_data.get('boards_schema_version') or 1)
+        created_at = config_data.get('created_at') or now_iso
+
+        boards_payload = {
+            'board_settings': board_settings,
+            'boards_schema_version': boards_schema_version,
+            'updated_at': now_iso,
+            'created_at': created_at,
+        }
+
+        estimated_boards_size = _estimate_json_size_bytes({'boards': boards})
+        if estimated_boards_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            boards_payload['boards'] = boards
+            boards_payload.pop('boards_storage', None)
+            boards_payload.pop('boards_chunk_count', None)
+            boards_payload.pop('boards_count', None)
+            await asyncio.to_thread(boards_ref.set, boards_payload)
+            await _clear_chunked_tap_boards(boards_ref)
+        else:
+            chunk_count = await _save_chunked_tap_boards(boards_ref, boards)
+            boards_payload['boards_storage'] = 'chunked'
+            boards_payload['boards_chunk_count'] = chunk_count
+            boards_payload['boards_count'] = len(boards)
+            await asyncio.to_thread(boards_ref.set, boards_payload)
+
+        boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+        menu_payload = {
+            'boards_menu': dedupe_boards_menu_tree(boards_menu),
+            'board_settings': board_settings,
+            'boards_schema_version': boards_schema_version,
+            'updated_at': now_iso,
+            'created_at': created_at,
+        }
+        await asyncio.to_thread(menu_ref.set, menu_payload)
+
+        return True
+    except Exception as e:
+        logging.error(f"Error saving split tap config docs: {e}")
+        return False
+
+
 async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dict]:
     """Load tap navigation configuration from Firestore"""
     global firestore_db
@@ -14819,11 +23771,47 @@ async def load_tap_nav_config(account_id: str, aac_user_id: str) -> Optional[Dic
     
     try:
         # Always load the single user configuration
-        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
+        doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         doc = await asyncio.to_thread(doc_ref.get)
+
+        split_data = await _load_split_tap_docs(account_id, aac_user_id)
+
         if doc.exists:
-            return doc.to_dict()
-        
+            config_data = doc.to_dict() or {}
+            if str(config_data.get('boards_storage') or '').lower() == 'chunked':
+                config_data['boards'] = await _load_chunked_tap_boards(doc_ref)
+            elif not isinstance(config_data.get('boards'), list):
+                config_data['boards'] = []
+
+            # Phase 1: prefer split docs for boards/menu/settings when present.
+            if isinstance(split_data, dict):
+                if isinstance(split_data.get('boards'), list):
+                    config_data['boards'] = split_data.get('boards')
+                if isinstance(split_data.get('boards_menu'), list):
+                    config_data['boards_menu'] = split_data.get('boards_menu')
+                if isinstance(split_data.get('board_settings'), dict):
+                    config_data['board_settings'] = split_data.get('board_settings')
+                if split_data.get('boards_schema_version') is not None:
+                    config_data['boards_schema_version'] = split_data.get('boards_schema_version')
+
+            # Keep compatibility shape updated
+            config_data['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+            return config_data
+
+        # Backward-compatible fallback: synthesize from split docs if combined doc is missing.
+        if isinstance(split_data, dict):
+            synthesized = create_default_tap_config(account_id, aac_user_id)
+            if isinstance(split_data.get('boards'), list):
+                synthesized['boards'] = split_data.get('boards')
+            if isinstance(split_data.get('boards_menu'), list):
+                synthesized['boards_menu'] = split_data.get('boards_menu')
+            if isinstance(split_data.get('board_settings'), dict):
+                synthesized['board_settings'] = split_data.get('board_settings')
+            if split_data.get('boards_schema_version') is not None:
+                synthesized['boards_schema_version'] = split_data.get('boards_schema_version')
+            synthesized['buttons'] = compose_legacy_buttons_from_boards_menu(synthesized)
+            return synthesized
+
         return None
     except Exception as e:
         logging.error(f"Error loading tap navigation config: {e}")
@@ -14836,19 +23824,333 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
         return False
     
     try:
-        # Always save to the single user configuration document
-        config_data['updated_at'] = dt.now().isoformat()
-        if 'created_at' not in config_data:
-            config_data['created_at'] = config_data['updated_at']
-        
-        doc_ref = firestore_db.document(f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/tap_interface_config/config")
-        await asyncio.to_thread(doc_ref.set, config_data)
-        return True
+        # Phase 1 migration strategy:
+        # - Split docs (boards_config + menu_config) are primary.
+        # - Legacy combined config doc is only mirrored if it already exists,
+        #   so deleting it does not cause recreation.
+        working_config = copy.deepcopy(config_data) if isinstance(config_data, dict) else {}
+        working_config['updated_at'] = dt.now().isoformat()
+        if 'created_at' not in working_config:
+            working_config['created_at'] = working_config['updated_at']
+
+        doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
+        boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
+
+        split_saved = await _save_split_tap_docs(account_id, aac_user_id, working_config)
+        if not split_saved:
+            return False
+
+        legacy_doc = await asyncio.to_thread(doc_ref.get)
+        if not legacy_doc.exists:
+            return True
+
+        estimated_size = _estimate_json_size_bytes(working_config)
+        combined_saved = False
+        if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            working_config.pop('boards_storage', None)
+            working_config.pop('boards_chunk_count', None)
+            working_config.pop('boards_count', None)
+            await asyncio.to_thread(doc_ref.set, working_config)
+            await _clear_chunked_tap_boards(doc_ref)
+            combined_saved = True
+        else:
+            # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
+            base_config = copy.deepcopy(working_config)
+            base_config.pop('boards', None)
+            chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
+            base_config['boards_storage'] = 'chunked'
+            base_config['boards_chunk_count'] = chunk_count
+            base_config['boards_count'] = len(boards)
+            await asyncio.to_thread(doc_ref.set, base_config)
+            combined_saved = True
+
+        return combined_saved
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
         return False
 
-def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
+
+def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[Dict], bool]:
+    if not isinstance(config_data, dict):
+        return config_data, False
+
+    buttons = config_data.get('buttons')
+    if not isinstance(buttons, list):
+        return config_data, False
+
+    normalized = False
+
+    expected_greetings_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'greetings_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'greetings',
+        'llm_prompt': 'Generate greeting phrases and words suitable for everyday social interactions. Include hellos, goodbyes, and common polite expressions.',
+        'static_options': None,
+        'label': 'Greetings',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+    expected_help_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'help_btn',
+        'prompt_exclusions': None,
+        'speech_text': 'I need help',
+        'prompt_category': 'help',
+        'llm_prompt': 'Generate AAC-friendly phrases for asking for help or assistance, covering a range of urgency and intensity. Include mild requests (I could use some help, Can you help me please, I need a little help), moderate requests (I need help right now, Please help me, I am having trouble and need assistance), and urgent phrases (I need help immediately, This is an emergency, Please call for help now, I need someone right away). Phrases should be clear, direct, and appropriate for someone with a communication disability.',
+        'static_options': None,
+        'label': 'Help',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+    expected_questions_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'requests_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'questions',
+        'llm_prompt': 'Generate AAC-friendly starters, question words, and short phrases for asking questions or making requests. Include question starters (Can, Could, What, Where, Why, How, Do, Is, Will, Would) and request starters (Please, I need, I want, May I, Help me) so the user can begin either a question or a request.',
+        'static_options': None,
+        'label': 'Questions',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+
+    # Normalize Greetings — remove children, enforce flat board
+    for button in buttons:
+        if not isinstance(button, dict):
+            continue
+        if str(button.get('id') or '').strip().lower() == 'greetings_btn' or str(button.get('label') or '').strip().lower() == 'greetings':
+            if button.get('children'):
+                button['children'] = []
+                normalized = True
+            if button.get('llm_prompt') != expected_greetings_button['llm_prompt']:
+                button['llm_prompt'] = expected_greetings_button['llm_prompt']
+                normalized = True
+            break
+
+    # Normalize Questions — remove children, enforce flat board
+    for button in buttons:
+        if not isinstance(button, dict):
+            continue
+        if str(button.get('id') or '').strip().lower() == 'requests_btn' or str(button.get('label') or '').strip().lower() == 'questions':
+            if button.get('children'):
+                button['children'] = []
+                normalized = True
+            if button.get('llm_prompt') != expected_questions_button['llm_prompt']:
+                button['llm_prompt'] = expected_questions_button['llm_prompt']
+                normalized = True
+            break
+
+    # Ensure root-level Help button exists; insert after Greetings if missing
+    help_index = None
+    greetings_index = None
+    for index, button in enumerate(buttons):
+        if not isinstance(button, dict):
+            continue
+        btn_id = str(button.get('id') or '').strip().lower()
+        btn_label = str(button.get('label') or '').strip().lower()
+        if btn_id == 'help_btn' or (btn_label == 'help' and button.get('prompt_category') == 'help'):
+            help_index = index
+        if btn_id == 'greetings_btn' or btn_label == 'greetings':
+            greetings_index = index
+
+    if help_index is None:
+        insert_at = (greetings_index + 1) if greetings_index is not None else len(buttons)
+        buttons.insert(insert_at, copy.deepcopy(expected_help_button))
+        normalized = True
+    else:
+        btn = buttons[help_index]
+        if btn.get('children'):
+            btn['children'] = []
+            normalized = True
+        if btn.get('prompt_category') != 'help':
+            btn['prompt_category'] = 'help'
+            normalized = True
+        if btn.get('llm_prompt') != expected_help_button['llm_prompt']:
+            btn['llm_prompt'] = expected_help_button['llm_prompt']
+            normalized = True
+
+    # Also normalize the boards_menu (source of truth for migrated configs).
+    # For greetings and questions: strip children. For help: ensure it exists at root level.
+    boards_menu = config_data.get('boards_menu')
+    if isinstance(boards_menu, list):
+        greetings_menu_index = None
+        help_menu_index = None
+        questions_menu_index = None
+
+        for mi, menu_item in enumerate(boards_menu):
+            if not isinstance(menu_item, dict):
+                continue
+            item_label = str(menu_item.get('label') or '').strip().lower()
+            item_source_btn = str(menu_item.get('source_button_id') or '').strip().lower()
+            if item_label == 'greetings' or item_source_btn == 'greetings_btn':
+                greetings_menu_index = mi
+                if menu_item.get('children'):
+                    menu_item['children'] = []
+                    normalized = True
+            elif item_label == 'help' and (item_source_btn == 'help_btn' or menu_item.get('board_id', '').startswith('board_help')):
+                help_menu_index = mi
+                if menu_item.get('children'):
+                    menu_item['children'] = []
+                    normalized = True
+            elif item_label == 'questions' or item_source_btn == 'requests_btn':
+                questions_menu_index = mi
+                if menu_item.get('children'):
+                    menu_item['children'] = []
+                    normalized = True
+
+        # Insert help menu item after greetings if missing from boards_menu
+        if help_menu_index is None:
+            new_help_menu_item = {
+                'id': 'menu_help_btn',
+                'label': 'Help',
+                'board_id': 'board_help_btn',
+                'source': 'legacy_category',
+                'source_button_id': 'help_btn',
+                'sort_order': (greetings_menu_index + 1) if greetings_menu_index is not None else len(boards_menu),
+                'hidden': False,
+                'image_url': None,
+                'speech_text': 'I need help',
+                'custom_audio_file': None,
+                'background_color': '#FFFFFF',
+                'text_color': '#000000',
+                'children': [],
+            }
+            insert_at = (greetings_menu_index + 1) if greetings_menu_index is not None else len(boards_menu)
+            boards_menu.insert(insert_at, new_help_menu_item)
+            config_data['boards_menu'] = boards_menu
+            normalized = True
+
+    # Normalize the home board in boards[] to ensure it has a conversation-starter prompt.
+    _home_llm_prompt = (
+        "Generate high-frequency general conversation starters and everyday AAC vocabulary for the home/start screen. "
+        "Include a mix of: common sentence starters (I want, I need, I feel, Can I, Let's), social phrases "
+        "(hi, yes, no, please, thank you, help), and action words (go, stop, more, done, wait, look). "
+        "Words should be versatile enough to begin any type of conversation."
+    )
+    boards = config_data.get('boards')
+    if isinstance(boards, list):
+        for board in boards:
+            if not isinstance(board, dict):
+                continue
+            is_home = (
+                str(board.get('source') or '') == 'default_home'
+                or str(board.get('label') or '').strip().lower() == 'home'
+            )
+            if is_home and not board.get('llm_prompt'):
+                board['llm_prompt'] = _home_llm_prompt
+                board['prompt_category'] = 'general_conversation'
+                normalized = True
+
+    expected_ask_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'ask_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'ask',
+        'llm_prompt': 'Generate AAC-friendly starters, words, and short phrases for asking questions or making requests. Include question starters (Can, Could, What, Where, Why, How, Do, Is, Will, Would) and request starters (Please, I need, I want, May I, Help me) so the user can begin either a question or a request from this board.',
+        'static_options': None,
+        'label': 'Ask',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+    expected_respond_button = {
+        'text_color': '#000000',
+        'special_function': None,
+        'custom_audio_file': None,
+        'words_prompt': None,
+        'id': 'respond_btn',
+        'prompt_exclusions': None,
+        'speech_text': None,
+        'prompt_category': 'respond',
+        'llm_prompt': 'Generate AAC-friendly response starters, words, and short phrases for responding to a question or request. When starting a sentence, strongly prefer natural response openings like Yes, No, Okay, Sure, Maybe, I can, I cannot, Please, Thank you, and Not right now.',
+        'static_options': None,
+        'label': 'Respond',
+        'image_url': None,
+        'prompt_examples': None,
+        'hidden': False,
+        'children': [],
+        'prompt_topic': None,
+        'background_color': '#FFFFFF'
+    }
+
+    ask_index = None
+
+    for index, button in enumerate(buttons):
+        if not isinstance(button, dict):
+            continue
+
+        button_id = str(button.get('id') or '').strip().lower()
+        button_label = str(button.get('label') or '').strip().lower()
+        if button_id != 'ask_btn' and button_label != 'ask':
+            continue
+
+        if button != expected_ask_button:
+            button.clear()
+            button.update(copy.deepcopy(expected_ask_button))
+            normalized = True
+        ask_index = index
+        break
+
+    if ask_index is not None:
+        respond_index = None
+        for index, button in enumerate(buttons):
+            if not isinstance(button, dict):
+                continue
+            button_id = str(button.get('id') or '').strip().lower()
+            button_label = str(button.get('label') or '').strip().lower()
+            if button_id == 'respond_btn' or button_label == 'respond':
+                respond_index = index
+                break
+
+        if respond_index is None:
+            buttons.insert(ask_index + 1, copy.deepcopy(expected_respond_button))
+            normalized = True
+        else:
+            if buttons[respond_index] != expected_respond_button:
+                buttons[respond_index].clear()
+                buttons[respond_index].update(copy.deepcopy(expected_respond_button))
+                normalized = True
+            if respond_index != ask_index + 1:
+                respond_button = buttons.pop(respond_index)
+                if respond_index < ask_index:
+                    ask_index -= 1
+                buttons.insert(ask_index + 1, respond_button)
+                normalized = True
+
+    return config_data, normalized
+
+def create_default_tap_config(account_id: str, aac_user_id: str, use_hybrid_pages: bool = False) -> Dict:
     """Create a comprehensive default tap navigation configuration based on production template"""
     from datetime import datetime
     
@@ -14857,25 +24159,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
         "id": "user_config",
         "is_active": True,
         "buttons": [
-        {
-            "text_color": "#000000",
-            "special_function": "spell",
-            "custom_audio_file": None,
-            "words_prompt": None,
-            "id": "spell_btn",
-            "prompt_exclusions": None,
-            "speech_text": None,
-            "prompt_category": None,
-            "llm_prompt": None,
-            "static_options": None,
-            "label": "Spell",
-            "image_url": None,
-            "prompt_examples": None,
-            "hidden": False,
-            "children": [],
-            "prompt_topic": None,
-            "background_color": "#ffffff"
-        },
         {
             "text_color": "#000000",
             "special_function": None,
@@ -14891,161 +24174,26 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "image_url": None,
             "prompt_examples": None,
             "hidden": False,
-            "children": [
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548786477",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate common greeting phrases and expressions for everyday social interactions",
-                    "prompt_category": "generic_greetings",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Generic Greetings",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548814397",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate location-based greetings and conversation starters",
-                    "prompt_category": "current_location",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Current Location",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548829795",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate simple, appropriate jokes and funny conversation starters",
-                    "prompt_category": "jokes",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Jokes",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769548860476",
-                    "prompt_exclusions": None,
-                    "llm_prompt": None,
-                    "prompt_category": None,
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "About Me",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548883127",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "personal_info",
-                            "llm_prompt": "Generate phrases for sharing personal information and basic details about myself",
-                            "static_options": None,
-                            "label": "Personal Info",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548909153",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "family",
-                            "llm_prompt": "Generate phrases for talking about family members and relationships",
-                            "static_options": None,
-                            "label": "Family",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548945509",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "interests",
-                            "llm_prompt": "Generate phrases for discussing hobbies, interests, and favorite activities",
-                            "static_options": None,
-                            "label": "Interests",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769548971094",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "medical_info",
-                            "llm_prompt": "Generate phrases for communicating medical needs and health information",
-                            "static_options": None,
-                            "label": "Medical Info",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        }
-                    ],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                }
-            ],
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#FFFFFF"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": None,
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "help_btn",
+            "prompt_exclusions": None,
+            "speech_text": "I need help",
+            "prompt_category": "help",
+            "llm_prompt": "Generate AAC-friendly phrases for asking for help or assistance, covering a range of urgency and intensity. Include mild requests (I could use some help, Can you help me please, I need a little help), moderate requests (I need help right now, Please help me, I am having trouble and need assistance), and urgent phrases (I need help immediately, This is an emergency, Please call for help now, I need someone right away). Phrases should be clear, direct, and appropriate for someone with a communication disability.",
+            "static_options": None,
+            "label": "Help",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
             "prompt_topic": None,
             "background_color": "#FFFFFF"
         },
@@ -15057,149 +24205,33 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "id": "requests_btn",
             "prompt_exclusions": None,
             "speech_text": None,
-            "prompt_category": "requests",
-            "llm_prompt": "Generate phrases for making requests and asking for things",
+            "prompt_category": "questions",
+            "llm_prompt": "Generate AAC-friendly starters, question words, and short phrases for asking questions or making requests. Include question starters (Can, Could, What, Where, Why, How, Do, Is, Will, Would) and request starters (Please, I need, I want, May I, Help me) so the user can begin either a question or a request.",
             "static_options": None,
-            "label": "Requests",
+            "label": "Questions",
             "image_url": None,
             "prompt_examples": None,
             "hidden": False,
-            "children": [
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549017543",
-                    "prompt_exclusions": None,
-                    "llm_prompt": None,
-                    "prompt_category": None,
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Help",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769549040004",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "emergency",
-                            "llm_prompt": "Generate emergency communication phrases and urgent requests",
-                            "static_options": None,
-                            "label": "Emergency",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        },
-                        {
-                            "text_color": "#000000",
-                            "special_function": None,
-                            "custom_audio_file": None,
-                            "words_prompt": None,
-                            "id": "button_1769549072633",
-                            "prompt_exclusions": None,
-                            "speech_text": None,
-                            "prompt_category": "need_assistance",
-                            "llm_prompt": "Generate phrases for requesting help and assistance",
-                            "static_options": None,
-                            "label": "Need Assistance",
-                            "image_url": None,
-                            "prompt_examples": None,
-                            "hidden": False,
-                            "children": [],
-                            "prompt_topic": None,
-                            "background_color": "#ffffff"
-                        }
-                    ],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549107362",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate options for food, include specific food and restaurant options",
-                    "prompt_category": "food",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Food",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549136913",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate options for drinks",
-                    "prompt_category": "drink",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Drink",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549165059",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate words or phrases to request something related to comfort",
-                    "prompt_category": "comfort",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Comfort",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549181795",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate question words and phrases for asking about things",
-                    "prompt_category": "questions",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Questions",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                }
-            ],
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#FFFFFF"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": None,
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "respond_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": "respond",
+            "llm_prompt": "Generate AAC-friendly response starters, words, and short phrases for responding to a question or request. When starting a sentence, strongly prefer natural response openings like Yes, No, Okay, Sure, Maybe, I can, I cannot, Please, Thank you, and Not right now.",
+            "static_options": None,
+            "label": "Respond",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
             "prompt_topic": None,
             "background_color": "#FFFFFF"
         },
@@ -15257,25 +24289,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             "prompt_examples": None,
             "hidden": False,
             "children": [
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
-                    "id": "button_1769549267036",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate a list of nouns for common objects and items found in the current location",
-                    "prompt_category": "in_the_room",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "In the Room",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
                 {
                     "words_prompt": None,
                     "special_function": None,
@@ -15554,6 +24567,44 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                     "speech_text": None,
                     "static_options": None,
                     "label": "General things",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "button_1769550096760_science",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of nouns related to science, including planets, space, and astronomy concepts",
+                    "prompt_category": "science",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Science",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "button_1769550096761_imaginary",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of nouns for imaginary and fantasy things, including mythical creatures and magical objects",
+                    "prompt_category": "imaginary",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Imaginary",
                     "image_url": None,
                     "prompt_examples": None,
                     "children": [],
@@ -16037,6 +25088,25 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
                     "hidden": False,
                     "background_color": "#ffffff",
                     "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "button_1769550096759_dinosaurs",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of dinosaurs or phrases that could be used to discuss dinosaurs",
+                    "prompt_category": "dinosaurs",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Dinosaurs",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
                 }
             ],
             "prompt_topic": None,
@@ -16137,6 +25207,44 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
             ],
             "prompt_topic": None,
             "background_color": "#ffffff"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": "spell",
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "spell_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": None,
+            "llm_prompt": None,
+            "static_options": None,
+            "label": "Spell",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#ffffff"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": "games",
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "games_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": None,
+            "llm_prompt": None,
+            "static_options": None,
+            "label": "Games",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [],
+            "prompt_topic": None,
+            "background_color": "#ffffff"
         }
     ],
     "name": "My Navigation"
@@ -16145,6 +25253,9 @@ def create_default_tap_config(account_id: str, aac_user_id: str) -> Dict:
     # Add timestamps
     config['created_at'] = datetime.now().isoformat()
     config['updated_at'] = datetime.now().isoformat()
+
+    config, _ = normalize_compose_tap_config(config)
+    config, _ = ensure_tap_boards_structure(config, use_hybrid_pages=use_hybrid_pages)
     
     return config
 
@@ -16160,12 +25271,26 @@ async def get_tap_interface_config(
     account_id = current_ids["account_id"]
     
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
         config_data = await load_tap_nav_config(account_id, aac_user_id)
         
         if not config_data:
             # Create and save default configuration
-            config_data = create_default_tap_config(account_id, aac_user_id)
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
             await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+            menu_before = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+            menu_deduped = dedupe_boards_menu_tree(menu_before)
+            menu_changed = menu_before != menu_deduped
+            if menu_changed:
+                config_data['boards_menu'] = menu_deduped
+                config_data['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+
+            if was_normalized or boards_changed or menu_changed:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
         
         # DEBUG: Log words_prompt presence
         if config_data and 'buttons' in config_data:
@@ -16177,7 +25302,9 @@ async def get_tap_interface_config(
                         if c.get('words_prompt'):
                             logging.info(f"DEBUG: Loaded child '{c.get('label')}' with words_prompt: {c.get('words_prompt')[:20]}...")
 
-        return JSONResponse(content=config_data)
+        config_response = dict(config_data)
+        config_response['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+        return JSONResponse(content=config_response)
     except Exception as e:
         logging.error(f"Error getting tap interface config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -16192,6 +25319,10 @@ async def save_tap_interface_config(
     account_id = current_ids["account_id"]
     
     try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        existing_config = await load_tap_nav_config(account_id, aac_user_id)
+
         # DEBUG: Log words_prompt presence in received config
         for b in config_data.buttons:
             if b.words_prompt:
@@ -16205,6 +25336,8 @@ async def save_tap_interface_config(
         # Always use 'user_config' as ID for single configuration per user
         config_dict['id'] = 'user_config'
         config_dict['updated_at'] = dt.now().isoformat()
+        config_dict, _ = normalize_compose_tap_config(config_dict)
+        config_dict, _ = ensure_tap_boards_structure(config_dict, existing_config=existing_config, use_hybrid_pages=use_hybrid_pages)
         
         success = await save_tap_nav_config(account_id, aac_user_id, config_dict)
         
@@ -16216,7 +25349,1297 @@ async def save_tap_interface_config(
         logging.error(f"Error saving tap interface config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class WordVariantRequest(BaseModel):
+    words: List[str]
+    mode: str  # 'past' or 'plural'
+    category: Optional[str] = None
+
+@app.post("/api/tap-interface/word-variants")
+async def get_word_variants(
+    request: WordVariantRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Convert a list of words to past tense or plural using LLM."""
+    if request.mode not in ('past', 'plural'):
+        raise HTTPException(status_code=400, detail="mode must be 'past' or 'plural'")
+
+    words = [w.strip() for w in request.words if isinstance(w, str) and w.strip()]
+    if not words:
+        return JSONResponse(content={"variants": {}})
+
+    words_json = json.dumps(words)
+
+    if request.mode == 'past':
+        prompt = (
+            f"Convert these words/phrases to past tense. "
+            f"Return ONLY a valid JSON object mapping each original word/phrase to its past tense form. "
+            f"For multi-word phrases, convert only the verb (first word that changes): 'do this'->'did this', 'wait here'->'waited here', 'go home'->'went home'. "
+            f"If a word does not change meaningfully in past tense (articles, prepositions, adjectives, nouns, pronouns, already-past forms), return it unchanged. "
+            f"Examples: want->wanted, am->was, is->was, are->were, have->had, has->had, can->could, will->would, feel->felt, go->went, need->needed, like->liked, understand->understood. "
+            f"Words: {words_json}"
+        )
+    else:
+        prompt = (
+            f"Convert these words/phrases to plural form. "
+            f"Return ONLY a valid JSON object mapping each original word to its plural form. "
+            f"If a word does not have a meaningful plural (verbs, prepositions, pronouns, adjectives, etc.), return it unchanged. "
+            f"Examples: cat->cats, wish->wishes, cookie->cookies, idea->ideas. "
+            f"Words: {words_json}"
+        )
+
+    try:
+        account_id = current_ids["account_id"]
+        aac_user_id = current_ids["aac_user_id"]
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_provider = str(settings.get('llm_provider') or 'gemini').lower()
+
+        response_text = None
+        if llm_provider == 'chatgpt' and openai_client:
+            resp = await asyncio.to_thread(
+                openai_client.chat.completions.create,
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+                temperature=0.1,
+            )
+            response_text = resp.choices[0].message.content.strip() if resp.choices else None
+        else:
+            import google.generativeai as genai
+            model = genai.GenerativeModel('gemini-2.0-flash-lite')
+            resp = await asyncio.to_thread(model.generate_content, prompt)
+            response_text = resp.text.strip() if resp and resp.text else None
+
+        if not response_text:
+            return JSONResponse(content={"variants": {w: w for w in words}})
+
+        # Extract JSON from response
+        json_str = response_text
+        if '```' in json_str:
+            import re
+            match = re.search(r'```(?:json)?\s*([\s\S]*?)```', json_str)
+            if match:
+                json_str = match.group(1).strip()
+
+        variants = json.loads(json_str)
+        if not isinstance(variants, dict):
+            return JSONResponse(content={"variants": {}})
+
+        # Only return words that actually changed — client skips identity mappings
+        result = {}
+        for w in words:
+            v = str(variants.get(w) or '').strip()
+            if v and v.lower() != w.lower():
+                result[w] = v
+
+        return JSONResponse(content={"variants": result})
+    except Exception as e:
+        logging.error(f"Error converting word variants: {e}", exc_info=True)
+        # Return identity mapping on error
+        return JSONResponse(content={"variants": {w: w for w in words}})
+
+
+@app.get("/api/tap-interface/boards-menu")
+async def get_tap_boards_menu_config(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get board-oriented menu config (parallel structure) for tap interface."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+            if was_normalized or boards_changed:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+
+        boards_menu_sorted = sort_boards_menu_tree(boards_menu)
+
+        return JSONResponse(content={
+            'boards_schema_version': int(config_data.get('boards_schema_version') or 1),
+            'board_settings': {
+                'max_columns': int(board_settings.get('max_columns', 12) or 12),
+                'max_rows': int(board_settings.get('max_rows', 7) or 7),
+                'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
+                'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+                'home_board_id': board_settings.get('home_board_id'),
+            },
+            'boards_menu': boards_menu_sorted,
+            'boards': [
+                {
+                    'id': b.get('id'),
+                    'label': b.get('label'),
+                    'board_type': b.get('board_type'),
+                    'owner_scope': b.get('owner_scope'),
+                    'hidden': bool(b.get('hidden', False)),
+                    'source': b.get('source'),
+                    'source_button_id': b.get('source_button_id'),
+                }
+                for b in boards
+                if isinstance(b, dict)
+            ],
+        })
+    except Exception as e:
+        logging.error(f"Error getting tap boards menu config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/boards-menu")
+async def save_tap_boards_menu_config(
+    payload: TapBoardsMenuUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save board-oriented menu config (parallel structure) for tap interface."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        valid_board_ids = {
+            str(b.get('id')).strip()
+            for b in boards
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+
+        requested_menu = [item.model_dump() for item in payload.boards_menu]
+        normalized_menu = normalize_boards_menu_items(requested_menu, valid_board_ids)
+        config_data['boards_menu'] = normalized_menu
+
+        if payload.board_settings is not None:
+            config_data['board_settings'] = payload.board_settings.model_dump()
+
+        config_data['boards_schema_version'] = 1
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to save boards menu config')
+
+        return JSONResponse(content={
+            'success': True,
+            'message': 'Boards menu saved successfully',
+            'boards_menu_count': len(normalized_menu),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error saving tap boards menu config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _clear_board_references_in_menu(menu_items: Any, removed_board_id: str) -> Any:
+    if not isinstance(menu_items, list):
+        return menu_items
+
+    updated_items: List[Dict[str, Any]] = []
+    for item in menu_items:
+        if not isinstance(item, dict):
+            continue
+
+        cloned = dict(item)
+        if str(cloned.get('board_id') or '').strip() == removed_board_id:
+            cloned['board_id'] = None
+        cloned['children'] = _clear_board_references_in_menu(cloned.get('children'), removed_board_id)
+        updated_items.append(cloned)
+
+    return updated_items
+
+
+@app.get("/api/tap-interface/boards")
+async def list_tap_boards(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """List all board definitions for board builder/admin tooling."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
+        else:
+            config_data, was_normalized = normalize_compose_tap_config(config_data)
+            config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+            if was_normalized or boards_changed:
+                await save_tap_nav_config(account_id, aac_user_id, config_data)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        return JSONResponse(content={
+            'boards': [b for b in boards if isinstance(b, dict)],
+            'count': len(boards),
+            'board_settings': {
+                'max_columns': int(board_settings.get('max_columns', 12) or 12),
+                'max_rows': int(board_settings.get('max_rows', 7) or 7),
+                'allow_user_boards': bool(board_settings.get('allow_user_boards', True)),
+                'default_ai_boards_global': bool(board_settings.get('default_ai_boards_global', True)),
+                'home_board_id': board_settings.get('home_board_id'),
+            },
+        })
+    except Exception as e:
+        logging.error(f"Error listing tap boards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tap-interface/boards/{board_id}")
+async def get_tap_board(
+    board_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get a single board definition by id."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+
+        board = next((b for b in boards if isinstance(b, dict) and b.get('id') == board_id), None)
+        if not board:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        return JSONResponse(content={'board': board, 'board_settings': board_settings})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting tap board {board_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/boards")
+async def create_tap_board(
+    payload: TapBoardCreateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Create a custom board definition."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        existing_ids = {
+            str(b.get('id')).strip()
+            for b in boards
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+
+        requested_id = str(payload.id or '').strip()
+        if requested_id:
+            board_id = requested_id
+            if board_id in existing_ids:
+                raise HTTPException(status_code=409, detail='Board ID already exists')
+        else:
+            base_slug = _sanitize_board_slug(payload.label)
+            board_id = f'board_{base_slug}'
+            suffix = 2
+            while board_id in existing_ids:
+                board_id = f'board_{base_slug}_{suffix}'
+                suffix += 1
+
+        board = _normalize_board_payload(payload.model_dump(), board_id=board_id, source='custom', source_button_id=None)
+        boards.append(board)
+        config_data['boards'] = boards
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if payload.set_as_home:
+            board_settings['home_board_id'] = board_id
+        config_data['board_settings'] = board_settings
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to create board')
+
+        return JSONResponse(content={'success': True, 'board': board, 'board_settings': config_data.get('board_settings', {})})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error creating tap board: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/tap-interface/boards/{board_id}")
+async def update_tap_board(
+    board_id: str,
+    payload: TapBoardUpdateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Update an existing board definition."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_index = next(
+            (i for i, b in enumerate(boards) if isinstance(b, dict) and str(b.get('id') or '') == board_id),
+            None,
+        )
+        if board_index is None:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        existing_board = boards[board_index]
+        if str(existing_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='System boards are read-only')
+
+        updated_board = _normalize_board_payload(
+            payload.model_dump(),
+            board_id=board_id,
+            source=str(existing_board.get('source') or 'custom'),
+            source_button_id=existing_board.get('source_button_id'),
+        )
+        # Preserve created_during_migration flag unless the incoming payload explicitly clears it
+        if not payload.created_during_migration:
+            updated_board['created_during_migration'] = False
+        boards[board_index] = updated_board
+
+        config_data['boards'] = boards
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if payload.set_as_home:
+            board_settings['home_board_id'] = board_id
+        config_data['board_settings'] = board_settings
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to update board')
+
+        return JSONResponse(content={'success': True, 'board': updated_board, 'board_settings': config_data.get('board_settings', {})})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating tap board {board_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/tap-interface/boards/{board_id}")
+async def delete_tap_board(
+    board_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Delete a board and clear any menu references to it."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_index = next(
+            (i for i, b in enumerate(boards) if isinstance(b, dict) and str(b.get('id') or '') == board_id),
+            None,
+        )
+        if board_index is None:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        removed_board = boards[board_index]
+        if str(removed_board.get('source') or '') == 'legacy_category' or str(removed_board.get('board_type') or '') == 'system':
+            raise HTTPException(status_code=403, detail='Legacy and system boards cannot be deleted')
+
+        board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        if str(board_settings.get('home_board_id') or '').strip() == board_id:
+            raise HTTPException(status_code=400, detail='Cannot delete the current home board')
+
+        removed_board = boards.pop(board_index)
+        config_data['boards'] = boards
+
+        existing_menu = config_data.get('boards_menu')
+        if isinstance(existing_menu, list):
+            config_data['boards_menu'] = _clear_board_references_in_menu(existing_menu, board_id)
+
+        config_data['updated_at'] = dt.now().isoformat()
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to delete board')
+
+        return JSONResponse(content={'success': True, 'deleted_board_id': board_id, 'deleted_label': removed_board.get('label')})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting tap board {board_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Note: Single configuration per user - no need for list, activate, or delete endpoints
+
+
+@app.post("/api/tap-interface/boards-convert-ai-to-static")
+async def convert_ai_boards_to_static(
+    payload: ConvertAIBoardsToStaticRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Convert AI boards to static boards by generating options with the LLM and auto-fetching images.
+    The original AI board is preserved unchanged; a new static board is created with a derived ID.
+    Menu items that referenced the original AI board are updated to point to the new static board.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    after_selection = payload.after_selection if payload.after_selection in ("do_nothing", "use_ai", "navigate_home") else "do_nothing"
+
+    def _extract_options_from_llm_response(raw_response: str, board_id_for_log: str) -> List[str]:
+        """Robustly extract a flat list of string option labels from a raw LLM response."""
+        text = raw_response.strip()
+        # Remove any markdown code fences (```json ... ``` or plain ``` ... ```)
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        # Find the first JSON array anywhere in the response (handles explanatory preamble)
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            logging.warning(f"JSON parse failed for board {board_id_for_log}. Raw (first 400): {raw_response[:400]}")
+            return []
+        # If LLM returned a dict instead of list, look for a list value
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                # Grab the first list-valued key if any
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                label = item.strip()
+            elif isinstance(item, dict):
+                label = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                label = str(item).strip()
+            if label and label.lower() not in seen:
+                seen.add(label.lower())
+                options.append(label)
+        return options
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards: List[Dict[str, Any]] = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board_index_by_id: Dict[str, int] = {
+            str(b.get('id')): i
+            for i, b in enumerate(boards)
+            if isinstance(b, dict) and str(b.get('id') or '').strip()
+        }
+        existing_board_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
+
+        results: List[Dict[str, Any]] = []
+        # Maps original AI board ID → new static board ID (for menu rewiring)
+        original_to_new_board_id: Dict[str, str] = {}
+        # Maps original AI board label (lowercase) → new static board ID (for label-based wiring)
+        converted_label_to_new_id: Dict[str, str] = {}
+        # New static boards to append after all boards are processed
+        new_static_boards: List[Dict[str, Any]] = []
+
+        for board_id in payload.board_ids:
+            board_idx = board_index_by_id.get(board_id)
+            if board_idx is None:
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_id, "success": False, "options_count": 0, "error": "Board not found"})
+                continue
+
+            board = boards[board_idx]
+            board_label = str(board.get('label') or board_id)
+
+            if str(board.get('board_type') or '') != 'ai':
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": "Board is not an AI board"})
+                continue
+
+            try:
+                llm_prompt = str(board.get('llm_prompt') or '').strip()
+                prompt_category = str(board.get('prompt_category') or '').strip()
+                prompt_context = llm_prompt or prompt_category or board_label
+
+                gen_prompt = (
+                    f"Generate EXACTLY {payload.num_options} unique, short AAC board button labels "
+                    f"for the category \"{board_label}\".\n"
+                    f"Context: {prompt_context}\n\n"
+                    f"REQUIREMENTS:\n"
+                    f"1. Generate at least {payload.num_options} distinct, practical options\n"
+                    f"2. No duplicates\n"
+                    f"3. Each label 1-5 words, clear and concise\n"
+                    f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+                    f"Return ONLY the JSON array — no explanation, no markdown."
+                )
+
+                raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+                generated_options = _extract_options_from_llm_response(raw_response, board_id)
+
+                if not generated_options:
+                    results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": "No options could be parsed from LLM response"})
+                    continue
+
+                generated_options = generated_options[:payload.num_options]
+                per_row = payload.options_per_row
+                buttons: List[Dict[str, Any]] = []
+                ts_base = int(time.time() * 1000)
+
+                for i, label in enumerate(generated_options):
+                    row = i // per_row
+                    col = i % per_row
+
+                    image_url: Optional[str] = None
+                    for term in [label, label.lower(), label.capitalize()]:
+                        try:
+                            q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                            docs = await asyncio.to_thread(q.get)
+                            for doc in docs:
+                                img_data = doc.to_dict()
+                                if img_data.get("image_url"):
+                                    image_url = img_data["image_url"]
+                                    break
+                        except Exception as img_err:
+                            logging.debug(f"Image search error for '{term}': {img_err}")
+                        if image_url:
+                            break
+
+                    buttons.append({
+                        "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                        "label": label,
+                        "row": row,
+                        "col": col,
+                        "speech_text": label,
+                        "action_type": "announce",
+                        "after_selection": after_selection,
+                        "target_board_id": None,
+                        "temporary_navigation": False,
+                        "custom_audio_file": None,
+                        "special_function": None,
+                        "image_url": image_url,
+                        "background_color": "#FFFFFF",
+                        "text_color": "#000000",
+                        "hidden": False,
+                    })
+
+                # Generate a unique ID for the new static board
+                base_new_id = f"{board_id}_static"
+                new_board_id = base_new_id
+                suffix = 2
+                all_used_ids = existing_board_ids | {b.get('id', '') for b in new_static_boards}
+                while new_board_id in all_used_ids:
+                    new_board_id = f"{base_new_id}_{suffix}"
+                    suffix += 1
+
+                # Create the new static board — original AI board is left untouched
+                new_static_board = {
+                    **board,
+                    "id": new_board_id,
+                    "board_type": "static",
+                    "source": "custom",  # editable in Board Builder
+                    "buttons": buttons,
+                }
+                new_static_boards.append(new_static_board)
+
+                original_to_new_board_id[board_id] = new_board_id
+                converted_label_to_new_id[board_label.strip().lower()] = new_board_id
+                results.append({"board_id": board_id, "new_board_id": new_board_id, "board_label": board_label, "success": True, "options_count": len(buttons), "error": None})
+
+            except HTTPException:
+                raise
+            except Exception as board_err:
+                logging.error(f"Error converting board {board_id}: {board_err}", exc_info=True)
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": str(board_err)})
+
+        # Append all new static boards (originals are unchanged)
+        boards.extend(new_static_boards)
+        config_data['boards'] = boards
+
+        # Rewire menu items:
+        #   - Items with board_id pointing to an original AI board → point to new static board
+        #   - Items with no board_id whose label matches a converted board → wire to new static board
+        menu_items_wired = 0
+
+        def _rewire_menu_recursive(items: Any) -> None:
+            nonlocal menu_items_wired
+            if not isinstance(items, list):
+                return
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                current_bid = str(item.get('board_id') or '').strip()
+                if current_bid and current_bid in original_to_new_board_id:
+                    item['board_id'] = original_to_new_board_id[current_bid]
+                    menu_items_wired += 1
+                elif not current_bid:
+                    item_label = str(item.get('label') or '').strip().lower()
+                    matched_id = converted_label_to_new_id.get(item_label)
+                    if matched_id:
+                        item['board_id'] = matched_id
+                        menu_items_wired += 1
+                _rewire_menu_recursive(item.get('children'))
+
+        boards_menu = config_data.get('boards_menu')
+        if isinstance(boards_menu, list):
+            _rewire_menu_recursive(boards_menu)
+            config_data['boards_menu'] = boards_menu
+
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={"success": True, "results": results, "menu_items_wired": menu_items_wired})
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in convert_ai_boards_to_static: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/create-ai-target-board")
+async def create_ai_target_board(
+    payload: CreateAITargetBoardRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Generate AI options for a button label and create a new static board.
+    Returns the new board's ID and label for use as a Target Board.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    label = payload.label.strip()
+    after_selection = payload.after_selection if payload.after_selection in ("do_nothing", "use_ai", "navigate_home") else "do_nothing"
+
+    def _extract_options(raw: str) -> List[str]:
+        text = raw.strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                opt = item.strip()
+            elif isinstance(item, dict):
+                opt = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                opt = str(item).strip()
+            if opt and opt.lower() not in seen:
+                seen.add(opt.lower())
+                options.append(opt)
+        return options
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+        _dr = settings.get("tapDynamicRows")
+        tap_dynamic_rows = int(_dr) if _dr is not None else 1
+        static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+
+        gen_prompt = (
+            f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
+            f"A user has just tapped a button that says \"{label}\".\n"
+            f"Generate EXACTLY {payload.num_options} short button labels for words or phrases that would naturally "
+            f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
+            f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
+            f"Example: if the word is \"eat\", good options are: more, now, lunch, snack, dinner, a lot, slowly, together, outside, please, later.\n"
+            f"Example: if the word is \"want\", good options are: more, that, this, help, food, water, to go, a hug, to play.\n"
+            f"Example: if the word is \"go\", good options are: home, outside, now, please, away, to school, fast, together, later, there.\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Every option must be a word or short phrase that makes sense coming AFTER \"{label}\" in speech\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        generated_options = _extract_options(raw_response)
+
+        if not generated_options:
+            raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
+
+        generated_options = generated_options[:payload.num_options]
+        per_row = payload.options_per_row
+        ts_base = int(time.time() * 1000)
+        buttons: List[Dict[str, Any]] = []
+
+        for i, opt_label in enumerate(generated_options):
+            row = i // per_row
+            col = i % per_row
+            image_url: Optional[str] = None
+            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
+                try:
+                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                    docs = await asyncio.to_thread(q.get)
+                    for doc in docs:
+                        img_data = doc.to_dict()
+                        if img_data.get("image_url"):
+                            image_url = img_data["image_url"]
+                            break
+                except Exception:
+                    pass
+                if image_url:
+                    break
+
+            btn_type = "static" if row < static_rows_count else "dynamic"
+
+            buttons.append({
+                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "label": opt_label,
+                "row": row,
+                "col": col,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": after_selection,
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": image_url,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+                "button_type": btn_type,
+            })
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        boards: List[Dict[str, Any]] = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        existing_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
+
+        # Build a filesystem-safe slug from the label
+        slug = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')
+        base_id = f"{slug}_target"
+        new_board_id = base_id
+        suffix = 2
+        while new_board_id in existing_ids:
+            new_board_id = f"{base_id}_{suffix}"
+            suffix += 1
+
+        new_board: Dict[str, Any] = {
+            "id": new_board_id,
+            "label": label,
+            "board_type": "static",
+            "source": "custom",
+            "dynamic_rows": tap_dynamic_rows,
+            "buttons": buttons,
+        }
+        boards.append(new_board)
+        config_data['boards'] = boards
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={
+            "success": True,
+            "board_id": new_board_id,
+            "board_label": label,
+            "options_count": len(buttons),
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in create_ai_target_board: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/bravo-build")
+async def bravo_build(
+    payload: BravoBuildRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Dynamically build a new static board based on a clicked button's label and context.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    source_board_id = payload.source_board_id
+    button_id = payload.button_id
+    context = payload.context.strip() if payload.context else ""
+
+    def _extract_options(raw: str) -> List[str]:
+        text = raw.strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                opt = item.strip()
+            elif isinstance(item, dict):
+                opt = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                opt = str(item).strip()
+            if opt and opt.lower() not in seen:
+                seen.add(opt.lower())
+                options.append(opt)
+        return options
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+        _dr = settings.get("tapDynamicRows")
+        tap_dynamic_rows = int(_dr) if _dr is not None else 1
+        static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        # Scan boards to find the button
+        button_obj = None
+        boards: List[Dict[str, Any]] = config_data.get('boards', [])
+        
+        # If source_board_id is "home", it might be a root button
+        if source_board_id == "home":
+            root_buttons = config_data.get('buttons', [])
+            for btn in root_buttons:
+                if btn.get('id') == button_id:
+                    button_obj = btn
+                    break
+        
+        # Otherwise, find the board first, then the button in that board
+        if not button_obj:
+            for board in boards:
+                if board.get('id') == source_board_id:
+                    for btn in board.get('buttons', []):
+                        if btn.get('id') == button_id:
+                            button_obj = btn
+                            break
+                    if button_obj:
+                        break
+
+        # Fallback search all boards
+        if not button_obj:
+            for board in boards:
+                for btn in board.get('buttons', []):
+                    if btn.get('id') == button_id:
+                        button_obj = btn
+                        break
+                if button_obj:
+                    break
+
+        label = "Next Option"
+        if button_obj:
+            label = button_obj.get('label') or button_obj.get('speech_text') or "Next Option"
+        elif payload.button_label and str(payload.button_label).strip():
+            label = str(payload.button_label).strip()
+
+        options_per_row = settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6
+        num_options = options_per_row * tap_words_rows
+        
+        if context:
+            prompt_text = (
+                f"The user is building a sentence on an AAC device. So far, they have said: \"{context}\".\n"
+                f"They just tapped the button \"{label}\" (so the combined sentence context is \"{context} {label}\").\n"
+                f"Generate EXACTLY {num_options} unique, short button labels for words or phrases that would naturally "
+                f"FOLLOW \"{label}\" to continue the sentence \"{context} {label}\" in spoken conversation.\n\n"
+            )
+        else:
+            prompt_text = (
+                f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
+                f"A user has just tapped a button that says \"{label}\".\n"
+                f"Generate EXACTLY {num_options} short button labels for words or phrases that would naturally "
+                f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
+            )
+
+        gen_prompt = (
+            prompt_text +
+            f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
+            f"Example: if the sentence is \"I want\" and the tapped word is \"eat\", good options are: more, now, lunch, snack, dinner, pizza, an apple, please, later.\n"
+            f"Example: if the sentence is \"I like\" and the tapped word is \"go\", good options are: home, outside, to school, to the park, fast, there.\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Every option must be a word or short phrase that makes sense coming AFTER the tapped word in speech\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        generated_options = _extract_options(raw_response)
+
+        if not generated_options:
+            raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
+
+        generated_options = generated_options[:num_options]
+        ts_base = int(time.time() * 1000)
+        buttons: List[Dict[str, Any]] = []
+
+        for i, opt_label in enumerate(generated_options):
+            row = i // options_per_row
+            col = i % options_per_row
+            image_url: Optional[str] = None
+            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
+                try:
+                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                    docs = await asyncio.to_thread(q.get)
+                    for doc in docs:
+                        img_data = doc.to_dict()
+                        if img_data.get("image_url"):
+                            image_url = img_data["image_url"]
+                            break
+                except Exception:
+                    pass
+                if image_url:
+                    break
+
+            btn_type = "static" if row < static_rows_count else "dynamic"
+
+            buttons.append({
+                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "label": opt_label,
+                "row": row,
+                "col": col,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": "use_ai",  # Allow continuous AI generation!
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": image_url,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+                "button_type": btn_type,
+            })
+
+        existing_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}
+
+        # Build a filesystem-safe slug from the label
+        slug = re.sub(r'[^a-z0-9]+', '_', label.lower()).strip('_')
+        base_id = f"{slug}_target"
+        new_board_id = base_id
+        suffix = 2
+        while new_board_id in existing_ids:
+            new_board_id = f"{base_id}_{suffix}"
+            suffix += 1
+
+        new_board: Dict[str, Any] = {
+            "id": new_board_id,
+            "label": label,
+            "board_type": "static",
+            "source": "custom",
+            "dynamic_rows": tap_dynamic_rows,
+            "buttons": buttons,
+        }
+        boards.append(new_board)
+        config_data['boards'] = boards
+
+        # Update the clicked button to navigate to the new board
+        if button_obj:
+            button_obj['after_selection'] = 'navigate'
+            button_obj['target_board_id'] = new_board_id
+
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={
+            "success": True,
+            "new_board_id": new_board_id,
+            "board": new_board,
+            "board_label": label
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in bravo_build: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/regenerate-board")
+async def regenerate_board(
+    payload: RegenerateBoardRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Dynamically regenerate options on an AI board based on context.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    board_id = payload.board_id
+    context = payload.context.strip() if payload.context else ""
+
+    def _extract_options(raw: str) -> List[str]:
+        text = raw.strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(parsed, dict):
+            for key in ('options', 'items', 'labels', 'data', 'buttons', 'words', 'list'):
+                if isinstance(parsed.get(key), list):
+                    parsed = parsed[key]
+                    break
+            else:
+                for v in parsed.values():
+                    if isinstance(v, list):
+                        parsed = v
+                        break
+                else:
+                    return []
+        if not isinstance(parsed, list):
+            return []
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            if isinstance(item, str):
+                opt = item.strip()
+            elif isinstance(item, dict):
+                opt = str(item.get('option') or item.get('text') or item.get('label') or '').strip()
+            else:
+                opt = str(item).strip()
+            if opt and opt.lower() not in seen:
+                seen.add(opt.lower())
+                options.append(opt)
+        return options
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        use_hybrid_pages = settings.get("useHybridPages", False)
+        tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+        _dr = settings.get("tapDynamicRows")
+        tap_dynamic_rows = int(_dr) if _dr is not None else 1
+        static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail="Board config not found")
+        config_data, _ = normalize_compose_tap_config(config_data)
+        config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+        # Find the board in the user's config
+        board_obj = None
+        boards: List[Dict[str, Any]] = config_data.get('boards', [])
+        for b in boards:
+            if b.get('id') == board_id:
+                board_obj = b
+                break
+
+        if not board_obj:
+            raise HTTPException(status_code=404, detail=f"Board {board_id} not found")
+
+        board_label = board_obj.get('label') or "Options"
+        llm_prompt = board_obj.get('llm_prompt') or board_obj.get('prompt_category') or board_label
+
+        options_per_row = settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6
+        num_options = options_per_row * tap_words_rows
+
+        if context:
+            prompt_text = (
+                f"You are helping generate AAC (Augmentative and Alternative Communication) device buttons.\n"
+                f"The user is in the middle of building a sentence. So far, they have typed/spoken: \"{context}\".\n"
+                f"The current board category/topic is: \"{board_label}\" (Instructions: {llm_prompt}).\n"
+                f"Generate EXACTLY {num_options} unique, short button labels (words or phrases) relevant to \"{board_label}\" "
+                f"that would naturally FOLLOW or fit into the sentence context \"{context}\" in spoken conversation.\n\n"
+            )
+        else:
+            prompt_text = (
+                f"You are helping generate AAC (Augmentative and Alternative Communication) device buttons.\n"
+                f"The board category/topic is: \"{board_label}\" (Instructions: {llm_prompt}).\n"
+                f"Generate EXACTLY {num_options} unique, short button labels (words or phrases) for this topic/category "
+                f"for everyday communication.\n\n"
+            )
+            
+        gen_prompt = (
+            prompt_text +
+            f"REQUIREMENTS:\n"
+            f"1. Every option must be a practical word or short phrase for AAC users\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        generated_options = _extract_options(raw_response)
+
+        if not generated_options:
+            raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
+
+        generated_options = generated_options[:num_options]
+        ts_base = int(time.time() * 1000)
+        buttons: List[Dict[str, Any]] = []
+
+        for i, opt_label in enumerate(generated_options):
+            row = i // options_per_row
+            col = i % options_per_row
+            image_url: Optional[str] = None
+            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
+                try:
+                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
+                    docs = await asyncio.to_thread(q.get)
+                    for doc in docs:
+                        img_data = doc.to_dict()
+                        if img_data.get("image_url"):
+                            image_url = img_data["image_url"]
+                            break
+                except Exception:
+                    pass
+                if image_url:
+                    break
+
+            btn_type = "static" if row < static_rows_count else "dynamic"
+
+            buttons.append({
+                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "label": opt_label,
+                "row": row,
+                "col": col,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": "do_nothing",  # Or match original after_selection if any
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": image_url,
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+                "button_type": btn_type,
+            })
+
+        board_obj['buttons'] = buttons
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save updated config")
+
+        return JSONResponse(content={
+            "success": True,
+            "board": board_obj
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error in regenerate_board: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/generate-options")
 async def generate_options(
@@ -16349,6 +26772,86 @@ except ImportError as e:
 
 # Store parsed MTI data temporarily (in production, use Redis or database)
 migration_sessions = {}  # Format: {session_id: {parsed_data, mapper, timestamp}}
+
+try:
+    from touchchat_ce_parser import parse_touchchat_ce_upload
+    TOUCHCHAT_MIGRATION_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"TouchChat migration utilities not available: {e}")
+    TOUCHCHAT_MIGRATION_AVAILABLE = False
+
+touchchat_migration_sessions = {}  # Format: {session_id: {parsed_data, temp_dir, c4s_path, timestamp, account_id, aac_user_id}}
+
+
+def _normalize_board_label(value: Any) -> str:
+    return str(value or "").strip().lower().replace(" ", "_")
+
+
+def _touchchat_source_board_is_speech_only(source_board: Dict[str, Any]) -> bool:
+    """Return True for speech-dominant boards that should behave like temporary nav targets.
+
+    Some TouchChat Word Power sub-vocabulary pages are almost entirely speech buttons but include
+    a couple utility nav buttons (for example ABC/123).  Those still need temporary return behavior.
+    """
+    buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
+    if not buttons:
+        return False
+
+    total_buttons = 0
+    nav_buttons = 0
+    for btn in buttons:
+        if not isinstance(btn, dict):
+            continue
+        label = str(btn.get("label") or "").strip()
+        speech = str(btn.get("speech_text") or "").strip()
+        nav_target = str(btn.get("navigation_target_page_rid") or "").strip()
+
+        # Skip empty placeholders from sparse layouts.
+        if not label and not speech and not nav_target:
+            continue
+
+        total_buttons += 1
+        if nav_target:
+            nav_buttons += 1
+
+    if total_buttons == 0:
+        return False
+
+    # Strict speech-only still qualifies.
+    if nav_buttons == 0:
+        return True
+
+    # Treat as speech-dominant when only a small minority are utility nav buttons.
+    speech_buttons = total_buttons - nav_buttons
+    nav_ratio = nav_buttons / float(total_buttons)
+    if nav_buttons <= 2 and speech_buttons >= 8 and nav_ratio <= 0.20:
+        return True
+
+    board_name = str(source_board.get("name") or "").strip().lower()
+    # Word Power 60 stores this page with utility nav buttons, but it should still
+    # behave as a temporary-return target for pronoun+verb phrase construction.
+    if board_name == ".basic60 i you" and speech_buttons >= 30 and nav_ratio <= 0.35:
+        return True
+
+    return False
+
+
+def _touchchat_cleanup_old_sessions() -> None:
+    cleanup_time = dt.now(timezone.utc) - timedelta(hours=1)
+    stale_sessions = [
+        sid for sid, data in touchchat_migration_sessions.items()
+        if data.get("timestamp") and data["timestamp"] < cleanup_time
+    ]
+
+    import shutil
+
+    for sid in stale_sessions:
+        session = touchchat_migration_sessions.pop(sid, None)
+        if not session:
+            continue
+        temp_dir = session.get("temp_dir")
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def load_existing_json(json_data: Dict) -> Dict:
@@ -16522,30 +27025,37 @@ async def upload_mti_file(
             ]
             extractor_path = next((p for p in extractor_candidates if os.path.exists(p)), None)
 
-            if not extractor_path:
-                raise HTTPException(
-                    status_code=500,
-                    detail=(
-                        "Failed to parse MTI file: extractor not found. "
-                        f"Checked: {', '.join(extractor_candidates)}"
-                    )
+            parsed_data = None
+
+            if extractor_path:
+                # Match dev behavior: when extractor exists, use it directly and fail if it errors.
+                # Silent fallback can change page naming/navigation semantics.
+                module_name = "extract_mti_to_json_runtime"
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+
+                spec = importlib.util.spec_from_file_location(module_name, extractor_path)
+                if spec is None or spec.loader is None:
+                    raise HTTPException(status_code=500, detail="Failed to load MTI extractor")
+
+                extractor = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(extractor)
+
+                parsed_data = extractor.extract_mti_file(tmp_path)
+                if not parsed_data:
+                    raise HTTPException(status_code=500, detail="Failed to parse MTI file: extractor returned no data")
+            else:
+                # Compatibility fallback only when extractor file is truly absent.
+                logging.warning(
+                    "MTI extractor script not found. Checked: %s. Falling back to AccentMTIParser.",
+                    ", ".join(extractor_candidates)
                 )
+                from accent_mti_parser import AccentMTIParser
 
-            # Always load a fresh copy to ensure the latest parsing logic is used
-            module_name = "extract_mti_to_json_runtime"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-
-            spec = importlib.util.spec_from_file_location(module_name, extractor_path)
-            if spec is None or spec.loader is None:
-                raise HTTPException(status_code=500, detail="Failed to load MTI extractor")
-
-            extractor = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(extractor)
-
-            parsed_data = extractor.extract_mti_file(tmp_path)
-            if not parsed_data:
-                raise HTTPException(status_code=500, detail="Failed to parse MTI file: extractor returned no data")
+                parser = AccentMTIParser()
+                parsed_data = parser.parse_file(tmp_path)
+                if not parsed_data:
+                    raise HTTPException(status_code=500, detail="Failed to parse MTI file: parser returned no data")
 
             # Sanitize button text in parsed data
             for page_id, page_data in parsed_data.get("pages", {}).items():
@@ -17119,6 +27629,1526 @@ async def delete_migration_session(
             raise HTTPException(status_code=403, detail="Not authorized")
     
     raise HTTPException(status_code=404, detail="Session not found")
+
+
+# ===================================
+# TOUCHCHAT TO BRAVO BOARD MIGRATION
+# ===================================
+
+@app.post("/api/touchchat-migration/upload-ce")
+async def upload_touchchat_ce_file(
+    file: UploadFile = File(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    if not TOUCHCHAT_MIGRATION_AVAILABLE:
+        raise HTTPException(status_code=501, detail="TouchChat migration functionality not available")
+
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    filename = str(file.filename or "")
+    normalized_name = filename.lower()
+    if not (normalized_name.endswith(".ce") or normalized_name.endswith(".ce.zip") or normalized_name.endswith(".zip")):
+        raise HTTPException(status_code=400, detail="Please upload a TouchChat .ce export file")
+
+    try:
+        content = await file.read()
+        extracted = parse_touchchat_ce_upload(content, filename)
+
+        session_id = str(uuid.uuid4())
+        touchchat_migration_sessions[session_id] = {
+            "parsed_data": extracted.parsed_data,
+            "temp_dir": extracted.temp_dir,
+            "c4s_path": extracted.c4s_path,
+            "timestamp": dt.now(timezone.utc),
+            "account_id": account_id,
+            "aac_user_id": aac_user_id,
+        }
+
+        _touchchat_cleanup_old_sessions()
+
+        return JSONResponse(content={
+            "session_id": session_id,
+            "summary": {
+                "file": extracted.parsed_data.get("file"),
+                "total_boards": extracted.parsed_data.get("total_boards", 0),
+                "total_buttons": extracted.parsed_data.get("total_buttons", 0),
+            },
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error parsing TouchChat CE file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse TouchChat CE file: {str(e)}")
+
+
+@app.get("/api/touchchat-migration/boards/{session_id}")
+async def get_touchchat_migration_boards(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to access this TouchChat migration session")
+
+    return JSONResponse(content=session["parsed_data"])
+
+
+@app.post("/api/touchchat-migration/import-board")
+async def import_touchchat_board(
+    request_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    session_id = str(request_data.get("session_id") or "").strip()
+    source_board_id = str(request_data.get("source_board_id") or "").strip()
+    selected_indices = request_data.get("selected_button_indices") or []
+    destination_type = str(request_data.get("destination_type") or "new").strip().lower()
+    destination_board_id = str(request_data.get("destination_board_id") or "").strip()
+    destination_board_name = str(request_data.get("destination_board_name") or "").strip()
+    merge_mode = str(request_data.get("merge_mode") or "update").strip().lower()
+    nav_resolutions = request_data.get("navigation_resolutions") or {}
+    import_full_cascade = bool(request_data.get("import_full_cascade", False))
+    cascade_root_board_rename = request_data.get("cascade_root_board_rename") if isinstance(request_data.get("cascade_root_board_rename"), dict) else {}
+    cascade_root_old_name = str(cascade_root_board_rename.get("old_name") or "").strip()
+    cascade_root_new_name = str(cascade_root_board_rename.get("new_name") or "").strip()
+    cascade_child_resolutions: Dict[str, Any] = (
+        request_data.get("cascade_child_resolutions")
+        if isinstance(request_data.get("cascade_child_resolutions"), dict)
+        else {}
+    )
+    # format: { source_board_id: { "action": "use_existing", "existing_board_id": "..." }
+    #                            | { "action": "new", "board_name": "..." } }
+
+    def _normalize_touchchat_name_for_compare(value: Any) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    root_rename_enabled = bool(
+        import_full_cascade
+        and cascade_root_old_name
+        and cascade_root_new_name
+        and (_normalize_touchchat_name_for_compare(cascade_root_old_name) != _normalize_touchchat_name_for_compare(cascade_root_new_name))
+    )
+
+    if not session_id or not source_board_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != account_id or session["aac_user_id"] != aac_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this TouchChat migration session")
+
+    parsed_data = session.get("parsed_data") or {}
+    boards_from_file = parsed_data.get("boards") if isinstance(parsed_data.get("boards"), dict) else {}
+    source_board = boards_from_file.get(source_board_id)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Source board not found in parsed TouchChat data")
+
+    sorted_buttons = source_board.get("buttons") if isinstance(source_board.get("buttons"), list) else []
+    selected_buttons = [
+        sorted_buttons[int(i)]
+        for i in selected_indices
+        if isinstance(i, int) and 0 <= int(i) < len(sorted_buttons)
+    ]
+    if import_full_cascade:
+        selected_buttons = sorted_buttons
+    if not selected_buttons:
+        raise HTTPException(status_code=400, detail="No valid buttons selected for import")
+
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    use_hybrid_pages = settings.get("useHybridPages", False)
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+    config_data, _ = normalize_compose_tap_config(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+    boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
+    existing_by_id = {
+        str(board.get("id") or "").strip(): board
+        for board in boards
+        if isinstance(board, dict) and str(board.get("id") or "").strip()
+    }
+    existing_by_label = {
+        _normalize_board_label(board.get("label")): str(board.get("id") or "").strip()
+        for board in boards
+        if isinstance(board, dict)
+    }
+
+    if destination_type not in {"new", "existing"}:
+        raise HTTPException(status_code=400, detail="destination_type must be 'new' or 'existing'")
+    if merge_mode not in {"replace", "update"}:
+        raise HTTPException(status_code=400, detail="merge_mode must be 'replace' or 'update'")
+
+    target_board: Optional[Dict[str, Any]] = None
+    target_board_id: Optional[str] = None
+    created_board = False
+
+    if destination_type == "existing":
+        if not destination_board_id:
+            raise HTTPException(status_code=400, detail="destination_board_id is required for existing board import")
+        target_board = existing_by_id.get(destination_board_id)
+        if not target_board:
+            raise HTTPException(status_code=404, detail="Destination board not found")
+        if str(target_board.get("source") or "") == "legacy_category" or str(target_board.get("board_type") or "") == "system":
+            raise HTTPException(status_code=403, detail="Cannot import into legacy/system read-only boards")
+        target_board_id = destination_board_id
+    else:
+        if not destination_board_name:
+            raise HTTPException(status_code=400, detail="destination_board_name is required for new board import")
+
+        base_slug = _sanitize_board_slug(destination_board_name)
+        candidate_id = f"board_{base_slug}"
+        suffix = 2
+        while candidate_id in existing_by_id:
+            candidate_id = f"board_{base_slug}_{suffix}"
+            suffix += 1
+
+        target_board_id = candidate_id
+        target_board = _normalize_board_payload(
+            {
+                "label": destination_board_name,
+                "board_type": "static",
+                "owner_scope": "user",
+                "hidden": False,
+                "default_columns": int(source_board.get("layout_cols") or 12),
+                "max_rows": max(7, int(source_board.get("layout_rows") or 7)),
+                "buttons": [],
+                "created_during_migration": True,
+            },
+            board_id=target_board_id,
+            source="custom",
+            source_button_id=None,
+        )
+        boards.append(target_board)
+        existing_by_id[target_board_id] = target_board
+        existing_by_label[_normalize_board_label(destination_board_name)] = target_board_id
+        created_board = True
+
+    source_page_rid = str(source_board.get("page_rid") or "").strip()
+    source_page_name = str(source_board.get("name") or "").strip()
+    missing_nav_targets: List[Dict[str, Any]] = []
+    resolved_nav_map: Dict[str, str] = {}
+    created_nav_boards: List[Dict[str, str]] = []
+
+    if import_full_cascade:
+        source_boards_by_page_id = {
+            str(board.get("page_id") or "").strip(): board
+            for board in boards_from_file.values()
+            if isinstance(board, dict) and str(board.get("page_id") or "").strip()
+        }
+        source_boards_by_rid = {
+            str(board.get("page_rid") or "").strip(): board
+            for board in boards_from_file.values()
+            if isinstance(board, dict) and str(board.get("page_rid") or "").strip()
+        }
+
+        def ensure_target_board_for_source(src_board: Dict[str, Any]) -> str:
+            src_page_id = str(src_board.get("page_id") or "").strip()
+
+            # Check for an explicit admin resolution first (from pre-flight conflict dialog)
+            if src_page_id and src_page_id in cascade_child_resolutions:
+                res = cascade_child_resolutions[src_page_id]
+                if isinstance(res, dict):
+                    if res.get("action") == "use_existing":
+                        resolved_existing_id = str(res.get("existing_board_id") or "").strip()
+                        if resolved_existing_id and resolved_existing_id in existing_by_id:
+                            return resolved_existing_id
+                    elif res.get("action") == "new":
+                        custom_name = str(res.get("board_name") or "").strip()
+                        if custom_name:
+                            custom_key = _normalize_board_label(custom_name)
+                            existing_for_custom = existing_by_label.get(custom_key)
+                            if existing_for_custom:
+                                return existing_for_custom
+                            # Create under custom name
+                            custom_slug = _sanitize_board_slug(custom_name)
+                            custom_cid = f"board_{custom_slug}"
+                            custom_suffix = 2
+                            while custom_cid in existing_by_id:
+                                custom_cid = f"board_{custom_slug}_{custom_suffix}"
+                                custom_suffix += 1
+                            new_board = _normalize_board_payload(
+                                {
+                                    "label": custom_name,
+                                    "board_type": "static",
+                                    "owner_scope": "user",
+                                    "hidden": False,
+                                    "default_columns": int(src_board.get("layout_cols") or 12),
+                                    "max_rows": max(7, int(src_board.get("layout_rows") or 7)),
+                                    "buttons": [],
+                                    "created_during_migration": True,
+                                },
+                                board_id=custom_cid,
+                                source="custom",
+                                source_button_id=None,
+                            )
+                            boards.append(new_board)
+                            existing_by_id[custom_cid] = new_board
+                            existing_by_label[custom_key] = custom_cid
+                            created_nav_boards.append({"id": custom_cid, "label": custom_name})
+                            return custom_cid
+
+            src_name = str(src_board.get("name") or src_board.get("page_id") or "Imported Board").strip() or "Imported Board"
+            src_key = _normalize_board_label(src_name)
+            existing_id = existing_by_label.get(src_key)
+            if existing_id:
+                return existing_id
+
+            src_slug = _sanitize_board_slug(src_name)
+            candidate_id = f"board_{src_slug}"
+            suffix = 2
+            while candidate_id in existing_by_id:
+                candidate_id = f"board_{src_slug}_{suffix}"
+                suffix += 1
+
+            new_board = _normalize_board_payload(
+                {
+                    "label": src_name,
+                    "board_type": "static",
+                    "owner_scope": "user",
+                    "hidden": False,
+                    "default_columns": int(src_board.get("layout_cols") or 12),
+                    "max_rows": max(7, int(src_board.get("layout_rows") or 7)),
+                    "buttons": [],
+                    "created_during_migration": True,
+                },
+                board_id=candidate_id,
+                source="custom",
+                source_button_id=None,
+            )
+            boards.append(new_board)
+            existing_by_id[candidate_id] = new_board
+            existing_by_label[src_key] = candidate_id
+            created_nav_boards.append({"id": candidate_id, "label": src_name})
+            return candidate_id
+
+        source_to_target_board_id: Dict[str, str] = {source_board_id: target_board_id}
+        queue: List[str] = [source_board_id]
+        processed: Set[str] = set()
+        total_imported_buttons = 0
+        imported_board_summaries: List[Dict[str, Any]] = []
+
+        while queue:
+            current_source_id = queue.pop(0)
+            if current_source_id in processed:
+                continue
+
+            current_source_board = source_boards_by_page_id.get(current_source_id)
+            if not current_source_board:
+                processed.add(current_source_id)
+                continue
+
+            current_target_id = source_to_target_board_id.get(current_source_id)
+            if not current_target_id:
+                current_target_id = ensure_target_board_for_source(current_source_board)
+                source_to_target_board_id[current_source_id] = current_target_id
+
+            current_target_board = existing_by_id.get(current_target_id)
+            if not current_target_board:
+                processed.add(current_source_id)
+                continue
+
+            current_buttons = current_source_board.get("buttons") if isinstance(current_source_board.get("buttons"), list) else []
+            current_source_rid = str(current_source_board.get("page_rid") or "").strip()
+            resolved_nav_map: Dict[str, str] = {}
+
+            for button in current_buttons:
+                target_rid = str(button.get("navigation_target_page_rid") or "").strip()
+                if not target_rid:
+                    continue
+                if target_rid == current_source_rid:
+                    resolved_nav_map[target_rid] = current_target_id
+                    continue
+
+                linked_source_board = source_boards_by_rid.get(target_rid)
+                if linked_source_board:
+                    linked_source_id = str(linked_source_board.get("page_id") or "").strip()
+                    if linked_source_id:
+                        linked_target_id = source_to_target_board_id.get(linked_source_id)
+                        if not linked_target_id:
+                            linked_target_id = ensure_target_board_for_source(linked_source_board)
+                            source_to_target_board_id[linked_source_id] = linked_target_id
+                        resolved_nav_map[target_rid] = linked_target_id
+                        if linked_source_id not in processed:
+                            queue.append(linked_source_id)
+                        continue
+
+                target_name = str(button.get("navigation_target_page_name") or "").strip() or target_rid
+                existing_match = existing_by_label.get(_normalize_board_label(target_name))
+                if existing_match:
+                    resolved_nav_map[target_rid] = existing_match
+                    continue
+
+                fallback_id = ensure_target_board_for_source({
+                    "name": target_name,
+                    "layout_cols": 12,
+                    "layout_rows": 7,
+                })
+                resolved_nav_map[target_rid] = fallback_id
+
+            existing_buttons = current_target_board.get("buttons") if isinstance(current_target_board.get("buttons"), list) else []
+            existing_buttons_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+            for existing_btn in existing_buttons:
+                if not isinstance(existing_btn, dict):
+                    continue
+                existing_buttons_by_position[(int(existing_btn.get("row", 0) or 0), int(existing_btn.get("col", 0) or 0))] = existing_btn
+
+            imported_buttons: List[Dict[str, Any]] = []
+            for idx, src_btn in enumerate(current_buttons):
+                label = str(src_btn.get("label") or "").strip()
+                row = int(src_btn.get("row") or 0)
+                col = int(src_btn.get("col") or 0)
+                existing_target_btn = existing_buttons_by_position.get((row, col))
+                image_url = None
+
+                nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
+                target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
+                temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+                if not temporary_navigation and nav_target_rid:
+                    _nav_src_board = source_boards_by_rid.get(nav_target_rid)
+                    if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
+                        temporary_navigation = True
+                speech_text = str(src_btn.get("speech_text") or "").strip() or None
+
+                # If the admin chose a different destination name for the root board during full
+                # cascade import, rewrite matching text on buttons that navigate to that root board.
+                if root_rename_enabled and target_nav_board_id and target_nav_board_id == target_board_id:
+                    if _normalize_touchchat_name_for_compare(label) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                        label = cascade_root_new_name
+                    if speech_text and _normalize_touchchat_name_for_compare(speech_text) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                        speech_text = cascade_root_new_name
+
+                modifier_trigger_id = src_btn.get("modifier_trigger_id")
+
+                raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
+                converted_modifier_variants: Dict[str, Dict[str, Any]] = {}
+                for modifier_id, raw_variant in raw_modifier_variants.items():
+                    if not isinstance(raw_variant, dict):
+                        continue
+                    variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
+                    variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+                    variant_label = str(raw_variant.get("label") or "").strip()
+                    variant_speech_text = str(raw_variant.get("speech_text") or "").strip() or None
+
+                    if root_rename_enabled and variant_target_board_id and variant_target_board_id == target_board_id:
+                        if _normalize_touchchat_name_for_compare(variant_label) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                            variant_label = cascade_root_new_name
+                        if variant_speech_text and _normalize_touchchat_name_for_compare(variant_speech_text) == _normalize_touchchat_name_for_compare(cascade_root_old_name):
+                            variant_speech_text = cascade_root_new_name
+
+                    converted_modifier_variants[str(modifier_id)] = {
+                        "label": variant_label,
+                        "speech_text": variant_speech_text,
+                        "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
+                        "action_type": "navigate" if variant_target_board_id else "announce",
+                        "after_selection": "navigate" if variant_target_board_id else "do_nothing",
+                        "target_board_id": variant_target_board_id,
+                        "temporary_navigation": (bool(raw_variant.get("temporary_navigation", False)) if variant_target_board_id else False),
+                        "background_color": raw_variant.get("background_color") or (existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"),
+                        "text_color": raw_variant.get("text_color") or src_btn.get("text_color") or "#000000",
+                    }
+
+                imported_buttons.append({
+                    "id": f"btn_{row}_{col}_{int(time.time() * 1000)}_{idx}",
+                    "label": label,
+                    "row": row,
+                    "col": col,
+                    "speech_text": speech_text,
+                    "modifier_trigger_id": modifier_trigger_id,
+                    "modifier_variants": converted_modifier_variants,
+                    "action_type": "navigate" if target_nav_board_id else "announce",
+                    "after_selection": "navigate" if target_nav_board_id else "do_nothing",
+                    "target_board_id": target_nav_board_id,
+                    "temporary_navigation": (temporary_navigation if target_nav_board_id else False),
+                    "custom_audio_file": None,
+                    "special_function": None,
+                    "image_url": image_url,
+                    "background_color": (
+                        existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"
+                    ),
+                    "text_color": src_btn.get("text_color") or "#000000",
+                    "hidden": False,
+                })
+
+            board_merge_mode = merge_mode if current_source_id == source_board_id else "update"
+            if board_merge_mode == "replace":
+                current_target_board["buttons"] = imported_buttons
+            else:
+                merged_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+                for btn in existing_buttons:
+                    if not isinstance(btn, dict):
+                        continue
+                    merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+                for btn in imported_buttons:
+                    merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+                current_target_board["buttons"] = sorted(
+                    list(merged_by_position.values()),
+                    key=lambda b: (int(b.get("row", 0) or 0), int(b.get("col", 0) or 0), str(b.get("id") or "")),
+                )
+
+            current_target_board["board_type"] = "static"
+            current_target_board["label"] = str(current_target_board.get("label") or current_source_board.get("name") or "Imported Board")
+            current_target_board["created_during_migration"] = len(current_target_board.get("buttons") or []) == 0
+
+            total_imported_buttons += len(imported_buttons)
+            imported_board_summaries.append({
+                "source_board_name": str(current_source_board.get("name") or current_source_id),
+                "target_board_label": str(current_target_board.get("label") or current_target_id),
+                "buttons_imported": len(imported_buttons),
+            })
+            processed.add(current_source_id)
+
+        config_data["boards"] = boards
+        config_data["updated_at"] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save TouchChat migration import")
+
+        unconfigured_created_nav_boards = [
+            b for b in created_nav_boards
+            if str(b.get("id") or "") in existing_by_id
+            and len(existing_by_id[str(b.get("id") or "")].get("buttons") or []) == 0
+        ]
+
+        return JSONResponse(content={
+            "success": True,
+            "created_board": created_board,
+            "target_board_id": target_board_id,
+            "target_board_label": target_board.get("label"),
+            "buttons_imported": total_imported_buttons,
+            "imported_boards": imported_board_summaries,
+            "created_navigation_boards": unconfigured_created_nav_boards,
+            "import_mode": "full_cascade",
+        })
+
+    for button in selected_buttons:
+        target_rid = str(button.get("navigation_target_page_rid") or "").strip()
+        if not target_rid:
+            continue
+        if target_rid == source_page_rid:
+            resolved_nav_map[target_rid] = target_board_id
+            continue
+
+        target_name = str(button.get("navigation_target_page_name") or "").strip() or target_rid
+        existing_match = existing_by_label.get(_normalize_board_label(target_name))
+        if existing_match:
+            resolved_nav_map[target_rid] = existing_match
+            continue
+
+        resolution = nav_resolutions.get(target_rid) if isinstance(nav_resolutions, dict) else None
+        action = str((resolution or {}).get("action") or "").strip().lower() if isinstance(resolution, dict) else ""
+
+        if action == "existing":
+            selected_existing_id = str((resolution or {}).get("board_id") or "").strip()
+            if selected_existing_id and selected_existing_id in existing_by_id:
+                resolved_nav_map[target_rid] = selected_existing_id
+                continue
+        elif action == "create":
+            requested_name = str((resolution or {}).get("board_name") or target_name).strip() or target_name
+            requested_key = _normalize_board_label(requested_name)
+            existing_id_for_name = existing_by_label.get(requested_key)
+            if existing_id_for_name:
+                resolved_nav_map[target_rid] = existing_id_for_name
+                continue
+
+            nav_slug = _sanitize_board_slug(requested_name)
+            nav_candidate_id = f"board_{nav_slug}"
+            nav_suffix = 2
+            while nav_candidate_id in existing_by_id:
+                nav_candidate_id = f"board_{nav_slug}_{nav_suffix}"
+                nav_suffix += 1
+
+            nav_board = _normalize_board_payload(
+                {
+                    "label": requested_name,
+                    "board_type": "static",
+                    "owner_scope": "user",
+                    "hidden": False,
+                    "default_columns": 12,
+                    "max_rows": 7,
+                    "buttons": [],
+                    "created_during_migration": True,
+                },
+                board_id=nav_candidate_id,
+                source="custom",
+                source_button_id=None,
+            )
+            boards.append(nav_board)
+            existing_by_id[nav_candidate_id] = nav_board
+            existing_by_label[requested_key] = nav_candidate_id
+            resolved_nav_map[target_rid] = nav_candidate_id
+            created_nav_boards.append({"id": nav_candidate_id, "label": requested_name})
+            continue
+
+        missing_nav_targets.append({
+            "target_page_rid": target_rid,
+            "target_page_name": target_name,
+            "button_label": str(button.get("label") or ""),
+            "source_board_name": source_page_name,
+        })
+
+    if missing_nav_targets:
+        return JSONResponse(content={
+            "requires_confirmation": True,
+            "missing_navigation_targets": missing_nav_targets,
+            "available_destination_boards": [
+                {"id": b_id, "label": (existing_by_id[b_id].get("label") or b_id)}
+                for b_id in sorted(existing_by_id.keys())
+            ],
+        })
+
+    existing_buttons = target_board.get("buttons") if isinstance(target_board.get("buttons"), list) else []
+    existing_buttons_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for existing_btn in existing_buttons:
+        if not isinstance(existing_btn, dict):
+            continue
+        existing_buttons_by_position[(int(existing_btn.get("row", 0) or 0), int(existing_btn.get("col", 0) or 0))] = existing_btn
+
+    _noncascade_boards_by_rid = {
+        str(b.get("page_rid") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_rid") or "").strip()
+    }
+
+    imported_buttons: List[Dict[str, Any]] = []
+    for idx, src_btn in enumerate(selected_buttons):
+        label = str(src_btn.get("label") or "").strip()
+        row = int(src_btn.get("row") or 0)
+        col = int(src_btn.get("col") or 0)
+        existing_target_btn = existing_buttons_by_position.get((row, col))
+        image_url = None
+
+        nav_target_rid = str(src_btn.get("navigation_target_page_rid") or "").strip()
+        target_nav_board_id = resolved_nav_map.get(nav_target_rid) if nav_target_rid else None
+        temporary_navigation = bool(src_btn.get("temporary_navigation", False))
+        if not temporary_navigation and nav_target_rid:
+            _nav_src_board = _noncascade_boards_by_rid.get(nav_target_rid)
+            if _nav_src_board and _touchchat_source_board_is_speech_only(_nav_src_board):
+                temporary_navigation = True
+        speech_text = str(src_btn.get("speech_text") or "").strip() or None
+        modifier_trigger_id = src_btn.get("modifier_trigger_id")
+
+        raw_modifier_variants = src_btn.get("modifier_variants") if isinstance(src_btn.get("modifier_variants"), dict) else {}
+        converted_modifier_variants: Dict[str, Dict[str, Any]] = {}
+        for modifier_id, raw_variant in raw_modifier_variants.items():
+            if not isinstance(raw_variant, dict):
+                continue
+            variant_nav_rid = str(raw_variant.get("navigation_target_page_rid") or "").strip()
+            variant_target_board_id = resolved_nav_map.get(variant_nav_rid) if variant_nav_rid else None
+            converted_modifier_variants[str(modifier_id)] = {
+                "label": str(raw_variant.get("label") or "").strip(),
+                "speech_text": str(raw_variant.get("speech_text") or "").strip() or None,
+                "modifier_trigger_id": raw_variant.get("modifier_trigger_id"),
+                "action_type": "navigate" if variant_target_board_id else "announce",
+                "after_selection": "navigate" if variant_target_board_id else "do_nothing",
+                "target_board_id": variant_target_board_id,
+                "temporary_navigation": (bool(raw_variant.get("temporary_navigation", False)) if variant_target_board_id else False),
+                "background_color": raw_variant.get("background_color") or (existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"),
+                "text_color": raw_variant.get("text_color") or src_btn.get("text_color") or "#000000",
+            }
+
+        imported_buttons.append({
+            "id": f"btn_{row}_{col}_{int(time.time() * 1000)}_{idx}",
+            "label": label,
+            "row": row,
+            "col": col,
+            "speech_text": speech_text,
+            "modifier_trigger_id": modifier_trigger_id,
+            "modifier_variants": converted_modifier_variants,
+            "action_type": "navigate" if target_nav_board_id else "announce",
+            "after_selection": "navigate" if target_nav_board_id else "do_nothing",
+            "target_board_id": target_nav_board_id,
+            "temporary_navigation": (temporary_navigation if target_nav_board_id else False),
+            "custom_audio_file": None,
+            "special_function": None,
+            "image_url": image_url,
+            "background_color": (
+                existing_target_btn.get("background_color") if isinstance(existing_target_btn, dict) else "#FFFFFF"
+            ),
+            "text_color": src_btn.get("text_color") or "#000000",
+            "hidden": False,
+        })
+
+    if merge_mode == "replace":
+        target_board["buttons"] = imported_buttons
+    else:
+        merged_by_position: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        for btn in existing_buttons:
+            if not isinstance(btn, dict):
+                continue
+            merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+        for btn in imported_buttons:
+            merged_by_position[(int(btn.get("row", 0) or 0), int(btn.get("col", 0) or 0))] = btn
+        target_board["buttons"] = sorted(
+            list(merged_by_position.values()),
+            key=lambda b: (int(b.get("row", 0) or 0), int(b.get("col", 0) or 0), str(b.get("id") or "")),
+        )
+
+    target_board["board_type"] = "static"
+    target_board["label"] = str(target_board.get("label") or destination_board_name or "Imported Board")
+    config_data["boards"] = boards
+    config_data["updated_at"] = dt.now().isoformat()
+
+    success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save TouchChat migration import")
+
+    logging.info(
+        "TouchChat import complete: board=%s buttons=%d",
+        str(target_board.get("label") or target_board_id or ""),
+        len(imported_buttons),
+    )
+
+    unconfigured_created_nav_boards = [
+        b for b in created_nav_boards
+        if str(b.get("id") or "") in existing_by_id
+        and len(existing_by_id[str(b.get("id") or "")].get("buttons") or []) == 0
+    ]
+
+    return JSONResponse(content={
+        "success": True,
+        "created_board": created_board,
+        "target_board_id": target_board_id,
+        "target_board_label": target_board.get("label"),
+        "buttons_imported": len(imported_buttons),
+        "created_navigation_boards": unconfigured_created_nav_boards,
+    })
+
+
+@app.post("/api/touchchat-migration/check-cascade-conflicts")
+async def check_touchchat_cascade_conflicts(
+    request_data: Dict = Body(...),
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    """Pre-flight check: return child boards in the cascade that already exist in the
+    user's Tap config, so the frontend can prompt the admin to resolve each conflict
+    before the actual import is executed."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    session_id = str(request_data.get("session_id") or "").strip()
+    source_board_id = str(request_data.get("source_board_id") or "").strip()
+
+    if not session_id or not source_board_id:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+    if session_id not in touchchat_migration_sessions:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found or expired")
+
+    session = touchchat_migration_sessions[session_id]
+    if session["account_id"] != account_id or session["aac_user_id"] != aac_user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    parsed_data = session.get("parsed_data") or {}
+    boards_from_file = parsed_data.get("boards") if isinstance(parsed_data.get("boards"), dict) else {}
+    source_board = boards_from_file.get(source_board_id)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Source board not found")
+
+    # Build lookups keyed by page_id and page_rid for traversal
+    src_by_page_id: Dict[str, Any] = {
+        str(b.get("page_id") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_id") or "").strip()
+    }
+    src_by_page_rid: Dict[str, Any] = {
+        str(b.get("page_rid") or "").strip(): b
+        for b in boards_from_file.values()
+        if isinstance(b, dict) and str(b.get("page_rid") or "").strip()
+    }
+
+    # Load the user's existing Tap boards to detect name collisions
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    use_hybrid_pages = settings.get("useHybridPages", False)
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        config_data = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=use_hybrid_pages)
+    config_data, _ = normalize_compose_tap_config(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+    tap_boards = config_data.get("boards") if isinstance(config_data.get("boards"), list) else []
+    tap_by_label: Dict[str, Dict[str, Any]] = {
+        _normalize_board_label(b.get("label")): b
+        for b in tap_boards
+        if isinstance(b, dict)
+    }
+
+    # BFS through the cascade; skip the root (already handled by the root conflict dialog)
+    visited: Set[str] = {source_board_id}
+    queue_ids: List[str] = [source_board_id]
+    conflicts: List[Dict[str, Any]] = []
+    seen_conflict_names: Set[str] = set()
+
+    while queue_ids:
+        current_id = queue_ids.pop(0)
+        current_src = src_by_page_id.get(current_id)
+        if not current_src:
+            continue
+        for btn in (current_src.get("buttons") or []):
+            if not isinstance(btn, dict):
+                continue
+            target_rid = str(btn.get("navigation_target_page_rid") or "").strip()
+            if not target_rid:
+                continue
+            linked = src_by_page_rid.get(target_rid)
+            if not linked:
+                continue
+            linked_id = str(linked.get("page_id") or "").strip()
+            if not linked_id or linked_id in visited:
+                continue
+            visited.add(linked_id)
+            queue_ids.append(linked_id)
+
+            # Skip root board — already handled separately
+            if linked_id == source_board_id:
+                continue
+
+            child_name = str(linked.get("name") or linked.get("page_id") or "").strip()
+            child_key = _normalize_board_label(child_name)
+            if not child_name or child_key in seen_conflict_names:
+                continue
+            existing_tap_board = tap_by_label.get(child_key)
+            if existing_tap_board:
+                seen_conflict_names.add(child_key)
+                conflicts.append({
+                    "source_board_id": linked_id,
+                    "source_board_name": child_name,
+                    "existing_board_id": str(existing_tap_board.get("id") or ""),
+                    "existing_board_label": str(existing_tap_board.get("label") or child_name),
+                })
+
+    return JSONResponse(content={"conflicts": conflicts})
+
+
+@app.delete("/api/touchchat-migration/session/{session_id}")
+async def delete_touchchat_migration_session(
+    session_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)] = None,
+):
+    session = touchchat_migration_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="TouchChat migration session not found")
+
+    if session["account_id"] != current_ids["account_id"] or session["aac_user_id"] != current_ids["aac_user_id"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    import shutil
+
+    touchchat_migration_sessions.pop(session_id, None)
+    temp_dir = session.get("temp_dir")
+    if temp_dir:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return JSONResponse(content={"success": True})
+
+
+# --- Guess Games Endpoints (Who/Where/What) ---
+
+DEFAULT_GUESS_WHO_CATEGORIES = [
+    "Movie Character",
+    "TV Character",
+    "Fictional Character",
+    "Sports Figure",
+    "Musician",
+    "Superhero",
+    "Historical Figure"
+]
+
+DEFAULT_GUESS_WHERE_CATEGORIES = [
+    "Cities",
+    "States",
+    "Countries",
+    "Vacation Spots",
+    "Stores",
+    "Restaurants",
+    "Landmarks",
+    "National Parks"
+]
+
+DEFAULT_GUESS_WHAT_CATEGORIES = [
+    "Food",
+    "Animals",
+    "Electronics",
+    "Toys",
+    "Sports Equipment",
+    "Movies",
+    "TV Shows",
+    "Things you wear"
+]
+
+@app.post("/api/guess-who/categories")
+async def get_guess_who_categories(
+    request: GuessWhoCategoriesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get default Guess Who categories + user-customized categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user's custom categories from profile
+        custom_categories = []
+        try:
+            user_doc = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+                account_id
+            ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id).get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                custom_categories = user_data.get("guess_who_categories", [])
+        except Exception as e:
+            logging.warning(f"Could not load custom categories for {aac_user_id}: {e}")
+        
+        # Use custom categories if available, otherwise use defaults
+        # Custom categories completely replace defaults (not added to them)
+        if custom_categories and len(custom_categories) > 0:
+            all_categories = custom_categories
+        else:
+            all_categories = DEFAULT_GUESS_WHO_CATEGORIES.copy()
+        
+        return JSONResponse(content={
+            "default_categories": DEFAULT_GUESS_WHO_CATEGORIES,
+            "custom_categories": custom_categories,
+            "all_categories": all_categories
+        })
+        
+    except Exception as e:
+        logging.error(f"Error getting Guess Who categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
+
+
+@app.post("/api/guess-who/custom-categories")
+async def save_custom_guess_who_categories(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save custom Guess Who categories to user profile"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        body = await request.json()
+        categories = body.get("categories", [])
+        
+        if not isinstance(categories, list):
+            raise HTTPException(status_code=400, detail="Categories must be a list")
+        
+        if len(categories) == 0:
+            raise HTTPException(status_code=400, detail="At least one category is required")
+        
+        # Validate categories
+        for cat in categories:
+            if not isinstance(cat, str) or len(cat.strip()) == 0:
+                raise HTTPException(status_code=400, detail="All categories must be non-empty strings")
+        
+        # Save to user profile
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({
+            "guess_who_categories": categories
+        })
+        
+        logging.info(f"Saved {len(categories)} custom Guess Who categories for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "categories": categories,
+            "count": len(categories)
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error saving custom Guess Who categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save categories: {str(e)}")
+
+
+@app.delete("/api/guess-who/custom-categories")
+async def delete_custom_guess_who_categories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Delete custom Guess Who categories (reset to defaults)"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Remove custom categories from user profile
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({
+            "guess_who_categories": firestore.DELETE_FIELD
+        })
+        
+        logging.info(f"Deleted custom Guess Who categories for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Custom categories deleted, using defaults"
+        })
+        
+    except Exception as e:
+        logging.error(f"Error deleting custom Guess Who categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete categories: {str(e)}")
+
+
+@app.post("/api/guess-who/generate-people")
+async def generate_guess_who_people(
+    request: GuessWhoGeneratePeopleRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate people/characters for Guess Who game using LLM"""
+    return await _generate_items(request, current_ids, item_type="person", item_type_plural="people")
+
+
+@app.post("/api/guess-who/generate-clues")
+async def generate_guess_who_clues(
+    request: GuessWhoGenerateCluesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate clues about the selected person for Player 1 to use"""
+    return await _generate_clues(request, current_ids, item_type="person")
+
+
+@app.post("/api/guess-who/generate-guesses")
+async def generate_guess_who_guesses(
+    request: GuessWhoGenerateGuessesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate guess options for Mode B based on the clues given by Player 2"""
+    return await _generate_guesses(request, current_ids, item_type="person", item_type_plural="people")
+
+
+# --- Guess Where Game Endpoints (Places) ---
+
+@app.post("/api/guess-where/categories")
+async def get_guess_where_categories(
+    request: GuessWhoCategoriesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get Guess Where categories for places"""
+    return await _get_categories(current_ids, DEFAULT_GUESS_WHERE_CATEGORIES, "guess_where_categories")
+
+@app.post("/api/guess-where/custom-categories")
+async def save_custom_guess_where_categories(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save custom Guess Where categories"""
+    return await _save_custom_categories(request, current_ids, "guess_where_categories")
+
+@app.delete("/api/guess-where/custom-categories")
+async def delete_custom_guess_where_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Delete custom Guess Where categories"""
+    return await _delete_custom_categories(current_ids, "guess_where_categories")
+
+@app.post("/api/guess-where/generate-people")
+async def generate_guess_where_places(request: GuessWhoGeneratePeopleRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate places for Guess Where game"""
+    return await _generate_items(request, current_ids, item_type="place", item_type_plural="places")
+
+@app.post("/api/guess-where/generate-clues")
+async def generate_guess_where_clues(request: GuessWhoGenerateCluesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate clues for Guess Where game"""
+    return await _generate_clues(request, current_ids, item_type="place")
+
+@app.post("/api/guess-where/generate-guesses")
+async def generate_guess_where_guesses(request: GuessWhoGenerateGuessesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate guesses for Guess Where game"""
+    return await _generate_guesses(request, current_ids, item_type="place", item_type_plural="places")
+
+
+# --- Guess What Game Endpoints (Things) ---
+
+@app.post("/api/guess-what/categories")
+async def get_guess_what_categories(
+    request: GuessWhoCategoriesRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get Guess What categories for things"""
+    return await _get_categories(current_ids, DEFAULT_GUESS_WHAT_CATEGORIES, "guess_what_categories")
+
+@app.post("/api/guess-what/custom-categories")
+async def save_custom_guess_what_categories(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save custom Guess What categories"""
+    return await _save_custom_categories(request, current_ids, "guess_what_categories")
+
+@app.delete("/api/guess-what/custom-categories")
+async def delete_custom_guess_what_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Delete custom Guess What categories"""
+    return await _delete_custom_categories(current_ids, "guess_what_categories")
+
+@app.post("/api/guess-what/generate-people")
+async def generate_guess_what_things(request: GuessWhoGeneratePeopleRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate things for Guess What game"""
+    return await _generate_items(request, current_ids, item_type="thing", item_type_plural="things")
+
+@app.post("/api/guess-what/generate-clues")
+async def generate_guess_what_clues(request: GuessWhoGenerateCluesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate clues for Guess What game"""
+    return await _generate_clues(request, current_ids, item_type="thing")
+
+@app.post("/api/guess-what/generate-guesses")
+async def generate_guess_what_guesses(request: GuessWhoGenerateGuessesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate guesses for Guess What game"""
+    return await _generate_guesses(request, current_ids, item_type="thing", item_type_plural="things")
+
+
+# --- Hangman Game Endpoints ---
+
+DEFAULT_HANGMAN_CATEGORIES = [
+    "Animals",
+    "Food",
+    "Sports",
+    "Movies",
+    "TV Shows",
+    "Colors",
+    "Countries",
+    "Fruits",
+    "Body Parts",
+    "Clothing",
+    "School Subjects",
+    "Musical Instruments",
+    "Vehicles",
+    "Holidays",
+    "Weather"
+]
+
+@app.post("/api/hangman/categories")
+async def get_hangman_categories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get Hangman categories"""
+    return await _get_categories(current_ids, DEFAULT_HANGMAN_CATEGORIES, "hangman_categories")
+
+@app.post("/api/hangman/custom-categories")
+async def save_custom_hangman_categories(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Save custom Hangman categories"""
+    return await _save_custom_categories(request, current_ids, "hangman_categories")
+
+@app.delete("/api/hangman/custom-categories")
+async def delete_custom_hangman_categories(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Delete custom Hangman categories (reset to defaults)"""
+    return await _delete_custom_categories(current_ids, "hangman_categories")
+
+class HangmanGenerateWordsRequest(BaseModel):
+    category: str = Field(..., description="Category name (e.g., 'Animals', 'Sports', 'Movies')")
+    previous_words: Optional[List[str]] = Field(default_factory=list, description="Previously used words to exclude")
+
+@app.post("/api/hangman/generate-words")
+async def generate_hangman_words(request: HangmanGenerateWordsRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate word options for Hangman game"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        llm_options = settings.get("LLMOptions", 10)
+
+        exclusion_instruction = ""
+        if request.previous_words and len(request.previous_words) > 0:
+            excluded_list = ", ".join(f'"{w}"' for w in request.previous_words)
+            exclusion_instruction = f"\n\nDo NOT include any of these previously used words: {excluded_list}. Generate completely different words."
+
+        llm_query = f"""You are helping someone play Hangman. Generate exactly {llm_options} words from the "{request.category}" category that are good for a Hangman game.
+
+Requirements:
+1. Each word should be a single word or a short well-known phrase (1-3 words max)
+2. Words should be well-known and recognizable
+3. Prefer words between 4 and 10 letters for single words
+4. Make them diverse within the category
+5. Avoid very obscure or difficult-to-spell words
+6. Words should be fun and engaging for a guessing game{exclusion_instruction}
+
+Return your response as a JSON array of strings.
+
+Example format for "Animals" category:
+["elephant", "dolphin", "penguin", "giraffe", "octopus"]
+
+Generate {llm_options} Hangman words for the "{request.category}" category now:"""
+
+        response_text = await _generate_gemini_content_with_fallback(llm_query, None, account_id, aac_user_id)
+
+        words = []
+        try:
+            json_text = response_text.strip()
+            if json_text.startswith('```json'):
+                lines = json_text.split('\n')
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if line.strip() == '```json':
+                        in_json = True
+                        continue
+                    elif line.strip() == '```' and in_json:
+                        break
+                    elif in_json:
+                        json_lines.append(line)
+                json_text = '\n'.join(json_lines)
+
+            parsed = json.loads(json_text)
+            if isinstance(parsed, list):
+                words = [w.strip() for w in parsed if isinstance(w, str) and w.strip()]
+            elif isinstance(parsed, dict) and 'words' in parsed:
+                words = [w.strip() for w in parsed['words'] if isinstance(w, str) and w.strip()]
+        except (json.JSONDecodeError, TypeError):
+            for line in response_text.strip().split('\n'):
+                line = line.strip().strip('-•*"\'').strip()
+                line = re.sub(r'^\d+\.?\s*', '', line).strip()
+                if line and len(line) < 40:
+                    words.append(line)
+
+        if not words:
+            fallback_words = {
+                "Animals": ["elephant", "dolphin", "penguin", "giraffe", "octopus"],
+                "Sports": ["basketball", "tennis", "soccer", "swimming", "baseball"],
+                "Food": ["pizza", "hamburger", "spaghetti", "chocolate", "sandwich"],
+                "Movies": ["frozen", "batman", "titanic", "avengers", "shrek"],
+            }
+            words = fallback_words.get(request.category, ["puzzle", "challenge", "mystery", "adventure", "treasure"])
+
+        return JSONResponse(content={
+            "words": words[:llm_options],
+            "category": request.category
+        })
+
+    except Exception as e:
+        logging.error(f"Error generating hangman words: {e}", exc_info=True)
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+# Helper functions for shared category logic
+async def _get_categories(current_ids, default_categories, field_name):
+    """Shared function to get categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        custom_categories = []
+        try:
+            user_doc = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+                account_id
+            ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id).get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                custom_categories = user_data.get(field_name, [])
+        except Exception as e:
+            logging.warning(f"Could not load custom categories for {aac_user_id}: {e}")
+        
+        if custom_categories and len(custom_categories) > 0:
+            all_categories = custom_categories
+        else:
+            all_categories = default_categories.copy()
+        
+        return JSONResponse(content={
+            "default_categories": default_categories,
+            "custom_categories": custom_categories,
+            "all_categories": all_categories
+        })
+    except Exception as e:
+        logging.error(f"Error getting categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
+
+async def _save_custom_categories(request: Request, current_ids, field_name):
+    """Shared function to save custom categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        body = await request.json()
+        categories = body.get("categories", [])
+        
+        if not isinstance(categories, list):
+            raise HTTPException(status_code=400, detail="Categories must be a list")
+        
+        if len(categories) == 0:
+            raise HTTPException(status_code=400, detail="At least one category is required")
+        
+        for cat in categories:
+            if not isinstance(cat, str) or len(cat.strip()) == 0:
+                raise HTTPException(status_code=400, detail="All categories must be non-empty strings")
+        
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({field_name: categories})
+        
+        logging.info(f"Saved {len(categories)} custom categories to {field_name} for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "categories": categories,
+            "count": len(categories)
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error saving custom categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save categories: {str(e)}")
+
+async def _delete_custom_categories(current_ids, field_name):
+    """Shared function to delete custom categories"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
+            account_id
+        ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
+        
+        user_ref.update({field_name: firestore.DELETE_FIELD})
+        
+        logging.info(f"Deleted custom categories from {field_name} for user {aac_user_id}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Custom categories deleted, using defaults"
+        })
+    except Exception as e:
+        logging.error(f"Error deleting custom categories: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete categories: {str(e)}")
+
+
+# Helper functions for generating game items with game-type-specific prompts
+async def _generate_items(request: GuessWhoGeneratePeopleRequest, current_ids: Dict[str, str], item_type: str, item_type_plural: str):
+    """Generate items (people/places/things) based on game type"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        # Load user settings for LLMOptions
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        raw_llm_options = settings.get("LLMOptions", 10)
+        # Allow Tap phrases to be disabled with LLMOptions=0 without breaking Guess Games.
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 10
+        if llm_options <= 0:
+            llm_options = 5
+        
+        # Build exclusion instruction
+        exclusion_instruction = ""
+        if request.previous_people and len(request.previous_people) > 0:
+            excluded_list = ", ".join(f'"{item}"' for item in request.previous_people)
+            exclusion_instruction = f"\n\nDo NOT include any of these: {excluded_list}. Generate completely different {item_type_plural}."
+        
+        llm_query = f"""You are helping someone using an AAC (Augmentative and Alternative Communication) device play a guessing game.
+
+Generate exactly {llm_options} different {item_type_plural} from the "{request.category}" category.
+
+Requirements:
+1. Make them diverse and well-known
+2. Each {item_type} should be specific and clear (e.g., "Eiffel Tower" not just "tower", "Golden Retriever" not just "dog")
+3. Avoid extremely obscure options
+4. Make them suitable for describing through clues
+5. Names should be clear and recognizable{exclusion_instruction}
+
+Return your response as a JSON array of strings with just the names.
+
+Example format:
+["{item_type.title()} 1", "{item_type.title()} 2", "{item_type.title()} 3"]
+
+Generate {llm_options} unique {item_type_plural} now:"""
+        
+        # Call LLM
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+        
+        # Parse response as JSON
+        items = []
+        try:
+            import json as json_module
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            items = json_module.loads(json_str)
+        except json_module.JSONDecodeError as e:
+            logging.warning(f"Failed to parse LLM response as JSON: {e}. Response: {response}")
+            items = [line.strip().strip('"- ') for line in response.split('\n') if line.strip()]
+        
+        if not items or not isinstance(items, list):
+            items = []
+        
+        return JSONResponse(content={
+            "category": request.category,
+            "people": items[:llm_options]  # Keep "people" key for API compatibility
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating items: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate {item_type_plural}: {str(e)}")
+
+
+async def _generate_clues(request: GuessWhoGenerateCluesRequest, current_ids: Dict[str, str], item_type: str):
+    """Generate clues based on game type"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        raw_llm_options = settings.get("LLMOptions", 5)
+        # Allow Tap phrases to be disabled with LLMOptions=0 without breaking Guess Games.
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 5
+        if llm_options <= 0:
+            llm_options = 5
+        
+        exclusion_instruction = ""
+        if request.previous_clues and len(request.previous_clues) > 0:
+            excluded_list = ", ".join(f'"{clue}"' for clue in request.previous_clues)
+            exclusion_instruction = f"\n\nDo NOT include any of these clues: {excluded_list}. Generate completely different clues."
+        
+        llm_query = f"""You are helping someone using an AAC device play a guessing game.
+
+The {item_type} to describe is: "{request.selected_person}"
+Category: "{request.category}"
+
+Generate exactly {llm_options} concise, distinctive clues that Player 1 can choose to help Player 2 guess what it is.
+
+Requirements:
+1. Each clue should be 1-2 sentences maximum
+2. Clues should be specific and descriptive
+3. Varied difficulty (some easier, some harder)
+4. Appropriate for someone using AAC
+5. Avoid giving away the answer completely{exclusion_instruction}
+
+Return your response as a JSON array of objects with "text" (full clue) and "summary" (5 words or less).
+
+Example format:
+[
+  {{"text": "This is located in Paris, France", "summary": "In Paris France"}},
+  {{"text": "It's made of iron and very tall", "summary": "Iron very tall"}}
+]
+
+Generate {llm_options} clues now:"""
+        
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+        
+        clues = []
+        try:
+            import json as json_module
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            parsed_data = json_module.loads(json_str)
+            
+            if parsed_data and isinstance(parsed_data, list):
+                clues = []
+                for item in parsed_data:
+                    if isinstance(item, dict):
+                        clues.append(item)
+                    elif isinstance(item, str):
+                        summary = item[:50] if len(item) > 50 else item
+                        summary = ' '.join(summary.split()[:5])
+                        clues.append({"text": item, "summary": summary})
+        except json_module.JSONDecodeError as e:
+            logging.warning(f"Failed to parse LLM response as JSON: {e}")
+            for line in response.split('\n'):
+                line = line.strip().strip('"- ')
+                if line:
+                    summary = ' '.join(line.split()[:5])
+                    clues.append({"text": line, "summary": summary})
+        
+        if not clues or not isinstance(clues, list):
+            clues = []
+        
+        return JSONResponse(content={
+            "category": request.category,
+            "selected_person": request.selected_person,
+            "clues": clues[:llm_options]
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating clues: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate clues: {str(e)}")
+
+
+async def _generate_guesses(request: GuessWhoGenerateGuessesRequest, current_ids: Dict[str, str], item_type: str, item_type_plural: str):
+    """Generate guesses based on game type"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+    
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        raw_llm_options = settings.get("LLMOptions", 5)
+        # Allow Tap phrases to be disabled with LLMOptions=0 without breaking Guess Games.
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 5
+        if llm_options <= 0:
+            llm_options = 5
+        total_guesses_needed = llm_options * 2
+        
+        clues_context = "\n".join([f"- {clue}" for clue in request.clues])
+        
+        previous_guesses_context = ""
+        if request.previous_guesses and len(request.previous_guesses) > 0:
+            guesses_list = "\n".join([f"- {guess}" for guess in request.previous_guesses])
+            previous_guesses_context = f"\n\nPrevious INCORRECT guesses (do NOT include these):\n{guesses_list}"
+        
+        llm_query = f"""You are helping someone using an AAC device play a guessing game. Player 1 needs to guess a {item_type} from the "{request.category}" category that Player 2 is thinking of.
+
+The clues given by Player 2 were:
+{clues_context}{previous_guesses_context}
+
+Generate exactly {total_guesses_needed} diverse guess options - {item_type_plural} from the "{request.category}" category that could match these clues.
+
+IMPORTANT: Consider ALL clues together. A good guess should reasonably match ALL the clues provided.
+
+Requirements:
+1. Each guess must be from the "{request.category}" category
+2. Guesses should be plausible based on ALL the clues
+3. Include a mix of obvious and creative guesses
+4. Randomize the order - do NOT put the most likely guess first
+5. Make them well-known and recognizable
+6. Do NOT include any of the previous incorrect guesses
+
+Return your response as a JSON array of strings, in RANDOM order.
+
+Example format:
+["{item_type.title()} 1", "{item_type.title()} 2", "{item_type.title()} 3"]
+
+Generate {total_guesses_needed} unique guesses now:"""
+        
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+        
+        guesses = []
+        try:
+            import json as json_module
+            import random
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            guesses = json_module.loads(json_str)
+            
+            if isinstance(guesses, list) and len(guesses) > 0:
+                random.shuffle(guesses)
+        except json_module.JSONDecodeError as e:
+            logging.warning(f"Failed to parse LLM response as JSON: {e}")
+            guesses = [line.strip().strip('"- ') for line in response.split('\n') if line.strip()]
+            import random
+            random.shuffle(guesses)
+        
+        if not guesses or not isinstance(guesses, list):
+            guesses = []
+        
+        return JSONResponse(content={
+            "category": request.category,
+            "clues_given": request.clues,
+            "guesses": guesses[:total_guesses_needed]
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating guesses: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate guesses: {str(e)}")
 
 
 if __name__ == "__main__":

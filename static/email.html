@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email</title>
+    <link rel="stylesheet" href="/static/compose.css">
+</head>
+<body>
+    <div class="compose-shell">
+        <header class="compose-header">
+            <h1>Email</h1>
+            <div class="header-actions">
+                <button id="home-btn" class="home-btn" type="button">Home</button>
+                <button id="gmail-connect-btn" class="primary-btn" type="button">Connect Gmail</button>
+            </div>
+        </header>
+
+        <main class="compose-main">
+            <section class="documents-panel">
+                <div class="panel-title">Saved Creations</div>
+                <div id="documents-list" class="documents-list"></div>
+            </section>
+
+            <section class="editor-panel">
+                <div class="editor-top-row">
+                    <label>
+                        Type
+                        <select id="document-type">
+                            <option value="story">Story</option>
+                            <option value="email">Email</option>
+                        </select>
+                    </label>
+                    <label>
+                        Title
+                        <input id="document-title" type="text" placeholder="Enter title">
+                    </label>
+                    <label>
+                        Subject
+                        <input id="email-subject" type="text" placeholder="Email subject">
+                    </label>
+                </div>
+
+                <div id="email-fields" class="email-fields">
+                    <label>
+                        To
+                        <input id="email-to" type="text" placeholder="name@example.com, person@example.com">
+                    </label>
+                    <label>
+                        Cc
+                        <input id="email-cc" type="text" placeholder="Optional">
+                    </label>
+                    <label>
+                        Bcc
+                        <input id="email-bcc" type="text" placeholder="Optional">
+                    </label>
+                    <label>
+                        Illustration Style
+                        <input id="illustration-style" type="text" placeholder="storybook illustration">
+                    </label>
+                </div>
+
+                <label>
+                    Body
+                    <textarea id="document-body" placeholder="Write your creation here"></textarea>
+                </label>
+
+                <div class="preview-row">
+                    <div class="illustration-card">
+                        <div class="illustration-title">Illustration</div>
+                        <img id="illustration-image" class="hidden" alt="Illustration preview">
+                        <div id="illustration-placeholder" class="illustration-placeholder">No illustration yet</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="illustration-title">Status</div>
+                        <div id="status-text" class="status-text">Ready.</div>
+                    </div>
+                </div>
+
+                <div class="editor-actions">
+                    <button id="new-story-btn" class="secondary-btn" type="button">New Story</button>
+                    <button id="new-email-btn" class="secondary-btn" type="button">New Email</button>
+                    <button id="save-btn" class="primary-btn" type="button">Save</button>
+                    <button id="send-btn" class="primary-btn" type="button">Send Email</button>
+                    <button id="illustrate-btn" class="secondary-btn" type="button">Generate Illustration</button>
+                    <button id="delete-btn" class="danger-btn" type="button">Delete</button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/token-refresh.js"></script>
+    <script src="/static/compose.js"></script>
+</body>
+</html>

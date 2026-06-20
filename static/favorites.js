@@ -5,20 +5,38 @@ let currentFavoritesButtons = [];
 let announcementQueue = [];
 let isProcessingQueue = false;
 let speechSynthesis = window.speechSynthesis;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
 
 // Audio context variable for resume functionality
 let audioContextResumeAttempted = false;
 
 // Scanning variables (EXACTLY from gridpage.js)
 let currentlyScannedButton = null; // Tracks the currently highlighted button
+let lastGamepadInputTime = 0; // For gamepad debounce/rate limiting
 let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from settings
 let scanningInterval; // Holds the interval ID for scanning
+let currentScanPattern = 'column'; // 'column' or 'row-column' - matches gridpage default
 let currentButtonIndex = -1; // Tracks the index for scanning
+let currentRowScanMode = false; // true if currently in row-scan phase
+let currentRow = -1; // Current row index for row scanning
+let currentButtonInRow = -1; // Current button index within the row
+let rowLoopCount = 0; // Tracks row-scan cycles for row-pattern
+let columnLoopCount = 0; // Tracks column-scan cycles for row-pattern
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
 let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to scan limit
 let ScanningOff = false; // Default scanning state
+let scanMode = 'auto'; // auto | step
 let gridColumns = 10; // Default number of grid columns for button sizing
+let waitForSwitchToScan = false; // Wait for switch before scanning starts
+let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
+let gamepadIndex = null; // Connected gamepad index
+let gamepadPollInterval = null; // requestAnimationFrame handle for gamepad polling
+let suppressSwitchActivationUntil = 0; // Prevent initial switch press from also selecting first button
+const FAVORITES_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_favorites';
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 
 // Speech recognition variables (from gridpage.js)
 let recognition = null;
@@ -80,6 +98,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     setupEventListeners();
     setupSpeechRecognition();  // Add wake word recognition
     setupKeyboardListener();   // Add keyboard controls
+    setupGamepadListeners();
+    window.addEventListener('resize', updateGridRowHeight);
     
     // --- Add AudioContext Resume Listeners (MUST HAVE for playing audio) ---
     document.body.addEventListener('mousedown', tryResumeAudioContext, { once: true });
@@ -197,6 +217,10 @@ async function loadUserSettings() {
             } else {
                 ScanningOff = false;
             }
+
+            scanMode = userSettings && userSettings.scanMode === 'step' ? 'step' : 'auto';
+            waitForSwitchToScan = userSettings && userSettings.waitForSwitchToScan === true;
+            playWaitForSwitchChime = userSettings && userSettings.playWaitForSwitchChime === true;
             
             // Load scan loop limit
             if (userSettings && typeof userSettings.scanLoopLimit === 'number' && !isNaN(userSettings.scanLoopLimit)) {
@@ -208,8 +232,7 @@ async function loadUserSettings() {
             
             // Apply grid columns setting to container
             if (gridContainer) {
-                gridContainer.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
-                console.log('Grid template columns applied:', gridContainer.style.gridTemplateColumns);
+                updateGridLayout();
             }
         }
     } catch (error) {
@@ -219,8 +242,31 @@ async function loadUserSettings() {
             gridColumns: 10, 
             scanDelay: 3500, 
             ScanningOff: false, 
+            scanMode: 'auto',
             scanLoopLimit: 0 
         };
+        waitForSwitchToScan = false;
+        playWaitForSwitchChime = false;
+    }
+}
+
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+        return;
+    }
+
+    hasPlayedWaitForSwitchChime = true;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Favorites page-ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize favorites page-ready chime audio:', error);
     }
 }
 
@@ -239,6 +285,10 @@ async function loadFavoritesButtons() {
         console.log('Favorites data loaded:', favoritesData);
         
         currentFavoritesButtons = favoritesData.buttons || [];
+        const userSettingScanPattern = userSettings?.scanPattern ?? userSettings?.scan_pattern;
+        const apiScanPattern = favoritesData.scan_pattern;
+        currentScanPattern = normalizeScanPattern(userSettingScanPattern ?? apiScanPattern ?? 'column');
+        console.log('[FAVORITES SCAN PATTERN] Set to:', currentScanPattern, '(settings:', userSettingScanPattern || 'undefined', ', api:', apiScanPattern || 'undefined', ')');
         generateGrid();
         
         console.log('Favorites buttons loaded and grid generated');
@@ -261,21 +311,184 @@ async function loadFavoritesButtons() {
     }
 }
 
+function updateGridLayout() {
+    if (!gridContainer) return;
+
+    gridContainer.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+
+    const baseFontSize = 20;
+    const minFontSize = 10;
+    const maxFontSize = 28;
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
+    gridContainer.style.setProperty('--button-font-size', `${fontSize}px`);
+
+    requestAnimationFrame(updateGridRowHeight);
+}
+
+function updateGridRowHeight() {
+    if (!gridContainer) return;
+
+    const containerWidth = gridContainer.clientWidth;
+    if (!containerWidth || gridColumns <= 0) return;
+
+    const computedStyle = window.getComputedStyle(gridContainer);
+    const gap = parseFloat(computedStyle.columnGap || computedStyle.gap || '24') || 24;
+    const totalGapWidth = gap * Math.max(0, gridColumns - 1);
+    const availableWidth = Math.max(0, containerWidth - totalGapWidth);
+    const columnWidth = availableWidth / gridColumns;
+
+    if (columnWidth > 0) {
+        gridContainer.style.gridAutoRows = `${columnWidth}px`;
+    }
+}
+
+function setButtonGridPosition(buttonElement, gridPosition) {
+    const row = Math.ceil(gridPosition / gridColumns);
+    const col = ((gridPosition - 1) % gridColumns) + 1;
+
+    buttonElement.style.gridRow = row.toString();
+    buttonElement.style.gridColumn = col.toString();
+    buttonElement.dataset.row = row.toString();
+    buttonElement.dataset.col = col.toString();
+}
+
+function getVisibleRowIndices() {
+    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+    if (buttons.length === 0) return [];
+
+    const rowSet = new Set();
+    buttons.forEach(btn => {
+        const row = parseInt(btn.dataset.row, 10);
+        if (!isNaN(row)) rowSet.add(row);
+    });
+
+    return Array.from(rowSet).sort((a, b) => a - b);
+}
+
+function getButtonsInRow(rowIndex) {
+    return Array.from(document.querySelectorAll(`#gridContainer button[data-row="${rowIndex}"]:not([style*="display: none"])`))
+        .sort((a, b) => {
+            const colA = parseInt(a.dataset.col, 10);
+            const colB = parseInt(b.dataset.col, 10);
+            return colA - colB;
+        });
+}
+
+function getVisibleButtons() {
+    return Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+}
+
+function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}) {
+    if (ScanningOff) {
+        console.log(`🔇 Scanning is disabled (${source}).`);
+        window.waitingForInitialSwitch = false;
+        return;
+    }
+
+    const hasValidScannedButton = Boolean(
+        currentlyScannedButton &&
+        currentlyScannedButton.isConnected &&
+        currentlyScannedButton.closest('#gridContainer')
+    );
+
+    if (currentlyScannedButton && !hasValidScannedButton) {
+        console.log(`🧹 Clearing stale scanned button reference (${source}).`);
+        currentlyScannedButton = null;
+    }
+
+    if (scanningInterval !== null || hasValidScannedButton) {
+        console.log(`⏭️ Scanning already active — ignoring startOrWaitForScanning (${source}).`);
+        return;
+    }
+
+    if (waitForSwitchToScan) {
+        window.waitingForInitialSwitch = true;
+        console.log(`✋ Waiting for switch press before scanning (${source}).`);
+        playPageReadyChimeIfEnabled();
+
+        const hasShownPrompt = sessionStorage.getItem(FAVORITES_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+        if (allowPrompt && !hasShownPrompt) {
+            sessionStorage.setItem(FAVORITES_SWITCH_PROMPT_SHOWN_KEY, 'true');
+            announce('Press switch to begin scanning', 'personal', false);
+        }
+        return;
+    }
+
+    window.waitingForInitialSwitch = false;
+    console.log(`▶️ Starting auditory scanning automatically (${source}).`);
+    startAuditoryScanning();
+}
+
+function markScanningStartedFromSwitch() {
+    suppressSwitchActivationUntil = Date.now() + 600;
+}
+
+function shouldSuppressSwitchActivation() {
+    return Date.now() < suppressSwitchActivationUntil;
+}
+
+function normalizeScanPattern(patternValue) {
+    if (typeof patternValue !== 'string') return 'column';
+    const normalized = patternValue.trim().toLowerCase();
+    return normalized === 'row-column' ? 'row-column' : 'column';
+}
+
+function handleSpacebarPress() {
+    if (window.waitingForInitialSwitch) {
+        console.log('Initial switch detected (spacebar) - starting scanning on favorites');
+        window.waitingForInitialSwitch = false;
+        markScanningStartedFromSwitch();
+        startAuditoryScanning();
+        return;
+    }
+
+    if (shouldSuppressSwitchActivation()) {
+        return;
+    }
+
+    if (listeningForQuestion) {
+        return;
+    }
+
+    if (isPausedFromScanLimit) {
+        resumeAuditoryScanning();
+        return;
+    }
+
+    if (!currentlyScannedButton) {
+        markScanningStartedFromSwitch();
+        startAuditoryScanning();
+        return;
+    }
+
+    const buttonToActivate = currentlyScannedButton;
+    console.log('Spacebar pressed, activating button:', buttonToActivate.textContent);
+    selectCurrentScannedButton();
+    buttonToActivate.classList.add('active');
+    setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+}
+
 // Generate the grid of favorites buttons
 function generateGrid() {
     if (!gridContainer) return;
+
+    stopAuditoryScanning();
+    window.waitingForInitialSwitch = false;
+    isPausedFromScanLimit = false;
+    currentRowScanMode = false;
+    currentRow = -1;
     
     console.log('Generating grid with', currentFavoritesButtons.length, 'buttons');
     
     // Clear existing content
     gridContainer.innerHTML = '';
+    updateGridLayout();
     
     // Always add "Go Back" button first (top-left position)
     const backButton = document.createElement('button');
     backButton.textContent = 'Go Back';
     backButton.classList.add('back-button');
-    backButton.style.gridRow = '1';
-    backButton.style.gridColumn = '1';
+    setButtonGridPosition(backButton, 1);
     backButton.addEventListener('click', async () => {
         console.log('Go Back button clicked');
         // Navigate back to gridpage (home) without announcement
@@ -319,19 +532,9 @@ function generateGrid() {
         buttonElement.textContent = button.text;
         buttonElement.classList.add('favorite-button');
         buttonElement.setAttribute('data-index', index);
-        
-        // Simplified sequential grid positioning after the Go Back button
-        const totalButtons = index + 1; // Current button position (1-based)
-        
-        // Position sequentially, skipping position 1 which is reserved for Go Back
-        let gridPosition = totalButtons + 1; // +1 to skip Go Back position
-        let row = Math.ceil(gridPosition / gridColumns);
-        let col = ((gridPosition - 1) % gridColumns) + 1;
-        
-        buttonElement.style.gridRow = row.toString();
-        buttonElement.style.gridColumn = col.toString();
-        
-        console.log(`Button "${button.text}" (index ${index}) positioned at grid row ${row}, col ${col} (gridPosition ${gridPosition})`);
+        const gridPosition = index + 2;
+        setButtonGridPosition(buttonElement, gridPosition);
+        console.log(`Button "${button.text}" (index ${index}) positioned at grid position ${gridPosition}`);
         
         // Add click handler
         buttonElement.addEventListener('click', () => handleFavoriteButtonClick(button, index));
@@ -347,7 +550,7 @@ function generateGrid() {
     // Delay scanning until after the page is rendered (exactly like gridpage.js)
     setTimeout(() => {
         console.log('Starting scanning from generateGrid setTimeout');
-        startAuditoryScanning();
+        startOrWaitForScanning({ allowPrompt: true, source: 'generateGrid' });
     }, defaultDelay);
 }
 
@@ -411,13 +614,13 @@ async function displayTopicContent(articles, topicName) {
         
         // Clear current grid
         gridContainer.innerHTML = '';
+        updateGridLayout();
         
         // Add back button first
         const backButton = document.createElement('button');
         backButton.textContent = 'Go Back';
         backButton.classList.add('back-button');
-        backButton.style.gridColumn = '1';
-        backButton.style.gridRow = '1';
+        setButtonGridPosition(backButton, 1);
         backButton.addEventListener('click', async () => {
             // Go back to favorites without announcement
             await loadFavoritesButtons();
@@ -430,20 +633,7 @@ async function displayTopicContent(articles, topicName) {
             buttonElement.textContent = summary.summary; // Short phrase for button text
             buttonElement.classList.add('article-button');
             buttonElement.setAttribute('data-option', summary.option || ''); // Full conversation starter
-            
-            // Calculate grid position properly
-            const gridColumns = userSettings.gridColumns || 10;
-            let row = Math.floor(index / gridColumns) + 1;
-            let col = (index % gridColumns) + 2; // Start from column 2
-            
-            // If we go beyond the grid width, wrap to next row starting at column 1
-            if (col > gridColumns) {
-                row++;
-                col = 1;
-            }
-            
-            buttonElement.style.gridColumn = col.toString();
-            buttonElement.style.gridRow = row.toString();
+            setButtonGridPosition(buttonElement, index + 2);
             
             // Add click handler
             buttonElement.addEventListener('click', () => handleSummarySelection(summary));
@@ -456,9 +646,7 @@ async function displayTopicContent(articles, topicName) {
         
         // Start scanning for article buttons
         setTimeout(() => {
-            if (!ScanningOff) {
-                startAuditoryScanning();
-            }
+            startOrWaitForScanning({ allowPrompt: false, source: 'displayTopicContent' });
         }, 500);
         
         console.log('Topic content displayed successfully');
@@ -489,7 +677,11 @@ async function handleSummarySelection(summary) {
 
 // Authenticated fetch function
 // Authenticated fetch function (matching gridpage.js pattern)
-async function authenticatedFetch(url, options = {}) {
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
+    // Re-read token from sessionStorage (may have been refreshed by token-refresh.js)
+    firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
+    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+
     if (!firebaseIdToken || !currentAacUserId) {
         throw new Error('No authentication token or user ID');
     }
@@ -507,10 +699,28 @@ async function authenticatedFetch(url, options = {}) {
         headers['X-Admin-Target-Account'] = adminTargetAccountId;
     }
     
-    return fetch(url, {
+    const response = await fetch(url, {
         ...options,
         headers
     });
+
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Auth failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed, retrying...');
+                return authenticatedFetch(url, options, true);
+            }
+        }
+        window.location.href = 'auth.html';
+        throw new Error('Authentication failed');
+    }
+    if (response.status === 401 || response.status === 403) {
+        window.location.href = 'auth.html';
+        throw new Error('Authentication failed after token refresh');
+    }
+    return response;
 }
 
 // Speech and announcement functions
@@ -542,12 +752,6 @@ function updateQuestionDisplay(text) {
 // Announcement functions
 async function announce(textToAnnounce, announcementType = "system", recordHistory = true) {
     console.log(`ANNOUNCE: "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
-    
-    // Stop scanning during announcement
-    const wasScanningActive = scanningInterval !== null;
-    if (wasScanningActive) {
-        stopAuditoryScanning();
-    }
     
     try {
         // Use the server's text-to-speech API like gridpage does
@@ -598,16 +802,6 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
         } catch (fallbackError) {
             console.error('Fallback speech synthesis also failed:', fallbackError);
         }
-    } finally {
-        // Restart scanning after announcement if it was active before
-        if (wasScanningActive && !ScanningOff) {
-            setTimeout(() => {
-                const buttons = document.querySelectorAll('#gridContainer button:not([style*="display: none"])');
-                if (buttons.length > 0) {
-                    startAuditoryScanning();
-                }
-            }, 500);
-        }
     }
 }
 
@@ -637,10 +831,16 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
 
         return new Promise((resolve) => {
             source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close();
                 resolve();
             };
@@ -649,8 +849,41 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
     } catch (error) {
         console.error('Error during audio playback:', error);
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
         throw error;
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isProcessingQueue = false;
+
+    if (speechSynthesis) {
+        speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function queueAnnouncement(text) {
@@ -705,16 +938,135 @@ async function announceText(text) {
     });
 }
 
-// Auditory scanning functions (from gridpage.js)
-// --- Auditory Scanning (EXACTLY from gridpage.js) ---
+// Auditory scanning functions (aligned with gridpage.js)
 function startAuditoryScanning() {
     stopAuditoryScanning();
-    if (ScanningOff) { console.log("Auditory scanning is off."); return; }
-    console.log("Starting auditory scanning...");
-    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
-    if (buttons.length === 0) { console.log("No visible buttons found."); currentlyScannedButton = null; return; }
-    
-    // Reset cycle tracking when starting fresh
+    if (ScanningOff) { console.log('Auditory scanning is off.'); return; }
+    if (scanMode === 'step') {
+        startStepColumnScanning();
+        return;
+    }
+
+    console.log('Starting auditory scanning...', `Pattern: ${currentScanPattern}`);
+
+    if (currentScanPattern === 'row-column') {
+        startRowPhaseScanning();
+    } else {
+        startColumnPhaseScanning();
+    }
+}
+
+function startStepColumnScanning() {
+    console.log('Starting STEP scanning (column mode)...');
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    currentRowScanMode = false;
+    currentButtonIndex = -1;
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
+    advanceStepColumnScan();
+}
+
+function advanceStepColumnScan() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+    if (currentlyScannedButton) {
+        speakAndHighlight(currentlyScannedButton);
+    }
+}
+
+function startRowPhaseScanning() {
+    console.log('Starting ROW-PHASE scanning...');
+    const rowIndices = getVisibleRowIndices();
+    if (rowIndices.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    currentRowScanMode = true;
+    currentRow = -1;
+    rowLoopCount = 0;
+    isPausedFromScanLimit = false;
+
+    const scanStep = async () => {
+        if (currentlyScannedButton) {
+            currentlyScannedButton.classList.remove('scanning');
+            document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+                btn.classList.remove('scanning-row');
+            });
+        }
+
+        currentRow++;
+        if (currentRow >= rowIndices.length) {
+            currentRow = 0;
+            rowLoopCount++;
+
+            if (scanLoopLimit > 0 && rowLoopCount >= scanLoopLimit) {
+                console.log(`Row scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                isPausedFromScanLimit = true;
+                stopAuditoryScanning();
+
+                try {
+                    await announce('Scanning paused', 'system', false);
+                } catch (e) {
+                    console.error('Speech synthesis error:', e);
+                }
+
+                const firstRowButtons = getButtonsInRow(rowIndices[0]);
+                if (firstRowButtons.length > 0) {
+                    currentlyScannedButton = firstRowButtons[0];
+                    firstRowButtons.forEach(btn => btn.classList.add('scanning-row'));
+                    currentRow = 0;
+                }
+                return;
+            }
+        }
+
+        const rowIndex = rowIndices[currentRow];
+        const buttonsInRow = getButtonsInRow(rowIndex);
+        if (buttonsInRow.length > 0) {
+            buttonsInRow.forEach(btn => btn.classList.add('scanning-row'));
+            currentlyScannedButton = buttonsInRow[0];
+
+            try {
+                await announce(`Row ${currentRow + 1}`, 'system', false);
+            } catch (e) {
+                console.error('Speech synthesis error:', e);
+            }
+        }
+    };
+
+    scanStep();
+    scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function startColumnPhaseScanning() {
+    console.log('Starting COLUMN-PHASE scanning...');
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    currentRowScanMode = false;
     currentButtonIndex = -1;
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
@@ -722,46 +1074,98 @@ function startAuditoryScanning() {
     const scanStep = async () => {
         if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); }
         currentButtonIndex++;
-        
-        // Check if we've completed a full cycle
-        if (currentButtonIndex >= buttons.length) { 
-            currentButtonIndex = 0; 
+
+        if (currentButtonIndex >= buttons.length) {
+            currentButtonIndex = 0;
             scanCycleCount++;
-            
-            // Check scan loop limit
+
             if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
-                console.log(`Scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                console.log(`Column scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
                 isPausedFromScanLimit = true;
                 stopAuditoryScanning();
-                
-                // Announce that scanning is paused
+
                 try {
-                    await announce("Scanning paused", "system", false);
-                } catch (e) { 
-                    console.error("Speech synthesis error:", e); 
+                    await announce('Scanning paused', 'system', false);
+                } catch (e) {
+                    console.error('Speech synthesis error:', e);
                 }
-                
-                // Set focus and highlight on the first button so user can restart scanning
+
                 if (buttons.length > 0) {
                     currentButtonIndex = 0;
                     buttons[0].focus();
-                    // Add visual highlight to show focus is on first button
                     currentlyScannedButton = buttons[0];
                     currentlyScannedButton.classList.add('scanning');
-                    console.log("Focus and highlight set on first button for restart capability");
                 }
-                
                 return;
             }
         }
-        
+
         if (buttons[currentButtonIndex]) {
             currentlyScannedButton = buttons[currentButtonIndex];
             speakAndHighlight(currentlyScannedButton);
-        } else { console.warn("Button not found at index:", currentButtonIndex); currentButtonIndex = -1; }
+        }
     };
-    console.log(`Scan delay set to: ${defaultDelay}ms`);
-    scanStep(); // Perform first scan immediately
+
+    scanStep();
+    scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function startColumnPhaseForRow(rowIndex) {
+    console.log(`Starting COLUMN-PHASE for row ${rowIndex}...`);
+    stopAuditoryScanning();
+    const buttonsInRow = getButtonsInRow(rowIndex);
+
+    if (buttonsInRow.length === 0) {
+        startRowPhaseScanning();
+        return;
+    }
+
+    document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+        btn.classList.remove('scanning-row');
+    });
+
+    currentRowScanMode = false;
+    currentRow = rowIndex;
+    currentButtonInRow = -1;
+    columnLoopCount = 0;
+    isPausedFromScanLimit = false;
+
+    const scanStep = async () => {
+        if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); }
+        currentButtonInRow++;
+
+        if (currentButtonInRow >= buttonsInRow.length) {
+            currentButtonInRow = 0;
+            columnLoopCount++;
+
+            if (scanLoopLimit > 0 && columnLoopCount >= scanLoopLimit) {
+                console.log(`Column scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                isPausedFromScanLimit = true;
+                stopAuditoryScanning();
+
+                try {
+                    await announce('Scanning paused', 'system', false);
+                } catch (e) {
+                    console.error('Speech synthesis error:', e);
+                }
+
+                if (buttonsInRow.length > 0) {
+                    currentButtonInRow = 0;
+                    buttonsInRow[0].focus();
+                    currentlyScannedButton = buttonsInRow[0];
+                    currentlyScannedButton.classList.add('scanning');
+                }
+                return;
+            }
+        }
+
+        if (buttonsInRow[currentButtonInRow]) {
+            currentlyScannedButton = buttonsInRow[currentButtonInRow];
+            speakAndHighlight(currentlyScannedButton);
+        }
+    };
+
+    scanStep();
     scanningInterval = setInterval(scanStep, defaultDelay);
 }
 
@@ -778,7 +1182,10 @@ function stopAuditoryScanning() {
     console.log("Stopping auditory scanning.");
     clearInterval(scanningInterval); scanningInterval = null;
     if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); currentlyScannedButton = null; }
-    currentButtonIndex = -1; window.speechSynthesis.cancel();
+    document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+        btn.classList.remove('scanning-row');
+    });
+    currentButtonIndex = -1;
 }
 
 // Function to resume scanning from first option with cycle reset
@@ -789,10 +1196,15 @@ async function resumeAuditoryScanning() {
         return;
     }
     
-    console.log("Resuming scanning from first option with cycle reset...");
+    console.log('Resuming scanning with cycle reset...');
     isPausedFromScanLimit = false;
-    scanCycleCount = 0; // Reset cycle count
-    currentButtonIndex = -1; // Reset to start from first option
+    if (currentRowScanMode) {
+        rowLoopCount = 0;
+        currentRow = -1;
+    } else {
+        scanCycleCount = 0;
+        currentButtonIndex = -1;
+    }
     
     // Announce that scanning is resumed
     try {
@@ -801,12 +1213,20 @@ async function resumeAuditoryScanning() {
         console.error("Speech synthesis error:", e); 
     }
     
-    startAuditoryScanning();
+    setTimeout(() => {
+        startAuditoryScanning();
+    }, 1500);
 }
 
 function selectCurrentScannedButton() {
     if (!currentlyScannedButton) {
         console.log("No button currently being scanned");
+        return;
+    }
+
+    if (currentRowScanMode && currentRow >= 0) {
+        console.log(`Row phase: User selected row ${currentRow}, switching to column-phase scanning...`);
+        startColumnPhaseForRow(currentRow);
         return;
     }
     
@@ -894,42 +1314,6 @@ function setupEventListeners() {
             }
         });
     }
-    
-    // Keyboard shortcuts for scanning (from gridpage.js)
-    document.addEventListener('keydown', (event) => {
-        switch(event.code) {
-            case 'Space':
-                event.preventDefault();
-                if (isPausedFromScanLimit) {
-                    resumeAuditoryScanning();
-                } else if (currentlyScannedButton) {
-                    selectCurrentScannedButton();
-                } else {
-                    startAuditoryScanning();
-                }
-                break;
-            case 'Escape':
-                event.preventDefault();
-                stopAuditoryScanning();
-                break;
-            case 'Enter':
-                event.preventDefault();
-                if (currentlyScannedButton) {
-                    selectCurrentScannedButton();
-                }
-                break;
-            case 'KeyS':
-                if (event.ctrlKey || event.metaKey) {
-                    event.preventDefault();
-                    if (isPausedFromScanLimit) {
-                        resumeAuditoryScanning();
-                    } else {
-                        startAuditoryScanning();
-                    }
-                }
-                break;
-        }
-    });
     
     // Help modal functionality
     setupHelpModal();
@@ -1107,17 +1491,154 @@ function setupQuestionRecognition() {
 // Keyboard listener setup
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
-        if (event.code === 'Space' && !listeningForQuestion && currentlyScannedButton) {
+        if (event.repeat) return; // Ignore key-repeat events (held key fires multiple keydown)
+        const isSpaceKey = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+
+        if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (tab) - starting scanning on favorites');
+                window.waitingForInitialSwitch = false;
+                markScanningStartedFromSwitch();
+                startAuditoryScanning();
+                return;
+            }
+
+            if (shouldSuppressSwitchActivation()) {
+                return;
+            }
+
+            if (!listeningForQuestion) {
+                if (isPausedFromScanLimit) {
+                    resumeAuditoryScanning();
+                } else if (!currentlyScannedButton) {
+                    startAuditoryScanning();
+                } else {
+                    advanceStepColumnScan();
+                }
+            }
+            return;
+        }
+
+        if (isSpaceKey) {
+            event.preventDefault();
+            handleSpacebarPress();
+            return;
+        }
+
+        if (event.code === 'Enter' && currentlyScannedButton && !listeningForQuestion) {
+            event.preventDefault();
+            if (shouldSuppressSwitchActivation()) {
+                return;
+            }
             const buttonToActivate = currentlyScannedButton; // Capture the button reference
-            console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
-            buttonToActivate.click();
+            selectCurrentScannedButton();
             buttonToActivate.classList.add('active');
-            // Use the captured reference in the timeout as well
             setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+            return;
+        }
+
+        if (event.code === 'Escape') {
+            event.preventDefault();
+            stopAuditoryScanning();
         }
     });
     console.log("Keyboard listener (Spacebar) set up.");
+}
+
+function setupGamepadListeners() {
+    window.addEventListener('gamepadconnected', (event) => {
+        console.log('Gamepad connected:', event.gamepad.index, event.gamepad.id);
+        if (gamepadIndex === null) {
+            gamepadIndex = event.gamepad.index;
+            startGamepadPolling();
+        }
+    });
+
+    window.addEventListener('gamepaddisconnected', (event) => {
+        console.log('Gamepad disconnected:', event.gamepad.index, event.gamepad.id);
+        if (gamepadIndex === event.gamepad.index) {
+            gamepadIndex = null;
+            stopGamepadPolling();
+        }
+    });
+
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (let i = 0; i < gamepads.length; i++) {
+        if (gamepads[i]) {
+            if (gamepadIndex === null) {
+                gamepadIndex = i;
+                startGamepadPolling();
+            }
+            break;
+        }
+    }
+}
+
+function startGamepadPolling() {
+    if (gamepadPollInterval !== null) return;
+
+    let lastButtonState = false;
+
+    function pollGamepads() {
+        if (gamepadIndex === null) {
+            stopGamepadPolling();
+            return;
+        }
+
+        const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+        const gp = gamepads[gamepadIndex];
+        if (!gp) {
+            gamepadPollInterval = requestAnimationFrame(pollGamepads);
+            return;
+        }
+
+        const currentButtonState = gp.buttons[0] && gp.buttons[0].pressed;
+        if (currentButtonState && !lastButtonState) {
+            const now = Date.now();
+            if (now - lastGamepadInputTime > 300) {
+                if (window.waitingForInitialSwitch) {
+                    console.log('Initial switch detected (gamepad) - starting scanning on favorites');
+                    window.waitingForInitialSwitch = false;
+                    markScanningStartedFromSwitch();
+                    startAuditoryScanning();
+                    lastGamepadInputTime = now;
+                    lastButtonState = currentButtonState;
+                    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                    return;
+                }
+
+                if (shouldSuppressSwitchActivation()) {
+                    lastButtonState = currentButtonState;
+                    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                    return;
+                }
+
+                if (!listeningForQuestion && currentlyScannedButton) {
+                    const buttonToActivate = currentlyScannedButton;
+                    console.log('Gamepad button 0 pressed, activating button:', buttonToActivate.textContent);
+                    selectCurrentScannedButton();
+                    buttonToActivate.classList.add('active');
+                    setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+                    lastGamepadInputTime = now;
+                }
+            }
+        }
+
+        lastButtonState = currentButtonState;
+        gamepadPollInterval = requestAnimationFrame(pollGamepads);
+    }
+
+    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+}
+
+function stopGamepadPolling() {
+    if (gamepadPollInterval !== null) {
+        cancelAnimationFrame(gamepadPollInterval);
+        gamepadPollInterval = null;
+    }
 }
 
 // Export functions for debugging

@@ -2,6 +2,18 @@
 let isAuthContextReady = false;
 let isDomContentLoaded = false;
 
+function markAdminDirty() {
+    window.adminUnsavedIndicator?.markDirty?.();
+}
+
+function markAdminSaving() {
+    window.adminUnsavedIndicator?.markSaving?.();
+}
+
+function markAdminSaved() {
+    window.adminUnsavedIndicator?.markSaved?.();
+}
+
 // DOM elements for tables and save button will be assigned in initializePage
 /**
  * Displays a status message to the user.
@@ -167,6 +179,7 @@ function addSourceRow(category) {
     if (tbody) {
         const newRow = createSourceRow({}, category); // Create row with empty data
         tbody.appendChild(newRow);
+        markAdminDirty();
         // Optionally scroll to the new row or focus the first input
         newRow.querySelector('.source-url-input')?.focus();
     } else {
@@ -185,6 +198,7 @@ function handleDeleteClick(event) {
     const row = button.closest('tr'); // Find the table row
     if (row) {
         row.remove(); // Remove the row from the DOM
+        markAdminDirty();
         showStatus("Row marked for deletion. Save changes to confirm.", false);
     }
 }
@@ -193,6 +207,7 @@ function handleDeleteClick(event) {
  * Gathers data from all tables and sends it to the backend to save.
  */
 async function saveConfig() {
+    markAdminSaving();
     showStatus("Saving configuration...", false);
     const configToSave = {
         news_sources: [],
@@ -289,6 +304,7 @@ async function saveConfig() {
         }
 
         // --- Success ---
+        markAdminSaved();
         showStatus("Configuration saved successfully!", false);
         // Optionally reload the config to get assigned IDs for new rows,
         // or update row IDs manually based on response if backend sends them back.

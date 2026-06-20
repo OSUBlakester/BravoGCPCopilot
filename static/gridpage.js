@@ -9,6 +9,217 @@ let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from setti
 let currentQuestion = null; // Stores the current question context for LLM
 let currentOptions = []; // Stores the current LLM-generated options for Something Else functionality
 let scanningInterval; // Holds the interval ID for scanning
+const GRID_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_grid';
+const FOLLOW_UP_CONVERSATION_KEY = 'llm_followUpConversation';
+let followUpConversation = {
+    originalQuestion: null,
+    selectedResponses: []
+};
+
+const COMPOSE_SESSION_STORAGE_KEY = 'bravoComposeSession';
+const COMPOSE_PENDING_APPEND_KEY = 'bravoComposePendingAppend';
+const EMAIL_SESSION_STORAGE_KEY = 'bravoEmailSession';
+let composeSession = null;
+let emailSession = null;
+let composeMenuActionInProgress = false;
+
+function loadEmailSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(EMAIL_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return {
+                active: false,
+                mode: 'menu',
+                recipientEmail: '',
+                recipientName: '',
+                sourceFrom: null,
+                threadId: '',
+                inReplyTo: '',
+                references: ''
+            };
+        }
+
+        return {
+            active: parsed.active === true,
+            mode: parsed.mode || 'menu',
+            recipientEmail: parsed.recipientEmail || '',
+            recipientName: parsed.recipientName || '',
+            sourceFrom: parsed.sourceFrom || null,
+            threadId: parsed.threadId || '',
+            inReplyTo: parsed.inReplyTo || '',
+            references: parsed.references || ''
+        };
+    } catch (error) {
+        console.warn('Failed to parse email session:', error);
+        return {
+            active: false,
+            mode: 'menu',
+            recipientEmail: '',
+            recipientName: '',
+            sourceFrom: null,
+            threadId: '',
+            inReplyTo: '',
+            references: ''
+        };
+    }
+}
+
+function saveEmailSession() {
+    if (!emailSession) return;
+    sessionStorage.setItem(EMAIL_SESSION_STORAGE_KEY, JSON.stringify(emailSession));
+}
+
+function clearEmailSession() {
+    emailSession = {
+        active: false,
+        mode: 'menu',
+        recipientEmail: '',
+        recipientName: '',
+        sourceFrom: null,
+        threadId: '',
+        inReplyTo: '',
+        references: ''
+    };
+    sessionStorage.removeItem(EMAIL_SESSION_STORAGE_KEY);
+}
+
+function isEmailSessionActive() {
+    return Boolean(emailSession && emailSession.active === true);
+}
+
+function loadComposeSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(COMPOSE_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+        }
+        return {
+            active: parsed.active === true,
+            documentId: parsed.documentId || null,
+            title: parsed.title || '',
+            text: typeof parsed.text === 'string' ? parsed.text : '',
+            startedAt: parsed.startedAt || null,
+            sourceFrom: parsed.sourceFrom || null
+        };
+    } catch (error) {
+        console.warn('Failed to parse compose session:', error);
+        return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    }
+}
+
+function saveComposeSession() {
+    if (!composeSession) return;
+    sessionStorage.setItem(COMPOSE_SESSION_STORAGE_KEY, JSON.stringify(composeSession));
+}
+
+function clearComposeSession() {
+    composeSession = { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    sessionStorage.removeItem(COMPOSE_SESSION_STORAGE_KEY);
+    updateSpeechHistoryPanel(); // Restore Speech History label and values
+    updateStatusBar(''); // Clear compose status from bar
+}
+
+function isComposeSessionActive() {
+    return Boolean(composeSession && composeSession.active === true);
+}
+
+function appendToComposeText(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized || !isComposeSessionActive()) return;
+
+    const existing = String(composeSession.text || '').trim();
+    composeSession.text = existing ? `${existing} ${normalized}` : normalized;
+    saveComposeSession();
+    updateSpeechHistoryPanel(); // Keep Compose box in sync
+}
+
+function consumePendingComposeAppends() {
+    const raw = localStorage.getItem(COMPOSE_PENDING_APPEND_KEY);
+    if (!raw) return;
+
+    let items = [];
+    try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            items = parsed;
+        }
+    } catch (error) {
+        console.warn('Unable to parse pending compose appends:', error);
+    }
+
+    if (!items.length || !isComposeSessionActive()) {
+        return;
+    }
+
+    let didAppend = false;
+    items.forEach((item) => {
+        const text = String(item || '').trim();
+        if (!text) return;
+        appendToComposeText(text);
+        didAppend = true;
+    });
+
+    if (didAppend) {
+        localStorage.removeItem(COMPOSE_PENDING_APPEND_KEY);
+    }
+}
+
+function getComposePromptContext() {
+    if (!isComposeSessionActive()) return '';
+    const compositionText = String(composeSession.text || '').trim();
+    if (!compositionText) return '';
+    return `\n\nCREATION CONTEXT:\nThe user is actively creating a letter. Prioritize options that continue or refine this creation:\n"${compositionText}"\nKeep continuity with this creation.`;
+}
+
+/**
+ * Show or clear the sticky #status-bar at the bottom of the screen.
+ * @param {string} message  - Text to display; empty string hides the bar.
+ * @param {boolean} isListening - When true, applies the green "listening" style.
+ */
+function updateStatusBar(message = '', isListening = false) {
+    const bar = document.getElementById('status-bar');
+    if (!bar) return;
+    if (message) {
+        bar.textContent = message;
+        bar.style.display = 'block';
+        bar.classList.toggle('listening', isListening);
+    } else {
+        bar.textContent = '';
+        bar.style.display = 'none';
+        bar.classList.remove('listening');
+    }
+}
+
+/**
+ * Switch the Speech History panel between "Speech History" mode and
+ * "Create" mode based on whether a compose session is currently active.
+ * Safe to call at any time.
+ */
+function updateSpeechHistoryPanel() {
+    const label = document.getElementById('speech-history-label');
+    const textarea = document.getElementById('speech-history');
+    if (!label || !textarea) return;
+
+    if (isComposeSessionActive()) {
+        label.textContent = isEmailSessionActive() ? 'Email:' : 'Create:';
+        textarea.value = String(composeSession.text || '');
+    } else {
+        label.textContent = 'Speech History:';
+        const userId = (typeof currentAacUserId !== 'undefined' && currentAacUserId)
+            ? currentAacUserId : '__default__';
+        const stored = localStorage.getItem(`speechHistory_${userId}`) || '';
+        textarea.value = stored;
+    }
+}
+
+function syncComposeSessionFromStorage() {
+    composeSession = loadComposeSession();
+    consumePendingComposeAppends();
+    updateSpeechHistoryPanel();
+}
+
+composeSession = loadComposeSession();
+emailSession = loadEmailSession();
 
 // Restore querytype and currentQuestion from localStorage if available
 if (localStorage.getItem('llm_currentQueryType')) {
@@ -28,10 +239,34 @@ if (localStorage.getItem('llm_currentOptions')) {
         currentOptions = [];
     }
 }
+if (localStorage.getItem(FOLLOW_UP_CONVERSATION_KEY)) {
+    try {
+        const storedConversation = JSON.parse(localStorage.getItem(FOLLOW_UP_CONVERSATION_KEY));
+        if (storedConversation && typeof storedConversation === 'object') {
+            followUpConversation.originalQuestion = typeof storedConversation.originalQuestion === 'string'
+                ? storedConversation.originalQuestion
+                : null;
+            followUpConversation.selectedResponses = Array.isArray(storedConversation.selectedResponses)
+                ? storedConversation.selectedResponses.filter(item => typeof item === 'string' && item.trim() !== '')
+                : [];
+        }
+        console.log('Restored follow-up conversation:', followUpConversation);
+    } catch (e) {
+        console.warn('Failed to parse follow-up conversation from storage:', e);
+        followUpConversation = { originalQuestion: null, selectedResponses: [] };
+    }
+}
 let currentButtonIndex = -1; // Tracks the index for scanning
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
 let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to scan limit
+// --- NEW: Row-Column Scanning Variables ---
+let currentScanPattern = 'column'; // 'column' or 'row-column'
+let currentRowScanMode = false; // true if currently in row-scan phase
+let currentRow = -1; // Current row being scanned (-1 = not in row mode)
+let currentButtonInRow = -1; // Current button index within the row
+let rowLoopCount = 0; // Tracks row-scan cycles for row-pattern
+let columnLoopCount = 0; // Tracks column-scan cycles for row-pattern
 let gamepadIndex = null; // To store the index of the connected gamepad
 let gamepadPollInterval = null; // Interval ID for gamepad polling
 const ANNOUNCE_RELOAD_DELAY = 2000; // Delay in ms after announce before reload (adjust as needed)
@@ -40,18 +275,1223 @@ let wakeWordInterjection = "hey"; // Default interjection (lowercase)
 let wakeWordName = "bravo";       // Default name (lowercase)
 let LLMOptions = 10; // Default number of options to generate
 let ScanningOff = false; // Default scanning state
+let scanMode = 'auto'; // auto | step
 let waitForSwitchToScan = false; // Default wait for switch state
+let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
+let playLlmOptionsChimePending = false; // One-shot guard for the next interactive LLM result set
+let suppressSwitchActivationUntil = 0; // Timestamp guard to prevent immediate button activation after starting scan
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
 const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening'; // CSS class for highlighting
 let activeOriginatingButtonText = null; // NEW: To store the text of the button that initiated the LLM query
 let activeLLMPromptForContext = null; // Store the prompt that generated current LLM buttons
+const LLM_PREFETCH_MAX_BUTTONS_PER_PAGE = 1;
+const LLM_PREFETCH_DELAY_MS = 1200;
+const LLM_PREFETCH_HISTORY_TTL_MS = 180000;
+const ENABLE_LLM_PREFETCH = false;
+let llmPrefetchTimer = null;
+const llmPrefetchHistory = new Map();
+const llmInFlightRequests = new Map();
+const NAV_TARGET_LLM_PREFETCH_KEY = 'bravoNavTargetLlmPrefetch';
+let loadedUserPages = [];
+let currentRenderedPageName = 'home';
+
+function cancelActivePrefetchRequests(reason = 'interactive request') {
+    let cancelledCount = 0;
+    for (const [requestKey, requestEntry] of llmInFlightRequests.entries()) {
+        if (requestEntry && requestEntry.source === 'prefetch' && requestEntry.abortController) {
+            requestEntry.abortController.abort();
+            llmInFlightRequests.delete(requestKey);
+            cancelledCount += 1;
+        }
+    }
+
+    if (cancelledCount > 0) {
+        console.log(`🛑 Cancelled ${cancelledCount} in-flight prefetch request(s): ${reason}`);
+    }
+}
+
+function findFirstVisibleLlmButtonForPage(page) {
+    if (!page || !Array.isArray(page.buttons)) return null;
+
+    return page.buttons.find((buttonData) => {
+        if (!(buttonData && buttonData.text && String(buttonData.text).trim() && buttonData.hidden !== true)) {
+            return false;
+        }
+
+        const llmQuery = typeof buttonData.LLMQuery === 'string' ? buttonData.LLMQuery.trim() : '';
+        return llmQuery.length > 0;
+    }) || null;
+}
+
+function queueNavigationTargetPrefetch(targetPageName) {
+    if (!ENABLE_LLM_PREFETCH) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
+    const normalizedTargetPage = String(targetPageName || '').trim();
+    if (!normalizedTargetPage || !Array.isArray(loadedUserPages) || loadedUserPages.length === 0) {
+        return;
+    }
+
+    const destinationPage = loadedUserPages.find((page) => String(page?.name || '').trim() === normalizedTargetPage);
+    const targetButton = findFirstVisibleLlmButtonForPage(destinationPage);
+    if (!targetButton) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
+    const llmQuery = String(targetButton.LLMQuery || '').trim();
+    if (!llmQuery) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
+    sessionStorage.setItem(NAV_TARGET_LLM_PREFETCH_KEY, JSON.stringify({
+        pageName: normalizedTargetPage,
+        buttonText: String(targetButton.text || '').trim(),
+        llmQuery,
+        storedAt: Date.now(),
+    }));
+}
+
+function triggerNavigationTargetPrefetchForCurrentPage(pageName) {
+    if (!ENABLE_LLM_PREFETCH) {
+        sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+        return;
+    }
+
+    const raw = sessionStorage.getItem(NAV_TARGET_LLM_PREFETCH_KEY);
+    if (!raw) return;
+
+    sessionStorage.removeItem(NAV_TARGET_LLM_PREFETCH_KEY);
+
+    try {
+        const payload = JSON.parse(raw);
+        if (!payload || String(payload.pageName || '').trim() !== String(pageName || '').trim()) {
+            return;
+        }
+
+        const ageMs = Date.now() - Number(payload.storedAt || 0);
+        if (!Number.isFinite(ageMs) || ageMs > LLM_PREFETCH_HISTORY_TTL_MS) {
+            return;
+        }
+
+        const llmQuery = String(payload.llmQuery || '').trim();
+        if (!llmQuery) {
+            return;
+        }
+
+        const promptForLLM = buildPromptForLLMQuery(llmQuery);
+        const prefetchKey = `${promptForLLM.length}:${promptForLLM}`;
+        pruneLlmPrefetchHistory();
+        if (llmPrefetchHistory.has(prefetchKey)) {
+            return;
+        }
+
+        llmPrefetchHistory.set(prefetchKey, Date.now());
+        void getLLMResponse(promptForLLM, { source: 'prefetch' }).then(() => {
+            console.log('⚡ Navigation target prefetch complete:', {
+                page: pageName,
+                button: payload.buttonText || 'button',
+                promptLength: promptForLLM.length,
+            });
+        });
+    } catch (error) {
+        console.warn('Failed to process navigation target prefetch hint:', error);
+    }
+}
+
+function getSummaryInstructionText() {
+    return SummaryOff
+        ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
+        : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
+}
+
+function getUserLanguageOutputInstruction() {
+    const locale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    const localeNames = {
+        'en-US': 'English (US)',
+        'es-US': 'Spanish (US)',
+        'fr-FR': 'French (France)',
+        'de-DE': 'German (Germany)',
+        'it-IT': 'Italian (Italy)',
+        'pt-BR': 'Portuguese (Brazil)',
+        'ar-XA': 'Arabic'
+    };
+    const languageName = localeNames[locale] || locale;
+    return `IMPORTANT LANGUAGE RULE: Return ALL generated values for "option" and "summary" in ${languageName} (${locale}) only. Even if the prompt/context text is in another language, translate internally and still output in ${languageName} (${locale}).`;
+}
+
+function buildPromptForLLMQuery(llmQuery) {
+    return `
+Generate up to "${LLMOptions}" short, single-phrase options for this AAC context:
+"${llmQuery}"
+
+Do not include introductions or conclusions.
+Each option should be a clear, selectable phrase for AAC use.
+Return ONLY a JSON list where each item has "option", "summary", and "keywords" keys.
+The "option" key should contain the FULL option text.
+${getSummaryInstructionText()}
+${getUserLanguageOutputInstruction()}
+The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
+${getComposePromptContext()}
+`;
+}
+
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime || !playLlmOptionsChimePending) {
+        return;
+    }
+
+    hasPlayedWaitForSwitchChime = true;
+    playLlmOptionsChimePending = false;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Page ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize page ready chime audio:', error);
+    }
+}
+
+function requestLlmOptionsChime() {
+    playLlmOptionsChimePending = true;
+    hasPlayedWaitForSwitchChime = false;
+}
+
+function pruneLlmPrefetchHistory(nowTs = Date.now()) {
+    for (const [key, ts] of llmPrefetchHistory.entries()) {
+        if ((nowTs - ts) > LLM_PREFETCH_HISTORY_TTL_MS) {
+            llmPrefetchHistory.delete(key);
+        }
+    }
+}
+
+function scheduleLlmPrefetchForVisibleButtons(visibleButtons) {
+    if (!ENABLE_LLM_PREFETCH) return;
+
+    if (!Array.isArray(visibleButtons) || visibleButtons.length === 0) return;
+    if (isComposeSessionActive() || isLLMProcessing) return;
+
+    const pageNameForPrefetch = String(currentRenderedPageName || '').trim().toLowerCase();
+    const prefetchLimit = pageNameForPrefetch === 'questions' ? 3 : LLM_PREFETCH_MAX_BUTTONS_PER_PAGE;
+    const prefetchDelayMs = pageNameForPrefetch === 'questions' ? 250 : LLM_PREFETCH_DELAY_MS;
+
+    const llmButtons = visibleButtons
+        .filter(buttonData => buttonData && typeof buttonData.LLMQuery === 'string' && buttonData.LLMQuery.trim().length > 0)
+        .slice(0, prefetchLimit);
+
+    if (llmButtons.length === 0) return;
+
+    if (llmPrefetchTimer) {
+        clearTimeout(llmPrefetchTimer);
+    }
+
+    llmPrefetchTimer = setTimeout(() => {
+        void prefetchLlmOptionsForButtons(llmButtons);
+    }, prefetchDelayMs);
+}
+
+async function prefetchLlmOptionsForButtons(llmButtons) {
+    if (!ENABLE_LLM_PREFETCH) return;
+
+    const nowTs = Date.now();
+    pruneLlmPrefetchHistory(nowTs);
+
+    for (const buttonData of llmButtons) {
+        const llmQuery = String(buttonData.LLMQuery || '').trim();
+        if (!llmQuery) continue;
+
+        const promptForLLM = buildPromptForLLMQuery(llmQuery);
+        const prefetchKey = `${promptForLLM.length}:${promptForLLM}`;
+        const previousTs = llmPrefetchHistory.get(prefetchKey);
+        if (previousTs && (nowTs - previousTs) < LLM_PREFETCH_HISTORY_TTL_MS) {
+            continue;
+        }
+
+        llmPrefetchHistory.set(prefetchKey, nowTs);
+
+        try {
+            await getLLMResponse(promptForLLM, { source: 'prefetch' });
+            console.log('⚡ LLM prefetch complete:', {
+                button: buttonData.text || 'button',
+                promptLength: promptForLLM.length,
+            });
+        } catch (error) {
+            console.warn(`LLM prefetch error for "${buttonData.text || 'button'}":`, error);
+        }
+    }
+}
+
+function persistFollowUpConversation() {
+    localStorage.setItem(FOLLOW_UP_CONVERSATION_KEY, JSON.stringify(followUpConversation));
+}
+
+function resetFollowUpConversation() {
+    followUpConversation = {
+        originalQuestion: null,
+        selectedResponses: []
+    };
+    localStorage.removeItem(FOLLOW_UP_CONVERSATION_KEY);
+}
+
+function initializeFollowUpConversation(questionText) {
+    const normalizedQuestion = typeof questionText === 'string' ? questionText.trim() : '';
+    if (!normalizedQuestion) {
+        resetFollowUpConversation();
+        return;
+    }
+
+    followUpConversation = {
+        originalQuestion: normalizedQuestion,
+        selectedResponses: []
+    };
+    persistFollowUpConversation();
+}
+
+function addFollowUpSelection(selectionText) {
+    const normalizedSelection = typeof selectionText === 'string' ? selectionText.trim() : '';
+    if (!normalizedSelection) return;
+
+    if (!followUpConversation.originalQuestion && currentQuestion) {
+        followUpConversation.originalQuestion = currentQuestion;
+    }
+
+    followUpConversation.selectedResponses.push(normalizedSelection);
+    persistFollowUpConversation();
+}
+
+function getConversationContextText() {
+    const baseQuestion = followUpConversation.originalQuestion || currentQuestion || '';
+    const history = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+
+    if (!baseQuestion) return '';
+
+    const historyText = history.length > 0
+        ? history.map((response, index) => `${index + 1}. ${response}`).join('\n')
+        : 'None yet';
+
+    return `Original question: "${baseQuestion}"\nSelected follow-ups so far:\n${historyText}`;
+}
+
+function classifyCommunicationType(text) {
+    const normalized = text.toLowerCase().trim();
+    
+    // Greeting patterns: hello, hi, hey, goodbye, etc.
+    if (/^\b(hello|hi|hey|goodbye|bye|good morning|good afternoon|good evening|howdy)\b/.test(normalized)) {
+        return 'greeting';
+    }
+    
+    // Question patterns: ends with ? or starts with question words
+    if (/\?$/.test(normalized) || /^\b(what|why|how|when|where|who|which|do|does|did|can|could|will|would|should|is|are|am|have|has|had|will)\b/.test(normalized)) {
+        return 'question';
+    }
+    
+    // Request patterns: want, need, can you, will you, let's
+    if (/\b(want|need|can you|could you|will you|would you|let's|let me|i need|i want|please|can i|could i)\b/.test(normalized)) {
+        return 'request';
+    }
+    
+    // Answer patterns: yes, no, yeah, nope, sure, etc.
+    if (/^\b(yes|no|yeah|yep|nope|sure|definitely|absolutely|maybe|perhaps|probably)\b|\b(yes|no)$/.test(normalized)) {
+        return 'answer';
+    }
+    
+    // Joke/humor patterns: common joke/funny signals
+    if (/\b(haha|lol|lmao|funny|joke|made me laugh|that's hilarious|isn't that funny)\b/.test(normalized)) {
+        return 'joke';
+    }
+    
+    // Affirmation patterns: positive self-assertions
+    if (/\b(i am strong|i can do|i'm amazing|i'm great|i'm capable|i'm confident|proud of)\b/.test(normalized)) {
+        return 'affirmation';
+    }
+    
+    // Default: assertion/opinion (statements of fact, feeling, or opinion)
+    return 'assertion';
+}
+
+function classifyFollowUpGuidance(communicationType) {
+    const guidance = {
+        greeting: {
+            description: 'The user greeted someone. Follow-ups should respond appropriately.',
+            patterns: [
+                'How are you doing?',
+                'Where have you been?',
+                'What have you been up to?',
+                'Good to see you!',
+                'I missed you!',
+                'What have you been doing?'
+            ]
+        },
+        assertion: {
+            description: 'The user made a statement or shared an opinion. Follow-ups should engage the other person at the same level.',
+            patterns: [
+                'What do you think about that?',
+                'Do you agree?',
+                'Have you experienced that too?',
+                'Would you like to do that with me?',
+                'I like that because...',
+                'That reminds me of...'
+            ]
+        },
+        question: {
+            description: 'The user asked a question. Follow-ups should provide alternatives, clarifications, or related questions.',
+            patterns: [
+                'Is it something fun?',
+                'Can we find that out together?',
+                'Let\'s figure it out',
+                'I\'m curious about that too',
+                'Do you know?',
+                'Should we ask someone?'
+            ]
+        },
+        request: {
+            description: 'The user made a request or expressed a want. Follow-ups should expand the idea or get partner input.',
+            patterns: [
+                'Do you want to go with me?',
+                'When can we do that?',
+                'What do you think about that?',
+                'Can we start planning that?',
+                'I hope we can do that soon',
+                'Do you want to do that too?'
+            ]
+        },
+        answer: {
+            description: 'The user gave an answer (yes/no/maybe). Follow-ups should continue the conversation or explain the answer.',
+            patterns: [
+                'I don\'t want to do that',
+                'Maybe we could try this instead',
+                'Here\'s why I think that',
+                'Would you do that?',
+                'What would you do?',
+                'Can we talk about why?'
+            ]
+        },
+        joke: {
+            description: 'The user shared humor. Follow-ups should engage with the joke or build on the playfulness.',
+            patterns: [
+                'Isn\'t that funny?',
+                'Do you like jokes like that?',
+                'Did that make you laugh?',
+                'I love when we laugh together',
+                'Tell me another funny one!',
+                'You\'re so funny!'
+            ]
+        },
+        affirmation: {
+            description: 'The user made a positive self-statement. Follow-ups should reinforce or build on that positivity.',
+            patterns: [
+                'You\'re amazing!',
+                'I\'m proud of you too',
+                'You\'re strong too',
+                'That\'s awesome!',
+                'I believe in you',
+                'We\'re both great!'
+            ]
+        }
+    };
+    return guidance[communicationType] || guidance.assertion;
+}
+
+function getActiveSessionMoodText() {
+    let mood = '';
+
+    if (typeof window.getCurrentMood === 'function') {
+        try {
+            mood = window.getCurrentMood() || '';
+        } catch (error) {
+            console.warn('Unable to read mood from getCurrentMood():', error);
+        }
+    }
+
+    if (!mood) {
+        mood = sessionStorage.getItem('currentSessionMood') || '';
+    }
+
+    const normalizedMood = typeof mood === 'string' ? mood.trim() : '';
+    if (!normalizedMood || normalizedMood.toLowerCase() === 'none') {
+        return '';
+    }
+
+    return `Current user mood for this session: "${normalizedMood}". Keep follow-up options naturally consistent with this mood.`;
+}
+
+function isPartnerInterrogativePattern(text) {
+    // Detects options that sound like the PARTNER questioning/interviewing the user about their own statement
+    // These should NEVER be generated as follow-up options from the user's perspective
+    
+    if (!text || typeof text !== 'string') return false;
+    const normalized = text.toLowerCase().trim();
+    
+    // DEBUG: Log what we're checking
+    console.log(`🔍 Checking option: "${text}"`);
+    
+    // Get latest user response to check context
+    const latestResponse = Array.isArray(followUpConversation.selectedResponses) && followUpConversation.selectedResponses.length > 0
+        ? followUpConversation.selectedResponses[followUpConversation.selectedResponses.length - 1]
+        : '';
+    const latestWasUserAssertion = /^i\b/i.test(latestResponse);
+    
+    console.log(`   Latest response: "${latestResponse}"`);
+    console.log(`   Was user assertion (started with "I"): ${latestWasUserAssertion}`);
+    
+    // BROAD CATCH-ALL: If user just made a statement about themselves (started with "I"),
+    // block ANY option asking them to elaborate on that statement
+    if (latestWasUserAssertion) {
+        // Block "tell me" phrases entirely after user assertion
+        if (/\btell me\b/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: "tell me" phrase after user assertion:', text);
+            return true;
+        }
+        
+        // Block "what's making you" or "what is making you" 
+        if (/what('s| is) making you/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: "what\'s making you" after user assertion:', text);
+            return true;
+        }
+        
+        // Block "what makes you"
+        if (/what makes you/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: "what makes you" after user assertion:', text);
+            return true;
+        }
+        
+        // Block "share more" / "describe" / "explain"
+        if (/^(share more|describe|explain)/i.test(normalized)) {
+            console.warn('🚫 BLOCKED: explain/describe pattern after user assertion:', text);
+            return true;
+        }
+    }
+    
+    // Block therapy/interview patterns regardless of context
+    if (/^(why are you|why do you|how does (that|it|this) make you feel|how are you feel)/i.test(normalized)) {
+        console.warn('🚫 BLOCKED: therapy/interview pattern:', text);
+        return true;
+    }
+    
+    // Block "what kind of ... are you"
+    if (/^what kind of .+ are you/i.test(normalized)) {
+        console.warn('🚫 BLOCKED: "what kind of ... are you" pattern:', text);
+        return true;
+    }
+    
+    // Block "can you tell me"
+    if (/^can you tell me/i.test(normalized)) {
+        console.warn('🚫 BLOCKED: "can you tell me" pattern:', text);
+        return true;
+    }
+    
+    console.log(`   ✅ Option passed filter`);
+    return false;
+}
+
+function buildFollowUpPrompt(excludedOptionsText = '') {
+    const summaryInstruction = SummaryOff
+        ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
+        : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
+
+    const conversationContext = getConversationContextText();
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+    
+    // Classify communication type and get guidance
+    const communicationType = latestSelectedResponse
+        ? classifyCommunicationType(latestSelectedResponse)
+        : 'assertion';
+    const typeGuidance = classifyFollowUpGuidance(communicationType);
+    
+    const moodLine = getActiveSessionMoodText();
+    const exclusionLine = excludedOptionsText && excludedOptionsText.trim()
+        ? `Avoid repeating these existing options: "${excludedOptionsText}".`
+        : '';
+    const latestFocusLine = latestSelectedResponse
+        ? `Latest selected response (PRIMARY FOCUS): "${latestSelectedResponse}".`
+        : '';
+    const composePromptContext = getComposePromptContext();
+    
+    // Build type-specific pattern examples
+    const typePatternExamples = typeGuidance.patterns
+        .slice(0, 4)
+        .map(pattern => `  • ${pattern}`)
+        .join('\n');
+
+    return `
+AAC COMMUNICATION SYSTEM - GENERATING USER'S NEXT SPEECH OPTIONS
+
+SCENARIO:
+An AAC user is having a conversation. They select pre-written options to speak.
+The user has ALREADY SPOKEN the following words out loud to their communication partner:
+${conversationContext}
+Most recently, the user JUST SAID OUT LOUD: "${latestSelectedResponse}"
+
+YOUR TASK:
+Generate ${LLMOptions} MORE things the SAME user can SAY, ASK, BUILD, or EXPOUND next to continue THEIR speaking turn.
+These are OPTIONS FOR THE USER TO SELECT AND SPEAK (including statements and partner-engagement questions), not responses TO the user.
+
+🚫🚫🚫 CRITICAL ERROR TO AVOID 🚫🚫🚫
+
+The user JUST SAID: "I am over the moon with excitement!"
+
+DO NOT GENERATE: "Tell me more about what makes you feel this way!"
+WHY THIS IS WRONG: The user JUST expressed excitement. They don't ask THEMSELVES to tell them more about their own feeling. That would be the PARTNER asking the user a question.
+
+DO NOT GENERATE: "What's making you so excited?"  
+WHY THIS IS WRONG: The user doesn't ask themselves what's making them excited. That's the PARTNER questioning the user.
+
+DO NOT GENERATE: "Tell me...", "What makes you...", "What's making you...", "Describe...", "Explain..."
+WHY: These are PARTNER phrases asking the user to elaborate. The user doesn't interview themselves.
+
+✅ CORRECT EXAMPLES - Generate options like these:
+
+The user JUST SAID: "I am over the moon with excitement!"
+GENERATE: "This is the best day ever!" ✅ (User expounding on their emotion)
+GENERATE: "Do you want to celebrate with me?" ✅ (User inviting partner)
+GENERATE: "I can't wait to do something fun!" ✅ (User continuing their expression)
+GENERATE: "Are you excited too?" ✅ (User engaging partner)
+GENERATE: "Something amazing just happened!" ✅ (User adding context)
+
+COMMUNICATION TYPE: ${communicationType.toUpperCase()}
+${typeGuidance.description}
+
+PATTERN EXAMPLES FOR ${communicationType.toUpperCase()}:
+${typePatternExamples}
+
+RULES FOR GENERATION:
+1. The user is SPEAKING, not being interviewed
+2. The user is continuing THEIR turn (partner hasn't responded yet)
+3. Generate things the user would SAY or ASK to engage the partner, not questions someone would ASK the user
+4. Options should BUILD/EXPOUND on their point OR invite partner engagement
+5. Keep options short, conversational, and natural
+6. NO "Tell me", "What makes you", "Describe", "Explain" after user assertions
+7. Include at least 4 partner-engagement QUESTIONS that end with "?" and invite the partner to respond
+
+${moodLine}${exclusionLine}
+${composePromptContext}
+Return ONLY a JSON list where each item has "option", "summary", and "keywords" keys.
+The "option" key should contain the FULL option text.
+${summaryInstruction}
+${getUserLanguageOutputInstruction()}
+The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
+`;
+}
+
+function scoreUserVoicePerspective(optionText) {
+    if (!optionText || typeof optionText !== 'string') return 0;
+    const normalized = optionText.trim().toLowerCase();
+    let score = 0;
+
+    // Positive signals: sounds like the AAC user speaking.
+    if (/^(i\b|i'm\b|i am\b|i want\b|i need\b|i feel\b|let('|’)s\b|can we\b|could we\b|tell me\b|show me\b)/i.test(optionText)) {
+        score += 3;
+    }
+
+    if (/^(do you\b|have you\b|can you\b|would you\b|could you\b|what do you think\b|which do you\b|did you\b)/i.test(optionText)) {
+        score += 4;
+    }
+
+    if (/\bwith me\b/i.test(optionText)) {
+        score += 2;
+    }
+
+    // Reduce rigid planning-style prompts that feel less conversational in follow-ups.
+    if (/^(what should i do\b|which (rides|one|park|option) should i\b)/i.test(optionText)) {
+        score -= 3;
+    }
+
+    // Negative signals: sounds like the system/partner questioning the AAC user's prior response.
+    const addressedToUserPatterns = [
+        /\bwhat\s+is\s+it\s+you\s+find\b/i,
+        /\bwhat\s+is\s+making\s+you\s+feel\b/i,
+        /\bwhat\s+makes\s+you\s+feel\b/i,
+        /\bwhy\s+did\s+you\s+choose\b/i,
+        /\bwhy\s+are\s+you\s+feeling\b/i,
+        /\bwhy\s+do\s+you\s+feel\b/i,
+        /\bhow\s+does\s+that\s+make\s+you\s+feel\b/i,
+        /\bhow\s+are\s+you\s+feeling\s+about\s+(that|this|your)\b/i,
+        /\byour\s+answer\b/i,
+        /\byou\s+selected\b/i,
+        /\byou\s+chose\b/i
+    ];
+
+    for (const pattern of addressedToUserPatterns) {
+        if (pattern.test(normalized)) {
+            score -= 6;
+        }
+    }
+
+    return score;
+}
+
+function startOrWaitForScanning({ allowPrompt = false, source = 'unknown' } = {}) {
+    if (ScanningOff) {
+        console.log(`🔇 Scanning is disabled (${source}).`);
+        window.waitingForInitialSwitch = false;
+        return;
+    }
+
+    const hasValidScannedButton = Boolean(
+        currentlyScannedButton &&
+        currentlyScannedButton.isConnected &&
+        currentlyScannedButton.closest('#gridContainer')
+    );
+
+    if (currentlyScannedButton && !hasValidScannedButton) {
+        console.log(`🧹 Clearing stale scanned button reference (${source}).`);
+        currentlyScannedButton = null;
+    }
+
+    // If scanning is already active (auto: interval running; step: a button is highlighted),
+    // don't disrupt it. This prevents the generateGrid setTimeout from re-entering the
+    // "waiting for initial switch" state after the user has already started scanning.
+    if (scanningInterval !== null || hasValidScannedButton) {
+        console.log(`⏭️ Scanning already active — ignoring startOrWaitForScanning (${source}).`);
+        return;
+    }
+
+    if (waitForSwitchToScan) {
+        window.waitingForInitialSwitch = true;
+        console.log(`✋ Waiting for switch press before scanning (${source}).`);
+
+        const hasShownPrompt = sessionStorage.getItem(GRID_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+        if (allowPrompt && !hasShownPrompt) {
+            sessionStorage.setItem(GRID_SWITCH_PROMPT_SHOWN_KEY, 'true');
+            announce("Press switch to begin scanning", "personal", false, false);
+        }
+        return;
+    }
+
+    window.waitingForInitialSwitch = false;
+    console.log(`▶️ Starting auditory scanning automatically (${source}).`);
+    startAuditoryScanning();
+}
+
+function markScanningStartedFromSwitch() {
+    suppressSwitchActivationUntil = Date.now() + 600;
+}
+
+function shouldSuppressSwitchActivation() {
+    return Date.now() < suppressSwitchActivationUntil;
+}
+
+function handleSpacebarPress() {
+    if (window.waitingForInitialSwitch) {
+        console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
+        window.waitingForInitialSwitch = false;
+        markScanningStartedFromSwitch();
+        startAuditoryScanning();
+        return;
+    }
+
+    if (shouldSuppressSwitchActivation()) {
+        return;
+    }
+
+    if (currentlyScannedButton && !isLLMProcessing && !listeningForQuestion) {
+        const buttonToActivate = currentlyScannedButton;
+        console.log('Spacebar pressed, activating button:', buttonToActivate.textContent);
+        buttonToActivate.click();
+        buttonToActivate.classList.add('active');
+        setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+        return;
+    }
+
+    if (isPausedFromScanLimit) {
+        resumeAuditoryScanning();
+        return;
+    }
+
+    const scanningIsIdle = scanningInterval === null && !currentlyScannedButton;
+    if (scanningIsIdle) {
+        markScanningStartedFromSwitch();
+        startAuditoryScanning();
+    }
+}
+
+function addPauseToJokeText(text) {
+    if (!text) return '';
+    if (text.includes('[PAUSE]')) return text;
+
+    const questionIndex = text.indexOf('?');
+    if (questionIndex !== -1 && questionIndex < text.length - 1) {
+        return `${text.slice(0, questionIndex + 1)} [PAUSE] ${text.slice(questionIndex + 1).trim()}`;
+    }
+
+    if (text.includes(' - ')) {
+        return text.replace(' - ', ' [PAUSE] ');
+    }
+
+    if (text.includes(' — ')) {
+        return text.replace(' — ', ' [PAUSE] ');
+    }
+
+    if (text.includes(': ')) {
+        return text.replace(': ', ': [PAUSE] ');
+    }
+
+    return text;
+}
+
+function isJokeQuestion(questionText) {
+    if (!questionText) return false;
+    const lowered = questionText.toLowerCase();
+    return /\b(joke|jokes|funny|pun|dad joke|tell me a joke|make me laugh)\b/.test(lowered);
+}
+
+function tokenizeForContext(text) {
+    if (!text || typeof text !== 'string') return [];
+    const stopWords = new Set([
+        'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'to', 'of', 'for', 'in', 'on', 'at', 'with', 'from',
+        'is', 'are', 'was', 'were', 'be', 'been', 'being', 'it', 'this', 'that', 'i', 'you', 'we', 'they', 'he', 'she',
+        'do', 'does', 'did', 'want', 'wants', 'would', 'could', 'should', 'can', 'will', 'today', 'tonight', 'afternoon'
+    ]);
+
+    return text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(token => token.length > 1 && !stopWords.has(token));
+}
+
+function scoreOptionContextualFit(optionData, contextTerms, latestResponseTerms) {
+    const optionText = typeof optionData.option === 'string' ? optionData.option : '';
+    const summaryText = typeof optionData.summary === 'string' ? optionData.summary : '';
+    const keywordText = Array.isArray(optionData.keywords) ? optionData.keywords.join(' ') : '';
+    const combinedText = `${optionText} ${summaryText} ${keywordText}`;
+    const optionTerms = tokenizeForContext(combinedText);
+    const optionTermSet = new Set(optionTerms);
+
+    let score = 0;
+    for (const term of contextTerms) {
+        if (optionTermSet.has(term)) score += 4;
+    }
+    for (const term of latestResponseTerms) {
+        if (optionTermSet.has(term)) score += 6;
+    }
+
+    const wordCount = optionText.trim().split(/\s+/).filter(Boolean).length;
+    if (wordCount >= 2 && wordCount <= 10) score += 1;
+    if (wordCount > 14) score -= 2;
+
+    if (/^i\s+want\s+to\b/i.test(optionText) || /^let('|’)s\b/i.test(optionText) || /^how about\b/i.test(optionText)) {
+        score += 1;
+    }
+
+    // BOOST: Prioritize partner-engagement questions
+    const partnerEngagementPatterns = [/^do you\b/i, /^would you\b/i, /^can you\b/i, /^could you\b/i, /^have you\b/i, /^what do you think\b/i, /^what do you feel\b/i, /^are you\b/i, /^should we\b/i, /^do you want\b/i, /^will you\b/i, /^do you like\b/i, /^what's your\b/i, /^who wants\b/i];
+    if (partnerEngagementPatterns.some(pattern => pattern.test(optionText))) score += 8;
+
+    // Prefer single selectable phrase over multi-sentence constructions.
+    if ((optionText.match(/[.!?]/g) || []).length > 1) {
+        score -= 2;
+    }
+
+    return score;
+}
+
+function prioritizeContextualOptions(options, contextText, maxCount = LLMOptions) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+
+    const contextTerms = tokenizeForContext(contextText || '');
+    const latestResponse = Array.isArray(followUpConversation.selectedResponses) && followUpConversation.selectedResponses.length > 0
+        ? followUpConversation.selectedResponses[followUpConversation.selectedResponses.length - 1]
+        : '';
+    const latestResponseTerms = tokenizeForContext(latestResponse);
+
+    const scored = options.map((optionData, index) => ({
+        optionData,
+        index,
+        score: scoreOptionContextualFit(optionData, contextTerms, latestResponseTerms)
+    }));
+
+    scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.index - b.index;
+    });
+
+    const selected = scored.slice(0, Math.max(1, maxCount)).map(item => item.optionData);
+    console.log('Context prioritization scores:', scored.map(s => ({ idx: s.index, score: s.score, summary: s.optionData?.summary })));
+    return selected;
+}
+
+function filterOptionsForUserVoicePerspective(options) {
+    if (!Array.isArray(options)) return [];
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    const mirroredToUserPatterns = [
+        /^\s*what\s+is\s+making\s+you\s+feel\b/i,
+        /^\s*what\s+makes\s+you\s+feel\b/i,
+        /^\s*why\s+do\s+you\s+feel\b/i,
+        /^\s*how\s+does\s+that\s+make\s+you\s+feel\b/i,
+        /^\s*why\s+are\s+you\s+so\b/i
+    ];
+
+    const latestLooksFirstPerson = /^\s*(i\b|i\'m\b|i am\b|i feel\b|i want\b|i like\b|i love\b)/i.test(latestSelectedResponse || '');
+
+    return options.filter(item => {
+        const optionText = typeof item?.option === 'string' ? item.option.trim() : '';
+        if (!optionText) return false;
+
+        if (latestLooksFirstPerson && mirroredToUserPatterns.some(pattern => pattern.test(optionText))) {
+            return false;
+        }
+
+        const perspectiveScore = scoreUserVoicePerspective(optionText);
+        // Keep neutral and positive items; remove only strongly "addressed-to-user" phrasing.
+        return perspectiveScore > -5;
+    });
+}
+
+function ensurePartnerPerspectiveMix(options, maxCount = LLMOptions) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    const isAssertion = /^\s*(i\b|i\'m\b|i am\b|i want\b|i like\b|i love\b|i feel\b)/i.test(latestSelectedResponse || '');
+    if (!isAssertion) return options.slice(0, Math.max(1, maxCount));
+
+    const partnerDirected = [];
+    const otherOptions = [];
+
+    for (const item of options) {
+        const text = typeof item?.option === 'string' ? item.option.trim() : '';
+        if (/^(do you\b|have you\b|would you\b|could you\b|can you\b|did you\b|what do you think\b)/i.test(text)) {
+            partnerDirected.push(item);
+        } else {
+            otherOptions.push(item);
+        }
+    }
+
+    const targetPartnerCount = Math.min(3, Math.max(1, Math.floor(Math.max(1, maxCount) / 3)));
+    const prioritized = [
+        ...partnerDirected.slice(0, targetPartnerCount),
+        ...otherOptions,
+        ...partnerDirected.slice(targetPartnerCount)
+    ];
+
+    return prioritized.slice(0, Math.max(1, maxCount));
+}
+
+function isQuestionLikeOption(text) {
+    if (!text || typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (/[?]\s*$/.test(trimmed)) return true;
+    return /^(do|does|did|are|is|can|could|would|will|have|has|should|what|which|when|where|why|how|who)\b/i.test(trimmed);
+}
+
+function buildPartnerQuestionFallbacks(latestSelectedResponse, neededCount) {
+    const communicationType = classifyCommunicationType(latestSelectedResponse || '');
+    const templatesByType = {
+        assertion: [
+            'What do you think about this?',
+            'Do you agree with me?',
+            'Have you felt this way too?',
+            'Can we talk about this?',
+            'What would you do in my place?'
+        ],
+        affirmation: [
+            'Do you feel the same way?',
+            'Would you agree with that?',
+            'What do you think?',
+            'Should we do that together?',
+            'Do you want to join me?'
+        ],
+        request: [
+            'Can you help me with this?',
+            'Would you do this with me?',
+            'Do you think this would work?',
+            'Should we try this now?',
+            'Can we do this together?'
+        ],
+        answer: [
+            'Does that make sense to you?',
+            'What do you think about that?',
+            'Do you want to know more?',
+            'Should I explain more?',
+            'Do you agree with that?'
+        ],
+        joke: [
+            'Do you think that is funny?',
+            'Want to hear another one?',
+            'Did that make you laugh?',
+            'Do you have a joke too?',
+            'Should I tell one more?'
+        ],
+        greeting: [
+            'How are you doing today?',
+            'What are you up to?',
+            'Can we chat for a bit?',
+            'Are you having a good day?',
+            'Do you want to talk?'
+        ],
+        question: [
+            'What do you think about that?',
+            'Do you have an idea?',
+            'Can we figure this out together?',
+            'Would you choose the same?',
+            'Should we decide together?'
+        ]
+    };
+
+    const templates = templatesByType[communicationType] || templatesByType.assertion;
+    const selectedTemplates = templates.slice(0, Math.max(0, neededCount));
+    return selectedTemplates.map((text) => ({
+        option: text,
+        summary: text,
+        keywords: tokenizeForContext(text).slice(0, 5),
+        isLLMGenerated: true,
+        originalPrompt: activeLLMPromptForContext,
+        originatingButtonText: activeOriginatingButtonText
+    }));
+}
+
+function prioritizePartnerEngagementQuestions(options, maxCount = LLMOptions, minQuestionCount = 3) {
+    if (!Array.isArray(options) || options.length === 0) return [];
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    const questions = [];
+    const nonQuestions = [];
+
+    for (const item of options) {
+        const text = typeof item?.option === 'string' ? item.option.trim() : '';
+        if (!text) continue;
+        if (isQuestionLikeOption(text)) {
+            questions.push(item);
+        } else {
+            nonQuestions.push(item);
+        }
+    }
+
+    const targetQuestions = Math.min(Math.max(1, minQuestionCount), Math.max(1, maxCount));
+    let supplementalQuestions = [];
+    if (questions.length < targetQuestions) {
+        supplementalQuestions = buildPartnerQuestionFallbacks(latestSelectedResponse, targetQuestions - questions.length);
+    }
+
+    const merged = [...questions, ...supplementalQuestions, ...nonQuestions];
+    const deduped = [];
+    const seen = new Set();
+    for (const item of merged) {
+        const text = typeof item?.option === 'string' ? item.option.trim() : '';
+        const normalized = normalizeForComparison(text);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        deduped.push(item);
+    }
+
+    const result = deduped.slice(0, Math.max(1, maxCount));
+    const resultQuestionCount = result.filter(item => isQuestionLikeOption(item?.option)).length;
+    console.log('❓ Partner question prioritization:', {
+        inputCount: options.length,
+        existingQuestionCount: questions.length,
+        supplementalQuestionCount: supplementalQuestions.length,
+        outputCount: result.length,
+        outputQuestionCount: resultQuestionCount,
+        targetQuestions
+    });
+    return result;
+}
+
+function normalizeForComparison(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text
+        .toLowerCase()
+        .replace(/["'“”‘’]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function enforceAdditiveFollowUpOptions(options, maxCount = LLMOptions) {
+    if (!Array.isArray(options) || options.length === 0) {
+        console.log('📊 enforceAdditiveFollowUpOptions: Empty/invalid input, returning empty');
+        return [];
+    }
+
+    const selectedResponses = Array.isArray(followUpConversation.selectedResponses)
+        ? followUpConversation.selectedResponses
+        : [];
+    const latestSelectedResponse = selectedResponses.length > 0
+        ? selectedResponses[selectedResponses.length - 1]
+        : '';
+
+    console.log('📊 enforceAdditiveFollowUpOptions START:', {
+        inputCount: options.length,
+        latestSelectedResponse: latestSelectedResponse,
+        selectedResponsesCount: selectedResponses.length
+    });
+
+    const latestNormalized = normalizeForComparison(latestSelectedResponse);
+    if (!latestNormalized) {
+        const result = options.slice(0, Math.max(1, maxCount));
+        console.log(`📊 enforceAdditiveFollowUpOptions: No latestNormalized, returning ${result.length} options`);
+        return result;
+    }
+
+    console.log('📊 Latest normalized:', latestNormalized);
+
+    const additive = [];
+    for (let i = 0; i < options.length; i++) {
+        const item = options[i];
+        if (!item || typeof item.option !== 'string') {
+            console.log(`  ❌ Option ${i}: Skipped (invalid item structure)`);
+            continue;
+        }
+
+        const rawOption = item.option.trim();
+        if (!rawOption) {
+            console.log(`  ❌ Option ${i}: Skipped (empty after trim)`);
+            continue;
+        }
+
+        let updatedOption = rawOption;
+        const normalizedOption = normalizeForComparison(rawOption);
+
+        console.log(`  📌 Option ${i}: "${rawOption.substring(0, 50)}..." normalized: "${normalizedOption.substring(0, 50)}..."`);
+
+        // If option is just a restatement of the previous selection, drop it.
+        if (normalizedOption === latestNormalized) {
+            console.log(`    🚫 Exact match with latest - DROPPED`);
+            continue;
+        }
+
+        // If option starts by repeating prior selection, remove that prefix and keep additive tail.
+        if (normalizedOption.startsWith(latestNormalized)) {
+            console.log(`    ⚠️  Option starts with latest response, attempting to strip prefix...`);
+            const escapedLatest = latestSelectedResponse.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const prefixRegex = new RegExp(`^\\s*${escapedLatest}\\s*[!?.:,;\-–—]*\\s*`, 'i');
+            updatedOption = updatedOption.replace(prefixRegex, '').trim();
+
+            // Fallback if punctuation/spacing mismatch prevented direct prefix strip.
+            if (!updatedOption) {
+                console.log(`      Direct regex failed, trying fallback...`);
+                const firstBreak = rawOption.search(/[!?.]\s+/);
+                if (firstBreak >= 0) {
+                    updatedOption = rawOption.slice(firstBreak + 1).trim();
+                    console.log(`      Fallback found break at ${firstBreak}, extracted: "${updatedOption.substring(0, 50)}..."`);
+                }
+            } else {
+                console.log(`      Regex stripped prefix, remaining: "${updatedOption.substring(0, 50)}..."`);
+            }
+        }
+
+        if (!updatedOption) {
+            console.log(`    🚫 No updated option remains - DROPPED`);
+            continue;
+        }
+
+        const updatedNormalized = normalizeForComparison(updatedOption);
+        if (!updatedNormalized || updatedNormalized === latestNormalized) {
+            console.log(`    🚫 Updated normalized is empty or matches latest - DROPPED`);
+            continue;
+        }
+
+        console.log(`    ✅ KEEPING option`);
+        additive.push({
+            ...item,
+            option: updatedOption,
+            summary: item.summary && typeof item.summary === 'string' ? item.summary : updatedOption
+        });
+    }
+
+    const result = additive.slice(0, Math.max(1, maxCount));
+    console.log(`📊 enforceAdditiveFollowUpOptions END: ${result.length} options kept from ${options.length} input`);
+    return result;
+}
+
+async function fetchJokeOptions(limit, questionContext) {
+    const response = await authenticatedFetch(`/api/jokes/contextual?limit=${limit}`);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch jokes: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const jokes = (data && data.jokes) ? data.jokes : [];
+
+    return jokes.map(joke => {
+        const jokeText = (joke.text || '').trim();
+        return {
+            option: addPauseToJokeText(jokeText),
+            summary: (joke.summary || 'Joke').trim() || 'Joke',
+            keywords: joke.tags ? (Array.isArray(joke.tags) ? joke.tags : [joke.tags]) : ['joke', 'humor'],
+            isLLMGenerated: true,
+            originalPrompt: questionContext,
+            originatingButtonText: activeOriginatingButtonText
+        };
+    }).filter(option => option.option && option.summary);
+}
 
 // --- NEW GLOBAL VARIABLES FOR ANNOUNCEMENT QUEUE & AUDIO CONTEXT FIX ---
 let announcementQueue = [];       // Queue for sequential announcements
 let isAnnouncingNow = false;      // Flag to prevent concurrent announce playback
+let announcementStartedAtMs = 0;  // Watchdog timestamp for stuck queue recovery
 let audioContextResumeAttempted = false; // Flag for AudioContext auto-resume helper
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.onended = null;
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
+}
 
 // --- NEW: User Management Variables ---
 let currentAacUserId = null; // NEW: To store the currently selected individual AAC user ID
@@ -68,9 +1508,259 @@ let systemSpeakerId = localStorage.getItem('bravoSystemSpeakerId') || 'default';
 
 let currentTtsVoiceName = 'en-US-Neural2-A'; // Default voice
 let currentSpeechRate = 180;                 // Default words-per-minute
+let userLanguageLocale = 'en-US';
+let defaultPartnerLanguageLocale = 'en-US';
+let defaultPartnerVoiceName = 'en-US-Neural2-A';
+let locationOverrideVoicesMap = {};
+let currentLocationLanguageOverride = '';
+
+const TRANSLATION_CACHE_TTL_MS = 10 * 60 * 1000;
+const translationCache = new Map();
+const translationInFlight = new Map();
+const standardPromptTranslationCache = new Map();
+const llmSpecialButtonLabelCache = new Map();
+
+const LLM_SPECIAL_BUTTON_LABELS = Object.freeze({
+    home: 'Home',
+    somethingElse: 'Something Else',
+    freeStyle: 'Free Style',
+    askAgain: 'Please ask me again'
+});
+
+const STANDARD_ANNOUNCEMENT_TEXT = {
+    listening: "I'm listening.",
+    processing: "Okay, processing. Give me a moment."
+};
+
+const LOCALE_LABEL_TO_TAG = {
+    'english (us)': 'en-US',
+    'spanish (us)': 'es-US',
+    'french (france)': 'fr-FR',
+    'german (germany)': 'de-DE',
+    'italian (italy)': 'it-IT',
+    'portuguese (brazil)': 'pt-BR',
+    'arabic': 'ar-XA'
+};
+
+function normalizeLocaleTag(value) {
+    if (typeof value !== 'string') return '';
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    const labelMatch = LOCALE_LABEL_TO_TAG[trimmed.toLowerCase()];
+    if (labelMatch) return labelMatch;
+
+    const cleaned = trimmed.replace(/_/g, '-');
+    const localeMatch = cleaned.match(/^([a-zA-Z]{2})(?:-([a-zA-Z]{2,3}))?$/);
+    if (!localeMatch) return '';
+
+    const lang = localeMatch[1].toLowerCase();
+    const region = localeMatch[2] ? localeMatch[2].toUpperCase() : '';
+    return region ? `${lang}-${region}` : lang;
+}
+
+function getEffectivePartnerLanguage() {
+    return normalizeLocaleTag(currentLocationLanguageOverride)
+        || normalizeLocaleTag(defaultPartnerLanguageLocale)
+        || 'en-US';
+}
+
+function getEffectivePartnerVoice() {
+    const locale = getEffectivePartnerLanguage();
+    const localeVoice = locationOverrideVoicesMap && typeof locationOverrideVoicesMap === 'object'
+        ? locationOverrideVoicesMap[locale]
+        : '';
+    return String(localeVoice || defaultPartnerVoiceName || currentTtsVoiceName || '').trim();
+}
+
+function getWakeWordRecognitionLanguage() {
+    // Wake-word spotting should track the wake-word / user language, not the partner TTS language.
+    return normalizeLocaleTag(userLanguageLocale) || 'en-US';
+}
+
+async function loadCurrentLocationLanguageOverride() {
+    try {
+        const response = await authenticatedFetch('/get-user-current', { method: 'GET' });
+        if (!response.ok) return;
+        const state = await response.json();
+        currentLocationLanguageOverride = normalizeLocaleTag(state.locationLanguageOverride);
+    } catch (error) {
+        console.warn('Unable to load current location language override:', error);
+    }
+}
+
+async function translateLineBetweenLocales(text, sourceLocaleRaw, targetLocaleRaw) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return cleanText;
+
+    const sourceLocale = String(sourceLocaleRaw || '').trim() || undefined;
+    const targetLocale = String(targetLocaleRaw || '').trim() || undefined;
+    if (!targetLocale) return cleanText;
+    if (sourceLocale && sourceLocale.toLowerCase() === targetLocale.toLowerCase()) {
+        return cleanText;
+    }
+
+    const cacheKey = `${sourceLocale || 'auto'}__${targetLocale}__${cleanText.toLowerCase()}`;
+    const now = Date.now();
+    const cached = translationCache.get(cacheKey);
+    if (cached && (now - cached.ts) < TRANSLATION_CACHE_TTL_MS) {
+        return cached.value;
+    }
+    if (translationInFlight.has(cacheKey)) {
+        return translationInFlight.get(cacheKey);
+    }
+
+    const requestTranslation = async (sourceLocaleOverride) => {
+        const response = await authenticatedFetch('/api/translate-lines', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                lines: [cleanText],
+                source_locale: sourceLocaleOverride || undefined,
+                target_locale: targetLocale,
+            }),
+        });
+        if (!response.ok) {
+            throw new Error(`Translate request failed: ${response.status}`);
+        }
+        const payload = await response.json();
+        const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines[0] : '';
+        return String(translated || '').trim();
+    };
+
+    const translationPromise = (async () => {
+        let translated = await requestTranslation(sourceLocale);
+        if (!translated || translated.toLowerCase() === cleanText.toLowerCase()) {
+            translated = await requestTranslation(null);
+        }
+        const finalValue = translated || cleanText;
+        translationCache.set(cacheKey, { value: finalValue, ts: Date.now() });
+        return finalValue;
+    })();
+
+    translationInFlight.set(cacheKey, translationPromise);
+    try {
+        return await translationPromise;
+    } catch (error) {
+        console.warn('Translation fallback to source text:', error);
+        return cleanText;
+    } finally {
+        translationInFlight.delete(cacheKey);
+    }
+}
+
+async function translateLineToPartnerLanguage(text) {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return cleanText;
+    const targetLocale = getEffectivePartnerLanguage();
+    const sourceLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    return translateLineBetweenLocales(cleanText, sourceLocale, targetLocale);
+}
+
+function warmTranslationCacheForOptions(options) {
+    const list = Array.isArray(options) ? options : [];
+    if (!list.length) return;
+    const targetLocale = getEffectivePartnerLanguage();
+    const sourceLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    if (targetLocale.toLowerCase() === sourceLocale.toLowerCase()) return;
+
+    // Warm only the first several options to avoid unnecessary API load.
+    const warmCandidates = list
+        .slice(0, 10)
+        .map(item => String(item?.option || '').trim())
+        .filter(Boolean);
+
+    warmCandidates.forEach(text => {
+        translateLineToPartnerLanguage(text).catch(() => {});
+    });
+}
+
+async function announcePartnerFacingOutput(sourceText, recordHistory = false, showSplash = true) {
+    const cleanSource = String(sourceText || '').trim();
+    if (!cleanSource) return;
+    const translatedForPartner = await translateLineToPartnerLanguage(cleanSource);
+    await announce(translatedForPartner, 'system', recordHistory, showSplash);
+}
+
+async function getTranslatedStandardPrompt(promptKey, fallbackText) {
+    const targetLocale = getEffectivePartnerLanguage();
+    // Built-in standard prompts are authored in English.
+    // Always translate from English to the effective partner language.
+    const sourceLocale = 'en-US';
+    const baseText = String(fallbackText || '').trim();
+    if (!baseText) return baseText;
+
+    const cacheKey = `${promptKey}__${sourceLocale}__${targetLocale}`;
+    const cached = standardPromptTranslationCache.get(cacheKey);
+    if (cached) return cached;
+
+    const translated = await translateLineBetweenLocales(baseText, sourceLocale, targetLocale);
+    const finalText = String(translated || baseText).trim() || baseText;
+    standardPromptTranslationCache.set(cacheKey, finalText);
+    return finalText;
+}
+
+function warmStandardPromptTranslations() {
+    Object.entries(STANDARD_ANNOUNCEMENT_TEXT).forEach(([promptKey, text]) => {
+        getTranslatedStandardPrompt(promptKey, text).catch(() => {});
+    });
+}
+
+async function announceFastStandardPrompt(promptKey, fallbackText) {
+    // Ensure we have the latest saved location override before translating wake-word prompts.
+    await loadCurrentLocationLanguageOverride();
+    console.log('Standard prompt locale context:', {
+        promptKey,
+        userLanguageLocale,
+        defaultPartnerLanguageLocale,
+        currentLocationLanguageOverride,
+        effectivePartnerLanguage: getEffectivePartnerLanguage()
+    });
+    const translatedPrompt = await getTranslatedStandardPrompt(promptKey, fallbackText);
+    // Keep standard prompts on the normal announce path so they use configured
+    // partner voice, output routing, and splash behavior like other announcements.
+    await announce(translatedPrompt, 'system', false, true, false);
+}
+
+async function getLocalizedLlmSpecialButtonLabels() {
+    const locale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+    const cached = llmSpecialButtonLabelCache.get(locale);
+    if (cached) {
+        return cached;
+    }
+
+    const defaults = { ...LLM_SPECIAL_BUTTON_LABELS };
+    if (locale.toLowerCase() === 'en-us') {
+        llmSpecialButtonLabelCache.set(locale, defaults);
+        return defaults;
+    }
+
+    const keys = Object.keys(defaults);
+    const translatedValues = await Promise.all(
+        keys.map(async (key) => {
+            const sourceText = defaults[key];
+            try {
+                const translated = await translateLineBetweenLocales(sourceText, 'en-US', locale);
+                return String(translated || sourceText).trim() || sourceText;
+            } catch (error) {
+                console.warn(`Failed to localize special button label "${sourceText}" for ${locale}:`, error);
+                return sourceText;
+            }
+        })
+    );
+
+    const localized = {};
+    keys.forEach((key, index) => {
+        localized[key] = translatedValues[index];
+    });
+
+    llmSpecialButtonLabelCache.set(locale, localized);
+    return localized;
+}
 
 // --- AAC Pictogram Support ---
 let enablePictograms = false; // Global setting for pictogram display - Always false for Gridpage
+let disableTapPictograms = false; // When true, Tap Interface shows no pictograms/images and no sight word formatting
 
 // Simple mapping of button text to Unicode emoji or icons
 // This can be extended with more sophisticated matching or external APIs
@@ -324,9 +2014,15 @@ function getWordVariants(word) {
  * @returns {Promise<string|null>} - Promise that resolves to image URL or null if none found
  */
 async function getSymbolImageForText(text, keywords = null) {
-    console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}`);
+    console.log(`🔍 getSymbolImageForText called for "${text}", enablePictograms: ${enablePictograms}, disableTapPictograms: ${disableTapPictograms}`);
     if (!text || text.trim() === '') {
         console.log(`❌ Empty text provided to getSymbolImageForText`);
+        return null;
+    }
+    
+    // If Tap Interface pictograms are disabled, return null (no images at all)
+    if (disableTapPictograms) {
+        console.log(`❌ Tap Interface pictograms disabled via setting, skipping image for "${text}"`);
         return null;
     }
     
@@ -454,8 +2150,8 @@ function base64ToArrayBuffer(base64) {
 
 // --- Core Fetch Wrapper (NEW) ---
 // This function will wrap all your fetch calls to automatically add auth headers
-async function authenticatedFetch(url, options = {}) {
-    // Always refresh tokens from session storage (in case they were updated)
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
+    // Always refresh tokens from session storage (in case they were updated by token-refresh.js)
     firebaseIdToken = sessionStorage.getItem(FIREBASE_TOKEN_SESSION_KEY);
     currentAacUserId = sessionStorage.getItem(AAC_USER_ID_SESSION_KEY);
     
@@ -489,10 +2185,24 @@ async function authenticatedFetch(url, options = {}) {
     // Make the request
     const response = await fetch(url, options);
     
-    // Handle authentication failures
-    if (response.status === 401 || response.status === 403) {
+    // Handle authentication failures — try silent token refresh before giving up
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Authentication failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        
+        // Try to refresh the token silently via Firebase
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed successfully, retrying request...');
+                // Retry the request with the fresh token (clone options to avoid header mutation issues)
+                const retryOptions = { ...options, headers: { ...options.headers } };
+                return authenticatedFetch(url, retryOptions, true);
+            }
+        }
+        
+        // Token refresh failed — fall back to redirect
         const errorText = await response.text();
-        console.warn(`Authentication failed (${response.status}) for ${url}:`, errorText);
+        console.warn(`Token refresh failed for ${url}:`, errorText);
         localStorage.setItem('debug_auth_expired', `Auth failed at ${new Date().toISOString()}: ${response.status} - ${errorText}`);
         
         // For chat history, fail gracefully without redirecting
@@ -506,6 +2216,22 @@ async function authenticatedFetch(url, options = {}) {
         window.location.href = 'auth.html';
         throw new Error("Session expired or invalid.");
     }
+    
+    // Handle auth failure on retry (refresh already attempted)
+    if (response.status === 401 || response.status === 403) {
+        const errorText = await response.text();
+        localStorage.setItem('debug_auth_expired', `Auth failed after refresh at ${new Date().toISOString()}: ${response.status} - ${errorText}`);
+        
+        if (url.includes('/record_chat_history')) {
+            throw new Error(`Authentication expired while recording chat history: ${response.status} - ${errorText}`);
+        }
+        
+        sessionStorage.clear();
+        alert('Your session has expired. Please log in again.');
+        window.location.href = 'auth.html';
+        throw new Error("Session expired or invalid.");
+    }
+    
     return response;
 }
 
@@ -567,11 +2293,14 @@ async function loadScanSettings() {
 
         // Load booleans
         ScanningOff = settings.ScanningOff === true;
+        scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
         waitForSwitchToScan = settings.waitForSwitchToScan === true;
+        playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
         SummaryOff = settings.SummaryOff === true;
         enablePictograms = settings.enablePictograms === true;
+        disableTapPictograms = settings.disableTapPictograms === true;
         console.log('🔍 DEBUG enablePictograms loaded from settings:', settings.enablePictograms, '-> final value:', enablePictograms);
-        console.log('🔍 DEBUG waitForSwitchToScan loaded from settings:', settings.waitForSwitchToScan, '-> final value:', waitForSwitchToScan);
+        console.log('🔍 DEBUG disableTapPictograms loaded from settings:', settings.disableTapPictograms, '-> final value:', disableTapPictograms);
         
         // Update sight word service with new settings
         if (window.updateSightWordSettings) {
@@ -604,6 +2333,15 @@ async function loadScanSettings() {
             console.warn("TTS Voice Name setting not found or invalid. Using default:", currentTtsVoiceName);
             // It will keep its default value of 'en-US-Neural2-A'
         }
+
+        userLanguageLocale = normalizeLocaleTag(settings?.userLanguage) || 'en-US';
+        defaultPartnerLanguageLocale = normalizeLocaleTag(settings?.defaultPartnerLanguage) || 'en-US';
+        defaultPartnerVoiceName = String(settings?.defaultPartnerVoice || settings?.selected_tts_voice_name || currentTtsVoiceName || '').trim() || currentTtsVoiceName;
+        locationOverrideVoicesMap = (settings?.locationOverrideVoices && typeof settings.locationOverrideVoices === 'object')
+            ? settings.locationOverrideVoices
+            : {};
+        currentTtsVoiceName = defaultPartnerVoiceName;
+        console.log(`Language context loaded. user=${userLanguageLocale}, partner=${defaultPartnerLanguageLocale}`);
         // --- END OF NEW LOGIC ---
 
    } catch (error) {
@@ -775,6 +2513,866 @@ async function showMoodSelectionIfNeeded() {
     });
 }
 
+function getComposeReturnTarget() {
+    if (composeSession?.sourceFrom) {
+        return composeSession.sourceFrom;
+    }
+    return 'gridpage.html?page=home';
+}
+
+function updateComposeQuestionDisplay(message = '') {
+    // Keep hidden textarea in sync (for legacy code that reads it)
+    const questionDisplay = document.getElementById('question-display');
+    const compositionText = String(composeSession?.text || '').trim();
+    const header = message || 'Create Mode';
+    if (questionDisplay) questionDisplay.value = compositionText ? `${header}\n\n${compositionText}` : header;
+    // Show in status bar instead of the hidden question box
+    updateStatusBar(`✏️ ${header}`);
+    // Keep the compose panel label/textarea current
+    updateSpeechHistoryPanel();
+}
+
+function createComposeGridButton(label, clickHandler, index = 0) {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.classList.add('grid-button');
+    const row = Math.floor(index / gridColumns);
+    const col = index % gridColumns;
+    button.dataset.row = String(row);
+    button.dataset.col = String(col);
+    button.style.gridRowStart = row + 1;
+    button.style.gridColumnStart = col + 1;
+    button.addEventListener('click', async () => {
+        if (composeMenuActionInProgress) {
+            return;
+        }
+        composeMenuActionInProgress = true;
+        stopAuditoryScanning();
+        try {
+            await clickHandler();
+        } finally {
+            composeMenuActionInProgress = false;
+        }
+    });
+    return button;
+}
+
+async function renderComposeEntryMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateComposeQuestionDisplay('Create: Start New or Open Existing');
+
+    const options = [
+        {
+            label: 'Create New',
+            handler: async () => {
+                composeSession = {
+                    active: true,
+                    documentId: null,
+                    title: '',
+                    text: '',
+                    startedAt: new Date().toISOString(),
+                    sourceFrom: fromUrl || getComposeReturnTarget()
+                };
+                saveComposeSession();
+                window.location.href = '/static/compose_create.html';
+            }
+        },
+        {
+            label: 'Open Existing',
+            handler: async () => {
+                await renderComposeExistingDocumentsMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Cancel',
+            handler: async () => {
+                clearComposeSession();
+                window.location.href = fromUrl || 'gridpage.html?page=home';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'compose-entry-menu' }), 50);
+}
+
+async function renderComposeExistingDocumentsMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateComposeQuestionDisplay('Create: Choose an existing document');
+
+    let docs = [];
+    try {
+        const response = await authenticatedFetch('/api/compose/documents', { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            docs = Array.isArray(data.documents) ? data.documents : [];
+        }
+    } catch (error) {
+        console.error('Error loading compose documents:', error);
+    }
+
+    const storyLikeDocs = docs.filter((doc) => (doc.document_type || 'story') !== 'email').slice(0, Math.max(6, gridColumns * 2));
+    let index = 0;
+
+    if (storyLikeDocs.length === 0) {
+        container.appendChild(createComposeGridButton('No Saved Documents', async () => {
+            await announce('No saved documents found.', 'system', false);
+            await renderComposeEntryMenu(container, fromUrl);
+        }, index++));
+    } else {
+        storyLikeDocs.forEach((doc) => {
+            const displayTitle = (doc.title || 'Untitled Creation').trim();
+            container.appendChild(createComposeGridButton(displayTitle, async () => {
+                composeSession = {
+                    active: true,
+                    documentId: doc.id,
+                    title: displayTitle,
+                    text: String(doc.body || ''),
+                    startedAt: new Date().toISOString(),
+                    sourceFrom: fromUrl || getComposeReturnTarget()
+                };
+                saveComposeSession();
+                window.location.href = '/static/compose_create.html';
+            }, index++));
+        });
+    }
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderComposeEntryMenu(container, fromUrl);
+    }, index));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'compose-existing-menu' }), 50);
+}
+
+async function saveComposeDocumentAndExit() {
+    const compositionText = String(composeSession?.text || '').trim();
+    if (!compositionText) {
+        await announce('Creation is empty. Add words before saving.', 'system', false);
+        return;
+    }
+
+    let generatedTitle = 'Untitled Letter';
+    try {
+        const titleResponse = await authenticatedFetch('/api/compose/generate-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: compositionText })
+        });
+        if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            if (titleData.success && titleData.title) {
+                generatedTitle = String(titleData.title).trim() || generatedTitle;
+            }
+        }
+    } catch (error) {
+        console.warn('Create title generation failed, using fallback title:', error);
+    }
+
+    const payload = {
+        document_type: 'story',
+        title: generatedTitle,
+        body: compositionText,
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: ''
+    };
+
+    const isUpdate = Boolean(composeSession?.documentId);
+    const targetUrl = isUpdate
+        ? `/api/compose/documents/${composeSession.documentId}`
+        : '/api/compose/documents';
+    const method = isUpdate ? 'PUT' : 'POST';
+
+    const saveResponse = await authenticatedFetch(targetUrl, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+
+    if (!saveResponse.ok) {
+        const errText = await saveResponse.text().catch(() => 'unknown save error');
+        throw new Error(`Save failed: ${errText}`);
+    }
+
+    clearComposeSession();
+    window.location.href = 'gridpage.html?page=home';
+}
+
+async function aiEditCompositionInSession() {
+    const compositionText = String(composeSession?.text || '').trim();
+    if (!compositionText) {
+        await announce('Creation is empty. Add words before editing.', 'system', false);
+        return;
+    }
+
+    const response = await authenticatedFetch('/api/compose/ai-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: compositionText })
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => 'unknown ai edit error');
+        throw new Error(`AI edit failed: ${errText}`);
+    }
+
+    const data = await response.json();
+    if (!data.success || !data.edited_body) {
+        throw new Error(data.error || 'AI edit failed');
+    }
+
+    composeSession.text = String(data.edited_body || '').trim();
+    saveComposeSession();
+}
+
+function buildCreationExportFilename() {
+    const existingTitle = String(composeSession?.title || '').trim();
+    const textPreview = String(composeSession?.text || '').trim().split(/\s+/).slice(0, 6).join(' ');
+    const baseName = existingTitle || textPreview || `creation-${new Date().toISOString().slice(0, 10)}`;
+    const safeName = baseName
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+    return `${safeName || 'creation'}.txt`;
+}
+
+async function exportCreationToLocalDrive() {
+    const creationText = String(composeSession?.text || '').trim();
+    if (!creationText) {
+        await announce('Creation is empty. Add words before exporting.', 'system', false);
+        return false;
+    }
+
+    const filename = buildCreationExportFilename();
+
+    if (window.showSaveFilePicker) {
+        try {
+            const fileHandle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [
+                    {
+                        description: 'Text Files',
+                        accept: { 'text/plain': ['.txt'] }
+                    }
+                ]
+            });
+            const writable = await fileHandle.createWritable();
+            await writable.write(creationText);
+            await writable.close();
+            return true;
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                return false;
+            }
+            console.warn('Save picker export failed, falling back to browser download:', error);
+        }
+    }
+
+    const blob = new Blob([creationText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+}
+
+async function renderComposeFinalizeMenu(container) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateComposeQuestionDisplay('Finalize Creation');
+
+    const options = [
+        {
+            label: 'Save Creation',
+            handler: async () => {
+                try {
+                    await saveComposeDocumentAndExit();
+                } catch (error) {
+                    console.error('Error saving composition:', error);
+                    await announce('Unable to save creation right now.', 'system', false);
+                    await renderComposeFinalizeMenu(container);
+                }
+            }
+        },
+        {
+            label: 'Discard Creation',
+            handler: async () => {
+                clearComposeSession();
+                window.location.href = 'gridpage.html?page=home';
+            }
+        },
+        {
+            label: 'Read Creation',
+            handler: async () => {
+                const compositionText = String(composeSession?.text || '').trim();
+                if (!compositionText) {
+                    await announce('Creation is empty.', 'system', false);
+                } else {
+                    await announce(compositionText, 'system', false);
+                }
+                await renderComposeFinalizeMenu(container);
+            }
+        },
+        {
+            label: 'Export Creation',
+            handler: async () => {
+                try {
+                    const exported = await exportCreationToLocalDrive();
+                    if (exported) {
+                        await announce('Creation exported to local drive.', 'system', false);
+                    }
+                } catch (error) {
+                    console.error('Error exporting creation:', error);
+                    await announce('Unable to export creation right now.', 'system', false);
+                }
+                await renderComposeFinalizeMenu(container);
+            }
+        },
+        {
+            label: 'AI Edit Creation',
+            handler: async () => {
+                try {
+                    await aiEditCompositionInSession();
+                    updateComposeQuestionDisplay('AI revised creation');
+                    await announce(String(composeSession?.text || ''), 'system', false);
+                } catch (error) {
+                    console.error('Error during AI edit:', error);
+                    await announce('Unable to AI edit creation right now.', 'system', false);
+                }
+                await renderComposeFinalizeMenu(container);
+            }
+        },
+        {
+            label: 'Return to Creation',
+            handler: async () => {
+                window.location.href = '/static/compose_create.html';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'compose-finalize-menu' }), 50);
+}
+
+function getEmailReturnTarget() {
+    if (emailSession?.sourceFrom) {
+        return emailSession.sourceFrom;
+    }
+    return 'gridpage.html?page=home';
+}
+
+function updateEmailQuestionDisplay(message = '') {
+    const questionDisplay = document.getElementById('question-display');
+    const draftText = String(composeSession?.text || '').trim();
+    const header = message || 'Email';
+    if (questionDisplay) {
+        questionDisplay.value = draftText ? `${header}\n\n${draftText}` : header;
+    }
+    updateStatusBar(`📧 ${header}`);
+    updateSpeechHistoryPanel();
+}
+
+async function startGmailConnectFlow() {
+    const response = await authenticatedFetch('/api/email/connect-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'gmail' })
+    });
+    if (!response.ok) {
+        const text = await response.text().catch(() => 'Unable to create Gmail connect link');
+        throw new Error(text);
+    }
+    const data = await response.json();
+    if (!data?.connect_url) {
+        throw new Error('Missing Gmail connect URL');
+    }
+    window.location.href = data.connect_url;
+}
+
+async function renderEmailEntryMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Choose an option');
+
+    const options = [
+        {
+            label: 'Home',
+            handler: async () => {
+                clearEmailSession();
+                window.location.href = fromUrl || 'gridpage.html?page=home';
+            }
+        },
+        {
+            label: 'Create New Email',
+            handler: async () => {
+                await renderEmailContactsMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Read Existing Email',
+            handler: async () => {
+                await renderEmailInboxMenu(container, fromUrl);
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-entry-menu' }), 50);
+}
+
+async function renderEmailContactsMenu(container, fromUrl, selectedContacts = [], pageToken = null) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const selectionCount = selectedContacts.length;
+    const displayTitle = selectionCount > 0
+        ? `Email: Add another contact (${selectionCount} selected)`
+        : 'Email: Choose a contact';
+    updateEmailQuestionDisplay(displayTitle);
+
+    const pageSize = Math.max(4, LLMOptions);
+    let contacts = [];
+    let nextPageToken = null;
+    let loadError = null;
+    let usingInboxFallback = false;
+    try {
+        const contactsUrl = new URL('/api/email/contacts', window.location.origin);
+        contactsUrl.searchParams.set('max_results', String(pageSize));
+        if (pageToken) contactsUrl.searchParams.set('page_token', pageToken);
+        const response = await authenticatedFetch(`${contactsUrl.pathname}${contactsUrl.search}`, { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            contacts = Array.isArray(data.contacts) ? data.contacts : [];
+            nextPageToken = String(data.next_page_token || '').trim() || null;
+        } else {
+            loadError = `Unable to load contacts (${response.status})`;
+        }
+    } catch (error) {
+        loadError = error.message || 'Unable to load contacts';
+    }
+
+    if (loadError || !contacts.length) {
+        try {
+            const inboxUrl = new URL('/api/email/inbox', window.location.origin);
+            inboxUrl.searchParams.set('max_results', String(pageSize));
+            if (pageToken) inboxUrl.searchParams.set('page_token', pageToken);
+            const inboxResponse = await authenticatedFetch(`${inboxUrl.pathname}${inboxUrl.search}`, { method: 'GET' });
+            if (inboxResponse.ok) {
+                const inboxData = await inboxResponse.json();
+                const messages = Array.isArray(inboxData.messages) ? inboxData.messages : [];
+                const dedupe = new Set();
+                const fallbackContacts = [];
+                messages.forEach((message) => {
+                    const senderEmail = String(message?.sender_email || extractEmailAddressFromHeader(message?.from || '') || '').trim();
+                    if (!senderEmail) return;
+                    const dedupeKey = senderEmail.toLowerCase();
+                    if (dedupe.has(dedupeKey)) return;
+                    dedupe.add(dedupeKey);
+                    fallbackContacts.push({
+                        name: String(message?.sender_name || '').trim(),
+                        email: senderEmail,
+                    });
+                });
+                if (fallbackContacts.length) {
+                    contacts = fallbackContacts;
+                    nextPageToken = String(inboxData.next_page_token || '').trim() || null;
+                    usingInboxFallback = true;
+                    loadError = null;
+                }
+            }
+        } catch (fallbackError) {
+            console.warn('Email contacts fallback from inbox failed:', fallbackError);
+        }
+    }
+
+    if (usingInboxFallback) {
+        updateEmailQuestionDisplay(selectionCount > 0
+            ? `Email: Add another contact (${selectionCount} selected)`
+            : 'Email: Choose a contact (recent senders)');
+    }
+
+    let index = 0;
+    if (loadError) {
+        container.appendChild(createComposeGridButton('Try Again', async () => {
+            await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+        }, index++));
+        container.appendChild(createComposeGridButton('Connect Gmail', async () => {
+            try {
+                await startGmailConnectFlow();
+            } catch (error) {
+                await announce('Unable to connect Gmail right now.', 'system', false);
+                await renderEmailEntryMenu(container, fromUrl);
+            }
+        }, index++));
+    } else if (!contacts.length) {
+        container.appendChild(createComposeGridButton('No Contacts Found', async () => {
+            await announce('No contacts found.', 'system', false);
+            await renderEmailEntryMenu(container, fromUrl);
+        }, index++));
+    } else {
+        // Filter out already-selected contacts to avoid duplicates
+        const selectedEmails = new Set(selectedContacts.map(c => c.email.toLowerCase()));
+        const availableContacts = contacts.filter(c => {
+            const email = String(c?.email || '').trim().toLowerCase();
+            return email && !selectedEmails.has(email);
+        });
+
+        availableContacts.forEach((contact) => {
+            const recipientEmail = String(contact?.email || '').trim();
+            const recipientName = String(contact?.name || '').trim();
+            const label = recipientName || recipientEmail;
+            if (!recipientEmail) return;
+
+            container.appendChild(createComposeGridButton(label, async () => {
+                const updatedContacts = [...selectedContacts, { email: recipientEmail, name: recipientName }];
+                await renderEmailContactsConfirmMenu(container, fromUrl, updatedContacts);
+            }, index++));
+        });
+
+        if (nextPageToken) {
+            container.appendChild(createComposeGridButton('Show More', async () => {
+                await renderEmailContactsMenu(container, fromUrl, selectedContacts, nextPageToken);
+            }, index++));
+        }
+    }
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        if (selectedContacts.length > 0) {
+            await renderEmailContactsConfirmMenu(container, fromUrl, selectedContacts);
+        } else {
+            await renderEmailEntryMenu(container, fromUrl);
+        }
+    }, index));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-contacts-menu' }), 50);
+}
+
+async function renderEmailContactsConfirmMenu(container, fromUrl, selectedContacts) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const names = selectedContacts.map(c => c.name || c.email).join(', ');
+    updateEmailQuestionDisplay(`To: ${names}`);
+
+    container.appendChild(createComposeGridButton('Add More Contacts', async () => {
+        await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+    }, 0));
+
+    container.appendChild(createComposeGridButton('Create Email', async () => {
+        const primary = selectedContacts[0];
+        emailSession = {
+            active: true,
+            mode: 'compose',
+            recipientEmail: selectedContacts.map(c => c.email).join(','),
+            recipientName: selectedContacts.map(c => c.name || c.email).join(', '),
+            recipients: selectedContacts,
+            sourceFrom: fromUrl || getEmailReturnTarget(),
+            threadId: '',
+            inReplyTo: '',
+            references: ''
+        };
+        saveEmailSession();
+
+        composeSession = {
+            active: true,
+            documentId: null,
+            title: '',
+            text: '',
+            startedAt: new Date().toISOString(),
+            sourceFrom: fromUrl || getEmailReturnTarget()
+        };
+        saveComposeSession();
+
+        window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
+    }, 1));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderEmailContactsMenu(container, fromUrl, selectedContacts, null);
+    }, 2));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-contacts-confirm-menu' }), 50);
+}
+
+async function renderEmailInboxMenu(container, fromUrl, pageToken = null) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Read existing messages');
+
+    let messages = [];
+    let nextPageToken = null;
+    let loadError = null;
+    try {
+        const inboxUrl = new URL('/api/email/inbox', window.location.origin);
+        inboxUrl.searchParams.set('max_results', '20');
+        if (pageToken) {
+            inboxUrl.searchParams.set('page_token', pageToken);
+        }
+
+        const response = await authenticatedFetch(`${inboxUrl.pathname}${inboxUrl.search}`, { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            messages = Array.isArray(data.messages) ? data.messages : [];
+            nextPageToken = String(data.next_page_token || '').trim() || null;
+        } else {
+            loadError = `Unable to load inbox (${response.status})`;
+        }
+    } catch (error) {
+        loadError = error.message || 'Unable to load inbox';
+    }
+
+    let index = 0;
+    if (loadError || !messages.length) {
+        container.appendChild(createComposeGridButton(loadError ? 'Inbox Unavailable' : 'No Inbox Messages', async () => {
+            await announce(loadError || 'No inbox messages available.', 'system', false);
+            await renderEmailEntryMenu(container, fromUrl);
+        }, index++));
+    } else {
+        messages.slice(0, Math.max(8, gridColumns * 3)).forEach((message) => {
+            const messageId = String(message?.id || '').trim();
+            if (!messageId) return;
+            const subject = String(message.subject || '(No subject)').trim();
+            const label = subject;
+
+            container.appendChild(createComposeGridButton(label.slice(0, 64), async () => {
+                stopAuditoryScanning();
+                try {
+                    const detailResponse = await authenticatedFetch(`/api/email/messages/${encodeURIComponent(messageId)}`, { method: 'GET' });
+                    if (!detailResponse.ok) {
+                        await announce('Unable to load that email.', 'system', false);
+                        await renderEmailInboxMenu(container, fromUrl, pageToken);
+                        return;
+                    }
+                    const detail = await detailResponse.json();
+                    const msg = detail?.message || {};
+                    const body = String(msg.body_text || msg.snippet || '').trim();
+                    const readText = body || 'No message body available.';
+                    await announce(readText, 'system', false, false);
+                    await renderEmailReadActionsMenu(container, fromUrl, messageId, msg);
+                    return;
+                } catch (error) {
+                    await announce('Unable to read that email right now.', 'system', false);
+                }
+                await renderEmailInboxMenu(container, fromUrl, pageToken);
+            }, index++));
+        });
+    }
+
+    if (nextPageToken) {
+        container.appendChild(createComposeGridButton('Show More', async () => {
+            await renderEmailInboxMenu(container, fromUrl, nextPageToken);
+        }, index++));
+    }
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderEmailEntryMenu(container, fromUrl);
+    }, index));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-inbox-menu' }), 50);
+}
+
+function extractEmailAddressFromHeader(headerValue) {
+    const raw = String(headerValue || '').trim();
+    if (!raw) return '';
+
+    const bracketMatch = raw.match(/<([^>]+)>/);
+    if (bracketMatch && bracketMatch[1]) {
+        return bracketMatch[1].trim();
+    }
+
+    const plainMatch = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return plainMatch ? plainMatch[0].trim() : '';
+}
+
+async function startReplyToEmail(fromUrl, messageId, messageData) {
+    const recipientEmail = extractEmailAddressFromHeader(messageData.from || '');
+    if (!recipientEmail) {
+        await announce('Unable to determine sender email for reply.', 'system', false);
+        return;
+    }
+
+    emailSession = {
+        active: true,
+        mode: 'reply',
+        recipientEmail,
+        recipientName: String(messageData.from || '').trim(),
+        sourceFrom: fromUrl || getEmailReturnTarget(),
+        threadId: String(messageData.thread_id || '').trim(),
+        inReplyTo: String(messageData.message_id_header || '').trim(),
+        references: String(messageData.references || '').trim()
+    };
+    saveEmailSession();
+
+    composeSession = {
+        active: true,
+        documentId: null,
+        title: String(messageData.subject || '').trim(),
+        text: '',
+        startedAt: new Date().toISOString(),
+        sourceFrom: fromUrl || getEmailReturnTarget()
+    };
+    saveComposeSession();
+
+    window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
+}
+
+async function renderEmailReadActionsMenu(container, fromUrl, messageId, messageData) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Choose an action');
+
+    container.appendChild(createComposeGridButton('Reply to Email', async () => {
+        await startReplyToEmail(fromUrl, messageId, messageData);
+    }, 0));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderEmailInboxMenu(container, fromUrl);
+    }, 1));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-read-actions-menu' }), 50);
+}
+
+async function sendCurrentEmailFromSession() {
+    if (!isEmailSessionActive()) {
+        throw new Error('Email session is not active');
+    }
+
+    const bodyText = String(composeSession?.text || '').trim();
+    if (!bodyText) {
+        throw new Error('Email body is empty');
+    }
+
+    // Support both array (multi-recipient) and legacy single-string recipient
+    let toAddresses = [];
+    if (Array.isArray(emailSession.recipients) && emailSession.recipients.length > 0) {
+        toAddresses = emailSession.recipients.map(r => String(r.email || '').trim()).filter(Boolean);
+    } else {
+        const recipientEmail = String(emailSession.recipientEmail || '').trim();
+        if (recipientEmail) {
+            toAddresses = recipientEmail.split(',').map(e => e.trim()).filter(Boolean);
+        }
+    }
+    if (!toAddresses.length) {
+        throw new Error('No recipient selected');
+    }
+
+    let subject = 'Message';
+    try {
+        const titleResponse = await authenticatedFetch('/api/compose/generate-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: bodyText })
+        });
+        if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            if (titleData?.success && titleData?.title) {
+                subject = String(titleData.title).trim() || subject;
+            }
+        }
+    } catch (error) {
+        console.warn('Email subject generation failed, using fallback subject:', error);
+    }
+
+    const sendResponse = await authenticatedFetch('/api/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            to: toAddresses,
+            cc: [],
+            bcc: [],
+            subject,
+            body: bodyText,
+            thread_id: String(emailSession.threadId || '').trim(),
+            in_reply_to: String(emailSession.inReplyTo || '').trim(),
+            references: String(emailSession.references || '').trim()
+        })
+    });
+
+    if (!sendResponse.ok) {
+        const errText = await sendResponse.text().catch(() => 'send failed');
+        throw new Error(errText);
+    }
+}
+
+async function renderEmailFinalizeMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateEmailQuestionDisplay('Email: Finalize draft');
+
+    const options = [
+        {
+            label: 'Read email',
+            handler: async () => {
+                const bodyText = String(composeSession?.text || '').trim();
+                await speakLocally(bodyText || 'Email is empty.');
+                await renderEmailFinalizeMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Edit email',
+            handler: async () => {
+                window.location.href = 'gridpage.html?page=home&compose=1&email_compose=1';
+            }
+        },
+        {
+            label: 'Send email',
+            handler: async () => {
+                try {
+                    await sendCurrentEmailFromSession();
+                    clearComposeSession();
+                    clearEmailSession();
+                    await announce('Email sent successfully.', 'system', false);
+                    window.location.href = `gridpage.html?email_menu=1&from=${encodeURIComponent(fromUrl || getEmailReturnTarget())}`;
+                } catch (error) {
+                    await announce('Unable to send email right now.', 'system', false);
+                    await renderEmailFinalizeMenu(container, fromUrl);
+                }
+            }
+        },
+        {
+            label: 'Discard Email',
+            handler: async () => {
+                clearComposeSession();
+                clearEmailSession();
+                window.location.href = 'gridpage.html?page=home';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-finalize-menu' }), 50);
+}
+
+function addQuitComposeButton(container) {
+    if (!isComposeSessionActive()) return;
+    if (container.querySelector('#compose-quit-button')) return;
+
+    const currentCount = container.querySelectorAll('button').length;
+    const isEmailDraft = isEmailSessionActive();
+    const quitButton = createComposeGridButton(isEmailDraft ? 'Exit Email' : 'Exit Creation', () => {
+        window.location.href = isEmailDraft ? 'gridpage.html?email_finalize=1' : 'gridpage.html?compose_finalize=1';
+    }, currentCount);
+    quitButton.id = 'compose-quit-button';
+    container.appendChild(quitButton);
+    updateComposeQuestionDisplay(isEmailDraft ? 'Email in progress' : 'Creation in progress');
+}
+
 
 
 // --- User Management Functions ---
@@ -805,14 +3403,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Parallelize independent async operations for faster load
-    const [scanSettingsResult, pagesResponse] = await Promise.all([
+    const [scanSettingsResult, locationOverrideResult, pagesResponse] = await Promise.all([
         loadScanSettings(),
+        loadCurrentLocationLanguageOverride(),
         authenticatedFetch('/pages', { method: 'GET' })
     ]);
+    warmStandardPromptTranslations();
     console.log('✅ Core initialization complete (parallelized)');
     
     // 3. Initialize grid layout with loaded gridColumns setting
     updateGridLayout();
+
+    const params = new URLSearchParams(window.location.search);
+    const isComposeEntryView = params.get('compose_entry') === '1';
+    const isComposeFinalizeView = params.get('compose_finalize') === '1';
+    const isEmailEntryView = params.get('email_menu') === '1';
+    const isEmailFinalizeView = params.get('email_finalize') === '1';
+    const isEmailComposeView = params.get('email_compose') === '1';
+    const composeResumeFlag = params.get('compose') === '1';
+    const isComposeFlowView = isComposeEntryView || isComposeFinalizeView || isEmailEntryView || isEmailFinalizeView || isEmailComposeView;
 
     // Remove the user-id-selector related UI elements if they exist
     document.getElementById('user-id-selector')?.closest('div')?.remove();
@@ -820,12 +3429,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 4. Show mood selection if enabled and not already set for this session
     // Lazy load non-critical features - don't block page render
     Promise.all([
-        showMoodSelectionIfNeeded(),
+        isComposeFlowView ? Promise.resolve() : showMoodSelectionIfNeeded(),
         window.avatarSelector?.initializeAfterAuth?.()
     ]).catch(err => console.warn('Non-critical feature init failed:', err));
 
     const gridContainer = document.getElementById('gridContainer');
-    const params = new URLSearchParams(window.location.search);
     let pageName = params.get('page');
 
     if (!pageName) {
@@ -841,8 +3449,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error(`Failed to load pages: ${pagesResponse.status} - ${errorText}`);
         }
         const userPages = await pagesResponse.json();
+        loadedUserPages = Array.isArray(userPages) ? userPages : [];
 
         let pageToDisplay = userPages.find(p => p.name === pageName);
+
+        // Load scan pattern from page metadata
+        currentScanPattern = pageToDisplay?.scan_pattern || 'column';
+        console.log(`Loaded scan pattern for page '${pageName}': ${currentScanPattern}`);
 
         if (!pageToDisplay) {
             console.warn(`Requested page '${pageName}' not found.`);
@@ -850,10 +3463,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (homePage) {
                 pageToDisplay = homePage; // Corrected variable name
                 pageName = "home"; // Update pageName to reflect the fallback
+                currentScanPattern = pageToDisplay?.scan_pattern || 'column'; // Load scan pattern for fallback page
                 console.warn(`Defaulting to 'home' page.`);
             } else if (userPages.length > 0) {
                 pageToDisplay = userPages[0];
                 pageName = pageToDisplay.name; // Update pageName
+                currentScanPattern = pageToDisplay?.scan_pattern || 'column'; // Load scan pattern for fallback page
                 console.warn(`No 'home' page. Defaulting to first available page: '${pageName}'.`);
             } else {
                 console.error(`No pages found for current user. Cannot display any content.`);
@@ -867,8 +3482,89 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Ensure pageToDisplay is not null/undefined before accessing properties
         sessionStorage.setItem('currentPageDisplayNameForBanner', pageToDisplay.displayName || capitalizeFirstLetter(pageToDisplay.name));
         setBannerAndPageTitle(); // Call again to set the correct title
+        currentRenderedPageName = String(pageName || 'home').trim().toLowerCase() || 'home';
+        triggerNavigationTargetPrefetchForCurrentPage(pageName);
 
-        await generateGrid(pageToDisplay, gridContainer);
+        if (isComposeEntryView) {
+            const fromUrl = params.get('from') || getComposeReturnTarget();
+            await renderComposeEntryMenu(gridContainer, fromUrl);
+        } else if (isComposeFinalizeView) {
+            if (!isComposeSessionActive()) {
+                window.location.href = 'gridpage.html?page=home';
+                return;
+            }
+            await renderComposeFinalizeMenu(gridContainer);
+        } else if (isEmailEntryView) {
+            const fromUrl = params.get('from') || getEmailReturnTarget();
+            await renderEmailEntryMenu(gridContainer, fromUrl);
+        } else if (isEmailFinalizeView) {
+            const fromUrl = params.get('from') || getEmailReturnTarget();
+            if (!isComposeSessionActive() || !isEmailSessionActive()) {
+                window.location.href = `gridpage.html?email_menu=1&from=${encodeURIComponent(fromUrl)}`;
+                return;
+            }
+            await renderEmailFinalizeMenu(gridContainer, fromUrl);
+        } else {
+            if (composeResumeFlag && isEmailComposeView && !isComposeSessionActive()) {
+                composeSession = {
+                    active: true,
+                    documentId: null,
+                    title: '',
+                    text: '',
+                    startedAt: new Date().toISOString(),
+                    sourceFrom: params.get('from') || getComposeReturnTarget()
+                };
+                saveComposeSession();
+            }
+
+            if (!isEmailComposeView && isComposeSessionActive() && !isEmailSessionActive()) {
+                clearComposeSession();
+            }
+
+            await generateGrid(pageToDisplay, gridContainer);
+            if (isComposeSessionActive()) {
+                addQuitComposeButton(gridContainer);
+                updateSpeechHistoryPanel(); // Switch label to "Compose" and show composition text
+            }
+        }
+
+        const jokesParam = params.get('jokes');
+        if (jokesParam) {
+            document.getElementById('loading-indicator').style.display = 'flex';
+            try {
+                currentQuestion = 'tell me a joke';
+                activeLLMPromptForContext = currentQuestion;
+                activeOriginatingButtonText = 'Special Jokes';
+                querytype = 'jokes';
+
+                sessionStorage.setItem('currentPageDisplayNameForBanner', 'Jokes');
+                setBannerAndPageTitle();
+
+                const questionDisplay = document.getElementById('question-display');
+                if (questionDisplay) {
+                    questionDisplay.value = 'Tell me a joke';
+                }
+
+                const jokeOptions = await fetchJokeOptions(LLMOptions, currentQuestion);
+                if (jokeOptions.length > 0) {
+                    await generateLlmButtons(jokeOptions);
+                } else {
+                    console.warn('No jokes returned for special jokes navigation.');
+                    announce('I could not find any jokes right now.', 'system', false);
+                }
+            } catch (error) {
+                console.error('Error loading jokes for special navigation:', error);
+                announce('Error loading jokes.', 'system', false);
+            } finally {
+                document.getElementById('loading-indicator').style.display = 'none';
+            }
+        }
+
+        const guessWhoParam = params.get('guess_who');
+        if (guessWhoParam) {
+            // Redirect to Guess Who game page (session tokens preserved in sessionStorage)
+            window.location.href = 'guess_who.html';
+        }
 
         const optionsParam = params.get('options');
         if (optionsParam) {
@@ -894,7 +3590,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupGamepadListeners(); // Ensure called
 
     // --- Setup Speech Recognition ---
-    setupSpeechRecognition();
+    if (!isComposeFlowView && !isComposeSessionActive()) {
+        setupSpeechRecognition();
+    }
 
     // --- Add AudioContext Resume Listeners (MUST HAVE for playing audio) ---
     document.body.addEventListener('mousedown', tryResumeAudioContext, { once: true });
@@ -904,6 +3602,65 @@ document.addEventListener('DOMContentLoaded', async () => {
     // --- Setup Clear History Button ---
     const clearButton = document.getElementById('clear-history');
     const speechHistory = document.getElementById('speech-history');
+    const translateHistoryButton = document.getElementById('translate-history-btn');
+    const translateModal = document.getElementById('translate-modal');
+    const translateModalClose = document.getElementById('translate-modal-close');
+    const translateModalContent = document.getElementById('translate-modal-content');
+
+    const closeTranslateModal = () => {
+        if (!translateModal) return;
+        translateModal.classList.add('hidden');
+        translateModal.classList.remove('flex');
+    };
+
+    const openTranslateHistoryModal = async () => {
+        if (!speechHistory || !translateModal || !translateModalContent) return;
+        const lines = String(speechHistory.value || '')
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
+
+        if (!lines.length) {
+            translateModalContent.innerHTML = '<p class="text-gray-500">No speech history to translate.</p>';
+            translateModal.classList.remove('hidden');
+            translateModal.classList.add('flex');
+            return;
+        }
+
+        translateModalContent.innerHTML = '<p class="text-gray-500">Translating...</p>';
+        translateModal.classList.remove('hidden');
+        translateModal.classList.add('flex');
+
+        try {
+            const response = await authenticatedFetch('/api/translate-lines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lines,
+                    source_locale: userLanguageLocale,
+                    target_locale: getEffectivePartnerLanguage(),
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Translate request failed (${response.status})`);
+            }
+
+            const payload = await response.json();
+            const translated = Array.isArray(payload.translated_lines) ? payload.translated_lines : [];
+            const items = translated.map((line, idx) => `
+                <div class="border border-gray-200 rounded p-2">
+                    <div class="text-xs text-gray-500 mb-1">Line ${idx + 1}</div>
+                    <div>${String(line || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                </div>
+            `).join('');
+            translateModalContent.innerHTML = items || '<p class="text-gray-500">No translated output available.</p>';
+        } catch (error) {
+            console.error('Error translating speech history:', error);
+            translateModalContent.innerHTML = '<p class="text-red-600">Unable to translate right now.</p>';
+        }
+    };
+
     if (clearButton && speechHistory) {
         clearButton.addEventListener('click', () => {
             speechHistory.value = '';
@@ -917,6 +3674,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         const storedHistory = localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId));
         if (storedHistory) { speechHistory.value = storedHistory; }
     }
+    if (translateHistoryButton) {
+        translateHistoryButton.addEventListener('click', () => {
+            void openTranslateHistoryModal();
+        });
+    }
+    if (translateModalClose) {
+        translateModalClose.addEventListener('click', closeTranslateModal);
+    }
+    if (translateModal) {
+        translateModal.addEventListener('click', (event) => {
+            if (event.target === translateModal) {
+                closeTranslateModal();
+            }
+        });
+    }
+    // If a compose session is already active (e.g. returning to compose grid), switch the panel
+    updateSpeechHistoryPanel();
+    window.addEventListener('pageshow', syncComposeSessionFromStorage);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            syncComposeSessionFromStorage();
+        }
+    });
+    window.addEventListener('focus', syncComposeSessionFromStorage);
     
     // --- NEW: Add event listeners for the admin toolbar buttons ---
     const switchUserButton = document.getElementById('switch-user-button');
@@ -1136,14 +3917,32 @@ function updateGridLayout() {
 
 // --- Grid Generation ---
 async function generateGrid(page, container) {
+    stopAuditoryScanning();
+    window.waitingForInitialSwitch = false;
+    hasPlayedWaitForSwitchChime = false;
+    isPausedFromScanLimit = false;
+    currentRowScanMode = false;
+    currentRow = -1;
+
     container.innerHTML = '';
     updateGridLayout();
 
     const buttonsArray = Array.isArray(page.buttons) ? page.buttons : [];
     // 1. Filter out hidden buttons and those without text
-    const visibleButtons = buttonsArray.filter(buttonData =>
-        buttonData && buttonData.text && buttonData.text.trim() !== '' && buttonData.hidden !== true
-    );
+    const visibleButtons = buttonsArray.filter(buttonData => {
+        if (!(buttonData && buttonData.text && buttonData.text.trim() !== '' && buttonData.hidden !== true)) {
+            return false;
+        }
+
+        if (isComposeSessionActive()) {
+            const target = String(buttonData.targetPage || '').trim().toLowerCase();
+            if (target === '!games' || target === '!compose' || target === '!composition') {
+                return false;
+            }
+        }
+
+        return true;
+    });
     if (visibleButtons.length === 0) {
         container.innerHTML = `<p class="col-span-full text-center text-gray-500">No buttons configured.</p>`;
         return;
@@ -1167,8 +3966,13 @@ async function generateGrid(page, container) {
         
         const button = document.createElement('button');
         
-        // Check if this is a sight word - if so, render as text-only
-        if (window.isSightWord && window.isSightWord(buttonData.text)) {
+        // When disableTapPictograms is on: ALL buttons are plain text-only
+        // No images, no sight word formatting, no assigned images — just text
+        if (disableTapPictograms) {
+            console.log(`[DISABLE TAP PICTOGRAMS] Plain text button for: "${buttonData.text}"`);
+            button.textContent = buttonData.text;
+        // Check if this is a sight word - if so, render as text-only with special formatting
+        } else if (window.isSightWord && window.isSightWord(buttonData.text)) {
             console.log('[SIGHT WORD] Rendering text-only button for:', buttonData.text);
             button.textContent = buttonData.text;
             button.classList.add('sight-word-button');
@@ -1218,16 +4022,17 @@ async function generateGrid(page, container) {
             
             // Text footer (overlays bottom of image)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '28px'; // Taller to accommodate 2 rows
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
+            textFooter.style.padding = '0 3px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
+            textFooter.style.boxSizing = 'border-box';
             textFooter.style.position = 'absolute';
             textFooter.style.bottom = '0';
             textFooter.style.left = '0';
@@ -1235,15 +4040,15 @@ async function generateGrid(page, container) {
             
             const textSpan = document.createElement('span');
             textSpan.textContent = buttonData.text;
-            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontSize = '0.45em';
             textSpan.style.fontWeight = 'bold';
             textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
+            textSpan.style.lineHeight = '0.95';
             textSpan.style.wordWrap = 'break-word';
             textSpan.style.hyphens = 'auto';
             textSpan.style.overflow = 'hidden';
             textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitLineClamp = '1';
             textSpan.style.webkitBoxOrient = 'vertical';
             
             imageContainer.appendChild(imageElement);
@@ -1261,6 +4066,8 @@ async function generateGrid(page, container) {
         button.dataset.targetPage = buttonData.targetPage || '';
         button.dataset.speechPhrase = buttonData.speechPhrase || '';
         button.dataset.queryType = buttonData.queryType || '';
+        button.dataset.row = currentRow;
+        button.dataset.col = currentCol;
         button.classList.add('grid-button'); // Add class for CSS styling (preserves sight-word-button if already set)
         button.style.gridRowStart = currentRow + 1;
         button.style.gridColumnStart = currentCol + 1;
@@ -1289,27 +4096,14 @@ async function generateGrid(page, container) {
 
     // Delay scanning until after the page is rendered
     setTimeout(() => {
-        // Check if we should wait for switch press before starting (only on first visit to this page)
-        const scanningHasStarted = sessionStorage.getItem('bravoScanningStarted_grid') === 'true';
-        
         console.log('🔍 GRIDPAGE SCANNING INIT DEBUG:');
         console.log('  ScanningOff:', ScanningOff);
         console.log('  waitForSwitchToScan:', waitForSwitchToScan);
-        console.log('  scanningHasStarted:', scanningHasStarted);
-        console.log('  Should wait?', !ScanningOff && waitForSwitchToScan && !scanningHasStarted);
-        
-        if (!ScanningOff && waitForSwitchToScan && !scanningHasStarted) {
-            console.log('✋ Waiting for switch press to begin scanning on gridpage...');
-            window.waitingForInitialSwitch = true;
-            // Play prompt in personal speaker
-            announce("Press switch to begin scanning", "personal", false, false);
-        } else if (!ScanningOff) {
-            console.log('▶️ Starting auditory scanning automatically');
-            startAuditoryScanning();
-        } else {
-            console.log('🔇 Scanning is disabled (ScanningOff=true)');
-        }
+        startOrWaitForScanning({ allowPrompt: true, source: 'generateGrid' });
     }, defaultDelay);
+
+    // Warm likely first-click LLM requests in the background so switching to a new button is faster.
+    scheduleLlmPrefetchForVisibleButtons(sortedButtons);
 }
 
 // --- Button Click Handling ---
@@ -1324,6 +4118,14 @@ async function handleButtonClick(buttonData) {
         debugTimes.resumeScan = performance.now();
         console.log('[DEBUG] handleButtonClick: resumeAuditoryScanning only, total:', (debugTimes.resumeScan - debugTimes.start).toFixed(2), 'ms');
         return; // Don't process the button click, just resume scanning
+    }
+
+    // NEW: Check if we're in row-phase scanning and handle row selection
+    if (currentRowScanMode && currentRow >= 0) {
+        console.log(`Row phase: User selected row ${currentRow}, switching to column-phase scanning...`);
+        stopAuditoryScanning();
+        startColumnPhaseForRow(currentRow);
+        return; // Return early, don't execute button action
     }
 
     // IMMEDIATELY stop scanning when any button is clicked
@@ -1431,14 +4233,14 @@ async function handleButtonClick(buttonData) {
         console.log('🔍 STEP 3: Checking llmQuery:', llmQuery ? 'YES' : 'NO', 'Value:', llmQuery);
         if (llmQuery) {
             console.log('✅ ENTERING LLM QUERY BRANCH');
-            const t0 = performance.now();
+            const tBranchStart = performance.now();
             // Case 1: Button triggers an LLM query.
+            let speechAnnouncePromise = null;
+            let speechAnnounceStart = 0;
             if (speechPhrase) {
                 console.log('🎤 Has speech phrase, announcing:', speechPhrase);
-                const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system"); // Announce while speech bubble is clear.
-                const tAnnounce1 = performance.now();
-                console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
+                speechAnnounceStart = performance.now();
+                speechAnnouncePromise = announcePartnerFacingOutput(speechPhrase, false); // Start announcement without blocking LLM fetch.
                 
                 // Record chat history for user speech selection
                 console.log('🎯 GRIDPAGE Recording speech selection:', speechPhrase);
@@ -1471,6 +4273,7 @@ async function handleButtonClick(buttonData) {
             }
             activeOriginatingButtonText = buttonLabel;
             activeLLMPromptForContext = llmQuery;
+            initializeFollowUpConversation(llmQuery);
 
             // Note: #LLMOptions replacement now handled on server side
             currentQuestion = llmQuery;
@@ -1480,13 +4283,24 @@ async function handleButtonClick(buttonData) {
             }
             sessionStorage.setItem('currentQuestion', llmQuery);
 
-            const summaryInstruction = SummaryOff ?
-                'The "summary" key should contain the exact same FULL text as the "option" key.' :
-                'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
-
-            const promptForLLM = `"${llmQuery}". Format as a JSON list... ${summaryInstruction} ...`;
+            const promptForLLM = buildPromptForLLMQuery(llmQuery);
+            cancelActivePrefetchRequests('user initiated LLM button click');
+            requestLlmOptionsChime();
             const tLLM0 = performance.now();
-            const options = await getLLMResponse(promptForLLM);
+            const optionsPromise = getLLMResponse(promptForLLM);
+
+            if (speechAnnouncePromise) {
+                speechAnnouncePromise
+                    .then(() => {
+                        const tAnnounce1 = performance.now();
+                        console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) took ${(tAnnounce1-speechAnnounceStart).toFixed(2)} ms (overlapped with LLM fetch)`);
+                    })
+                    .catch((announceError) => {
+                        console.error('Speech announcement failed during LLM fetch:', announceError);
+                    });
+            }
+
+            const options = await optionsPromise;
             const tLLM1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: getLLMResponse took ${(tLLM1-tLLM0).toFixed(2)} ms`);
             
@@ -1496,6 +4310,14 @@ async function handleButtonClick(buttonData) {
             await generateLlmButtons(options); // This function will restart scanning.
             const tGen1 = performance.now();
             console.log(`[DEBUG] handleButtonClick: generateLlmButtons took ${(tGen1-tGen0).toFixed(2)} ms`);
+            const preRequestMs = tLLM0 - tBranchStart;
+            const networkAndModelMs = tLLM1 - tLLM0;
+            const renderMs = tGen1 - tGen0;
+            const clickToButtonsMs = tGen1 - tBranchStart;
+            console.log(
+                `[PERF] click->buttons=${clickToButtonsMs.toFixed(2)} ms ` +
+                `(pre-request=${preRequestMs.toFixed(2)} ms, llm=${networkAndModelMs.toFixed(2)} ms, render=${renderMs.toFixed(2)} ms)`
+            );
             debugTimes.llmBranch = performance.now();
 
         } else if (localQueryType === "currentevents") {
@@ -1568,7 +4390,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system");
+                await announcePartnerFacingOutput(speechPhrase, false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (go-back) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -1604,7 +4426,7 @@ async function handleButtonClick(buttonData) {
                 
                 if (speechPhrase) {
                     const tAnnounce0 = performance.now();
-                    await announce(speechPhrase, "system");
+                    await announcePartnerFacingOutput(speechPhrase, false);
                     const tAnnounce1 = performance.now();
                     console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (temp nav return) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                     
@@ -1630,7 +4452,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system");
+                await announcePartnerFacingOutput(speechPhrase, false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (nav) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -1667,6 +4489,53 @@ async function handleButtonClick(buttonData) {
                 if (specialPage === 'favorites') {
                     const currentUrl = window.location.href;
                     window.location.href = `${specialPage}.html?from=${encodeURIComponent(currentUrl)}`;
+                } else if (specialPage === 'jokes') {
+                    const params = new URLSearchParams();
+                    params.set('jokes', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'guess-who' || specialPage === 'guesswho') {
+                    const params = new URLSearchParams();
+                    params.set('guess_who', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'mood' || specialPage === 'mood-selection') {
+                    if (typeof clearCurrentMood === 'function') {
+                        clearCurrentMood();
+                    } else {
+                        sessionStorage.removeItem('currentSessionMood');
+                    }
+
+                    if (typeof showMoodSelection === 'function') {
+                        showMoodSelection((selectedMood) => {
+                            if (selectedMood) {
+                                console.log('Mood updated from gridpage button:', selectedMood);
+                            } else {
+                                console.log('Mood selection dismissed or unavailable from gridpage button.');
+                            }
+                            startAuditoryScanning();
+                        });
+                    } else {
+                        console.warn('showMoodSelection is unavailable; falling back to mood.html');
+                        window.location.href = 'mood.html';
+                    }
+                    return;
+                } else if (specialPage === 'spelling' || specialPage === 'spell') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    window.location.href = `spelling.html?${params.toString()}`;
+                } else if (specialPage === 'numbers' || specialPage === 'number') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    window.location.href = `numbers.html?${params.toString()}`;
+                } else if (specialPage === 'email' || specialPage === 'emails') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    params.set('email_menu', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
+                } else if (specialPage === 'compose' || specialPage === 'composition') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    params.set('compose_entry', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
                 } else if (specialPage === 'freestyle') {
                     // For freestyle page, pass context information for contextual word suggestions
                     console.log('DEBUG: Before freestyle navigation - activeLLMPromptForContext:', activeLLMPromptForContext);
@@ -1690,6 +4559,10 @@ async function handleButtonClick(buttonData) {
                     if (activeOriginatingButtonText) {
                         params.set('originating_button', activeOriginatingButtonText);
                     }
+
+                    if (isComposeSessionActive()) {
+                        params.set('compose', '1');
+                    }
                     
                     console.log('DEBUG: Freestyle navigation params:', params.toString());
                     const queryString = params.toString();
@@ -1699,6 +4572,7 @@ async function handleButtonClick(buttonData) {
                 }
             } else {
                 // Normal page: use gridpage.html?page=targetPage
+                queueNavigationTargetPrefetch(targetPage);
                 window.location.href = `gridpage.html?page=${targetPage}`;
             }
             debugTimes.targetPageBranch = performance.now();
@@ -1714,7 +4588,7 @@ async function handleButtonClick(buttonData) {
                 sessionStorage.removeItem('tempNavReturnPage');
                 
                 if (speechPhrase) {
-                    await announce(speechPhrase, "system");
+                    await announcePartnerFacingOutput(speechPhrase, false);
                     // Record chat history for user speech selection
                     console.log('🎯 GRIDPAGE Recording temp nav speech before return:', speechPhrase);
                     recordChatHistory("", speechPhrase).catch(error => {
@@ -1734,7 +4608,7 @@ async function handleButtonClick(buttonData) {
             
             if (speechPhrase) {
                 const tAnnounce0 = performance.now();
-                await announce(speechPhrase, "system");
+                await announcePartnerFacingOutput(speechPhrase, false);
                 const tAnnounce1 = performance.now();
                 console.log(`[DEBUG] handleButtonClick: announce(speechPhrase) (speak only) took ${(tAnnounce1-tAnnounce0).toFixed(2)} ms`);
                 
@@ -1767,6 +4641,7 @@ async function handleButtonClick(buttonData) {
     } catch (error) {
         debugTimes.error = performance.now();
         console.error("Error in handleButtonClick main logic:", error);
+        playLlmOptionsChimePending = false;
         announce("Sorry, an error occurred.", "system", false);
         document.getElementById('loading-indicator').style.display = 'none';
         startAuditoryScanning(); // Restart scanning on error
@@ -1884,15 +4759,49 @@ async function getCurrentEvents(eventType) {
 }
 
 // --- LLM Interaction ---
-async function getLLMResponse(prompt) {
+async function getLLMResponse(prompt, options = {}) {
+    const source = options && options.source ? String(options.source) : 'interactive';
+    const requestKey = `${prompt.length}:${prompt}`;
+    const existingRequestEntry = llmInFlightRequests.get(requestKey);
+    if (existingRequestEntry) {
+        console.log(
+            `♻️ Reusing in-flight /llm request (existing=${existingRequestEntry.source}, requested=${source}) ` +
+            `for prompt length ${prompt.length}`
+        );
+        return existingRequestEntry.promise;
+    }
+
     console.log("Sending LLM Request (Prompt length):", prompt.length);
+    const abortController = new AbortController();
+    const requestPromise = (async () => {
     try {
         function prepareJsonString(str) { /* ... */ }
+
+        // When a compose session is active, tell the server to suppress location context
+        // and focus the LLM on composition continuation instead.
+        const requestBody = { prompt };
+        if (isComposeSessionActive()) {
+            requestBody.compose_mode = true;
+            requestBody.compose_body = String(composeSession.text || '').trim();
+        }
+
         const response = await authenticatedFetch('/llm', { // Use authenticatedFetch
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
-            body: JSON.stringify({ prompt: prompt }),
+            body: JSON.stringify(requestBody),
+            signal: abortController.signal,
         });
+
+        const llmTimingHeader = response.headers.get('X-LLM-Timing');
+        const llmProfileHeader = response.headers.get('X-LLM-Profile');
+        const llmCacheHeader = response.headers.get('X-LLM-Cache');
+        if ((llmTimingHeader || llmProfileHeader || llmCacheHeader) && source !== 'prefetch') {
+            console.log('🧪 /llm server diagnostics:', {
+                timing: llmTimingHeader || 'n/a',
+                profile: llmProfileHeader || 'n/a',
+                cache: llmCacheHeader || 'n/a',
+            });
+        }
 
         if (!response.ok) {
             const eT = await response.text();
@@ -1900,7 +4809,9 @@ async function getLLMResponse(prompt) {
         }
 
         const parsedJson = await response.json();
-        console.log("LLM Response Received (Raw Parsed):", parsedJson);
+        if (source !== 'prefetch') {
+            console.log("LLM Response Received (Raw Parsed):", parsedJson);
+        }
 
         if (!Array.isArray(parsedJson)) {
             console.error("LLM response was not an array:", parsedJson);
@@ -1938,7 +4849,9 @@ async function getLLMResponse(prompt) {
             return null; // Return null if the object is not in the expected format
         }).filter(Boolean); // The .filter(Boolean) removes any null entries
 
-        console.log("Transformed and Validated Data:", transformedData);
+        if (source !== 'prefetch') {
+            console.log("Transformed and Validated Data:", transformedData);
+        }
         
         if (transformedData.length !== parsedJson.length) {
             console.warn(`Filtered out ${parsedJson.length - transformedData.length} malformed items from the LLM response.`);
@@ -1947,12 +4860,33 @@ async function getLLMResponse(prompt) {
         return transformedData;
 
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            if (source === 'prefetch') {
+                console.log(`⏭️ Prefetch request aborted for prompt length ${prompt.length}`);
+            }
+            return [];
+        }
         console.error("Error fetching or processing LLM Response:", error);
         const loadingIndicator = document.getElementById('loading-indicator');
         if (loadingIndicator) {
             loadingIndicator.style.display = 'none';
         }
         return [];
+    }
+    })();
+
+    const requestEntry = {
+        source,
+        promise: requestPromise,
+        abortController,
+    };
+    llmInFlightRequests.set(requestKey, requestEntry);
+    try {
+        return await requestPromise;
+    } finally {
+        if (llmInFlightRequests.get(requestKey) === requestEntry) {
+            llmInFlightRequests.delete(requestKey);
+        }
     }
 }
 
@@ -1970,9 +4904,16 @@ function setupSpeechRecognition() {
         console.error("Speech Recognition API not supported."); isSettingUpRecognition = false; return;
     }
     recognition = new SpeechRecognitionAPI();
+    recognition.lang = getWakeWordRecognitionLanguage();
     recognition.continuous = true;
     recognition.interimResults = false;
-    console.log("Keyword Recognition object created:", recognition);
+    console.log("Keyword Recognition object created:", {
+        lang: recognition.lang,
+        wakeWordInterjection,
+        wakeWordName,
+        userLanguageLocale,
+        defaultPartnerLanguageLocale
+    });
 
     recognition.onerror = function (event) {
         console.error("Keyword Speech recognition error:", event.error, event.message);
@@ -2028,11 +4969,13 @@ function setupSpeechRecognition() {
                 questionTextarea.classList.add(LISTENING_HIGHLIGHT_CLASS);
                 questionTextarea.placeholder = "Listening for your question..."; // Update placeholder
             }
+            updateStatusBar('🎤 Listening for your question...', true);
 
-            const announcement = 'Listening for your question...';
+            const announcement = "I'm listening.";
             console.log("Calling announce for question prompt...");
             try {
-                await announce(announcement, "system", false);
+                await loadCurrentLocationLanguageOverride();
+                await announceFastStandardPrompt('listening', announcement);
                 console.log("Announce finished. Setting up question recognition.");
                 setupQuestionRecognition(); // This will set listeningForQuestion = true
             } catch (announceError) {
@@ -2061,10 +5004,10 @@ function setupSpeechRecognition() {
 function setupQuestionRecognition() {
     console.log("Attempting to set up question recognition...");
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) { console.error("Speech Recognition API not supported."); announce("Sorry, I can't use speech recognition.", "system", false); return; }
+    if (!SpeechRecognitionAPI) { console.error("Speech Recognition API not supported."); announcePartnerFacingOutput("Sorry, I can't use speech recognition.", false); return; }
 
     let questionRecognitionInstance = new SpeechRecognitionAPI(); // Use local instance
-    questionRecognitionInstance.lang = 'en-US';
+    questionRecognitionInstance.lang = getEffectivePartnerLanguage();
     questionRecognitionInstance.continuous = false;
     questionRecognitionInstance.interimResults = true;
     questionRecognitionInstance.maxAlternatives = 1;
@@ -2072,7 +5015,7 @@ function setupQuestionRecognition() {
     let finalTranscript = ''; let listeningTimeout; let hasProcessedResult = false; let isRestartingKeyword = false;
     const questionTextarea = document.getElementById(QUESTION_TEXTAREA_ID);
 
-    console.log("Question Recognition Config:", { continuous: false, interimResults: true, lang: 'en-US', maxAlternatives: 1 });
+    console.log("Question Recognition Config:", { continuous: false, interimResults: true, lang: questionRecognitionInstance.lang, maxAlternatives: 1 });
 
     questionRecognitionInstance.onstart = () => {
         console.log("Question Recognition: Listening started...");
@@ -2082,11 +5025,12 @@ function setupQuestionRecognition() {
             questionTextarea.value = "";
             questionTextarea.classList.add(LISTENING_HIGHLIGHT_CLASS); // Ensure highlight is on
         }
+        updateStatusBar('🎤 Listening...', true);
         listeningForQuestion = true; // Set global state
         clearTimeout(listeningTimeout);
         listeningTimeout = setTimeout(() => {
              if (listeningForQuestion && !finalTranscript && !hasProcessedResult) {
-                 console.log("Question Timeout: No speech detected."); announce("I didn't hear anything. Try again?", "system", false);
+                 console.log("Question Timeout: No speech detected."); announcePartnerFacingOutput("I didn't hear anything. Try again?", false);
                  try { questionRecognitionInstance.stop(); } catch(e){}
              }
         }, 10000);
@@ -2101,6 +5045,7 @@ function setupQuestionRecognition() {
         }
         const displayTranscript = finalTranscript || interimTranscript;
         if (questionTextarea) questionTextarea.value = displayTranscript.trim();
+        if (displayTranscript.trim()) updateStatusBar(displayTranscript.trim());
 
         const isFinishedUtterance = event.results[event.results.length - 1].isFinal;
 
@@ -2113,8 +5058,35 @@ function setupQuestionRecognition() {
             document.getElementById('loading-indicator').style.display = 'flex';
 
             try {
-                announce("Okay, processing: " + finalTranscript.trim() + ". Give me a moment.", "system", false);
-                currentQuestion = finalTranscript.trim().toLowerCase();
+                await announceFastStandardPrompt('processing', STANDARD_ANNOUNCEMENT_TEXT.processing);
+                updateStatusBar('Processing: ' + finalTranscript.trim() + '...');
+
+                const rawQuestion = finalTranscript.trim();
+                const normalizedQuestion = await translateLineBetweenLocales(
+                    rawQuestion,
+                    getEffectivePartnerLanguage(),
+                    userLanguageLocale
+                );
+
+                const normalizedQuestionDisplay = String(normalizedQuestion || rawQuestion).trim();
+                currentQuestion = normalizedQuestionDisplay.toLowerCase();
+                if (currentQuestion !== rawQuestion.toLowerCase()) {
+                    console.log('Question translated to user language for LLM:', {
+                        source: rawQuestion,
+                        translated: currentQuestion,
+                        from: getEffectivePartnerLanguage(),
+                        to: userLanguageLocale
+                    });
+                }
+
+                const userLocale = String(userLanguageLocale || 'en-US').trim() || 'en-US';
+                const partnerLocale = String(getEffectivePartnerLanguage() || 'en-US').trim() || 'en-US';
+                if (userLocale.toLowerCase() !== partnerLocale.toLowerCase() && normalizedQuestionDisplay) {
+                    // Non-blocking confirmation in user language while LLM options are generated.
+                    announce(normalizedQuestionDisplay, 'system', false, false, true)
+                        .catch(error => console.warn('User-language confirmation prompt failed:', error));
+                }
+                initializeFollowUpConversation(currentQuestion);
 
                 const summaryInstruction = SummaryOff
                 ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
@@ -2122,34 +5094,57 @@ function setupQuestionRecognition() {
                 activeLLMPromptForContext = currentQuestion; // Set context to just the user's question
                 activeOriginatingButtonText = "Voice Input"; // Mark as voice-initiated
 
+                if (isJokeQuestion(currentQuestion)) {
+                    querytype = "jokes";
+                    const jokeOptions = await fetchJokeOptions(LLMOptions, currentQuestion);
+                    if (jokeOptions.length > 0) {
+                        await generateLlmButtons(jokeOptions);
+                    } else {
+                        console.warn("No jokes returned for joke request.");
+                        announcePartnerFacingOutput("I couldn't find any jokes right now.", false);
+                        isRestartingKeyword = true;
+                        setupSpeechRecognition();
+                    }
+                    return;
+                }
+
                 const promptForLLM = `
                     Provide up to "${LLMOptions}" short, single-phrase options related to: "${currentQuestion}".
                     Do not include any introductory or concluding text.
+                    Each option should be a short, selectable next-step phrase for AAC use.
+                    Prefer concrete activity choices, clarifying choices, or preference choices.
                     Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-                    The "option" key should contain the FULL option text. If the option contains a question and answer, like a joke, the option contain the question and the answer.
+                    The "option" key should contain the FULL option text.
                     ${summaryInstruction}
+                    ${getUserLanguageOutputInstruction()}
                     The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
                     Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
+                    ${getComposePromptContext()}
                 `;
                 document.getElementById('loading-indicator').style.display = 'flex';
+                requestLlmOptionsChime();
                 const options = await getLLMResponse(promptForLLM);
-                if (Array.isArray(options) && (options.length === 0 || options.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
-                    querytype = "question"; await generateLlmButtons(options);
+                const prioritizedOptions = prioritizeContextualOptions(options, currentQuestion, LLMOptions);
+                if (Array.isArray(prioritizedOptions) && (prioritizedOptions.length === 0 || prioritizedOptions.every(o => typeof o === 'object' && o !== null && 'option' in o && 'summary' in o))) {
+                    querytype = "question"; await generateLlmButtons(prioritizedOptions);
                 } else {
-                    console.error("LLM response invalid:", options); announce("Unexpected response.", "system", false);
+                    console.error("LLM response invalid:", prioritizedOptions); announcePartnerFacingOutput("Unexpected response.", false);
+                    playLlmOptionsChimePending = false;
                     isRestartingKeyword = true; setupSpeechRecognition();
                 }
             } catch (error) {
-                console.error('Error processing question:', error); announce("Error processing question.", "system", false);
+                console.error('Error processing question:', error); announcePartnerFacingOutput("Error processing question.", false);
+                playLlmOptionsChimePending = false;
                 isRestartingKeyword = true; setupSpeechRecognition();
             } finally {
                 //document.getElementById('loading-indicator').style.display = 'none';
                 document.getElementById('loading-indicator').style.display = 'none'; // Ensure indicator is hidden
-                if (questionTextarea) questionTextarea.placeholder = "Ask a question..."; 
+                if (questionTextarea) questionTextarea.placeholder = "Ask a question...";
+                updateStatusBar(''); // Clear status bar after question is processed
                 console.log("LLM processing finished for question.");
             }
         } else if (!isFinishedUtterance) { console.log("Waiting for final result..."); }
-        else { console.log("Final utterance empty."); listeningForQuestion = false; if (questionTextarea) questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); }
+        else { console.log("Final utterance empty."); listeningForQuestion = false; if (questionTextarea) questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); updateStatusBar(''); }
     };
 
     questionRecognitionInstance.onerror = (event) => {
@@ -2165,12 +5160,13 @@ function setupQuestionRecognition() {
         else if (event.error === 'network') { errorMessage = "Network error."; }
         else if (event.error === 'aborted') { errorMessage = ""; }
 
-        if (errorMessage) { announce(errorMessage, "system", false); }
+        if (errorMessage) { announcePartnerFacingOutput(errorMessage, false); }
         document.getElementById('loading-indicator').style.display = 'none';
         if (questionTextarea) {
             questionTextarea.placeholder = "Ask a question...";
             questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); // Remove highlight on error
         }
+        updateStatusBar(''); // Clear status bar on error
         listeningForQuestion = false;
         try { questionRecognitionInstance.stop(); } catch(e) {}
 
@@ -2178,7 +5174,7 @@ function setupQuestionRecognition() {
             console.log("Attempting retry...");
             setTimeout(() => {
                  try { finalTranscript = ''; listeningForQuestion = true; hasProcessedResult = false; questionRecognitionInstance.start(); }
-                 catch (e) { console.error("Retry start error:", e); announce("Retry failed.", "system", false); listeningForQuestion = false; isRestartingKeyword = true; setupSpeechRecognition(); }
+                 catch (e) { console.error("Retry start error:", e); announcePartnerFacingOutput("Retry failed.", false); listeningForQuestion = false; isRestartingKeyword = true; setupSpeechRecognition(); }
             }, 500);
         } else { 
             console.log("Not retrying. Restarting keyword listener.");
@@ -2200,9 +5196,9 @@ function setupQuestionRecognition() {
             questionTextarea.classList.remove(LISTENING_HIGHLIGHT_CLASS); // Ensure highlight is removed
             questionTextarea.placeholder = "Ask a question...";
         }
-        // document.getElementById('loading-indicator').style.display = 'none'; // Moved to onresult's finally block
+        updateStatusBar(''); // Clear status bar when recognition ends
 
-        if (stillListening && !hasProcessedResult && !wasRetried) { console.log("Ended without result/retry."); announce("Didn't catch that. Try again?", "system", false); }
+        if (stillListening && !hasProcessedResult && !wasRetried) { console.log("Ended without result/retry."); announcePartnerFacingOutput("Didn't catch that. Try again?", false); }
 
         if (!hasProcessedResult && !isRestartingKeyword) {
             console.log("Restarting keyword listener from onend.");
@@ -2222,7 +5218,7 @@ function setupQuestionRecognition() {
         console.log("Question Speech ended."); clearTimeout(listeningTimeout);
         listeningTimeout = setTimeout(() => {
             if (listeningForQuestion && !hasProcessedResult) {
-                console.warn("Timeout after speech end."); announce("Didn't get a final result.", "system", false);
+                console.warn("Timeout after speech end."); announcePartnerFacingOutput("Didn't get a final result.", false);
                 try { questionRecognitionInstance.stop(); } catch(e){}
             }
         }, 5000);
@@ -2231,7 +5227,7 @@ function setupQuestionRecognition() {
 
     setTimeout(() => {
         try { console.log("Calling start() for question recognition..."); questionRecognitionInstance.start(); }
-        catch (e) { console.error("Start error:", e); announce("Couldn't start listening.", "system", false); listeningForQuestion = false; clearTimeout(listeningTimeout); isRestartingKeyword = true; setupSpeechRecognition(); }
+        catch (e) { console.error("Start error:", e); announcePartnerFacingOutput("Couldn't start listening.", false); listeningForQuestion = false; clearTimeout(listeningTimeout); isRestartingKeyword = true; setupSpeechRecognition(); }
     }, 150);
 }
 
@@ -2424,21 +5420,48 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
 
     let audioContext;
     let source;
+    let playbackTimeoutId = null;
+
+    const clearPlaybackTimeout = () => {
+        if (playbackTimeoutId) {
+            clearTimeout(playbackTimeoutId);
+            playbackTimeoutId = null;
+        }
+    };
+
+    const closeAudioContextSafely = async () => {
+        if (audioContext && audioContext.state !== 'closed') {
+            try {
+                await audioContext.close();
+            } catch (_closeError) {
+                // ignore close errors
+            }
+        }
+    };
 
     try {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         if (audioContext.state === 'suspended') {
             console.log("playAudioToDevice: AudioContext is suspended, attempting to resume.");
-            // We resume here; the tryResumeAudioContext() will provide the gesture.
-            audioContext.resume().catch(err => {
+            // Await resume so start/onended doesn't stall behind a suspended context.
+            try {
+                await audioContext.resume();
+            } catch (err) {
                 console.warn("playAudioToDevice: .resume() failed, probably no user gesture yet:", err);
-            });
+            }
         }
 
         if (typeof audioContext.setSinkId === 'function' && targetOutputDeviceId && targetOutputDeviceId !== 'default') {
             console.log(`playAudioToDevice: Attempting to call audioContext.setSinkId to device (ID: ${targetOutputDeviceId})`);
-            await audioContext.setSinkId(targetOutputDeviceId);
-            console.log(`playAudioToDevice: setSinkId call FINISHED for device ${targetOutputDeviceId}`);
+            try {
+                await Promise.race([
+                    audioContext.setSinkId(targetOutputDeviceId),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('setSinkId timeout')), 1500))
+                ]);
+                console.log(`playAudioToDevice: setSinkId call FINISHED for device ${targetOutputDeviceId}`);
+            } catch (sinkError) {
+                console.warn('playAudioToDevice: setSinkId failed or timed out, continuing with default output.', sinkError);
+            }
         } else {
             console.warn(`playAudioToDevice: Not performing explicit routing. Audio will play to browser's default speaker.`);
         }
@@ -2449,38 +5472,180 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start(0);
         console.log("playAudioToDevice: Audio source started.");
 
         return new Promise((resolve) => {
-            source.onended = () => {
+            const finishPlayback = () => {
+                clearPlaybackTimeout();
                 console.log("playAudioToDevice: Audio playback ended.");
-                audioContext.close(); // Important to release resources
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
+                closeAudioContextSafely();
                 resolve();
             };
+
+            source.onended = finishPlayback;
+
+            // Failsafe so queue cannot deadlock if onended never fires.
+            const durationMs = Math.max(1500, Math.ceil((audioBuffer.duration || 0) * 1000) + 2000);
+            playbackTimeoutId = setTimeout(() => {
+                console.warn(`playAudioToDevice: onended timeout (${durationMs}ms). Forcing playback completion.`);
+                try {
+                    source.stop(0);
+                } catch (_stopError) {
+                    // ignore
+                }
+                finishPlayback();
+            }, durationMs);
         }).catch(err => {
             console.error("playAudioToDevice: Error during audio playback promise:", err);
-            if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            clearPlaybackTimeout();
+            closeAudioContextSafely();
+            if (activeAnnouncementAudioContext === audioContext) {
+                activeAnnouncementAudioContext = null;
+                activeAnnouncementAudioSource = null;
+            }
             throw err;
         });
 
     } catch (error) {
         console.error('playAudioToDevice: Fatal Error during setup or playback:', error);
-        if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        clearPlaybackTimeout();
+        closeAudioContextSafely();
+        if (activeAnnouncementAudioContext === audioContext) {
+            activeAnnouncementAudioContext = null;
+            activeAnnouncementAudioSource = null;
+        }
         throw error;
     }
 }
 
 // --- Announcement Queue Processor ---
 // This function manages playing announcements from the queue sequentially.
+function speakWithSystemVoice(textToSpeak) {
+    return new Promise((resolve, reject) => {
+        if (!window.speechSynthesis) {
+            reject(new Error('speechSynthesis is not available in this browser.'));
+            return;
+        }
+
+        let settled = false;
+        let utteranceTimeoutId = null;
+
+        const settleResolve = () => {
+            if (settled) return;
+            settled = true;
+            if (utteranceTimeoutId) {
+                clearTimeout(utteranceTimeoutId);
+                utteranceTimeoutId = null;
+            }
+            resolve();
+        };
+
+        const settleReject = (error) => {
+            if (settled) return;
+            settled = true;
+            if (utteranceTimeoutId) {
+                clearTimeout(utteranceTimeoutId);
+                utteranceTimeoutId = null;
+            }
+            reject(error);
+        };
+
+        try {
+            // Clear pending utterances so scanning speech stays responsive.
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(textToSpeak);
+            const normalizedWpm = Number(currentSpeechRate || 180);
+            // Rough mapping from WPM to browser speech rate (1.0 ~= ~180wpm).
+            utterance.rate = Math.max(0.5, Math.min(2.0, normalizedWpm / 180));
+
+            utterance.onend = () => settleResolve();
+            utterance.onerror = (event) => settleReject(new Error(`System voice failed: ${event.error || 'unknown error'}`));
+
+            const estimatedDurationMs = Math.max(3000, Math.min(15000, textToSpeak.length * 110));
+            utteranceTimeoutId = setTimeout(() => {
+                console.warn(`speakWithSystemVoice timeout (${estimatedDurationMs}ms). Forcing completion.`);
+                try {
+                    window.speechSynthesis.cancel();
+                } catch (_cancelError) {
+                    // ignore cancel errors
+                }
+                settleReject(new Error('System voice timeout'));
+            }, estimatedDurationMs);
+
+            window.speechSynthesis.speak(utterance);
+        } catch (err) {
+            settleReject(err);
+        }
+    });
+}
+
+async function playAnnouncementWithServerTTS(textToAnnounce, announcementType) {
+    const controller = new AbortController();
+    const requestTimeoutId = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+        response = await authenticatedFetch(`/play-audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+                text: textToAnnounce,
+                routing_target: announcementType,
+                use_system_voice: false,
+                voice_name_override: getEffectivePartnerVoice(),
+                language_code_override: getEffectivePartnerLanguage(),
+            }),
+        });
+    } finally {
+        clearTimeout(requestTimeoutId);
+    }
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => response.text());
+        throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+    }
+
+    const jsonResponse = await response.json();
+    const audioData = jsonResponse.audio_data;
+    const sampleRate = jsonResponse.sample_rate;
+
+    if (!audioData) {
+        throw new Error("No audio data received from server.");
+    }
+
+    const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
+    await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
+}
+
 async function processAnnouncementQueue() {
-    if (isAnnouncingNow || announcementQueue.length === 0) {
+    if (announcementQueue.length === 0) {
         return; // Already playing or nothing to play.
     }
 
+    if (isAnnouncingNow) {
+        const activeForMs = announcementStartedAtMs > 0 ? (Date.now() - announcementStartedAtMs) : 0;
+        if (activeForMs > 25000) {
+            console.warn(`ANNOUNCE QUEUE: Detected stuck announcer (${activeForMs}ms). Resetting queue lock.`);
+            isAnnouncingNow = false;
+            announcementStartedAtMs = 0;
+        } else {
+            console.log(`ANNOUNCE QUEUE: Busy (${activeForMs}ms). Pending items: ${announcementQueue.length}`);
+            return;
+        }
+    }
+
     isAnnouncingNow = true;
+    announcementStartedAtMs = Date.now();
     const announcement = announcementQueue.shift();
-    const { textToAnnounce, announcementType, recordHistory, showSplash, resolve, reject, historyText } = announcement;
+    const { textToAnnounce, announcementType, recordHistory, showSplash, useSystemVoice, resolve, reject, historyText } = announcement;
 
     console.log(`ANNOUNCE QUEUE: Playing "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
 
@@ -2490,41 +5655,30 @@ async function processAnnouncementQueue() {
     }
 
     try {
-        // Fetch audio data from your server using authenticatedFetch
-        const response = await authenticatedFetch(`/play-audio`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }, // authenticatedFetch adds Auth and X-User-ID
-            body: JSON.stringify({ text: textToAnnounce, routing_target: announcementType }),
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.json().catch(() => response.text());
-            throw new Error(`Failed to synthesize audio: ${response.status} - ${JSON.stringify(errorBody)}`);
+        if (useSystemVoice === true) {
+            // Browser speechSynthesis can timeout and desync scanning UI from audio.
+            // Route system prompts through the same server TTS path for reliable timing.
+            await playAnnouncementWithServerTTS(textToAnnounce, announcementType);
+        } else {
+            // Fetch audio data from server-side TTS when partner voice is requested.
+            await playAnnouncementWithServerTTS(textToAnnounce, announcementType);
         }
-
-        const jsonResponse = await response.json();
-        const audioData = jsonResponse.audio_data;
-        const sampleRate = jsonResponse.sample_rate;
-
-        if (!audioData) {
-            throw new Error("No audio data received from server.");
-        }
-
-        const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
-        await playAudioToDevice(audioDataArrayBuffer, sampleRate, announcementType);
 
         if (recordHistory) {
-            const speechHistory = document.getElementById('speech-history');
-            if (speechHistory) {
-                // Use historyText if provided (for PAUSE-split announcements), otherwise clean the current text
-                const textForHistory = historyText || textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
-                let history = (localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId)) || '').split('\n').filter(Boolean);
-                history.unshift(textForHistory);
-                if (history.length > 20) { history = history.slice(0, 20); }
-                speechHistory.value = history.join('\n');
-                localStorage.setItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId), speechHistory.value);
+            const textForHistory = historyText || textToAnnounce.replace(/\[PAUSE\]/g, ' ').trim();
+            if (isComposeSessionActive()) {
+                appendToComposeText(textForHistory);
             } else {
-                console.warn("Speech history textarea not found for recording.");
+                const speechHistory = document.getElementById('speech-history');
+                if (speechHistory) {
+                    let history = (localStorage.getItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId)) || '').split('\n').filter(Boolean);
+                    history.unshift(textForHistory);
+                    if (history.length > 20) { history = history.slice(0, 20); }
+                    speechHistory.value = history.join('\n');
+                    localStorage.setItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId), speechHistory.value);
+                } else {
+                    console.warn("Speech history textarea not found for recording.");
+                }
             }
         }
         
@@ -2535,6 +5689,7 @@ async function processAnnouncementQueue() {
         reject(error);
     } finally {
         isAnnouncingNow = false;
+        announcementStartedAtMs = 0;
         if (announcementQueue.length > 0) {
             processAnnouncementQueue();
         }
@@ -2544,7 +5699,7 @@ async function processAnnouncementQueue() {
 
 // --- Announce Function (MODIFIED to use the queue) ---
 // This function will now queue up messages for sequential playback.
-async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true) {
+async function announce(textToAnnounce, announcementType = "system", recordHistory = true, showSplash = true, useSystemVoice = false) {
     console.log(`ANNOUNCE: QUEUING "${textToAnnounce.substring(0, 30)}..." (Type: ${announcementType})`);
     
     // Special handling for RANDOM choice - detect {RANDOM:option1|option2|option3} pattern
@@ -2590,6 +5745,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                         announcementType,
                         recordHistory: false, // Don't record the split parts
                         showSplash: showSplash,
+                        useSystemVoice,
                         resolve,
                         reject
                     });
@@ -2611,6 +5767,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                     announcementType,
                     recordHistory: recordHistory,
                     showSplash: showSplash,
+                    useSystemVoice,
                     resolve,
                     reject,
                     historyText: cleanText // Add custom property for clean history text
@@ -2638,6 +5795,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 announcementType,
                 recordHistory: false, // Don't record the split parts
                 showSplash: showSplash,
+                useSystemVoice,
                 resolve,
                 reject
             });
@@ -2654,6 +5812,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
                 announcementType,
                 recordHistory, // Record the full joke in history if requested
                 showSplash: showSplash,
+                useSystemVoice,
                 resolve,
                 reject
             });
@@ -2668,6 +5827,7 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
             announcementType,
             recordHistory,
             showSplash,
+            useSystemVoice,
             resolve, // Store the resolve function of this promise
             reject   // Store the reject function of this promise
         });
@@ -2677,6 +5837,12 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
     });
 }
 
+
+async function speakLocally(textToSpeak) {
+    const safeText = String(textToSpeak || '').trim();
+    if (!safeText) return;
+    await announce(safeText, 'system', false, false);
+}
 
 // --- Global AudioContext Resume Helper ---
 // This function tries to resume the AudioContext on first user gesture.
@@ -2697,15 +5863,179 @@ function tryResumeAudioContext() {
 
 
 
+// --- Row-Column Scanning Helper Functions ---
+function getVisibleRowIndices() {
+    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+    if (buttons.length === 0) return [];
+    
+    const rowSet = new Set();
+    buttons.forEach(btn => {
+        const row = parseInt(btn.dataset.row, 10);
+        if (!isNaN(row)) rowSet.add(row);
+    });
+    
+    return Array.from(rowSet).sort((a, b) => a - b);
+}
+
+function getButtonsInRow(rowIndex) {
+    return Array.from(document.querySelectorAll(`#gridContainer button[data-row="${rowIndex}"]:not([style*="display: none"])`))
+        .sort((a, b) => {
+            const colA = parseInt(a.dataset.col, 10);
+            const colB = parseInt(b.dataset.col, 10);
+            return colA - colB;
+        });
+}
+
+function getVisibleButtons() {
+    return Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
+}
+
+
 // --- Auditory Scanning ---
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { console.log("Auditory scanning is off."); return; }
-    console.log("Starting auditory scanning...");
-    const buttons = Array.from(document.querySelectorAll('#gridContainer button:not([style*="display: none"])'));
-    if (buttons.length === 0) { console.log("No visible buttons found."); currentlyScannedButton = null; return; }
+    if (scanMode === 'step') {
+        startStepColumnScanning();
+        return;
+    }
+    console.log("Starting auditory scanning...", `Pattern: ${currentScanPattern}`);
     
-    // Reset cycle tracking when starting fresh
+    // Check which scanning pattern to use
+    if (currentScanPattern === 'row-column') {
+        startRowPhaseScanning();
+    } else {
+        startColumnPhaseScanning();
+    }
+}
+
+function startStepColumnScanning() {
+    console.log("Starting STEP scanning (column mode)...");
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    currentRowScanMode = false;
+    currentButtonIndex = -1;
+    scanCycleCount = 0;
+    isPausedFromScanLimit = false;
+    advanceStepColumnScan();
+}
+
+function advanceStepColumnScan() {
+    if (ScanningOff || scanMode !== 'step') {
+        return;
+    }
+
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) {
+        currentlyScannedButton = null;
+        return;
+    }
+
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.remove('scanning');
+    }
+
+    currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
+    currentlyScannedButton = buttons[currentButtonIndex];
+    if (currentlyScannedButton) {
+        speakAndHighlight(currentlyScannedButton);
+    }
+}
+
+function startRowPhaseScanning() {
+    console.log("Starting ROW-PHASE scanning...");
+    const rowIndices = getVisibleRowIndices();
+    if (rowIndices.length === 0) { 
+        console.log("No rows found for row-phase scanning."); 
+        currentlyScannedButton = null;
+        return;
+    }
+    
+    currentRowScanMode = true;
+    currentRow = -1;
+    rowLoopCount = 0;
+    isPausedFromScanLimit = false;
+
+    const scanStep = async () => {
+        // Remove previous highlight (if it was on a button from the previous row)
+        if (currentlyScannedButton) { 
+            currentlyScannedButton.classList.remove('scanning');
+            // Also remove row highlights from all buttons
+            document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+                btn.classList.remove('scanning-row');
+            });
+        }
+        
+        currentRow++;
+        
+        // Check if we've completed a full cycle through all rows
+        if (currentRow >= rowIndices.length) {
+            currentRow = 0;
+            rowLoopCount++;
+            
+            // Check scan loop limit
+            if (scanLoopLimit > 0 && rowLoopCount >= scanLoopLimit) {
+                console.log(`Row scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                isPausedFromScanLimit = true;
+                stopAuditoryScanning();
+                
+                try {
+                    await announce("Scanning paused", "system", false, false, true);
+                } catch (e) { 
+                    console.error("Speech synthesis error:", e); 
+                }
+                
+                // Highlight first button for restart capability
+                const firstRowButtons = getButtonsInRow(rowIndices[0]);
+                if (firstRowButtons.length > 0) {
+                    currentlyScannedButton = firstRowButtons[0];
+                    firstRowButtons.forEach(btn => btn.classList.add('scanning-row'));
+                    currentRow = 0;
+                }
+                return;
+            }
+        }
+        
+        const rowIndex = rowIndices[currentRow];
+        const buttonsInRow = getButtonsInRow(rowIndex);
+        
+        if (buttonsInRow.length > 0) {
+            // Highlight all buttons in this row
+            buttonsInRow.forEach(btn => btn.classList.add('scanning-row'));
+            // Set currentlyScannedButton to the first button in the row (for switch handling)
+            currentlyScannedButton = buttonsInRow[0];
+            
+            // Announce the row
+            try {
+                const rowNumber = currentRow + 1;
+                await announce(`Row ${rowNumber}`, "system", false, false, true);
+            } catch (e) { 
+                console.error("Speech synthesis error:", e); 
+            }
+        } else {
+            console.warn("No buttons found in row:", rowIndex);
+        }
+    };
+    
+    console.log(`Scan delay set to: ${defaultDelay}ms`);
+    scanStep(); // Perform first scan immediately
+    scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function startColumnPhaseScanning() {
+    console.log("Starting COLUMN-PHASE scanning...");
+    const buttons = getVisibleButtons();
+    if (buttons.length === 0) { 
+        console.log("No visible buttons found."); 
+        currentlyScannedButton = null; 
+        return; 
+    }
+    
+    currentRowScanMode = false;
     currentButtonIndex = -1;
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
@@ -2716,32 +6046,28 @@ function startAuditoryScanning() {
         
         // Check if we've completed a full cycle
         if (currentButtonIndex >= buttons.length) { 
-            currentButtonIndex = 0; 
+            currentButtonIndex = 0;
             scanCycleCount++;
             
             // Check scan loop limit
             if (scanLoopLimit > 0 && scanCycleCount >= scanLoopLimit) {
-                console.log(`Scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                console.log(`Column scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
                 isPausedFromScanLimit = true;
                 stopAuditoryScanning();
                 
-                // Announce that scanning is paused using the proper audio system
                 try {
-                    await announce("Scanning paused", "system", false, false);
+                    await announce("Scanning paused", "system", false, false, true);
                 } catch (e) { 
                     console.error("Speech synthesis error:", e); 
                 }
                 
-                // Set focus and highlight on the first button so user can restart scanning
+                // Set focus on first button for restart capability
                 if (buttons.length > 0) {
                     currentButtonIndex = 0;
                     buttons[0].focus();
-                    // Add visual highlight to show focus is on first button
                     currentlyScannedButton = buttons[0];
                     currentlyScannedButton.classList.add('scanning');
-                    console.log("Focus and highlight set on first button for restart capability");
                 }
-                
                 return;
             }
         }
@@ -2749,8 +6075,81 @@ function startAuditoryScanning() {
         if (buttons[currentButtonIndex]) {
             currentlyScannedButton = buttons[currentButtonIndex];
             speakAndHighlight(currentlyScannedButton);
-        } else { console.warn("Button not found at index:", currentButtonIndex); currentButtonIndex = -1; }
+        } else { 
+            console.warn("Button not found at index:", currentButtonIndex); 
+            currentButtonIndex = -1; 
+        }
     };
+    
+    console.log(`Scan delay set to: ${defaultDelay}ms`);
+    scanStep(); // Perform first scan immediately
+    scanningInterval = setInterval(scanStep, defaultDelay);
+}
+
+function startColumnPhaseForRow(rowIndex) {
+    console.log(`Starting COLUMN-PHASE for row ${rowIndex}...`);
+    // Stop any existing scanning interval (row phase) before switching modes
+    stopAuditoryScanning();
+    const buttonsInRow = getButtonsInRow(rowIndex);
+    
+    if (buttonsInRow.length === 0) {
+        console.log("No buttons found in row, resuming row scanning.");
+        startRowPhaseScanning();
+        return;
+    }
+    
+    // Clear row highlighting
+    document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+        btn.classList.remove('scanning-row');
+    });
+    
+    currentRowScanMode = false;
+    currentRow = rowIndex;
+    currentButtonInRow = -1;
+    columnLoopCount = 0;
+    isPausedFromScanLimit = false;
+
+    const scanStep = async () => {
+        if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); }
+        currentButtonInRow++;
+        
+        // Check if we've completed a full cycle through buttons in this row
+        if (currentButtonInRow >= buttonsInRow.length) {
+            currentButtonInRow = 0;
+            columnLoopCount++;
+            
+            // Check scan loop limit
+            if (scanLoopLimit > 0 && columnLoopCount >= scanLoopLimit) {
+                console.log(`Column scan loop limit reached (${scanLoopLimit} cycles). Pausing scanning.`);
+                isPausedFromScanLimit = true;
+                stopAuditoryScanning();
+                
+                try {
+                    await announce("Scanning paused", "system", false, false, true);
+                } catch (e) { 
+                    console.error("Speech synthesis error:", e); 
+                }
+                
+                // Highlight first button in row for restart
+                if (buttonsInRow.length > 0) {
+                    currentButtonInRow = 0;
+                    buttonsInRow[0].focus();
+                    currentlyScannedButton = buttonsInRow[0];
+                    currentlyScannedButton.classList.add('scanning');
+                }
+                return;
+            }
+        }
+        
+        if (buttonsInRow[currentButtonInRow]) {
+            currentlyScannedButton = buttonsInRow[currentButtonInRow];
+            speakAndHighlight(currentlyScannedButton);
+        } else {
+            console.warn("Button not found at index:", currentButtonInRow);
+            currentButtonInRow = -1;
+        }
+    };
+    
     console.log(`Scan delay set to: ${defaultDelay}ms`);
     scanStep(); // Perform first scan immediately
     scanningInterval = setInterval(scanStep, defaultDelay);
@@ -2762,7 +6161,7 @@ async function speakAndHighlight(button) {
     try {
         const textToSpeak = button.textContent;
         // Use backend TTS instead of browser speech synthesis
-        await announce(textToSpeak, "system", false, false);
+        await announce(textToSpeak, "system", false, false, true);
     } catch (e) { console.error("Speech synthesis error:", e); }
 }
 
@@ -2770,6 +6169,9 @@ function stopAuditoryScanning() {
     console.log("Stopping auditory scanning.");
     clearInterval(scanningInterval); scanningInterval = null;
     if (currentlyScannedButton) { currentlyScannedButton.classList.remove('scanning'); currentlyScannedButton = null; }
+    document.querySelectorAll('#gridContainer button.scanning-row').forEach(btn => {
+        btn.classList.remove('scanning-row');
+    });
     currentButtonIndex = -1;
     // Note: No need to cancel speech here as backend TTS handles its own queue
 }
@@ -2782,14 +6184,21 @@ async function resumeAuditoryScanning() {
         return;
     }
     
-    console.log("Resuming scanning from first option with cycle reset...");
+    console.log("Resuming scanning with cycle reset...");
     isPausedFromScanLimit = false;
-    scanCycleCount = 0; // Reset cycle count
-    currentButtonIndex = -1; // Reset to start from first option
+    
+    // Reset appropriate counters based on current mode
+    if (currentRowScanMode) {
+        rowLoopCount = 0;
+        currentRow = -1;
+    } else {
+        scanCycleCount = 0;
+        currentButtonIndex = -1;
+    }
     
     // Announce that scanning is resumed using the proper audio system
     try {
-        await announce("Scanning resumed", "system", false, false);
+        await announce("Scanning resumed", "system", false, false, true);
     } catch (e) { 
         console.error("Speech synthesis error:", e); 
     }
@@ -2800,12 +6209,90 @@ async function resumeAuditoryScanning() {
     }, 1500);
 }
 
+async function createHomeButton(homeLabel = 'Home') {
+    const homeButton = document.createElement('button');
+    homeButton.className = '';
+
+    const homeImageUrl = await getSymbolImageForText('Home', ['home', 'house', 'main', 'start']);
+    if (homeImageUrl) {
+        const buttonContent = document.createElement('div');
+        buttonContent.style.position = 'relative';
+        buttonContent.style.width = '100%';
+        buttonContent.style.height = '100%';
+        buttonContent.style.display = 'flex';
+        buttonContent.style.flexDirection = 'column';
+
+        const imageContainer = document.createElement('div');
+        imageContainer.style.flex = '1';
+        imageContainer.style.width = '100%';
+        imageContainer.style.overflow = 'hidden';
+        imageContainer.style.borderRadius = '8px 8px 0 0';
+        imageContainer.style.display = 'flex';
+        imageContainer.style.alignItems = 'center';
+        imageContainer.style.justifyContent = 'center';
+
+        const imageElement = document.createElement('img');
+        imageElement.src = homeImageUrl;
+        imageElement.alt = homeLabel;
+        imageElement.style.width = '100%';
+        imageElement.style.height = '100%';
+        imageElement.style.objectFit = 'cover';
+        imageElement.onerror = () => {
+            homeButton.textContent = homeLabel;
+        };
+
+        const textFooter = document.createElement('div');
+        textFooter.style.minHeight = '14px';
+        textFooter.style.width = '100%';
+        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        textFooter.style.color = 'white';
+        textFooter.style.display = 'flex';
+        textFooter.style.alignItems = 'center';
+        textFooter.style.justifyContent = 'center';
+        textFooter.style.padding = '0 3px';
+        textFooter.style.boxSizing = 'border-box';
+        textFooter.style.position = 'absolute';
+        textFooter.style.bottom = '0';
+        textFooter.style.left = '0';
+        textFooter.style.right = '0';
+
+        const textSpan = document.createElement('span');
+        textSpan.textContent = homeLabel;
+        textSpan.style.fontSize = '0.45em';
+        textSpan.style.fontWeight = 'bold';
+        textSpan.style.textAlign = 'center';
+        textSpan.style.lineHeight = '0.95';
+
+        imageContainer.appendChild(imageElement);
+        textFooter.appendChild(textSpan);
+        buttonContent.appendChild(imageContainer);
+        buttonContent.appendChild(textFooter);
+        homeButton.appendChild(buttonContent);
+    } else {
+        homeButton.textContent = homeLabel;
+    }
+
+    homeButton.addEventListener('click', () => {
+        activeOriginatingButtonText = null;
+        activeLLMPromptForContext = null;
+        resetFollowUpConversation();
+        localStorage.removeItem('llm_currentQueryType');
+        localStorage.removeItem('llm_currentQuestion');
+        localStorage.removeItem('llm_currentOptions');
+        window.location.href = 'gridpage.html?page=home';
+    });
+
+    return homeButton;
+}
+
 // --- LLM Button Generation ---
 async function generateLlmButtons(options) {
     document.getElementById('loading-indicator').style.display = 'none';
     isLLMProcessing = false; // Reset processing flag since LLM results are ready
     options = Array.isArray(options) ? options : [];
     stopAuditoryScanning();
+    window.waitingForInitialSwitch = false;
+    hasPlayedWaitForSwitchChime = false;
     const gridContainer = document.getElementById('gridContainer');
     if (!gridContainer) { console.error("gridContainer not found!"); return; }
     gridContainer.innerHTML = '';
@@ -2815,6 +6302,9 @@ async function generateLlmButtons(options) {
     
     currentOptions = options;
     localStorage.setItem('llm_currentOptions', JSON.stringify(options));
+    const localizedLabels = await getLocalizedLlmSpecialButtonLabels();
+    // Start translating visible options in the background to reduce click-to-speech delay.
+    warmTranslationCacheForOptions(options);
     let isAnnouncing = false;
     console.log("Generating buttons for options:", options);
 
@@ -2825,118 +6315,40 @@ async function generateLlmButtons(options) {
      const askAgainButtonColors = [ 'bg-yellow-500', 'border-yellow-700', 'hover:bg-yellow-600', 'hover:border-yellow-800', 'text-black', 'focus:ring-yellow-400' ];
      const goBackButtonColors = [ 'bg-gray-200', 'border-gray-400', 'hover:bg-gray-300', 'hover:border-gray-500', 'text-black', 'focus:ring-gray-300' ];
 
-    // Generate buttons with async symbol loading (throttled to prevent server overwhelm)
-    const buttonPromises = options.map(async (optionData, idx) => {
-        if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') { 
-            console.warn("Skipping invalid option data:", optionData); 
-            return null; 
+    // Build buttons immediately (text first), then hydrate images asynchronously.
+    const validButtons = [];
+    options.forEach((optionData) => {
+        if (!optionData || typeof optionData.summary !== 'string' || typeof optionData.option !== 'string') {
+            console.warn("Skipping invalid option data:", optionData);
+            return;
         }
+
         const button = document.createElement('button');
-        
-        // Add delay between requests to prevent server overwhelm (200ms per button for better spacing)
-        await new Promise(resolve => setTimeout(resolve, idx * 200));
-        
-        // Get optimized search term for better image matching (removes question words like "what", "who", etc.)
-        const optimizedSearchTerm = getOptimizedSearchTerm(optionData.summary, optionData.keywords);
-        console.log(`🔍 Image search optimization: "${optionData.summary}" → "${optimizedSearchTerm}"`);
-        
-        // Try to get symbol image first, fall back to pictogram if needed
-        let symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, optionData.keywords);
-        
-        if (!symbolImageUrl) {
-            console.warn(`🚨 LLM Option: No image found for "${optimizedSearchTerm}" (original: "${optionData.summary}")`);
-        }
-        
-        if (symbolImageUrl) {
-            // Create container with dedicated image area and text footer
-            const buttonContent = document.createElement('div');
-            buttonContent.style.position = 'relative';
-            buttonContent.style.width = '100%';
-            buttonContent.style.height = '100%';
-            buttonContent.style.display = 'flex';
-            buttonContent.style.flexDirection = 'column';
-            
-            // Image container (takes up most of button height)
-            const imageContainer = document.createElement('div');
-            imageContainer.style.flex = '1';
-            imageContainer.style.width = '100%';
-            imageContainer.style.overflow = 'hidden';
-            imageContainer.style.borderRadius = '8px 8px 0 0';
-            imageContainer.style.display = 'flex';
-            imageContainer.style.alignItems = 'center';
-            imageContainer.style.justifyContent = 'center';
-            
-            const imageElement = document.createElement('img');
-            imageElement.src = symbolImageUrl;
-            imageElement.alt = optionData.summary;
-            imageElement.style.width = '100%';
-            imageElement.style.height = '100%';
-            imageElement.style.objectFit = 'cover';
-            imageElement.onerror = () => {
-                console.warn(`Failed to load image for "${optionData.summary}" - using text-only display`);
-                // No emoji fallback - just hide the broken image
-                imageElement.style.display = 'none';
-            };
-            
-            // Text footer (overlays bottom of image)
-            const textFooter = document.createElement('div');
-            textFooter.style.height = '28px'; // Taller to accommodate 2 rows
-            textFooter.style.width = '100%';
-            textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-            textFooter.style.color = 'white';
-            textFooter.style.display = 'flex';
-            textFooter.style.alignItems = 'center';
-            textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '2px 4px';
-            textFooter.style.margin = '0';
-            textFooter.style.borderRadius = '0';
-            textFooter.style.position = 'absolute';
-            textFooter.style.bottom = '0';
-            textFooter.style.left = '0';
-            textFooter.style.right = '0';
-            
-            const textSpan = document.createElement('span');
-            textSpan.textContent = optionData.summary;
-            textSpan.style.fontSize = '0.7em';
-            textSpan.style.fontWeight = 'bold';
-            textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
-            textSpan.style.wordWrap = 'break-word';
-            textSpan.style.hyphens = 'auto';
-            textSpan.style.overflow = 'hidden';
-            textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
-            textSpan.style.webkitBoxOrient = 'vertical';
-            
-            imageContainer.appendChild(imageElement);
-            textFooter.appendChild(textSpan);
-            buttonContent.appendChild(imageContainer);
-            buttonContent.appendChild(textFooter);
-            button.appendChild(buttonContent);
-        } else {
-            // No image found - use text-only display (no emoji fallback)
-            button.textContent = optionData.summary;
-        }
-        
+        button.textContent = optionData.summary;
         button.dataset.option = optionData.option;
         button.dataset.speechPhrase = optionData.option;
-        // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
-        // The #gridContainer button CSS rules will handle the styling
         button.className = '';
-        
-        // Apply same edge-to-edge styling as regular buttons
-        button.style.padding = '0'; // Remove all padding
-        button.style.margin = '0'; // Remove all margin
-        button.style.border = 'none'; // Remove border
-        button.style.position = 'relative'; // Allow for absolute positioning of text overlay
-        button.style.overflow = 'hidden'; // Ensure images don't overflow button boundaries
+        button.style.padding = '0';
+        button.style.margin = '0';
+        button.style.border = 'none';
+        button.style.position = 'relative';
+        button.style.overflow = 'hidden';
 
-        return { button, optionData };
+        validButtons.push({ button, optionData });
     });
-    
-    // Wait for all buttons to be created
-    const buttonResults = await Promise.all(buttonPromises);
-    const validButtons = buttonResults.filter(result => result !== null);
+
+    console.log(`🧩 generateLlmButtons: Prepared ${validButtons.length} immediate buttons`);
+    const fragment = document.createDocumentFragment();
+
+    if (querytype === 'jokes') {
+        const homeButton = await createHomeButton(localizedLabels.home);
+        fragment.appendChild(homeButton);
+    }
+
+    if (querytype !== 'jokes') {
+        const homeButton = await createHomeButton(localizedLabels.home);
+        gridContainer.appendChild(homeButton);
+    }
     
     // Add event listeners and append buttons
     validButtons.forEach(({ button, optionData }) => {
@@ -2946,6 +6358,9 @@ async function generateLlmButtons(options) {
             isAnnouncing = true;
             stopAuditoryScanning(); // Stop scanning when an option is chosen
             console.log("LLM Button Click. Announcing:", optionData.option); // Log the full option text
+
+            // Start translation immediately so it runs in parallel with non-blocking side effects.
+            const translatedOptionPromise = translateLineToPartnerLanguage(optionData.option);
 
             // --- Log LLM Button Click for Audit ---
             const clickTimestamp = new Date().toISOString();
@@ -2960,20 +6375,25 @@ async function generateLlmButtons(options) {
                 originating_button_text: optionData.originatingButtonText // NEW: Add originating button text
             };
             console.log("Logging LLM button click data:", logData);
-            try {
-                console.log('🔄 About to send audit log...');
-                const auditResponse = await authenticatedFetch('/api/audit/log-button-click', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(logData)
-                });
-                console.log('📊 Audit response received:', auditResponse.ok);
-                if (!auditResponse.ok) console.error("Failed to log LLM button click:", auditResponse.status, await auditResponse.text());
-                else console.log("LLM button click logged successfully:", logData);
-            } catch (auditError) {
-                console.error("Error sending LLM button click log:", auditError);
-            }
-            console.log('✅ Audit logging complete');
+            (async () => {
+                try {
+                    console.log('🔄 About to send audit log...');
+                    const auditResponse = await authenticatedFetch('/api/audit/log-button-click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(logData)
+                    });
+                    console.log('📊 Audit response received:', auditResponse.ok);
+                    if (!auditResponse.ok) {
+                        console.error("Failed to log LLM button click:", auditResponse.status, await auditResponse.text());
+                    } else {
+                        console.log("LLM button click logged successfully:", logData);
+                    }
+                } catch (auditError) {
+                    console.error("Error sending LLM button click log:", auditError);
+                }
+                console.log('✅ Audit logging complete');
+            })();
             // --- End Audit Logging ---
             
             // --- Record Chat History for LLM Selection ---
@@ -2996,30 +6416,160 @@ async function generateLlmButtons(options) {
             
             console.log('🔊 About to announce option...');
             try {
-                // Announce the selected option (using the full option text for clarity)
-                await announce(optionData.option, "system"); // Use optionData.option directly
+                // Announce translated partner-facing output while preserving source text for LLM context.
+                const translatedOptionForPartner = await translatedOptionPromise;
+                await announce(translatedOptionForPartner, "system", true);
                 console.log("✅ Announcement finished for:", button.dataset.option);
 
-                console.log('🔄 About to reload page...');
-                // Clear the question display after announcement
-                // NOTE: Keep activeLLMPromptForContext intact for context-aware navigation (e.g., to freestyle)
-                const questionDisplay = document.getElementById('question-display');
-                if (questionDisplay) { questionDisplay.value = ''; }
+                if (querytype === 'jokes') {
+                    window.location.href = 'gridpage.html?page=home';
+                } else {
+                    addFollowUpSelection(optionData.option);
 
-                // Reload the page to go back to the initial state
-                // Consider if this is always the desired behavior
-                window.location.reload(true);
+                    const excludedOptionsText = currentOptions
+                        .map(opt => opt.option)
+                        .filter(text => typeof text === 'string' && text.trim() !== '')
+                        .join('; ');
+
+                    const followUpPrompt = buildFollowUpPrompt(excludedOptionsText);
+                    activeLLMPromptForContext = getConversationContextText();
+                    querytype = 'question';
+
+                    document.getElementById('loading-indicator').style.display = 'flex';
+                    requestLlmOptionsChime();
+                    const followUpOptions = await getLLMResponse(followUpPrompt);
+                    document.getElementById('loading-indicator').style.display = 'none';
+                    
+                    console.log(`📥 Received ${Array.isArray(followUpOptions) ? followUpOptions.length : 0} options from LLM`);
+                    
+                    // FILTER 1: Remove partner-interrogative patterns
+                    const filteredForUserPerspective = Array.isArray(followUpOptions)
+                        ? followUpOptions.filter(optionObj => {
+                            const optionText = typeof optionObj === 'object' ? optionObj.option : optionObj;
+                            const isInterrogative = isPartnerInterrogativePattern(optionText);
+                            if (isInterrogative) {
+                                console.warn('🚫 Filtered out partner-interrogative pattern:', optionText);
+                            }
+                            return !isInterrogative;
+                        })
+                        : followUpOptions;
+                    
+                    console.log(`✅ After interrogative filter: ${Array.isArray(filteredForUserPerspective) ? filteredForUserPerspective.length : 0} options remain`);
+                    
+                    const prioritizedFollowUpOptions = prioritizeContextualOptions(
+                        filteredForUserPerspective,
+                        getConversationContextText(),
+                        LLMOptions
+                    );
+                    const additiveFollowUpOptions = enforceAdditiveFollowUpOptions(prioritizedFollowUpOptions, LLMOptions);
+                    const partnerQuestionPrioritizedOptions = prioritizePartnerEngagementQuestions(additiveFollowUpOptions, LLMOptions, 4);
+
+                    if (Array.isArray(partnerQuestionPrioritizedOptions) && partnerQuestionPrioritizedOptions.length > 0) {
+                        await generateLlmButtons(partnerQuestionPrioritizedOptions);
+                    } else {
+                        console.warn('No follow-up options returned after selection.');
+                        announce("Sorry, I couldn't find follow-up options right now.", "system", false);
+                        startAuditoryScanning();
+                    }
+                }
 
             } catch (error) {
                  console.error("❌ Error during announcement or reload:", error);
+                 document.getElementById('loading-indicator').style.display = 'none';
                  // Optionally restart scanning here if announce fails
                  startAuditoryScanning();
             } finally {
                 isAnnouncing = false; // Reset flag  
             }
         }, clickDebounceDelay)); // Apply debounce
-        gridContainer.appendChild(button);
+        fragment.appendChild(button);
     });
+
+    // Hydrate images after buttons are already visible to avoid blank states.
+    validButtons.forEach(({ button, optionData }, idx) => {
+        (async () => {
+            try {
+                await new Promise(resolve => setTimeout(resolve, idx * 200));
+                const optimizedSearchTerm = getOptimizedSearchTerm(optionData.summary, optionData.keywords);
+                console.log(`🔍 Image search optimization: "${optionData.summary}" → "${optimizedSearchTerm}"`);
+
+                const symbolImageUrl = await getSymbolImageForText(optimizedSearchTerm, optionData.keywords);
+                if (!symbolImageUrl || !button.isConnected) {
+                    if (!symbolImageUrl) {
+                        console.warn(`🚨 LLM Option: No image found for "${optimizedSearchTerm}" (original: "${optionData.summary}")`);
+                    }
+                    return;
+                }
+
+                const buttonContent = document.createElement('div');
+                buttonContent.style.position = 'relative';
+                buttonContent.style.width = '100%';
+                buttonContent.style.height = '100%';
+                buttonContent.style.display = 'flex';
+                buttonContent.style.flexDirection = 'column';
+
+                const imageContainer = document.createElement('div');
+                imageContainer.style.flex = '1';
+                imageContainer.style.width = '100%';
+                imageContainer.style.overflow = 'hidden';
+                imageContainer.style.borderRadius = '8px 8px 0 0';
+                imageContainer.style.display = 'flex';
+                imageContainer.style.alignItems = 'center';
+                imageContainer.style.justifyContent = 'center';
+
+                const imageElement = document.createElement('img');
+                imageElement.src = symbolImageUrl;
+                imageElement.alt = optionData.summary;
+                imageElement.style.width = '100%';
+                imageElement.style.height = '100%';
+                imageElement.style.objectFit = 'cover';
+                imageElement.onerror = () => {
+                    console.warn(`Failed to load image for "${optionData.summary}" - keeping text-only display`);
+                };
+
+                const textFooter = document.createElement('div');
+                textFooter.style.minHeight = '14px';
+                textFooter.style.width = '100%';
+                textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                textFooter.style.color = 'white';
+                textFooter.style.display = 'flex';
+                textFooter.style.alignItems = 'center';
+                textFooter.style.justifyContent = 'center';
+                textFooter.style.padding = '0 3px';
+                textFooter.style.margin = '0';
+                textFooter.style.borderRadius = '0';
+                textFooter.style.boxSizing = 'border-box';
+                textFooter.style.position = 'absolute';
+                textFooter.style.bottom = '0';
+                textFooter.style.left = '0';
+                textFooter.style.right = '0';
+
+                const textSpan = document.createElement('span');
+                textSpan.textContent = optionData.summary;
+                textSpan.style.fontSize = '0.45em';
+                textSpan.style.fontWeight = 'bold';
+                textSpan.style.textAlign = 'center';
+                textSpan.style.lineHeight = '0.95';
+                textSpan.style.wordWrap = 'break-word';
+                textSpan.style.hyphens = 'auto';
+                textSpan.style.overflow = 'hidden';
+                textSpan.style.display = '-webkit-box';
+                textSpan.style.webkitLineClamp = '1';
+                textSpan.style.webkitBoxOrient = 'vertical';
+
+                imageContainer.appendChild(imageElement);
+                textFooter.appendChild(textSpan);
+                buttonContent.appendChild(imageContainer);
+                buttonContent.appendChild(textFooter);
+
+                button.innerHTML = '';
+                button.appendChild(buttonContent);
+            } catch (error) {
+                console.warn(`LLM button image hydration failed for "${optionData.summary}":`, error);
+            }
+        })();
+    });
+    gridContainer.appendChild(fragment);
 
     // --- Generate Special Buttons ---
     // (Ensure these also have the base class and appropriate color classes)
@@ -3048,34 +6598,35 @@ async function generateLlmButtons(options) {
         
         const imageElement = document.createElement('img');
         imageElement.src = somethingElseImageUrl;
-        imageElement.alt = 'Something Else';
+        imageElement.alt = localizedLabels.somethingElse;
         imageElement.style.width = '100%';
         imageElement.style.height = '100%';
         imageElement.style.objectFit = 'cover';
         imageElement.onerror = () => {
-            somethingElseButton.textContent = 'Something Else';
+            somethingElseButton.textContent = localizedLabels.somethingElse;
         };
         
         const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
+        textFooter.style.minHeight = '14px';
         textFooter.style.width = '100%';
         textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
         textFooter.style.color = 'white';
         textFooter.style.display = 'flex';
         textFooter.style.alignItems = 'center';
         textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
+        textFooter.style.padding = '0 3px';
+        textFooter.style.boxSizing = 'border-box';
         textFooter.style.position = 'absolute';
         textFooter.style.bottom = '0';
         textFooter.style.left = '0';
         textFooter.style.right = '0';
         
         const textSpan = document.createElement('span');
-        textSpan.textContent = 'Something Else';
-        textSpan.style.fontSize = '0.7em';
+        textSpan.textContent = localizedLabels.somethingElse;
+        textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
+        textSpan.style.lineHeight = '0.95';
         
         imageContainer.appendChild(imageElement);
         textFooter.appendChild(textSpan);
@@ -3083,7 +6634,7 @@ async function generateLlmButtons(options) {
         buttonContent.appendChild(textFooter);
         somethingElseButton.appendChild(buttonContent);
     } else {
-        somethingElseButton.textContent = 'Something Else';
+        somethingElseButton.textContent = localizedLabels.somethingElse;
     }
     somethingElseButton.addEventListener('click', async () => {
         stopAuditoryScanning(); // Stop scanning before fetching new options
@@ -3096,6 +6647,15 @@ async function generateLlmButtons(options) {
                 // should still be the category button that initiated it.
                 console.log("Getting next set of current events for type:", eventtype);
                 await getCurrentEvents(eventtype); // This calls generateLlmButtons, which starts scanning
+            } else if (querytype === "jokes") {
+                document.getElementById('loading-indicator').style.display = 'flex';
+                const jokeOptions = await fetchJokeOptions(LLMOptions, currentQuestion);
+                if (jokeOptions.length > 0) {
+                    await generateLlmButtons(jokeOptions);
+                } else {
+                    console.warn("No jokes returned for refresh.");
+                    announce("Sorry, I couldn't find any other jokes.", "system", false);
+                }
             } else if (querytype === "question" || querytype === "options") {
                 document.getElementById('loading-indicator').style.display = 'flex';
                 try {
@@ -3105,50 +6665,65 @@ async function generateLlmButtons(options) {
                         .join("; ");
                     console.log("Excluding options:", excludedOptionsText);
 
-                    const summaryInstruction = SummaryOff
-                        ? 'The "summary" key should contain the exact same FULL text as the "option" key.'
-                        : 'If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.';
-                        // Set activeLLMPromptForContext to the original concise question before calling getLLMResponse
-                        activeLLMPromptForContext = currentQuestion;
-                        // activeOriginatingButtonText should still be set from the initial question or button click
-                        // that generated the current set of options.
-                    const prompt = `
-                        For the question "${currentQuestion}", provide new options.
-                        IMPORTANTLY, exclude the following options if possible: "${excludedOptionsText}".
-                        Return ONLY a numbered list of the new options. Do not include any introductory or concluding text.
-                        Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-                        ${summaryInstruction}
-                        The "option" key should contain the FULL option text. If the option contains a question and answer, like a joke, the option contain the question and the answer.
-                        The "keywords" key should contain 3-5 words that match available symbols. Use these available descriptive words: good, great, happy, sad, angry, excited, tired, hungry, thirsty, hot, cold, big, small, fast, slow, easy, hard, fun, work, play, eat, drink, sleep, walk, run, read, write, look, listen, talk, help, love, like, want, need, more, less, yes, no, stop, go, come, here, there, up, down, in, out, on, off, open, close, new, old, clean, dirty, quiet, loud, light, dark. Focus on concrete, simple words rather than complex descriptives.
-                        Example: [{"option": "What a fantastic day!", "summary": "Fantastic day", "keywords": ["good", "happy", "great", "day", "fun"]}]
-                    `;
+                    activeLLMPromptForContext = getConversationContextText() || currentQuestion;
+                    const prompt = buildFollowUpPrompt(excludedOptionsText);
                     console.log("Sending prompt for 'Something Else' options:", prompt);
 
-                    const response = await getLLMResponse(prompt); // Expects an array
+                    requestLlmOptionsChime();
 
-                    if (Array.isArray(response)) {
-                        if (response.length > 0) {
-                            await generateLlmButtons(response); // This will restart scanning
+                    const response = await getLLMResponse(prompt); // Expects an array
+                    
+                    console.log(`📥 Received ${Array.isArray(response) ? response.length : 0} options from LLM (Something Else)`);
+                    
+                    // FILTER 1: Remove partner-interrogative patterns
+                    const filteredResponse = Array.isArray(response)
+                        ? response.filter(optionObj => {
+                            const optionText = typeof optionObj === 'object' ? optionObj.option : optionObj;
+                            const isInterrogative = isPartnerInterrogativePattern(optionText);
+                            if (isInterrogative) {
+                                console.warn('🚫 Filtered out partner-interrogative pattern:', optionText);
+                            }
+                            return !isInterrogative;
+                        })
+                        : response;
+                    
+                    console.log(`✅ After interrogative filter: ${Array.isArray(filteredResponse) ? filteredResponse.length : 0} options remain (Something Else)`);
+                    
+                    const prioritizedResponse = prioritizeContextualOptions(
+                        filteredResponse,
+                        getConversationContextText() || currentQuestion,
+                        LLMOptions
+                    );
+                    const additiveResponse = enforceAdditiveFollowUpOptions(prioritizedResponse, LLMOptions);
+                    const partnerQuestionPrioritizedResponse = prioritizePartnerEngagementQuestions(additiveResponse, LLMOptions, 4);
+
+                    if (Array.isArray(partnerQuestionPrioritizedResponse)) {
+                        if (partnerQuestionPrioritizedResponse.length > 0) {
+                            await generateLlmButtons(partnerQuestionPrioritizedResponse); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (array response).");
+                            playLlmOptionsChimePending = false;
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
                         }
-                    } else if (typeof response === 'string' && response.trim() !== '') { // Fallback for older string response
+                    } else if (typeof prioritizedResponse === 'string' && prioritizedResponse.trim() !== '') { // Fallback for older string response
                         console.warn("Received string response from getLLMResponse for 'Something Else', expected array. Processing as string.");
-                        const newOptions = response.split("\n").map(option => option.replace(/^\s*\d+[\.\)]?\s*|\s*\*+\s*|["']/g, '').trim()).filter(option => option !== "");
+                        const newOptions = prioritizedResponse.split("\n").map(option => option.replace(/^\s*\d+[\.\)]?\s*|\s*\*+\s*|["']/g, '').trim()).filter(option => option !== "");
                         if (newOptions.length > 0) {
                             const newOptionsObjects = newOptions.map(optText => ({ summary: optText, option: optText, keywords: [] }));
                             await generateLlmButtons(newOptionsObjects); // This will restart scanning
                         } else {
                             console.warn("LLM did not return any new options after exclusion (string response).");
+                            playLlmOptionsChimePending = false;
                             announce("Sorry, I couldn't find any other options for that.", "system", false);
                         }
                     } else {
-                        console.error("Unexpected or empty response type from getLLMResponse for 'Something Else':", response);
+                        console.error("Unexpected or empty response type from getLLMResponse for 'Something Else':", prioritizedResponse);
+                        playLlmOptionsChimePending = false;
                         announce("Sorry, I received an unexpected response for more options.", "system", false);
                     }
                     } catch (error) {
                     console.error('Error getting new LLM options for "Something Else":', error);
+                    playLlmOptionsChimePending = false;
                     announce("Sorry, an error occurred while getting more options.", "system", false);
                 } finally {
                     document.getElementById('loading-indicator').style.display = 'none';
@@ -3200,34 +6775,35 @@ async function generateLlmButtons(options) {
         
         const imageElement = document.createElement('img');
         imageElement.src = freeStyleImageUrl;
-        imageElement.alt = 'Free Style';
+        imageElement.alt = localizedLabels.freeStyle;
         imageElement.style.width = '100%';
         imageElement.style.height = '100%';
         imageElement.style.objectFit = 'cover';
         imageElement.onerror = () => {
-            freeStyleButton.textContent = 'Free Style';
+            freeStyleButton.textContent = localizedLabels.freeStyle;
         };
         
         const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
+        textFooter.style.minHeight = '14px';
         textFooter.style.width = '100%';
         textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
         textFooter.style.color = 'white';
         textFooter.style.display = 'flex';
         textFooter.style.alignItems = 'center';
         textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
+        textFooter.style.padding = '0 3px';
+        textFooter.style.boxSizing = 'border-box';
         textFooter.style.position = 'absolute';
         textFooter.style.bottom = '0';
         textFooter.style.left = '0';
         textFooter.style.right = '0';
         
         const textSpan = document.createElement('span');
-        textSpan.textContent = 'Free Style';
-        textSpan.style.fontSize = '0.7em';
+        textSpan.textContent = localizedLabels.freeStyle;
+        textSpan.style.fontSize = '0.45em';
         textSpan.style.fontWeight = 'bold';
         textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
+        textSpan.style.lineHeight = '0.95';
         
         imageContainer.appendChild(imageElement);
         textFooter.appendChild(textSpan);
@@ -3235,7 +6811,7 @@ async function generateLlmButtons(options) {
         buttonContent.appendChild(textFooter);
         freeStyleButton.appendChild(buttonContent);
     } else {
-        freeStyleButton.textContent = 'Free Style';
+        freeStyleButton.textContent = localizedLabels.freeStyle;
     }
     freeStyleButton.addEventListener('click', () => {
         stopAuditoryScanning();
@@ -3257,6 +6833,10 @@ async function generateLlmButtons(options) {
             params.set('context', activeLLMPromptForContext);
             params.set('is_llm_generated', 'true');
         }
+
+        if (isComposeSessionActive()) {
+            params.set('compose', '1');
+        }
         
         // Pass originating button text if available
         if (activeOriginatingButtonText) {
@@ -3270,9 +6850,11 @@ async function generateLlmButtons(options) {
     });
     gridContainer.appendChild(freeStyleButton);
 
+    playPageReadyChimeIfEnabled();
+
     if (querytype === "question") {
         const askAgainButton = document.createElement('button');
-        askAgainButton.textContent = 'Please ask me again';
+        askAgainButton.textContent = localizedLabels.askAgain;
         askAgainButton.id = 'askAgainButton';
         // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
         askAgainButton.className = '';
@@ -3280,7 +6862,8 @@ async function generateLlmButtons(options) {
             stopAuditoryScanning();
             activeOriginatingButtonText = null; // Reset, as a new question will be asked
             activeLLMPromptForContext = null;
-            announce('Okay, please ask your question again after the tone.', "system", false)
+            resetFollowUpConversation();
+            announcePartnerFacingOutput('Okay, please ask your question again after the tone.', false)
                 .then(() => { activeLLMPromptForContext = "User chose to ask question again."; })
                 .then(() => {
                     // Reset state and start question recognition again
@@ -3303,84 +6886,12 @@ async function generateLlmButtons(options) {
         gridContainer.appendChild(askAgainButton);
     }
 
-    const goBackButton = document.createElement('button');
-    // Remove Tailwind classes to allow CSS speech bubble styling to take precedence
-    goBackButton.className = '';
-    
-    // Apply image matching to Go Back button
-    const goBackImageUrl = await getSymbolImageForText('Go Back', ['back', 'return', 'previous', 'arrow']);
-    if (goBackImageUrl) {
-        const buttonContent = document.createElement('div');
-        buttonContent.style.position = 'relative';
-        buttonContent.style.width = '100%';
-        buttonContent.style.height = '100%';
-        buttonContent.style.display = 'flex';
-        buttonContent.style.flexDirection = 'column';
-        
-        const imageContainer = document.createElement('div');
-        imageContainer.style.flex = '1';
-        imageContainer.style.width = '100%';
-        imageContainer.style.overflow = 'hidden';
-        imageContainer.style.borderRadius = '8px 8px 0 0';
-        imageContainer.style.display = 'flex';
-        imageContainer.style.alignItems = 'center';
-        imageContainer.style.justifyContent = 'center';
-        
-        const imageElement = document.createElement('img');
-        imageElement.src = goBackImageUrl;
-        imageElement.alt = 'Go Back';
-        imageElement.style.width = '100%';
-        imageElement.style.height = '100%';
-        imageElement.style.objectFit = 'cover';
-        imageElement.onerror = () => {
-            goBackButton.textContent = 'Go Back';
-        };
-        
-        const textFooter = document.createElement('div');
-        textFooter.style.height = '28px';
-        textFooter.style.width = '100%';
-        textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-        textFooter.style.color = 'white';
-        textFooter.style.display = 'flex';
-        textFooter.style.alignItems = 'center';
-        textFooter.style.justifyContent = 'center';
-        textFooter.style.padding = '2px 4px';
-        textFooter.style.position = 'absolute';
-        textFooter.style.bottom = '0';
-        textFooter.style.left = '0';
-        textFooter.style.right = '0';
-        
-        const textSpan = document.createElement('span');
-        textSpan.textContent = 'Go Back';
-        textSpan.style.fontSize = '0.7em';
-        textSpan.style.fontWeight = 'bold';
-        textSpan.style.textAlign = 'center';
-        textSpan.style.lineHeight = '1.1';
-        
-        imageContainer.appendChild(imageElement);
-        textFooter.appendChild(textSpan);
-        buttonContent.appendChild(imageContainer);
-        buttonContent.appendChild(textFooter);
-        goBackButton.appendChild(buttonContent);
-    } else {
-        goBackButton.textContent = 'Go Back';
-    }
-    goBackButton.addEventListener('click', () => {
-        activeOriginatingButtonText = null; // Reset on navigation
-        activeLLMPromptForContext = null; // Clear context on navigation
-        localStorage.removeItem('llm_currentQueryType');
-        localStorage.removeItem('llm_currentQuestion');
-        localStorage.removeItem('llm_currentOptions');
-        window.location.reload(true);
-    })
-    gridContainer.appendChild(goBackButton);
-
 
     // --- Start Auditory Scanning ---
     if (gridContainer.childElementCount > 0) {
          console.log("Starting auditory scanning for generated LLM/special buttons.");
-        // activeLLMPromptForContext is already set by the function that called generateLlmButtons
-         startAuditoryScanning();
+         setupSpeechRecognition();
+            startOrWaitForScanning({ allowPrompt: false, source: 'generateLlmButtons' });
     } else { console.log("No buttons generated, not starting scanning."); }
 }
 
@@ -3391,27 +6902,36 @@ async function generateLlmButtons(options) {
  */
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
-        if (event.code === 'Space') {
+        if (event.repeat) return; // Ignore key-repeat events (held key fires multiple keydown)
+        const isSpaceKey = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar';
+
+        if (event.code === 'Tab' && scanMode === 'step') {
             event.preventDefault();
-            
-            // Check if we're waiting for initial switch press
+            interruptScanningAnnouncementPlayback();
+
             if (window.waitingForInitialSwitch) {
-                console.log('Initial switch detected (spacebar) - starting scanning on gridpage');
+                console.log('Initial switch detected (tab) - starting scanning on gridpage');
                 window.waitingForInitialSwitch = false;
-                sessionStorage.setItem('bravoScanningStarted_grid', 'true');
+                markScanningStartedFromSwitch();
                 startAuditoryScanning();
                 return;
             }
-            
-            // Normal scanning behavior
-            if (!isLLMProcessing && !listeningForQuestion && currentlyScannedButton) {
-                const buttonToActivate = currentlyScannedButton; // Capture the button reference
-                console.log("Spacebar pressed, activating button:", buttonToActivate.textContent);
-                buttonToActivate.click();
-                buttonToActivate.classList.add('active');
-                // Use the captured reference in the timeout as well
-                setTimeout(() => buttonToActivate?.classList.remove('active'), 150);
+
+            if (shouldSuppressSwitchActivation()) return;
+
+            if (!isLLMProcessing && !listeningForQuestion) {
+                if (!currentlyScannedButton) {
+                    startAuditoryScanning();
+                } else {
+                    advanceStepColumnScan();
+                }
             }
+            return;
+        }
+
+        if (isSpaceKey) {
+            event.preventDefault();
+            handleSpacebarPress();
         }
     });
     console.log("Keyboard listener (Spacebar) set up.");
@@ -3461,9 +6981,15 @@ function startGamepadPolling() {
                 if (window.waitingForInitialSwitch) {
                     console.log('Initial switch detected (gamepad) - starting scanning on gridpage');
                     window.waitingForInitialSwitch = false;
-                    sessionStorage.setItem('bravoScanningStarted_grid', 'true');
+                    markScanningStartedFromSwitch();
                     startAuditoryScanning();
                     lastGamepadInputTime = now;
+                    lastButtonState = currentButtonState;
+                    gamepadPollInterval = requestAnimationFrame(pollGamepads);
+                    return;
+                }
+
+                if (shouldSuppressSwitchActivation()) {
                     lastButtonState = currentButtonState;
                     gamepadPollInterval = requestAnimationFrame(pollGamepads);
                     return;
@@ -3891,9 +7417,13 @@ if (!document.getElementById('scanning-styles')) {
     const styleSheet = document.createElement("style");
     styleSheet.id = 'scanning-styles';
     styleSheet.textContent = `
-        .scanning { /* Highlight style */
+        .scanning { /* Highlight style for individual buttons */
             box-shadow: 0 0 10px 4px #FB4F14 !important; /* Orange glow, !important to override base button shadow */
             outline: none !important; /* Prevent default browser focus outline, !important for specificity */
+        }
+        .scanning-row { /* Highlight style for entire row during row-phase scanning */
+            box-shadow: 0 0 8px 3px #FFA500 !important; /* Slightly different orange glow for row highlight */
+            outline: none !important;
         }
         .active { /* Optional style for click feedback */
              transform: scale(0.95);

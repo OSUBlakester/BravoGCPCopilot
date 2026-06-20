@@ -28,13 +28,21 @@ STATIC_PAGES = [
     "threads.html",
     "tap_interface.html",
     "tap_interface_admin.html",
+    "tap_boards_menu_admin.html",
+    "tap_board_builder.html",
     "image_management.html",
     "help_admin.html",
     "avatar_admin.html",
+    "jokes.html",
     "games.html",
+    "guess_who.html",
     "mood.html",
+    "compose.html",
+    "spelling.html",
+    "numbers.html",
     "symbol_admin.html",
-    "accent_migration.html"
+    "accent_migration.html",
+    "touchchat_migration.html"
 ]
 
 for page in STATIC_PAGES:

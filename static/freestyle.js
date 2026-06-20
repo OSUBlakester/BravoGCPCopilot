@@ -7,6 +7,8 @@ let isLLMProcessing = false; // Flag to detect if LLM query is running
 const clickDebounceDelay = 300; // Debounce for button clicks
 let defaultDelay = 3500; // Default auditory scan delay (ms) - Loaded from settings
 let scanningInterval; // Holds the interval ID for scanning
+let scanMode = 'auto'; // auto | step
+let currentScanAdvanceFn = null; // step scanning advance callback for active context
 let currentButtonIndex = -1; // Tracks the index for scanning
 let scanCycleCount = 0; // Tracks how many complete cycles have been performed
 let scanLoopLimit = 0; // 0 = unlimited, 1-10 = limit cycles
@@ -14,8 +16,13 @@ let isPausedFromScanLimit = false; // Flag to track if scanning is paused due to
 let gamepadIndex = null; // To store the index of the connected gamepad
 let gamepadPollInterval = null; // Interval ID for gamepad polling
 let scanningPaused = false; // Global scanning pause flag
+let waitForSwitchToScan = false; // Wait for switch press before scanning (matches gridpage setting)
+let playWaitForSwitchChime = false; // Optional page-ready chime while waiting for initial switch
+let hasPlayedWaitForSwitchChime = false; // One-shot guard per page load
 let gridColumns = 6; // Default number of grid columns for alphabet grid sizing
 let autoClean = false; // Auto Clean setting for automatic cleanup on Speak Display
+const FREESTYLE_SWITCH_PROMPT_SHOWN_KEY = 'bravoSwitchPromptShown_freestyle';
+const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 
 // --- User Management Variables (Same as gridpage.js) ---
 let currentAacUserId = null;
@@ -24,6 +31,8 @@ const AAC_USER_ID_SESSION_KEY = "currentAacUserId";
 const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
 const SELECTED_DISPLAY_NAME_SESSION_KEY = "selectedDisplayName";
 const SPEECH_HISTORY_LOCAL_STORAGE_KEY = (aacUserId) => `speechHistory_${aacUserId}`;
+const COMPOSE_SESSION_STORAGE_KEY = 'bravoComposeSession';
+const COMPOSE_PENDING_APPEND_KEY = 'bravoComposePendingAppend';
 
 // --- Audio Variables ---
 let personalSpeakerId = localStorage.getItem('bravoPersonalSpeakerId') || 'default';
@@ -35,6 +44,10 @@ let currentSpeechRate = 180;
 let announcementQueue = [];
 let isAnnouncingNow = false;
 let audioContextResumeAttempted = false;
+let activeAnnouncementAudioContext = null;
+let activeAnnouncementAudioSource = null;
+let pendingHighlightSpeechTimer = null;
+let pendingHighlightSpeechToken = 0;
 
 // --- Freestyle Specific Variables ---
 let currentBuildSpaceText = "";
@@ -46,6 +59,69 @@ let isChooseWordModalOpen = false;
 let currentChooseWordCategory = "";
 let currentCategoryWords = [];
 let currentScanningContext = "main"; // "main", "spelling-letters", "spelling-predictions", "choose-word-categories", "choose-word-options"
+
+function loadComposeSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(COMPOSE_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') {
+            return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+        }
+        return {
+            active: parsed.active === true,
+            documentId: parsed.documentId || null,
+            title: parsed.title || '',
+            text: typeof parsed.text === 'string' ? parsed.text : '',
+            startedAt: parsed.startedAt || null,
+            sourceFrom: parsed.sourceFrom || null
+        };
+    } catch (error) {
+        console.warn('Failed to parse compose session in freestyle:', error);
+        return { active: false, documentId: null, title: '', text: '', startedAt: null, sourceFrom: null };
+    }
+}
+
+function saveComposeSession(composeSession) {
+    if (!composeSession) return;
+    sessionStorage.setItem(COMPOSE_SESSION_STORAGE_KEY, JSON.stringify(composeSession));
+}
+
+function isComposeSessionActive() {
+    return false;
+}
+
+function appendToComposeText(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) return;
+
+    const composeSession = loadComposeSession();
+    if (!composeSession.active) return;
+
+    const existing = String(composeSession.text || '').trim();
+    composeSession.text = existing ? `${existing} ${normalized}` : normalized;
+    saveComposeSession(composeSession);
+}
+
+function isComposeFlowRequested() {
+    return false;
+}
+
+function queueComposeAppend(text) {
+    const normalized = String(text || '').replace(/\[PAUSE\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalized) return;
+
+    let queue = [];
+    try {
+        const parsed = JSON.parse(localStorage.getItem(COMPOSE_PENDING_APPEND_KEY) || '[]');
+        if (Array.isArray(parsed)) {
+            queue = parsed;
+        }
+    } catch (error) {
+        console.warn('Failed to parse compose append queue:', error);
+    }
+
+    queue.push(normalized);
+    localStorage.setItem(COMPOSE_PENDING_APPEND_KEY, JSON.stringify(queue));
+}
 
 // Navigation context from URL parameters
 function getNavigationContext() {
@@ -380,7 +456,7 @@ async function initializeUserContext() {
     return true;
 }
 
-// Function to update page title with profile name
+// Function to update page title with profile name and source context
 async function updatePageTitleWithProfile() {
     try {
         const response = await authenticatedFetch('/api/account/users');
@@ -392,9 +468,22 @@ async function updatePageTitleWithProfile() {
         if (currentProfile && currentProfile.display_name) {
             const titleElement = document.getElementById('dynamic-page-title');
             if (titleElement) {
-                const baseTitle = 'Free Style Communication';
+                let baseTitle = 'Free Style Communication';
+                
+                // Add source context to title if available
+                const navContext = getNavigationContext();
+                if (navContext.originating_button && navContext.is_llm_generated) {
+                    // LLM-generated page — show the button text as topic
+                    baseTitle = `Free Style - ${navContext.originating_button}`;
+                } else if (navContext.source_page && navContext.source_page.toLowerCase() !== 'home') {
+                    // Static page — show the page name as topic
+                    const pageName = navContext.source_page.replace(/_/g, ' ').replace(/-/g, ' ')
+                        .replace(/\b\w/g, c => c.toUpperCase());
+                    baseTitle = `Free Style - ${pageName}`;
+                }
+                
                 titleElement.textContent = `${baseTitle} - ${currentProfile.display_name}`;
-                console.log(`Updated freestyle page title to include profile: ${currentProfile.display_name}`);
+                console.log(`Updated freestyle page title to include profile: ${currentProfile.display_name}, context: ${baseTitle}`);
             }
         }
     } catch (error) {
@@ -403,7 +492,11 @@ async function updatePageTitleWithProfile() {
 }
 
 // --- Core Fetch Wrapper (Same as gridpage.js) ---
-async function authenticatedFetch(url, options = {}) {
+async function authenticatedFetch(url, options = {}, _isRetry = false) {
+    // Re-read token from sessionStorage (may have been refreshed by token-refresh.js)
+    firebaseIdToken = sessionStorage.getItem('firebaseIdToken');
+    currentAacUserId = sessionStorage.getItem('currentAacUserId');
+
     if (!firebaseIdToken || !currentAacUserId) {
         throw new Error('User not authenticated');
     }
@@ -421,10 +514,22 @@ async function authenticatedFetch(url, options = {}) {
     options.headers = headers;
 
     const response = await fetch(url, options);
-    if (response.status === 401 || response.status === 403) {
+    if ((response.status === 401 || response.status === 403) && !_isRetry) {
+        console.warn(`Auth failed (${response.status}) for ${url}. Attempting silent token refresh...`);
+        if (typeof window.refreshFirebaseToken === 'function') {
+            const newToken = await window.refreshFirebaseToken();
+            if (newToken) {
+                console.log('[AUTH] Token refreshed, retrying...');
+                return authenticatedFetch(url, options, true);
+            }
+        }
         console.error('Authentication failed. Redirecting to auth page.');
         window.location.href = '/static/auth.html';
         throw new Error('Authentication failed');
+    }
+    if (response.status === 401 || response.status === 403) {
+        window.location.href = '/static/auth.html';
+        throw new Error('Authentication failed after token refresh');
     }
     return response;
 }
@@ -436,7 +541,15 @@ async function loadScanSettings() {
         if (response.ok) {
             const settings = await response.json();
             defaultDelay = settings.scanDelay || 3500;
+            scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
             scanLoopLimit = settings.scanLoopLimit || 0;
+            waitForSwitchToScan = settings.waitForSwitchToScan === true;
+            playWaitForSwitchChime = settings.playWaitForSwitchChime === true;
+            // Set the waiting flag immediately so that any startScanning() calls during
+            // page load (e.g. from loadWordOptions finally block) are blocked right away.
+            if (waitForSwitchToScan) {
+                window.waitingForInitialSwitch = true;
+            }
             currentTtsVoiceName = settings.selected_tts_voice_name || 'en-US-Neural2-A';
             currentSpeechRate = settings.speech_rate || 180;
             autoClean = settings.autoClean || false; // Load Auto Clean setting
@@ -465,29 +578,45 @@ async function loadScanSettings() {
     }
 }
 
+function playPageReadyChimeIfEnabled() {
+    if (!playWaitForSwitchChime || hasPlayedWaitForSwitchChime) {
+        return;
+    }
+
+    hasPlayedWaitForSwitchChime = true;
+    try {
+        const audio = new Audio(WAIT_FOR_SWITCH_CHIME_URL);
+        audio.preload = 'auto';
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch((error) => {
+                console.warn('Freestyle page-ready chime playback was blocked or failed:', error);
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to initialize freestyle page-ready chime audio:', error);
+    }
+}
+
 // --- Grid Layout Update Function (Similar to gridpage.js) ---
 function updateAlphabetGridLayout() {
     const grid = document.getElementById('alphabet-grid');
     if (!grid) return;
     
-    // Update the CSS grid template columns based on gridColumns setting
-    grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+    // Letters are skinnier so we can fit more columns than the main grid
+    // Use ~1.5x the gridColumns since letters only need narrow buttons
+    const letterColumns = Math.max(6, Math.min(13, Math.round(gridColumns * 1.3)));
+    grid.style.gridTemplateColumns = `repeat(${letterColumns}, 1fr)`;
     
-    // Calculate font size based on number of columns
-    // Fewer columns (larger buttons) = larger font size
-    // More columns (smaller buttons) = smaller font size
-    const baseFontSize = 16; // Base font size in pixels for letters
-    const minFontSize = 10;  // Minimum font size
-    const maxFontSize = 20;  // Maximum font size
+    // Calculate font size matching gridpage formula
+    const baseFontSize = 20; // Match gridpage base
+    const minFontSize = 10;
+    const maxFontSize = 28;
     
-    // Calculate font size: inversely proportional to number of columns
-    // Formula: baseFontSize * (baseFactor / gridColumns) where baseFactor is calibrated for good results
-    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
-    
-    // Set the CSS custom property for letter button font size
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / letterColumns)));
     grid.style.setProperty('--letter-font-size', `${fontSize}px`);
     
-    console.log(`Alphabet grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
+    console.log(`Alphabet grid layout updated to ${letterColumns} columns (from gridColumns=${gridColumns}) with ${fontSize}px font size`);
 }
 
 // --- Update Word Options Grid Layout ---
@@ -498,12 +627,12 @@ function updateWordOptionsGridLayout() {
     // Update the CSS grid template columns based on gridColumns setting
     grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
     
-    // Calculate font size for word options
-    const baseFontSize = 16; // Base font size for word options
-    const minFontSize = 12;  // Minimum font size
-    const maxFontSize = 18;  // Maximum font size
+    // Calculate font size for word options (matching gridpage formula)
+    const baseFontSize = 20; // Match gridpage base font size
+    const minFontSize = 10;  // Match gridpage minimum
+    const maxFontSize = 28;  // Match gridpage maximum
     
-    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (6 / gridColumns)));
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
     grid.style.setProperty('--word-option-font-size', `${fontSize}px`);
     
     console.log(`Word options grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
@@ -572,6 +701,23 @@ function startInitialScanning() {
             return;
         }
         
+        // If "wait for switch to begin scanning" is enabled, pause here and
+        // prompt the user to press the switch — exactly like gridpage does.
+        if (waitForSwitchToScan) {
+            // Stop any scanning that may have been kicked off during page load
+            stopScanning();
+            window.waitingForInitialSwitch = true;
+            console.log('✋ Waiting for switch press before scanning (freestyle).');
+            playPageReadyChimeIfEnabled();
+            const hasShownPrompt = sessionStorage.getItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY) === 'true';
+            if (!hasShownPrompt) {
+                sessionStorage.setItem(FREESTYLE_SWITCH_PROMPT_SHOWN_KEY, 'true');
+                announce('Press switch to begin scanning', 'personal', false, false);
+            }
+            return;
+        }
+        
+        window.waitingForInitialSwitch = false;
         scanningPaused = false;
         startScanning();
         console.log('Initial scanning started with buttons available');
@@ -614,11 +760,23 @@ async function speakDisplayText() {
         console.log('Auto Clean enabled - cleaning text before speaking');
         await cleanupTextInternal(); // Use internal cleanup to avoid duplicate loading indicators
     }
+
+    const textToSpeak = currentBuildSpaceText.trim();
+
+    // Persist to compose immediately when compose flow is active.
+    // Also queue in localStorage as a cross-navigation fallback.
+    if (isComposeFlowRequested()) {
+        appendToComposeText(textToSpeak);
+        queueComposeAppend(textToSpeak);
+        console.log('Compose session updated directly from Speak Display:', textToSpeak);
+    }
     
-    await announce(currentBuildSpaceText, "system", true);
+    await announce(textToSpeak, "system", false);
     
-    // Record to speech history (following gridpage.js pattern)
-    recordToSpeechHistory(currentBuildSpaceText);
+    // Record to speech history only when compose flow is not active
+    if (!isComposeFlowRequested()) {
+        recordToSpeechHistory(textToSpeak);
+    }
     
     // Pause scanning for the scanning interval duration, then reset to Go Back button
     if (scanningInterval) {
@@ -728,7 +886,12 @@ async function cleanupTextInternal() {
 }
 
 function goBackToGrid() {
-    // Navigate back to gridpage.html with the home page
+    // Navigate back to gridpage.html with the home page.
+    // Preserve explicit compose mode when freestyle was used during composition.
+    if (isComposeFlowRequested()) {
+        window.location.href = '/static/gridpage.html?page=home&compose=1';
+        return;
+    }
     window.location.href = '/static/gridpage.html?page=home';
 }
 
@@ -782,9 +945,10 @@ async function loadWordOptions() {
         showLoadingIndicator(false);
         
         // Restart scanning after new options are loaded and rendered
-        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused) {
+        // Don't restart if we're waiting for the user to press the switch first
+        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused && !window.waitingForInitialSwitch) {
             setTimeout(() => {
-                if (!scanningInterval) { // Double check
+                if (!scanningInterval && !window.waitingForInitialSwitch) { // Double check
                     startScanning();
                 }
             }, 500);
@@ -865,18 +1029,19 @@ async function renderWordOptionsGrid() {
                 }
             };
             
-            // Text footer (edge to edge, no margins)
+            // Text footer (matching gridpage)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '18px';
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '1px 2px';
+            textFooter.style.padding = '0 3px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
+            textFooter.style.boxSizing = 'border-box';
             textFooter.style.position = 'absolute';
             textFooter.style.bottom = '0';
             textFooter.style.left = '0';
@@ -884,15 +1049,15 @@ async function renderWordOptionsGrid() {
             
             const textSpan = document.createElement('span');
             textSpan.textContent = displayText;
-            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontSize = '0.54em';
             textSpan.style.fontWeight = 'bold';
             textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
+            textSpan.style.lineHeight = '1.0';
             textSpan.style.wordWrap = 'break-word';
             textSpan.style.hyphens = 'auto';
             textSpan.style.overflow = 'hidden';
             textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitLineClamp = '1';
             textSpan.style.webkitBoxOrient = 'vertical';
             
             imageContainer.appendChild(imageElement);
@@ -915,8 +1080,8 @@ async function renderWordOptionsGrid() {
                 
                 const textSpan = document.createElement('span');
                 textSpan.textContent = displayText;
-                textSpan.style.fontSize = '0.9em';
-                textSpan.style.fontWeight = '500';
+                textSpan.style.fontSize = '0.54em';
+                textSpan.style.fontWeight = '700';
                 textSpan.style.display = 'block';
                 textSpan.style.textAlign = 'center';
                 textSpan.style.wordWrap = 'break-word';
@@ -925,9 +1090,8 @@ async function renderWordOptionsGrid() {
                 button.appendChild(pictogramSpan);
                 button.appendChild(textSpan);
             } else {
-                // Pure text fallback - increase text size for sight words
+                // Pure text fallback
                 button.textContent = displayText;
-                button.style.fontSize = '1.8em'; // Double the size
                 button.style.fontWeight = 'bold';
                 button.style.textAlign = 'center';
                 button.style.display = 'flex';
@@ -972,6 +1136,9 @@ async function loadMoreWordOptions() {
         isLLMProcessing = true;
         showLoadingIndicator(true);
         
+        // Include navigation context so refreshed options stay relevant to the source page topic
+        const navContext = getNavigationContext();
+        
         const response = await authenticatedFetch('/api/freestyle/word-options', {
             method: 'POST',
             headers: {
@@ -979,7 +1146,11 @@ async function loadMoreWordOptions() {
             },
             body: JSON.stringify({
                 build_space_text: currentBuildSpaceText,
-                request_different_options: true // Signal to generate different options
+                request_different_options: true, // Signal to generate different options
+                context: navContext.context,
+                source_page: navContext.source_page,
+                is_llm_generated: navContext.is_llm_generated,
+                originating_button_text: navContext.originating_button
             })
         });
         
@@ -997,9 +1168,10 @@ async function loadMoreWordOptions() {
         showLoadingIndicator(false);
         
         // Restart scanning after new options are loaded
-        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused) {
+        // Don't restart if we're waiting for the user to press the switch first
+        if (currentScanningContext === "main" && !scanningInterval && !scanningPaused && !window.waitingForInitialSwitch) {
             setTimeout(() => {
-                if (!scanningInterval) { // Double check
+                if (!scanningInterval && !window.waitingForInitialSwitch) { // Double check
                     startScanning();
                 }
             }, 500);
@@ -1175,15 +1347,7 @@ async function handleLetterClick(letter) {
     // Get word predictions
     await getWordPredictions();
     
-    // If scanning is active, restart with updated button list
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 400);
-    }
+    restartScanningForCurrentContext(400);
 }
 
 async function getWordPredictions() {
@@ -1275,15 +1439,7 @@ function clearCurrentWord() {
     currentPredictions = [];
     renderWordPredictions();
     
-    // If scanning is active, restart to account for all letters being enabled again
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 400);
-    }
+    restartScanningForCurrentContext(400);
 }
 
 function backspaceCurrentWord() {
@@ -1296,16 +1452,29 @@ function backspaceCurrentWord() {
         
         getWordPredictions();
         
-        // If scanning is active, restart to account for newly enabled letters
-        if (scanningInterval) {
-            stopScanning();
-            setTimeout(() => {
-                if (!scanningPaused) {
-                    startScanning();
-                }
-            }, 400);
-        }
+        restartScanningForCurrentContext(400);
     }
+}
+
+// --- Choose Word Modal Grid Layout (match gridpage sizing) ---
+function updateModalGridLayout() {
+    // Apply same grid columns and font size as main word-options grid
+    const categoryGrid = document.getElementById('category-grid');
+    const wordOptionsGrid = document.getElementById('category-word-options-grid');
+    
+    const baseFontSize = 20;
+    const minFontSize = 10;
+    const maxFontSize = 28;
+    const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize * (8 / gridColumns)));
+    
+    [categoryGrid, wordOptionsGrid].forEach(grid => {
+        if (grid) {
+            grid.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+            grid.style.setProperty('--word-option-font-size', `${fontSize}px`);
+        }
+    });
+    
+    console.log(`Modal grid layout updated to ${gridColumns} columns with ${fontSize}px font size`);
 }
 
 // --- Choose Word Modal Management ---
@@ -1338,18 +1507,13 @@ function openChooseWordModal() {
     // Show modal
     document.getElementById('choose-word-modal').classList.remove('hidden');
     
+    // Apply gridpage-matching layout to modal grids
+    updateModalGridLayout();
+    
     // Show category selection
     showCategorySelection();
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 function closeChooseWordModal() {
@@ -1366,15 +1530,7 @@ function closeChooseWordModal() {
     // Hide modal
     document.getElementById('choose-word-modal').classList.add('hidden');
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 function showCategorySelection() {
@@ -1390,15 +1546,7 @@ function showCategorySelection() {
     // Generate category buttons
     generateCategoryButtons();
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 function generateCategoryButtons() {
@@ -1436,11 +1584,11 @@ function generateCategoryButtons() {
     // Clear existing categories
     categoryGrid.innerHTML = '';
     
-    // Create category buttons
+    // Create category buttons (text only, no icons, for better fit)
     categories.forEach((category, index) => {
         const button = document.createElement('button');
         button.className = 'freestyle-modal-btn category-btn';
-        button.innerHTML = `<i class="${category.icon}"></i> ${category.name}`;
+        button.textContent = category.name;
         button.addEventListener('click', () => selectCategory(category.name));
         categoryGrid.appendChild(button);
     });
@@ -1523,6 +1671,9 @@ async function displayCategoryWords() {
     // Clear existing words
     wordOptionsGrid.innerHTML = '';
     
+    // Apply gridpage-matching layout
+    updateModalGridLayout();
+    
     // Add word buttons with images
     for (let i = 0; i < currentCategoryWords.length; i++) {
         const word = currentCategoryWords[i];
@@ -1581,18 +1732,19 @@ async function displayCategoryWords() {
                 }
             };
             
-            // Text footer (edge to edge, no margins)
+            // Text footer (matching gridpage)
             const textFooter = document.createElement('div');
-            textFooter.style.height = '18px';
+            textFooter.style.minHeight = '14px';
             textFooter.style.width = '100%';
             textFooter.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
             textFooter.style.color = 'white';
             textFooter.style.display = 'flex';
             textFooter.style.alignItems = 'center';
             textFooter.style.justifyContent = 'center';
-            textFooter.style.padding = '1px 2px';
+            textFooter.style.padding = '0 3px';
             textFooter.style.margin = '0';
             textFooter.style.borderRadius = '0';
+            textFooter.style.boxSizing = 'border-box';
             textFooter.style.position = 'absolute';
             textFooter.style.bottom = '0';
             textFooter.style.left = '0';
@@ -1600,15 +1752,15 @@ async function displayCategoryWords() {
             
             const textSpan = document.createElement('span');
             textSpan.textContent = displayText;
-            textSpan.style.fontSize = '0.7em';
+            textSpan.style.fontSize = '0.54em';
             textSpan.style.fontWeight = 'bold';
             textSpan.style.textAlign = 'center';
-            textSpan.style.lineHeight = '1.1';
+            textSpan.style.lineHeight = '1.0';
             textSpan.style.wordWrap = 'break-word';
             textSpan.style.hyphens = 'auto';
             textSpan.style.overflow = 'hidden';
             textSpan.style.display = '-webkit-box';
-            textSpan.style.webkitLineClamp = '2';
+            textSpan.style.webkitLineClamp = '1';
             textSpan.style.webkitBoxOrient = 'vertical';
             
             imageContainer.appendChild(imageElement);
@@ -1631,8 +1783,8 @@ async function displayCategoryWords() {
                 
                 const textSpan = document.createElement('span');
                 textSpan.textContent = displayText;
-                textSpan.style.fontSize = '0.9em';
-                textSpan.style.fontWeight = '500';
+                textSpan.style.fontSize = '0.54em';
+                textSpan.style.fontWeight = '700';
                 textSpan.style.display = 'block';
                 textSpan.style.textAlign = 'center';
                 textSpan.style.wordWrap = 'break-word';
@@ -1649,22 +1801,20 @@ async function displayCategoryWords() {
         wordOptionsGrid.appendChild(button);
     }
     
-    // Update scanning
-    if (scanningInterval) {
-        stopScanning();
-        setTimeout(() => {
-            if (!scanningPaused) {
-                startScanning();
-            }
-        }, 300);
-    }
+    restartScanningForCurrentContext(300);
 }
 
 async function generateDifferentWords() {
     console.log('Generating different words for category:', currentChooseWordCategory);
     
+    // Extract display text strings from current words to exclude them
+    const excludeWords = currentCategoryWords.map(w => 
+        (typeof w === 'object' && w.text) ? w.text : String(w)
+    );
+    console.log('Excluding words:', excludeWords);
+    
     // Generate new words excluding current ones
-    await generateCategoryWords(currentChooseWordCategory, currentCategoryWords);
+    await generateCategoryWords(currentChooseWordCategory, excludeWords);
 }
 
 async function selectCategoryWord(word) {
@@ -1690,7 +1840,17 @@ async function selectCategoryWord(word) {
 
 // --- Speech History Management (Following gridpage.js pattern) ---
 function recordToSpeechHistory(textToRecord) {
-    if (!currentAacUserId || !textToRecord.trim()) {
+    if (!textToRecord || !textToRecord.trim()) {
+        return;
+    }
+
+    if (isComposeSessionActive()) {
+        appendToComposeText(textToRecord);
+        console.log('Compose session updated from freestyle Build Space:', textToRecord);
+        return;
+    }
+
+    if (!currentAacUserId) {
         return;
     }
     
@@ -1728,6 +1888,7 @@ function startScanning() {
     
     scanCycleCount = 0;
     isPausedFromScanLimit = false;
+    currentScanAdvanceFn = null;
     
     if (currentScanningContext === "main") {
         startMainScanning();
@@ -1792,7 +1953,10 @@ function startMainScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startSpellingLettersScanning() {
@@ -1851,7 +2015,10 @@ function startSpellingLettersScanning() {
     
     currentButtonIndex = 0;
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startSpellingPredictionsScanning() {
@@ -1889,7 +2056,10 @@ function startSpellingPredictionsScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startChooseWordCategoriesScanning() {
@@ -1906,7 +2076,7 @@ function startChooseWordCategoriesScanning() {
     const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
-            currentlyScannedButton.classList.remove('scanned');
+            currentlyScannedButton.classList.remove('scanning-highlight');
         }
         
         // Check scan limit
@@ -1932,7 +2102,10 @@ function startChooseWordCategoriesScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function startChooseWordOptionsScanning() {
@@ -1949,7 +2122,7 @@ function startChooseWordOptionsScanning() {
     const scanNext = () => {
         // Remove highlight from previous button
         if (currentlyScannedButton) {
-            currentlyScannedButton.classList.remove('scanned');
+            currentlyScannedButton.classList.remove('scanning-highlight');
         }
         
         // Check scan limit
@@ -1975,7 +2148,10 @@ function startChooseWordOptionsScanning() {
     };
     
     scanNext(); // Start immediately
-    scanningInterval = setInterval(scanNext, defaultDelay);
+    currentScanAdvanceFn = scanNext;
+    if (scanMode !== 'step') {
+        scanningInterval = setInterval(scanNext, defaultDelay);
+    }
 }
 
 function stopScanning() {
@@ -1984,44 +2160,77 @@ function stopScanning() {
         scanningInterval = null;
         console.log('Scanning stopped');
     }
+
+    pendingHighlightSpeechToken += 1;
+    if (pendingHighlightSpeechTimer) {
+        clearTimeout(pendingHighlightSpeechTimer);
+        pendingHighlightSpeechTimer = null;
+    }
+    interruptScanningAnnouncementPlayback();
     
     // Remove highlight from current button
     if (currentlyScannedButton) {
         currentlyScannedButton.classList.remove('scanning-highlight');
         currentlyScannedButton = null;
     }
+    currentScanAdvanceFn = null;
     
     currentButtonIndex = -1;
     // Note: No need to cancel speech here as backend TTS handles its own queue
 }
 
-async function speakAndHighlight(button) {
+function speakAndHighlight(button) {
     // Remove scanning class from all buttons
     document.querySelectorAll('.scanning-highlight').forEach(btn => {
         btn.classList.remove('scanning-highlight');
     });
     
-    // Add scanning class to current button
     button.classList.add('scanning-highlight');
-    
-    try {
-        let textToSpeak = button.textContent;
-        
-        // Special case: if this is the Speak Display button, use Build Space text instead
-        if (button.id === 'speak-display-btn' && currentBuildSpaceText.trim()) {
-            textToSpeak = currentBuildSpaceText.trim();
-        }
-        
-        // Special case: if this is the Add Word button, use Current Word text instead
-        if (button.id === 'add-word-btn' && currentSpellingWord.trim()) {
-            textToSpeak = currentSpellingWord.trim();
-        }
-        
-        // Use backend TTS instead of browser speech synthesis
-        await announce(textToSpeak, "system", false);
-    } catch (e) {
-        console.error("Speech synthesis error:", e);
+
+    pendingHighlightSpeechToken += 1;
+    const speechToken = pendingHighlightSpeechToken;
+    if (pendingHighlightSpeechTimer) {
+        clearTimeout(pendingHighlightSpeechTimer);
+        pendingHighlightSpeechTimer = null;
     }
+
+    interruptScanningAnnouncementPlayback();
+
+    const textToSpeak = getButtonScanLabel(button);
+    if (!textToSpeak) {
+        return;
+    }
+
+    pendingHighlightSpeechTimer = setTimeout(() => {
+        pendingHighlightSpeechTimer = null;
+        if (speechToken !== pendingHighlightSpeechToken || currentlyScannedButton !== button) {
+            return;
+        }
+        announce(textToSpeak, 'system', false, false).catch((error) => {
+            console.error('Freestyle scanning announce error:', error);
+        });
+    }, 500);
+}
+
+function getButtonScanLabel(button) {
+    if (!button) return '';
+
+    const ariaLabel = (button.getAttribute('aria-label') || '').trim();
+    if (ariaLabel) return ariaLabel;
+
+    const dataLetter = (button.getAttribute('data-letter') || '').trim();
+    if (dataLetter) return dataLetter;
+
+    return (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
+}
+
+function restartScanningForCurrentContext(delay = 300) {
+    stopScanning();
+    setTimeout(() => {
+        if (!scanningPaused) {
+            startScanning();
+        }
+    }, delay);
 }
 
 function resumeScanning() {
@@ -2035,6 +2244,34 @@ function resumeScanning() {
 // --- Input Handling (Same as gridpage.js) ---
 function setupKeyboardListener() {
     document.addEventListener('keydown', (event) => {
+        if (event.code === 'Tab' && scanMode === 'step') {
+            event.preventDefault();
+            interruptScanningAnnouncementPlayback();
+
+            // If waiting for initial switch, start scanning now
+            if (window.waitingForInitialSwitch) {
+                console.log('Initial switch detected (tab) - starting scanning on freestyle');
+                window.waitingForInitialSwitch = false;
+                scanningPaused = false;
+                startScanning();
+                return;
+            }
+
+            pendingHighlightSpeechToken += 1;
+            if (pendingHighlightSpeechTimer) {
+                clearTimeout(pendingHighlightSpeechTimer);
+                pendingHighlightSpeechTimer = null;
+            }
+            if (isPausedFromScanLimit) {
+                resumeScanning();
+            } else if (currentScanAdvanceFn) {
+                currentScanAdvanceFn();
+            } else {
+                startScanning();
+            }
+            return;
+        }
+
         if (event.code === 'Space') {
             event.preventDefault();
             handleSpacebarPress();
@@ -2043,6 +2280,15 @@ function setupKeyboardListener() {
 }
 
 function handleSpacebarPress() {
+    // If waiting for initial switch press, treat this as the trigger to start scanning
+    if (window.waitingForInitialSwitch) {
+        console.log('Initial switch detected (spacebar) - starting scanning on freestyle');
+        window.waitingForInitialSwitch = false;
+        scanningPaused = false;
+        startScanning();
+        return;
+    }
+
     if (currentlyScannedButton) {
         // Simulate click on the currently scanned button
         currentlyScannedButton.click();
@@ -2083,7 +2329,15 @@ function startGamepadPolling() {
             if (currentTime - lastGamepadInputTime > clickDebounceDelay) {
                 if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
                     lastGamepadInputTime = currentTime;
-                    handleSpacebarPress();
+                    // If waiting for initial switch press, treat this as the trigger
+                    if (window.waitingForInitialSwitch) {
+                        console.log('Initial switch detected (gamepad) - starting scanning on freestyle');
+                        window.waitingForInitialSwitch = false;
+                        scanningPaused = false;
+                        startScanning();
+                    } else {
+                        handleSpacebarPress();
+                    }
                 }
             }
         }
@@ -2130,17 +2384,53 @@ async function playAudioToDevice(audioDataBuffer, sampleRate, announcementType) 
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        activeAnnouncementAudioContext = audioContext;
+        activeAnnouncementAudioSource = source;
         source.start();
 
         return new Promise((resolve) => {
             source.onended = () => {
+                activeAnnouncementAudioSource = null;
+                if (activeAnnouncementAudioContext === audioContext) {
+                    activeAnnouncementAudioContext = null;
+                }
                 audioContext.close();
                 resolve();
             };
         });
     } catch (error) {
         console.error('Error playing audio:', error);
+        activeAnnouncementAudioContext = null;
+        activeAnnouncementAudioSource = null;
     }
+}
+
+function interruptScanningAnnouncementPlayback() {
+    announcementQueue = [];
+    isAnnouncingNow = false;
+
+    if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+    }
+
+    if (activeAnnouncementAudioSource) {
+        try {
+            activeAnnouncementAudioSource.stop(0);
+        } catch (e) {
+            // no-op
+        }
+        try {
+            activeAnnouncementAudioSource.disconnect();
+        } catch (e) {
+            // no-op
+        }
+        activeAnnouncementAudioSource = null;
+    }
+
+    if (activeAnnouncementAudioContext && activeAnnouncementAudioContext.state !== 'closed') {
+        activeAnnouncementAudioContext.close().catch(() => {});
+    }
+    activeAnnouncementAudioContext = null;
 }
 
 async function processAnnouncementQueue() {
@@ -2152,10 +2442,10 @@ async function processAnnouncementQueue() {
 
     while (announcementQueue.length > 0) {
         const announcement = announcementQueue.shift();
-        const { textToAnnounce, announcementType, recordHistory } = announcement;
+        const { textToAnnounce, announcementType, recordHistory, showSplash } = announcement;
 
-        // Show splash screen if enabled
-        if (typeof showSplashScreen === 'function') {
+        // Show splash screen if enabled and requested
+        if (typeof showSplashScreen === 'function' && showSplash !== false) {
             showSplashScreen(textToAnnounce);
         }
 
@@ -2205,7 +2495,8 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
     announcementQueue.push({
         textToAnnounce: textToAnnounce.trim(),
         announcementType,
-        recordHistory
+        recordHistory,
+        showSplash: arguments.length >= 4 ? arguments[3] : true
     });
 
     processAnnouncementQueue();

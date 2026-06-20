@@ -33,8 +33,8 @@ steps:
       - 'managed'
       - '--allow-unauthenticated'
       - '--update-env-vars'
-      - 'ENVIRONMENT=$_ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID'
-      - '--set-secrets'
+      - 'ENVIRONMENT=$_ENV_NAME,GCP_PROJECT_ID=$PROJECT_ID,EMAIL_FEATURE_ENABLED=$_EMAIL_FEATURE_ENABLED'
+      - '--update-secrets'
       - 'GOOGLE_API_KEY=bravo-google-api-key:latest'
       - '--memory'
       - '2Gi'
@@ -58,6 +58,7 @@ substitutions:
   _REGION: 'us-central1'
   _ENV: 'dev'
   _ENV_NAME: 'development'
+  _EMAIL_FEATURE_ENABLED: 'false'
 
 # Build configuration
 options:
