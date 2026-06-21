@@ -758,7 +758,7 @@ async function loadSettings() {
             tapWordsRowsInput.value = currentSettings.tapWordsRows !== null && currentSettings.tapWordsRows !== undefined ? currentSettings.tapWordsRows : 4;
         }
         if (tapPhrasesRowsInput) {
-            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 1;
+            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 0;
         }
         if (useHybridPagesCheckbox) {
             useHybridPagesCheckbox.checked = currentSettings.useHybridPages === true;
@@ -1216,7 +1216,7 @@ async function saveSettings() {
         LLMOptions: parseInt(newLLMOptions),
         FreestyleOptions: newFreestyleOptions !== '' ? parseInt(newFreestyleOptions) : null,
         tapWordsRows: newTapWordsRows !== '' ? parseInt(newTapWordsRows) : 4,
-        tapPhrasesRows: newTapPhrasesRows !== '' ? parseInt(newTapPhrasesRows) : 1,
+        tapPhrasesRows: newTapPhrasesRows !== '' ? parseInt(newTapPhrasesRows) : 0,
         useHybridPages: newUseHybridPages,
         tapDynamicRows: newTapDynamicRows !== '' ? parseInt(newTapDynamicRows) : 1,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
@@ -1292,7 +1292,7 @@ async function saveSettings() {
             tapWordsRowsInput.value = currentSettings.tapWordsRows !== null && currentSettings.tapWordsRows !== undefined ? currentSettings.tapWordsRows : 4;
         }
         if (tapPhrasesRowsInput) {
-            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 1;
+            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 0;
         }
         if (useHybridPagesCheckbox) {
             useHybridPagesCheckbox.checked = currentSettings.useHybridPages === true;

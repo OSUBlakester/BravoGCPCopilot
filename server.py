@@ -1768,7 +1768,7 @@ DEFAULT_SETTINGS = {
     "specialPageTranslations": {},
     "voice_style": "adult",
     "tapWordsRows": 3,
-    "tapPhrasesRows": 1,
+    "tapPhrasesRows": 0,
     "useHybridPages": False,
     "tapDynamicRows": 1,
     "useBravoBuild": True,
@@ -8773,7 +8773,7 @@ async def get_settings(current_ids: Annotated[Dict[str, str], Depends(get_curren
                             phrases_rows = max(0, round(llm_opts / grid_cols))
                         else:
                             words_rows = 4
-                            phrases_rows = 1
+                            phrases_rows = 0
                         settings_dict['tapWordsRows'] = words_rows
                         settings_dict['tapPhrasesRows'] = phrases_rows
                         legacy_patches['tapWordsRows'] = words_rows
@@ -17730,12 +17730,14 @@ async def generate_category_words(
 
         # When the user has already said something, reframe the task: generate words that
         # continue/extend the partial sentence rather than words that describe the category.
+        custom_prompt_provided = bool(request.custom_prompt and str(request.custom_prompt).strip())
         if build_space_text:
             task_framing = (
                 f"The AAC user has already said: \"{build_space_text}\"\n"
                 f"Generate {freestyle_options} short words or phrases that would naturally FOLLOW and EXTEND "
                 f"what was already said, completing or adding to the thought.\n"
-                f"Category context (for domain guidance only): {request.category}"
+                + (f"Guidance: {instruction_text}\n" if custom_prompt_provided else "")
+                + f"Category context (for domain guidance only): {request.category}"
             )
             follow_up_rule = (
                 "Generate natural follow-up completions to the partial message. "
@@ -17746,7 +17748,14 @@ async def generate_category_words(
                 f"Category: {request.category}\n"
                 f"Instruction: {instruction_text}"
             )
-            follow_up_rule = "Stay tightly on the requested category"
+            if custom_prompt_provided:
+                follow_up_rule = (
+                    "Generate words of the SAME TYPE as described in the instruction, "
+                    "but DIFFERENT from any excluded words. The excluded words show you "
+                    "the style — generate MORE options in that exact same category."
+                )
+            else:
+                follow_up_rule = "Stay tightly on the requested category"
 
         cache_payload = {
             "category": request.category,
@@ -22985,7 +22994,7 @@ def ensure_tap_boards_structure(
                 elif has_static_options:
                     board_type = 'static'
                 else:
-                    board_type = 'static' if use_hybrid_pages else 'ai'
+                    board_type = 'static'
 
                 owner_scope_default = 'global' if str(button_node.get('id') or '').endswith('_btn') else 'user'
                 owner_scope = owner_scope_default
@@ -23187,7 +23196,7 @@ def ensure_tap_boards_structure(
             merged_boards.append({
                 'id': home_board_id,
                 'label': 'Home',
-                'board_type': 'static' if use_hybrid_pages else 'ai',
+                'board_type': 'static',
                 'source': 'default_home',
                 'source_button_id': None,
                 'owner_scope': 'user',
@@ -23534,7 +23543,7 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
             'background_color': menu_item.get('background_color') or '#FFFFFF',
             'text_color': menu_item.get('text_color') or '#000000',
             'llm_prompt': board.get('llm_prompt') if isinstance(board, dict) else None,
-            'words_prompt': None,
+            'words_prompt': board.get('words_prompt') if isinstance(board, dict) else None,
             'prompt_category': board.get('prompt_category') if isinstance(board, dict) else None,
             'prompt_topic': board.get('prompt_topic') if isinstance(board, dict) else None,
             'prompt_examples': board.get('prompt_examples') if isinstance(board, dict) else None,
@@ -25382,9 +25391,11 @@ async def get_word_variants(
     else:
         prompt = (
             f"Convert these words/phrases to plural form. "
-            f"Return ONLY a valid JSON object mapping each original word to its plural form. "
-            f"If a word does not have a meaningful plural (verbs, prepositions, pronouns, adjectives, etc.), return it unchanged. "
-            f"Examples: cat->cats, wish->wishes, cookie->cookies, idea->ideas. "
+            f"Return ONLY a valid JSON object mapping each original word/phrase to its plural form. "
+            f"For multi-word phrases, pluralize all words that change: 'that dog'->'those dogs', 'this thing'->'these things', 'it again'->'them again'. "
+            f"If a word does not have a meaningful plural (verbs, prepositions, adverbs, adjectives, etc.), return it unchanged. "
+            f"Demonstrative pronouns DO change: this->these, that->those, it->them, its->their. "
+            f"Examples: cat->cats, wish->wishes, cookie->cookies, idea->ideas, this->these, that->those, it->them. "
             f"Words: {words_json}"
         )
 
@@ -25910,8 +25921,9 @@ async def convert_ai_boards_to_static(
             board = boards[board_idx]
             board_label = str(board.get('label') or board_id)
 
-            if str(board.get('board_type') or '') != 'ai':
-                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": "Board is not an AI board"})
+            board_dynamic_rows = board.get('dynamic_rows')
+            if board_dynamic_rows is not None and int(board_dynamic_rows) <= 0:
+                results.append({"board_id": board_id, "new_board_id": None, "board_label": board_label, "success": False, "options_count": 0, "error": "Board has no dynamic rows"})
                 continue
 
             try:
@@ -26359,8 +26371,14 @@ async def bravo_build(
         gen_prompt = (
             prompt_text +
             f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
-            f"Example: if the sentence is \"I want\" and the tapped word is \"eat\", good options are: more, now, lunch, snack, dinner, pizza, an apple, please, later.\n"
-            f"Example: if the sentence is \"I like\" and the tapped word is \"go\", good options are: home, outside, to school, to the park, fast, there.\n\n"
+            f"PRIORITY ORDER for what to generate:\n"
+            f"  1. Direct objects / complements (WHAT, WHO, WHERE): things, people, places, activities that complete the sentence's core meaning\n"
+            f"  2. Common qualifiers that add clear, unique meaning (e.g. \"the red one\", \"my favorite\", \"a new one\")\n"
+            f"  3. DO NOT generate vague intensity adverbs (so much, very much, really, a lot, more) unless the sentence has no better objects — they rarely help an AAC user express what they mean\n\n"
+            f"Examples:\n"
+            f"  - Sentence \"I like\": good options are the things the user might like — you, it, that, dogs, pizza, playing, this, my family, school, music, swimming\n"
+            f"  - Sentence \"I want\", tapped \"eat\": good options are: lunch, a snack, dinner, pizza, an apple, something sweet, now, please\n"
+            f"  - Sentence \"I\", tapped \"go\": good options are: home, outside, to school, to the park, there, later, now\n\n"
             f"REQUIREMENTS:\n"
             f"1. Every option must be a word or short phrase that makes sense coming AFTER the tapped word in speech\n"
             f"2. No duplicates\n"
@@ -26429,12 +26447,23 @@ async def bravo_build(
             new_board_id = f"{base_id}_{suffix}"
             suffix += 1
 
+        # Build a words_prompt so Something Else regeneration has full sentence context.
+        # Note: context already contains the tapped label (client sends buildSpace after addToSpeech).
+        full_sentence = context if context else label
+        regen_prompt = (
+            f"Words or short phrases that naturally follow '{label}' to complete "
+            f"the sentence '{full_sentence}' in spoken conversation. "
+            f"Prioritize what the user means: direct objects, activities, people, and places. "
+            f"Avoid vague intensity adverbs (so much, very much, really, a lot)."
+        )
+
         new_board: Dict[str, Any] = {
             "id": new_board_id,
             "label": label,
             "board_type": "static",
             "source": "custom",
             "dynamic_rows": tap_dynamic_rows,
+            "words_prompt": regen_prompt,
             "buttons": buttons,
         }
         boards.append(new_board)
@@ -26462,6 +26491,97 @@ async def bravo_build(
         raise
     except Exception as e:
         logging.error(f"Error in bravo_build: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class BravoSuggestRequest(BaseModel):
+    """Payload for regenerating bravo-build-style options without saving a board."""
+    label: str = Field(..., description="The button label that was tapped (e.g. 'like')")
+    context: Optional[str] = Field("", description="Built sentence context so far (e.g. 'I like')")
+    count: int = Field(12, description="Number of options to generate")
+    exclude_options: Optional[List[str]] = Field(default_factory=list, description="Options to exclude")
+
+
+@app.post("/api/tap-interface/bravo-suggest")
+async def bravo_suggest(
+    payload: BravoSuggestRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Generate follow-up options using bravo-build's focused prompt, without saving to Firestore.
+    Used by Something Else on bravo-build boards.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    label = payload.label.strip()
+    context = payload.context.strip() if payload.context else ""
+    count = max(1, min(60, payload.count))
+    exclude_set = {str(e).strip().lower() for e in (payload.exclude_options or []) if str(e).strip()}
+
+    try:
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        options_per_row = settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6
+
+        if context:
+            prompt_text = (
+                f"The user is building a sentence on an AAC device. So far, they have said: \"{context}\".\n"
+                f"They want more options that naturally follow \"{label}\" to continue the sentence \"{context}\".\n"
+                f"Generate EXACTLY {count} unique, short button labels for words or phrases that would naturally "
+                f"FOLLOW \"{label}\" to continue this sentence in spoken conversation.\n\n"
+            )
+        else:
+            prompt_text = (
+                f"Generate EXACTLY {count} short button labels for words or phrases that would naturally "
+                f"FOLLOW the word \"{label}\" when building a spoken sentence.\n\n"
+            )
+
+        exclude_text = (
+            f"Do NOT include any of these already-shown options: {', '.join(sorted(exclude_set))}.\n"
+            if exclude_set else ""
+        )
+
+        gen_prompt = (
+            prompt_text +
+            exclude_text +
+            f"PRIORITY ORDER for what to generate:\n"
+            f"  1. Direct objects / complements (WHAT, WHO, WHERE): things, people, places, activities\n"
+            f"  2. Qualifiers that add clear meaning (e.g. 'the red one', 'my favorite')\n"
+            f"  3. DO NOT generate vague intensity adverbs (so much, very much, really, a lot)\n\n"
+            f"Examples for 'I like': dogs, pizza, that, swimming, my family, school, music, books\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Every option must make sense coming AFTER \"{label}\" in speech\n"
+            f"2. No duplicates, no options already listed above\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings, e.g. [\"Option 1\", \"Option 2\"]\n\n"
+            f"Return ONLY the JSON array — no explanation, no markdown."
+        )
+
+        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+
+        text = str(raw_response or "").strip()
+        text = re.sub(r'```(?:json)?\s*', '', text).strip()
+        arr_match = re.search(r'\[[\s\S]*\]', text)
+        if arr_match:
+            text = arr_match.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = []
+        if not isinstance(parsed, list):
+            parsed = []
+
+        options: List[str] = []
+        seen: set = set()
+        for item in parsed:
+            opt = str(item).strip() if isinstance(item, str) else str(item.get('text') or item.get('label') or '').strip()
+            if opt and opt.lower() not in seen and opt.lower() not in exclude_set:
+                seen.add(opt.lower())
+                options.append(opt)
+
+        return JSONResponse(content={"options": options[:count]})
+
+    except Exception as e:
+        logging.error(f"Error in bravo_suggest: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

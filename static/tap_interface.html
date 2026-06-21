@@ -1848,6 +1848,12 @@
         // Client-side lookup for common AAC vocabulary — avoids an LLM call for known words.
         // Keys are lowercase. null = no meaningful form for this mode.
         const COMMON_WORD_VARIANTS = {
+            // ── DEMONSTRATIVES / PRONOUNS ─────────────────────────────────────
+            'this':             { past: null,   plural: 'these' },
+            'that':             { past: null,   plural: 'those' },
+            'it':               { past: null,   plural: 'them' },
+            'its':              { past: null,   plural: 'their' },
+            'itself':           { past: null,   plural: 'themselves' },
             // ── TO BE ─────────────────────────────────────────────────────────
             'am':               { past: 'was',              plural: null },
             'is':               { past: 'was',              plural: null },
@@ -4152,6 +4158,52 @@
             }
         }
 
+        // Resolves variants for multi-word phrases client-side before hitting the LLM.
+        // Returns the converted phrase string, or null if no rule matches.
+        function resolveVariantPhrase(orig, mode) {
+            const words = orig.split(' ');
+            if (words.length < 2) return null;
+            const wordsLower = words.map(w => w.toLowerCase());
+
+            if (mode === 'plural') {
+                // "this/that/it + ..." → "these/those/them + ..." with noun tail pluralized
+                const demonstrativeMap = { 'this': 'these', 'that': 'those', 'it': 'them' };
+                const pluralFirst = demonstrativeMap[wordsLower[0]];
+                if (pluralFirst) {
+                    const result = [...words];
+                    result[0] = pluralFirst;
+                    // Try to pluralize the last word if it has a known plural
+                    const lastLower = wordsLower[wordsLower.length - 1];
+                    const lastLookup = COMMON_WORD_VARIANTS[lastLower];
+                    if (lastLookup && lastLookup.plural) {
+                        result[result.length - 1] = lastLookup.plural;
+                    }
+                    return result.join(' ');
+                }
+            }
+
+            if (mode === 'past') {
+                // "do/does + ..." → "did + ..." (e.g. "do this" → "did this")
+                const doMap = { 'do': 'did', 'does': 'did' };
+                const pastFirst = doMap[wordsLower[0]];
+                if (pastFirst) {
+                    const result = [...words];
+                    result[0] = pastFirst;
+                    return result.join(' ');
+                }
+                // "[verb] + adverb/particle" → "[verb-past] + adverb/particle"
+                // e.g. "wait here" → "waited here", "go there" → "went there"
+                const firstLookup = COMMON_WORD_VARIANTS[wordsLower[0]];
+                if (firstLookup && firstLookup.past) {
+                    const result = [...words];
+                    result[0] = firstLookup.past;
+                    return result.join(' ');
+                }
+            }
+
+            return null;
+        }
+
         async function applyVariantModeToCurrentBoard() {
             if (!variantMode || variantApplyInProgress) return;
             variantApplyInProgress = true;
@@ -4184,6 +4236,10 @@
                     const lookup = COMMON_WORD_VARIANTS[orig.toLowerCase()];
                     const lookupVal = lookup ? (variantMode === 'past' ? lookup.past : lookup.plural) : null;
                     if (lookupVal) { variantCache.set(orig, lookupVal); continue; }
+
+                    // 2b. Client-side phrase resolver for multi-word patterns
+                    const phraseVariant = resolveVariantPhrase(orig, variantMode);
+                    if (phraseVariant) { variantCache.set(orig, phraseVariant); continue; }
 
                     // 3. Queue for LLM
                     wordsForLlm.push(orig);
@@ -6166,20 +6222,22 @@
         }
 
         // Generate word options with exclusion (like freestyle page)
-        async function generateFreestyleLLMOptionsWithExclusion(category, count, wordsPrompt, excludedWords) {
+        // buildSpaceContent: pass '' to suppress sentence context (category boards),
+        // or undefined to use the live buildSpace value (default).
+        async function generateFreestyleLLMOptionsWithExclusion(category, count, wordsPrompt, excludedWords, buildSpaceContent = undefined) {
             const wordsCount = count || FreestyleWordOptions;
             const mergedExclusions = getTapSpecialButtonExclusions(excludedWords);
             console.log('generateFreestyleLLMOptionsWithExclusion called with category:', category, 'count:', wordsCount, 'wordsPrompt:', wordsPrompt, 'excluding:', mergedExclusions);
-            
+
             try {
                 if (category && category !== 'general') {
                     // Get current mood for context
                     const currentMood = getCurrentMood ? getCurrentMood() : null;
-                    
+
                     // Use category-words endpoint with exclusion
                     const requestBody = {
                         category: category,
-                        build_space_content: buildSpace.value || '',
+                        build_space_content: buildSpaceContent !== undefined ? buildSpaceContent : (buildSpace.value || ''),
                         max_options: wordsCount,
                         exclude_words: mergedExclusions,
                         target_locale: getEffectiveTapWordLocale(),
@@ -6401,6 +6459,10 @@
             if (boardDynamicRowsExplicit) {
                 numDynamic = Math.max(0, Number(targetBoardObj.dynamic_rows));
             }
+            // Wake word response mode: all rows are dynamic
+            if (categoryContext?.is_wake_word_board) {
+                numDynamic = totalRows;
+            }
 
             // Fallback: check how many dynamic buttons are currently rendered on the screen.
             // Only apply when dynamic_rows is not explicitly set to 0 — never override an
@@ -6421,7 +6483,7 @@
             
             // 1. Keep pre-defined buttons in rows < splitRowIndex
             let upperRowButtons = configuredButtons.filter(btn => btn && Number(btn.row) < splitRowIndex);
-            
+
             // Build a set of occupied cell coordinates in the upper rows
             const occupiedCoords = new Set(upperRowButtons.map(btn => `${btn.row}:${btn.col}`));
             const totalUpperSlots = splitRowIndex * cols;
@@ -6474,7 +6536,47 @@
             if (totalDynamicButtons <= 0) {
                 return upperRowButtons;
             }
-            
+
+            // For bravo-build boards (source:"custom"), the server already generated all buttons
+            // with a focused, context-aware prompt. Use those pre-generated dynamic buttons on
+            // initial load. On Something Else (exclusions present), call bravo-suggest which uses
+            // the same focused prompt as bravo-build rather than the generic category-words path.
+            const isBravoBuildBoard = targetBoardObj && targetBoardObj.source === 'custom';
+            const preConfiguredDynamic = configuredButtons.filter(btn => btn && Number(btn.row) >= splitRowIndex);
+            if (isBravoBuildBoard) {
+                if (preConfiguredDynamic.length > 0 && extraExclusions.length === 0) {
+                    return [...upperRowButtons, ...preConfiguredDynamic];
+                }
+                // Something Else: use bravo-suggest for context-aware regeneration
+                try {
+                    const boardLabel = targetBoardObj.label || activeCategory.label || '';
+                    const boardContext = buildSpace.value.trim();
+                    const suggestRes = await authenticatedFetch('/api/tap-interface/bravo-suggest', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            label: boardLabel,
+                            context: boardContext,
+                            count: totalDynamicButtons,
+                            exclude_options: extraExclusions,
+                        }),
+                    });
+                    if (suggestRes.ok) {
+                        const suggestData = await suggestRes.json();
+                        const dynamicBtns = (suggestData.options || []).map((text, i) => {
+                            const r = splitRowIndex + Math.floor(i / cols);
+                            const c = i % cols;
+                            return { id: `btn_suggest_${r}_${c}_${Date.now()}_${i}`, text, label: text, row: r, col: c,
+                                speech_text: text, action_type: 'announce', after_selection: 'use_ai',
+                                button_type: 'dynamic', target_board_id: null, image_url: null };
+                        });
+                        return [...upperRowButtons, ...dynamicBtns];
+                    }
+                } catch (e) {
+                    console.warn('[BRAVO-SUGGEST] fetch failed, falling through to category-words:', e);
+                }
+            }
+
             const activeCategory = categoryContext || currentCategory;
             const currentSpeech = buildSpace.value.trim();
             const staticWords = upperRowButtons.map(btn => btn.text || btn.label || btn.speech_text).filter(Boolean);
@@ -6491,15 +6593,27 @@
                 } else if (activeCategory && !shouldUseDefaultHomeStarterWords(activeCategory)) {
                     // Use the board's specific category and LLM prompt
                     const categoryName = activeCategory.prompt_category || activeCategory.label || 'general';
-                    const wordsPrompt = activeCategory.words_prompt || activeCategory.llm_prompt || null;
-                    
+                    let wordsPrompt = activeCategory.words_prompt || activeCategory.llm_prompt || null;
+
+                    // Use the board's configured prompt as-is. The exclusion list handles
+                    // filtering out words already shown. No prompt synthesis needed.
+
+                    // Wake word boards pass the current build space so the LLM generates
+                    // contextual responses that grow with what the user has already selected.
+                    // Category vocabulary boards pass empty string to prevent sentence-context
+                    // from pulling generation off-course.
+                    const buildSpaceForRequest = activeCategory?.is_wake_word_board
+                        ? currentSpeech
+                        : '';
+
                     console.log(`🔮 Generating hybrid dynamic words for category: "${categoryName}", prompt: "${wordsPrompt}", excluding:`, excludedWords);
-                    
+
                     dynamicWords = await generateFreestyleLLMOptionsWithExclusion(
                         categoryName,
                         totalDynamicButtons,
                         wordsPrompt,
-                        excludedWords
+                        excludedWords,
+                        buildSpaceForRequest
                     );
                 } else {
                     // Fallback to starter words or speech history-based options
@@ -6513,11 +6627,16 @@
                 console.error('Error fetching dynamic words for hybrid board:', err);
             }
             
-            // If the category-specific fetch failed or returned nothing, do fallback
+            // If the category-specific fetch failed or returned nothing, do fallback.
+            // Wake word boards skip the home-starter fallback — retry with speech history context.
             if (!dynamicWords || dynamicWords.length === 0) {
                 try {
-                    if (currentSpeech) {
-                        dynamicWords = await generateWordsBasedOnSpeechHistory(currentSpeech, totalDynamicButtons, excludedWords);
+                    if (currentSpeech || activeCategory?.is_wake_word_board) {
+                        dynamicWords = await generateWordsBasedOnSpeechHistory(
+                            currentSpeech || (activeCategory?.llm_prompt || ''),
+                            totalDynamicButtons,
+                            excludedWords
+                        );
                     } else {
                         dynamicWords = await generateDefaultHomeStarterWords(totalDynamicButtons, excludedWords);
                     }
@@ -6639,25 +6758,9 @@
             const c_board_obj = boardId ? boardsById[boardId] : null;
             const c_board_dr = c_board_obj ? c_board_obj.dynamic_rows : null;
 
-            if (resolvedBoardType === 'static' || resolvedBoardType === '') {
-                // Static boards always route through resolveHybridBoardButtons regardless of
-                // dynamic row count; that function correctly handles numDynamic=0 (returns only
-                // static buttons with coordinates so Something Else is never shown).
-                resolvedBoardType = 'hybrid';
-            } else if (resolvedBoardType === 'ai' && useHybridPages) {
-                resolvedBoardType = 'hybrid';
-            }
-
-            // Fallback: if there are currently dynamic buttons rendered in #freestyle-options, treat as hybrid
-            const freestyleOptionsEl = freestyleOptions;
-            const hasDynamicButtonsOnScreen = freestyleOptionsEl
-                ? Array.from(freestyleOptionsEl.querySelectorAll('.option-button'))
-                    .some(btn => btn.dataset.buttonType === 'dynamic' || btn.classList.contains('dynamic-button'))
-                : false;
-            
-            if (hasDynamicButtonsOnScreen && (resolvedBoardType === 'static' || resolvedBoardType === '')) {
-                resolvedBoardType = 'hybrid';
-            }
+            // All boards route through resolveHybridBoardButtons. Legacy 'ai' board_type
+            // is treated identically — dynamic_rows count drives what gets regenerated.
+            resolvedBoardType = 'hybrid';
 
             return resolvedBoardType;
         }
@@ -14507,10 +14610,8 @@ VARIETY RULES:
 
                 console.log('⏱️ Starting parallel fetch at:', Date.now());
 
-                // Resolve board_type up front — needed by both phrases and words sections
-                let resolvedBoardType = getResolvedBoardType(currentCategory);
-                const isCategoryAiBoard = resolvedBoardType === 'ai';
-                const isCategoryHomeAiBoard = shouldUseDefaultHomeStarterWords(currentCategory) && isCategoryAiBoard;
+                // All boards resolve to 'hybrid' and go through resolveHybridBoardButtons.
+                const resolvedBoardType = getResolvedBoardType(currentCategory);
 
                 // Start both promises immediately - they will execute concurrently
                 let phrasesPromise, wordsPromise;
@@ -14541,30 +14642,10 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     phrasesPromise = Promise.resolve([]);
                 }
 
-                // WORDS SECTION LOGIC
+                // WORDS SECTION LOGIC — all boards route through resolveHybridBoardButtons,
+                // which handles static-only boards (dynamic_rows=0) and mixed boards alike.
                 console.log('⏱️ Starting words fetch at:', Date.now());
-                console.log('[DEBUG] board_type resolved:', resolvedBoardType, 'board_id:', currentCategory.board_id, 'isAiBoard:', isCategoryAiBoard);
-                if (resolvedBoardType === 'hybrid') {
-                    console.log('Hybrid board type detected in selectCategory, resolving hybrid buttons');
-                    wordsPromise = resolveHybridBoardButtons(currentCategory.board_word_options || [], currentCategory);
-                } else if (Array.isArray(currentCategory.board_word_options) && currentCategory.board_word_options.length > 0 && !isCategoryAiBoard) {
-                    console.log('Using structured board word options for Words section:', currentCategory.board_word_options);
-                    const hasDynamic = currentCategory.board_word_options.some(opt => opt.button_type === 'dynamic');
-                    if (hasDynamic) {
-                        wordsPromise = resolveDynamicButtons(currentCategory.board_word_options);
-                    } else {
-                        wordsPromise = Promise.resolve(currentCategory.board_word_options);
-                    }
-                } else if (currentCategory.static_options && !isCategoryAiBoard) {
-                    console.log('Using static options for Words section:', currentCategory.static_options);
-                    const staticWords = currentCategory.static_options.split(',').map(opt => opt.trim()).filter(opt => opt);
-                    wordsPromise = Promise.resolve(staticWords.map(text => ({ text: text, keywords: [] })));
-                } else if (shouldUseDefaultHomeStarterWords(currentCategory) && isCategoryAiBoard) {
-                    console.log('Using default Home starter prompt for Words section');
-                    wordsPromise = generateDefaultHomeStarterWords(FreestyleWordOptions);
-                } else {
-                    wordsPromise = generateFreestyleOptionsForCategory(currentCategory.label || currentCategory, FreestyleWordOptions, currentCategory.words_prompt, currentCategory.llm_prompt, isCategoryAiBoard);
-                }
+                wordsPromise = resolveHybridBoardButtons(currentCategory.board_word_options || [], currentCategory);
 
                 // Progressive rendering: do not block words UI on phrase generation latency.
                 const loadRequestKey = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -16377,20 +16458,6 @@ ${getTapLanguageDirective()}
                     return;
                 }
                 
-                if (resolvedBoardType === 'ai') {
-                    console.log('🎯 AI board detected, regenerating board options in-place');
-                    const options = await generateFreestyleOptionsForCategory(
-                        currentCategory.label || currentCategory,
-                        FreestyleWordOptions,
-                        currentCategory.words_prompt,
-                        currentCategory.llm_prompt,
-                        true
-                    );
-                    renderFreestyleOptions(options, true);
-                    setTimeout(() => loadImagesForWords(options, true), 50);
-                    return;
-                }
-                
                 // Get current speech history - this is the key!
                 const currentSpeech = buildSpace.value.trim();
                 console.log('🎯 Updating word options based on current Speech History:', currentSpeech);
@@ -16562,7 +16629,6 @@ ${getTapLanguageDirective()}
             if (option && option.button_type === 'dynamic') {
                 isDynamic = true;
             } else {
-                const resolvedBoardType = getResolvedBoardType(currentCategory);
                 const boardId = getCategoryBoardId(currentCategory);
                 const targetBoardObj = boardId ? boardsById[String(boardId).trim()] : null;
                 const rawBoardType = String(targetBoardObj?.board_type || '').toLowerCase();
@@ -16576,7 +16642,7 @@ ${getTapLanguageDirective()}
                 const staticRows = Math.max(0, totalRows - numDynamic);
 
                 const optionRow = option ? Number(option.row) : (btn.dataset.row !== undefined ? Number(btn.dataset.row) : null);
-                if (resolvedBoardType === 'ai' || (resolvedBoardType === 'hybrid' && optionRow !== null && optionRow >= staticRows)) {
+                if (optionRow !== null && optionRow >= staticRows) {
                     isDynamic = true;
                 }
             }
@@ -16780,7 +16846,7 @@ ${getTapLanguageDirective()}
                         return;
                     }
 
-                    if (effectiveAfterSel === 'ai_build_board' || (effectiveAfterSel === 'use_ai' && option.button_type !== 'dynamic' && getResolvedBoardType(currentCategory) !== 'ai')) {
+                    if (effectiveAfterSel === 'ai_build_board' || (effectiveAfterSel === 'use_ai' && option.button_type !== 'dynamic')) {
                         const sourceBoardId = getCategoryBoardId(currentCategory);
                         const btnId = option.id;
                         const context = buildSpace.value.trim();
@@ -17052,7 +17118,7 @@ ${getTapLanguageDirective()}
                 const effectiveBoardDrForSE = boardDrExplicitForSE
                     ? Number(linkedBoardForSE.dynamic_rows)
                     : (Number(tapDynamicRows) || 0);
-                const showSomethingElseInBoard = (linkedBoardForSE?.board_type === 'ai') || effectiveBoardDrForSE > 0;
+                const showSomethingElseInBoard = effectiveBoardDrForSE > 0;
 
                 for (let row = 0; row < effectiveDisplayRows; row++) {
                     for (let col = 0; col < effectiveBoardCols; col++) {
@@ -17884,14 +17950,14 @@ ${getTapLanguageDirective()}
                     isSettingUpRecognition = false;
 
                     // Highlight question textarea
-                    updateStatusMessage("Listening for your question...");
+                    updateStatusMessage("I'm listening...");
                     if (questionDisplay) {
                         questionDisplay.classList.add(LISTENING_HIGHLIGHT_CLASS);
-                        questionDisplay.placeholder = "I'm listening for your question...";
+                        questionDisplay.placeholder = "I'm listening...";
                     }
 
                     // Announce and start listening for question
-                    const announcement = "Listening for your question...";
+                    const announcement = "I'm listening";
                     console.log("Calling announce for wake word response...");
                     try {
                         await announce(announcement, "system", false);
@@ -18152,31 +18218,35 @@ ${getTapLanguageDirective()}
         }
 
         async function processQuestionAndUpdateInterface(question) {
-            console.log("Processing question and updating interface:", question);
-            
+            console.log("Processing wake word question:", question);
+
             try {
-                // Use the question as a category context for generating options
-                const questionCategory = {
-                    label: question,
-                    llm_prompt: `Generate response options for the question: "${question}". Provide helpful answers, suggestions, or related communication phrases.`
+                // Build a virtual "wake word" category. Setting is_wake_word_board causes
+                // resolveHybridBoardButtons to make ALL rows dynamic and pass the growing
+                // build space as LLM context (so options evolve as the user selects words).
+                const wakeWordCategory = {
+                    label: 'Partner Question',
+                    is_wake_word_board: true,
+                    board_word_options: [],
+                    llm_prompt: `The partner said: "${question}". Generate short words and phrases the AAC user can say in response.`,
+                    prompt_category: 'conversational response',
                 };
 
-                // Update both gridpage-style options (top 2 rows) and freestyle options (bottom 3 rows)
-                console.log("Generating gridpage-style options for question...");
-                const gridpageOptions = await generateGridpageLLMOptions(questionCategory.llm_prompt, 18);
-                renderCategoryOptions(gridpageOptions);
-                
-                console.log("Generating freestyle options for question...");
-                const freestyleOptions = await generateFreestyleLLMOptions(questionCategory, 29);
-                renderFreestyleOptions(freestyleOptions);
-                
-                // Set the current category to the question for context
-                currentCategory = questionCategory;
-                
-                console.log("Interface updated with question-based options");
-                
+                currentCategory = wakeWordCategory;
+
+                // Clear the phrases section — the full word grid handles all rows dynamically
+                renderCategoryOptions([]);
+
+                // Generate all-dynamic board and render it
+                const buttons = await resolveHybridBoardButtons([], wakeWordCategory);
+                currentWordOptions = buttons.slice();
+                renderFreestyleOptions(buttons, true);
+                setTimeout(() => loadImagesForWords(buttons, true), 50);
+
+                console.log(`Wake word board loaded with ${buttons.length} dynamic options`);
+
             } catch (error) {
-                console.error('Error updating interface with question:', error);
+                console.error('Error processing wake word question:', error);
                 announce("Sorry, I had trouble processing that question.", "system", false);
             }
         }
