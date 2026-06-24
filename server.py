@@ -8886,12 +8886,17 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                         and not board.get('buttons')
                         and CATEGORY_STATIC_POOLS
                     ):
-                        raw_key = str(board.get('prompt_category') or board.get('label') or '').strip().lower()
-                        pool_key = ''.join(ch if ch.isalnum() else '_' for ch in raw_key)
-                        while '__' in pool_key:
-                            pool_key = pool_key.replace('__', '_')
-                        pool_key = pool_key.strip('_')
-                        pool = CATEGORY_STATIC_POOLS.get(pool_key, [])
+                        def _to_pool_key(s: str) -> str:
+                            k = ''.join(ch if ch.isalnum() else '_' for ch in s.strip().lower())
+                            while '__' in k:
+                                k = k.replace('__', '_')
+                            return k.strip('_')
+                        # Try prompt_category first, then fall back to label so that boards
+                        # like Home (prompt_category='general_conversation', label='Home')
+                        # still find their pool via the label key.
+                        pool = CATEGORY_STATIC_POOLS.get(_to_pool_key(str(board.get('prompt_category') or '')), [])
+                        if not pool:
+                            pool = CATEGORY_STATIC_POOLS.get(_to_pool_key(str(board.get('label') or '')), [])
                         if pool:
                             max_buttons = static_rows * grid_cols
                             pool_words = pool[:max_buttons]
@@ -22554,6 +22559,8 @@ class TapBoardButton(BaseModel):
     background_color: Optional[str] = Field("#FFFFFF", description="Button background color")
     text_color: Optional[str] = Field("#000000", description="Button text color")
     hidden: bool = Field(default=False, description="Whether button is hidden")
+    plural: Optional[str] = Field(None, description="Plural form of button label")
+    past_tense: Optional[str] = Field(None, description="Past tense form of button label")
 
 
 class TapBoard(BaseModel):
@@ -22751,6 +22758,8 @@ def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[
         'text_color': button.get('text_color') or '#000000',
         'hidden': bool(button.get('hidden', False)),
         'button_type': button.get('button_type') or 'static',
+        'plural': button.get('plural') or None,
+        'past_tense': button.get('past_tense') or None,
     }
 
 
@@ -23208,7 +23217,7 @@ def ensure_tap_boards_structure(
                 'prompt_exclusions': None,
                 'static_options': None,
                 'special_function': None,
-                'default_columns': 12,
+                'default_columns': DEFAULT_COLUMNS,
                 'max_rows': 7,
                 'buttons': [],
             })
@@ -25381,73 +25390,70 @@ async def get_word_variants(
 
     if request.mode == 'past':
         prompt = (
-            f"Convert these words/phrases to past tense. "
-            f"Return ONLY a valid JSON object mapping each original word/phrase to its past tense form. "
-            f"For multi-word phrases, convert only the verb (first word that changes): 'do this'->'did this', 'wait here'->'waited here', 'go home'->'went home'. "
-            f"If a word does not change meaningfully in past tense (articles, prepositions, adjectives, nouns, pronouns, already-past forms), return it unchanged. "
-            f"Examples: want->wanted, am->was, is->was, are->were, have->had, has->had, can->could, will->would, feel->felt, go->went, need->needed, like->liked, understand->understood. "
+            f"Given these AAC button labels, return a JSON object mapping each ACTION VERB to its past tense form. "
+            f"Include ONLY verbs — skip nouns, adjectives, prepositions, and already-past forms. "
+            f"For multi-word phrases convert only the main verb: 'go home'->'went home'. "
+            f"Examples: play->played, swim->swam, eat->ate, go->went, run->ran, want->wanted, feel->felt, have->had. "
+            f"Return ONLY valid JSON. Return {{}} if nothing qualifies. Do not include a word mapped to itself. "
             f"Words: {words_json}"
         )
     else:
         prompt = (
-            f"Convert these words/phrases to plural form. "
-            f"Return ONLY a valid JSON object mapping each original word/phrase to its plural form. "
-            f"For multi-word phrases, pluralize all words that change: 'that dog'->'those dogs', 'this thing'->'these things', 'it again'->'them again'. "
-            f"If a word does not have a meaningful plural (verbs, prepositions, adverbs, adjectives, etc.), return it unchanged. "
-            f"Demonstrative pronouns DO change: this->these, that->those, it->them, its->their. "
-            f"Examples: cat->cats, wish->wishes, cookie->cookies, idea->ideas, this->these, that->those, it->them. "
+            f"Given these AAC button labels, return a JSON object mapping each NOUN to its plural form. "
+            f"Include ONLY nouns — skip verbs, adjectives, and prepositions. "
+            f"Demonstrative pronouns change too: this->these, that->those, it->them. "
+            f"For multi-word noun phrases pluralize the head noun: 'monkey bar'->'monkey bars', 'play area'->'play areas'. "
+            f"Examples: chair->chairs, towel->towels, box->boxes, child->children, cookie->cookies. "
+            f"Return ONLY valid JSON. Return {{}} if nothing qualifies. Do not include a word mapped to itself. "
             f"Words: {words_json}"
         )
 
     try:
         account_id = current_ids["account_id"]
         aac_user_id = current_ids["aac_user_id"]
-        settings = await load_settings_from_file(account_id, aac_user_id)
-        llm_provider = str(settings.get('llm_provider') or 'gemini').lower()
 
-        response_text = None
-        if llm_provider == 'chatgpt' and openai_client:
-            resp = await asyncio.to_thread(
-                openai_client.chat.completions.create,
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=0.1,
-            )
-            response_text = resp.choices[0].message.content.strip() if resp.choices else None
-        else:
-            import google.generativeai as genai
-            model = genai.GenerativeModel('gemini-2.0-flash-lite')
-            resp = await asyncio.to_thread(model.generate_content, prompt)
-            response_text = resp.text.strip() if resp and resp.text else None
+        response_text = await _generate_gemini_content_with_fallback(
+            prompt,
+            {"response_mime_type": "application/json", "temperature": 0.1},
+            account_id,
+            aac_user_id,
+        )
+
+        logging.info(f"Word variants LLM raw response (mode={request.mode}, words={len(words)}): {(response_text or '')[:300]!r}")
 
         if not response_text:
-            return JSONResponse(content={"variants": {w: w for w in words}})
+            return JSONResponse(content={"variants": {}})
 
-        # Extract JSON from response
+        # Extract JSON from response — handle code blocks and leading text
+        import re as _re
         json_str = response_text
         if '```' in json_str:
-            import re
-            match = re.search(r'```(?:json)?\s*([\s\S]*?)```', json_str)
-            if match:
-                json_str = match.group(1).strip()
+            m = _re.search(r'```(?:json)?\s*([\s\S]*?)```', json_str)
+            if m:
+                json_str = m.group(1).strip()
+        if not json_str.strip().startswith('{'):
+            m = _re.search(r'\{[\s\S]*\}', json_str)
+            if m:
+                json_str = m.group(0)
 
         variants = json.loads(json_str)
         if not isinstance(variants, dict):
             return JSONResponse(content={"variants": {}})
 
-        # Only return words that actually changed — client skips identity mappings
+        # Build a lowercase-keyed lookup so capitalization from the LLM doesn't break matching
+        variants_lower = {str(k).strip().lower(): str(v).strip() for k, v in variants.items()}
+
         result = {}
         for w in words:
-            v = str(variants.get(w) or '').strip()
+            # Try exact match first, then case-insensitive fallback
+            v = str(variants.get(w) or variants_lower.get(w.lower()) or '').strip()
             if v and v.lower() != w.lower():
                 result[w] = v
 
         return JSONResponse(content={"variants": result})
     except Exception as e:
         logging.error(f"Error converting word variants: {e}", exc_info=True)
-        # Return identity mapping on error
-        return JSONResponse(content={"variants": {w: w for w in words}})
+        return JSONResponse(content={"variants": {}})
 
 
 @app.get("/api/tap-interface/boards-menu")

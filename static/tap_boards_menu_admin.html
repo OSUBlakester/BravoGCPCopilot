@@ -116,11 +116,8 @@
         <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full hover:bg-orange-100" title="Back to Board Builder">
             <i class="fas fa-table-cells-large mr-2"></i>Board Builder
         </button>
-        <div class="flex gap-2 items-center bg-gray-100 border border-gray-300 rounded-full px-3 py-1 text-sm h-10">
-            <span class="font-semibold text-gray-700">Mass Target Update:</span>
-            <button type="button" class="h-8 px-3 flex items-center justify-center text-white bg-blue-600 rounded-full text-xs hover:bg-blue-700 transition" id="massUpdateBtn" title="Switch selected default board targets to Static or AI">Configure...</button>
-        </div>
         <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
+        <button class="btn btn-primary h-10 px-4 flex items-center justify-center rounded-full text-sm" id="addMenuItemBtn">+ Add Root Menu Item</button>
         <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
             <i class="fas fa-save mr-1"></i>Save
         </button>
@@ -145,9 +142,6 @@
                 <div class="root-drop-zone" id="rootDropTopZone">Drop here to move to top of root menu</div>
                 <div id="treeContainer"></div>
                 <div class="root-drop-zone" id="rootDropBottomZone">Drop here to move to end of root menu</div>
-                <div class="add-button">
-                    <button class="btn btn-primary" id="addMenuItemBtn">+ Add Root Menu Item</button>
-                </div>
             </div>
         </div>
         <div class="resizer" id="sidebarResizer"></div>
@@ -284,45 +278,6 @@
             </div>
         </div>
     </div>
-    <!-- Mass Target Update Modal -->
-    <div id="massUpdateModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden flex items-center justify-center" style="z-index: 5500;">
-        <div class="relative mx-auto p-6 border w-11/12 max-w-lg shadow-xl rounded-xl bg-white">
-            <div class="flex items-center justify-between border-b pb-3 mb-4">
-                <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <i class="fas fa-arrows-spin text-blue-600"></i>Mass Target Update
-                </h3>
-                <button id="closeMassUpdateModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
-            </div>
-            
-            <p class="text-sm text-gray-600 mb-4">Select the menu board targets you want to update, then choose to switch them to either Static or AI.</p>
-            
-            <div class="flex justify-between mb-2">
-                <div class="flex gap-2">
-                    <button type="button" onclick="massUpdateSelectAll(true)" class="text-xs text-blue-600 hover:underline">Select All</button>
-                    <span class="text-gray-300">|</span>
-                    <button type="button" onclick="massUpdateSelectAll(false)" class="text-xs text-blue-600 hover:underline">Deselect All</button>
-                </div>
-                <span id="massUpdateSelectedCount" class="text-xs text-gray-500 font-semibold">0 selected</span>
-            </div>
-            
-            <div class="border rounded-lg max-h-60 overflow-y-auto p-3 bg-gray-50 space-y-2" id="massUpdateCheckboxContainer">
-                <!-- Checkboxes will be dynamically generated here -->
-            </div>
-            
-            <div class="flex items-center justify-between border-t pt-4 mt-5">
-                <button id="cancelMassUpdateModal" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium">Cancel</button>
-                <div class="flex gap-2">
-                    <button id="runMassUpdateStatic" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold flex items-center gap-1">
-                        <i class="fas fa-table-cells"></i> Set to Static
-                    </button>
-                    <button id="runMassUpdateAi" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-semibold flex items-center gap-1">
-                        <i class="fas fa-wand-magic-sparkles"></i> Set to AI
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Convert AI to Static Wizard Modal -->
     <div id="convertAIModal" class="fixed inset-0 bg-gray-900 bg-opacity-60 overflow-y-auto h-full w-full hidden" style="z-index:5400;">
         <div class="relative top-10 mx-auto p-0 border w-11/12 max-w-2xl shadow-xl rounded-xl bg-white">
@@ -478,12 +433,7 @@
             document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
             document.getElementById('expandAllTreeBtn').addEventListener('click', expandAllTreeNodes);
             document.getElementById('collapseAllTreeBtn').addEventListener('click', collapseAllTreeNodes);
-            document.getElementById('massUpdateBtn')?.addEventListener('click', openMassUpdateModal);
-            document.getElementById('closeMassUpdateModal')?.addEventListener('click', closeMassUpdateModal);
-            document.getElementById('cancelMassUpdateModal')?.addEventListener('click', closeMassUpdateModal);
-            document.getElementById('runMassUpdateStatic')?.addEventListener('click', () => executeMassUpdate('static'));
-            document.getElementById('runMassUpdateAi')?.addEventListener('click', () => executeMassUpdate('ai'));
-            document.getElementById('translateMenuBtn').addEventListener('click', openTranslateMenuModal);
+document.getElementById('translateMenuBtn').addEventListener('click', openTranslateMenuModal);
                         document.getElementById('closeTranslateMenuModal').addEventListener('click', closeTranslateMenuModal);
                         document.getElementById('cancelTranslateMenuModal').addEventListener('click', closeTranslateMenuModal);
                         document.getElementById('performMenuTranslationBtn').addEventListener('click', performMenuTranslation);
@@ -632,21 +582,20 @@
             document.getElementById('translateMenuResultsContainer').classList.add('hidden');
             
             try {
-                // Collect all menu item labels that need translation
+                // Collect all menu item labels that need translation, keyed by node id
                 const textsToTranslate = [];
                 const translationEntries = [];
-                
-                const collectLabels = (nodes, parentPath = []) => {
-                    nodes.forEach((node, idx) => {
-                        const path = [...parentPath, idx];
-                        if (node.label) {
+
+                const collectLabels = (nodes) => {
+                    nodes.forEach((node) => {
+                        if (node.id && node.label) {
                             textsToTranslate.push(node.label);
-                            translationEntries.push({ type: 'label', path, original: node.label });
+                            translationEntries.push({ type: 'label', nodeId: node.id, original: node.label });
                         }
-                        if (Array.isArray(node.children)) collectLabels(node.children, path);
+                        if (Array.isArray(node.children)) collectLabels(node.children);
                     });
                 };
-                
+
                 collectLabels(menuTree);
                 
                 if (textsToTranslate.length === 0) {
@@ -702,31 +651,24 @@
             } else {
                 html = `<p class="text-sm text-gray-600 mb-3 pb-3 border-b">Total items: <span class="font-semibold">${entries.length}</span></p>`;
                 entries.forEach(entry => {
-                    const pathLabel = Array.isArray(entry.path) ? entry.path.join(' › ') : String(entry.path || '');
-                    html += `<div class="mb-3 p-3 bg-white border-l-4 border-gray-300 rounded">
-                        <div class="text-sm mb-1">
-                            <span class="text-gray-600">EN:</span> <span class="font-medium">${entry.original}</span><br>
-                            <span class="text-green-600 font-semibold">${targetLanguage.toUpperCase()}:</span> <span class="font-medium">${entry.translated}</span>
-                        </div>
-                        <div class="text-xs text-gray-600">Menu path: ${pathLabel}</div>
+                    html += `<div class="mb-2 p-2 bg-white border-l-4 border-gray-300 rounded text-sm">
+                        <span class="text-gray-500">EN:</span> <span class="font-medium">${escapeHtml(entry.original)}</span>
+                        &rarr; <span class="text-green-700 font-semibold">${escapeHtml(entry.translated)}</span>
                     </div>`;
                 });
             }
-            
+
             container.innerHTML = html;
         }
 
-        function applyTranslationsToMenuTree(nodes, entriesByPath, parentPath = []) {
+        function applyTranslationsToMenuTree(nodes, entriesByNodeId) {
             if (!Array.isArray(nodes)) return;
-            nodes.forEach((node, index) => {
-                const path = [...parentPath, index];
-                const pathKey = path.join('/');
-                const translatedLabel = entriesByPath[pathKey];
-                if (translatedLabel && node && typeof node === 'object') {
-                    node.label = formatMenuLabel(translatedLabel);
+            nodes.forEach((node) => {
+                if (node.id && entriesByNodeId[node.id]) {
+                    node.label = formatMenuLabel(entriesByNodeId[node.id]);
                 }
                 if (Array.isArray(node?.children)) {
-                    applyTranslationsToMenuTree(node.children, entriesByPath, path);
+                    applyTranslationsToMenuTree(node.children, entriesByNodeId);
                 }
             });
         }
@@ -737,10 +679,10 @@
                 return;
             }
 
-            const entriesByPath = {};
+            const entriesByNodeId = {};
             pendingMenuTranslationEntries.forEach(entry => {
-                if (entry.type === 'label') {
-                    entriesByPath[entry.path.join('/')] = formatMenuLabel(entry.translated || entry.original);
+                if (entry.type === 'label' && entry.nodeId) {
+                    entriesByNodeId[entry.nodeId] = formatMenuLabel(entry.translated || entry.original);
                 }
             });
 
@@ -748,7 +690,7 @@
                 flushFormToNode(selectedPath);
             }
 
-            applyTranslationsToMenuTree(menuTree, entriesByPath);
+            applyTranslationsToMenuTree(menuTree, entriesByNodeId);
 
             if (selectedPath) {
                 const selectedNode = getNodeByPath(selectedPath);
@@ -984,123 +926,6 @@
             walk(menuTree);
             return list;
         }
-
-        function openMassUpdateModal() {
-            activeTargetableNodes = collectTargetableMenuNodes();
-            const container = document.getElementById('massUpdateCheckboxContainer');
-            container.innerHTML = '';
-            
-            if (activeTargetableNodes.length === 0) {
-                container.innerHTML = '<p class="text-sm text-gray-500 text-center py-4">No default standard boards found in the menu structure.</p>';
-                document.getElementById('runMassUpdateStatic').disabled = true;
-                document.getElementById('runMassUpdateAi').disabled = true;
-                document.getElementById('massUpdateSelectedCount').textContent = '0 selected';
-                document.getElementById('massUpdateModal').classList.remove('hidden');
-                return;
-            }
-            
-            document.getElementById('runMassUpdateStatic').disabled = false;
-            document.getElementById('runMassUpdateAi').disabled = false;
-            
-            activeTargetableNodes.forEach((node) => {
-                const isStatic = node.board_id.endsWith('_static') || node.board_id === 'board_home_static';
-                const typeText = isStatic ? 'STATIC' : 'AI';
-                const typeColor = isStatic ? 'text-blue-600' : 'text-purple-600';
-                
-                const itemDiv = document.createElement('label');
-                itemDiv.className = 'flex items-center justify-between p-2 hover:bg-gray-100 rounded cursor-pointer text-sm border border-gray-200 bg-white';
-                itemDiv.innerHTML = `
-                    <div class="flex items-center gap-2">
-                        <input type="checkbox" class="mass-update-cb rounded text-blue-600 focus:ring-blue-500 h-4 w-4" data-node-id="${node.id}" checked>
-                        <span class="font-medium text-gray-800">${escapeHtml(node.label)}</span>
-                    </div>
-                    <span class="text-xs font-semibold ${typeColor}">${typeText}</span>
-                `;
-                container.appendChild(itemDiv);
-            });
-            
-            container.querySelectorAll('.mass-update-cb').forEach(cb => {
-                cb.addEventListener('change', updateMassUpdateSelectedCount);
-            });
-            
-            updateMassUpdateSelectedCount();
-            document.getElementById('massUpdateModal').classList.remove('hidden');
-        }
-
-        function updateMassUpdateSelectedCount() {
-            const checkboxes = document.querySelectorAll('.mass-update-cb');
-            const checkedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-            document.getElementById('massUpdateSelectedCount').textContent = `${checkedCount} selected`;
-            
-            document.getElementById('runMassUpdateStatic').disabled = checkedCount === 0;
-            document.getElementById('runMassUpdateAi').disabled = checkedCount === 0;
-        }
-
-        function massUpdateSelectAll(check) {
-            document.querySelectorAll('.mass-update-cb').forEach(cb => {
-                cb.checked = check;
-            });
-            updateMassUpdateSelectedCount();
-        }
-
-        function closeMassUpdateModal() {
-            document.getElementById('massUpdateModal').classList.add('hidden');
-        }
-
-        function executeMassUpdate(targetType) {
-            const selectedNodeIds = new Set(
-                Array.from(document.querySelectorAll('.mass-update-cb'))
-                    .filter(cb => cb.checked)
-                    .map(cb => cb.dataset.nodeId)
-            );
-            
-            let count = 0;
-            const walk = (nodes) => {
-                nodes.forEach(node => {
-                    if (selectedNodeIds.has(node.id) && node.board_id) {
-                        const currentId = String(node.board_id).trim();
-                        let newId = currentId;
-                        if (targetType === 'static') {
-                            if (currentId.endsWith('_ai')) {
-                                newId = currentId.slice(0, -3) + '_static';
-                            } else if (currentId === 'board_home' || currentId === 'board_home_ai') {
-                                newId = 'board_home_static';
-                            }
-                        } else if (targetType === 'ai') {
-                            if (currentId.endsWith('_static')) {
-                                newId = currentId.slice(0, -7) + '_ai';
-                            } else if (currentId === 'board_home' || currentId === 'board_home_static') {
-                                newId = 'board_home_ai';
-                            }
-                        }
-                        if (newId !== currentId && boards.some(b => b.id === newId)) {
-                            node.board_id = newId;
-                            count++;
-                        }
-                    }
-                    if (Array.isArray(node.children)) {
-                        walk(node.children);
-                    }
-                });
-            };
-            
-            walk(menuTree);
-            
-            if (count > 0) {
-                markAsChanged();
-                renderTree();
-                if (selectedPath) {
-                    selectItem(selectedPath);
-                }
-                showNotification(`Successfully updated ${count} target(s) to ${targetType.toUpperCase()}.`, 'success');
-            } else {
-                showNotification(`No targets were changed.`, 'info');
-            }
-            closeMassUpdateModal();
-        }
-
-        window.massUpdateSelectAll = massUpdateSelectAll;
-
 
         // ── Selection / form ──────────────────────────────────────────────────────
         function selectItem(path) {

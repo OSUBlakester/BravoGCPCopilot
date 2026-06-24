@@ -65,7 +65,6 @@
                 <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
                 <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
                 <button id="translateBoardBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-language mr-1"></i>Translate Board</button>
-                <button id="translateAllAiBoardsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-globe mr-1"></i>Translate All AI Boards</button>
         </div>
     </div>
 
@@ -95,35 +94,36 @@
         <form id="boardForm" class="mb-6 p-4 border rounded-md bg-white">
             <h3 class="text-xl font-semibold mb-3">Board Details</h3>
             <div class="grid grid-cols-1 gap-4">
-                <div>
-                    <label for="boardLabel" class="block text-sm font-medium text-gray-700">Display Name</label>
-                    <input type="text" id="boardLabel" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g., Home, Food, Feelings">
-                </div>
-            </div>
-
-            <div id="homeBoardAssignmentSection" class="mt-4 p-4 border border-amber-200 bg-amber-50 rounded-md">
-                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                    <div>
-                        <h4 class="font-semibold text-gray-800">Home Board Assignment</h4>
-                        <p id="homeBoardCurrentStatus" class="text-sm text-gray-700 mt-1">Current Home Board: none selected</p>
-                        <p id="homeBoardChangeStatus" class="text-sm text-amber-700 mt-1 hidden"></p>
-                        <p class="text-xs text-gray-600 mt-2">Use this to choose which board opens first in Tap Interface.</p>
+                <div class="flex items-end gap-3">
+                    <div class="flex-1">
+                        <label for="boardLabel" class="block text-sm font-medium text-gray-700">Display Name</label>
+                        <input type="text" id="boardLabel" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g., Home, Food, Feelings">
                     </div>
-                    <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input type="checkbox" id="setAsHomeBoard" class="h-4 w-4">
-                        Set this board as Home
-                    </label>
+                    <button type="button" id="setAsHomeBoardBtn" class="px-3 py-2 text-sm bg-amber-500 text-white rounded-md hover:bg-amber-600 whitespace-nowrap">
+                        <i class="fas fa-home mr-1"></i>Set as Home Board
+                    </button>
                 </div>
             </div>
         </form>
+
+        <div id="setAsHomeBoardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6000;">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                <h3 class="text-lg font-bold text-gray-900 mb-3">Set as Home Board</h3>
+                <p id="setAsHomeBoardMsg" class="text-gray-700 text-sm mb-5"></p>
+                <div class="flex justify-end gap-3">
+                    <button id="setAsHomeBoardCancel" type="button" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Cancel</button>
+                    <button id="setAsHomeBoardConfirm" type="button" class="px-4 py-2 bg-amber-500 text-white rounded-md hover:bg-amber-600">Yes, Set as Home Board</button>
+                </div>
+            </div>
+        </div>
 
         <section id="gridSection" class="bg-white p-4 border rounded-md relative">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
                 <div class="flex gap-2 flex-wrap">
-                    <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
                     <button id="aiBulkBuildBtn" type="button" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>Use AI to Create Options</button>
                     <button id="setDynamicRowsBtn" type="button" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700"><i class="fas fa-sliders-h mr-1"></i>Configure Dynamic Rows</button>
+                    <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
                 </div>
             </div>
             <p class="text-gray-600 mb-3">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
@@ -321,16 +321,17 @@
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="md:col-span-2">
-                    <label for="aiBulkPrompt" class="block text-sm font-medium text-gray-700 mb-2">Prompt</label>
-                    <textarea id="aiBulkPrompt" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Example: Generate common food choices for lunch"></textarea>
+                    <label for="aiBulkTopic" class="block text-sm font-medium text-gray-700 mb-1">What is this board about?</label>
+                    <p class="text-xs text-gray-500 mb-2">e.g. School, At the Beach, Feelings, Favorite Songs, Morning Routine</p>
+                    <input type="text" id="aiBulkTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe the topic or theme of this board">
                 </div>
                 <div>
-                    <label for="aiBulkTotalOptions" class="block text-sm font-medium text-gray-700 mb-2">Total Options</label>
-                    <input type="number" id="aiBulkTotalOptions" min="1" max="84" value="24" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <label for="aiBulkExamples" class="block text-sm font-medium text-gray-700 mb-2">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="aiBulkExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play, go">
                 </div>
                 <div>
-                    <label for="aiBulkOptionsPerRow" class="block text-sm font-medium text-gray-700 mb-2">Options Per Row</label>
-                    <input type="number" id="aiBulkOptionsPerRow" min="1" max="12" value="12" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <label for="aiBulkExclusions" class="block text-sm font-medium text-gray-700 mb-2">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="aiBulkExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. more, yes, no, all done">
                 </div>
                 <div>
                     <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
@@ -380,11 +381,12 @@
     <div id="notification" class="notification"></div>
 
     <div id="translateBoardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5300;">
-        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Translate Board Labels</h3>
+                <h3 class="text-lg font-bold text-gray-900">Translate Board</h3>
                 <button id="closeTranslateModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
             </div>
+            <p class="text-sm text-gray-600 mb-4">Translates all button labels, speech text, plural and past tense values, and the AI prompt into the selected language. The board will be saved automatically.</p>
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-2">Target Language</label>
                 <select id="translateTargetLanguage" class="w-full px-3 py-2 border border-gray-300 rounded-md">
@@ -401,8 +403,7 @@
                     <option value="ko">Korean</option>
                 </select>
             </div>
-            <div id="translateResultsContainer" class="bg-gray-50 p-4 rounded-md max-h-[400px] overflow-y-auto hidden">
-                <h4 class="text-sm font-semibold mb-3">Translations:</h4>
+            <div id="translateResultsContainer" class="bg-gray-50 p-4 rounded-md hidden">
                 <div id="translateResults"></div>
             </div>
             <div id="translateLoadingSpinner" class="text-center py-4 hidden">
@@ -410,8 +411,8 @@
             </div>
             <div class="flex justify-end gap-2 mt-4">
                 <button id="cancelTranslateModal" class="px-4 py-2 bg-gray-300 rounded-md hover:bg-gray-400">Close</button>
-                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate Current Board</button>
-                <button id="performTranslateAllAiBoardsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700" disabled>Translate All AI Boards</button>
+                <button id="performTranslationAllBtn" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700" disabled>Translate &amp; Save All Boards</button>
+                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate &amp; Save Board</button>
             </div>
         </div>
     </div>
@@ -468,17 +469,17 @@
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
             document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
-            document.getElementById('translateAllAiBoardsBtn').addEventListener('click', openTranslateModal);
             document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
-            document.getElementById('performTranslateAllAiBoardsBtn').addEventListener('click', performAllAiBoardsTranslation);
-            document.getElementById('setAsHomeBoard').addEventListener('change', refreshHomeBoardAssignmentUI);
-            document.getElementById('boardLabel').addEventListener('input', refreshHomeBoardAssignmentUI);
+            document.getElementById('performTranslationAllBtn').addEventListener('click', performAllBoardsTranslation);
+            document.getElementById('setAsHomeBoardBtn').addEventListener('click', openSetAsHomeBoardModal);
+            document.getElementById('setAsHomeBoardCancel').addEventListener('click', closeSetAsHomeBoardModal);
+            document.getElementById('setAsHomeBoardConfirm').addEventListener('click', confirmSetAsHomeBoard);
             document.getElementById('translateTargetLanguage').addEventListener('change', () => {
                 const hasLocale = !!document.getElementById('translateTargetLanguage').value;
                 document.getElementById('performTranslationBtn').disabled = !hasLocale;
-                document.getElementById('performTranslateAllAiBoardsBtn').disabled = !hasLocale;
+                document.getElementById('performTranslationAllBtn').disabled = !hasLocale;
             });
             document.getElementById('aiBulkBuildBtn').addEventListener('click', openAIBulkBuilderModal);
             document.getElementById('setAllAfterSelectionBtn').addEventListener('click', openSetAllAfterSelectionModal);
@@ -683,11 +684,9 @@
         function clearBoardForm() {
             currentBoardData = null;
             document.getElementById('boardLabel').value = '';
-            document.getElementById('setAsHomeBoard').checked = false;
             document.getElementById('buttonGrid').innerHTML = '';
             document.getElementById('readOnlyHint').classList.add('hidden');
             document.getElementById('gridReadOnlyOverlay').classList.add('hidden');
-            refreshHomeBoardAssignmentUI();
         }
 
         function createNewBoardDraft() {
@@ -706,42 +705,51 @@
             return String(homeBoard?.label || homeBoardId).trim();
         }
 
-        function refreshHomeBoardAssignmentUI() {
-            const currentStatusEl = document.getElementById('homeBoardCurrentStatus');
-            const changeStatusEl = document.getElementById('homeBoardChangeStatus');
-            const setAsHomeEl = document.getElementById('setAsHomeBoard');
-            if (!currentStatusEl || !changeStatusEl || !setAsHomeEl) return;
-
-            const currentHomeId = String(boardSettings?.home_board_id || '').trim();
+        function openSetAsHomeBoardModal() {
+            if (!currentBoardData?.id) { showNotification('Save this board first before setting it as Home', 'error'); return; }
+            const boardLabel = String(document.getElementById('boardLabel')?.value || currentBoardData.label || 'this board').trim();
             const currentHomeLabel = getCurrentHomeBoardLabel();
-            const selectedBoardId = String(currentBoardData?.id || '').trim();
-            const selectedBoardLabel = String(document.getElementById('boardLabel')?.value || currentBoardData?.label || 'this board').trim() || 'this board';
+            const isAlreadyHome = currentBoardData.id === String(boardSettings?.home_board_id || '').trim();
+            if (isAlreadyHome) { showNotification(`"${boardLabel}" is already the Home board`, 'info'); return; }
+            const msg = currentHomeLabel
+                ? `Replace "${currentHomeLabel}" with "${boardLabel}" as the Home board?`
+                : `Set "${boardLabel}" as the Home board?`;
+            document.getElementById('setAsHomeBoardMsg').textContent = msg;
+            document.getElementById('setAsHomeBoardModal').classList.remove('hidden');
+        }
 
-            currentStatusEl.textContent = currentHomeLabel
-                ? `Current Home Board: ${currentHomeLabel}`
-                : 'Current Home Board: none selected';
+        function closeSetAsHomeBoardModal() {
+            document.getElementById('setAsHomeBoardModal').classList.add('hidden');
+        }
 
-            const isCurrentlyHome = !!selectedBoardId && selectedBoardId === currentHomeId;
-            if (setAsHomeEl.checked) {
-                if (isCurrentlyHome) {
-                    changeStatusEl.textContent = 'This board is already set as Home.';
-                } else if (currentHomeLabel) {
-                    changeStatusEl.textContent = `Saving will replace "${currentHomeLabel}" with "${selectedBoardLabel}" as Home.`;
-                } else {
-                    changeStatusEl.textContent = `Saving will set "${selectedBoardLabel}" as the Home board.`;
-                }
-                changeStatusEl.classList.remove('hidden');
-            } else {
-                changeStatusEl.classList.add('hidden');
-                changeStatusEl.textContent = '';
+        async function confirmSetAsHomeBoard() {
+            closeSetAsHomeBoardModal();
+            if (!currentBoardData?.id) return;
+            try {
+                const response = await fetch(`/api/tap-interface/boards/${encodeURIComponent(currentBoardData.id)}`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        label: document.getElementById('boardLabel').value.trim() || currentBoardData.label,
+                        set_as_home: true,
+                        board_type: currentBoardData.board_type || 'static',
+                        buttons: currentBoardData.buttons || [],
+                        dynamic_rows: currentBoardData.dynamic_rows !== undefined ? currentBoardData.dynamic_rows : null,
+                        is_customized: true,
+                    }),
+                });
+                if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${response.status}`); }
+                const data = await response.json();
+                if (data.board_settings) boardSettings = data.board_settings;
+                showNotification(`"${currentBoardData.label || 'Board'}" is now the Home board`, 'success');
+            } catch (err) {
+                showNotification('Failed to set Home board: ' + err.message, 'error');
             }
         }
 
         function bindBoardToForm() {
             if (!currentBoardData) return;
             document.getElementById('boardLabel').value = currentBoardData.label || '';
-            document.getElementById('setAsHomeBoard').checked = (currentBoardData.id && currentBoardData.id === boardSettings.home_board_id);
-            refreshHomeBoardAssignmentUI();
         }
 
         function updateBoardModeUI() {
@@ -755,11 +763,10 @@
             document.getElementById('gridReadOnlyOverlay').classList.toggle('hidden', !isReadOnly);
             document.getElementById('saveBoardBtn').disabled = !!isReadOnly;
             document.getElementById('deleteBoardBtn').disabled = !!isReadOnly;
-            ['boardLabel', 'setAsHomeBoard'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.disabled = !!isReadOnly;
-            });
-            refreshHomeBoardAssignmentUI();
+            const boardLabelEl = document.getElementById('boardLabel');
+            if (boardLabelEl) boardLabelEl.disabled = !!isReadOnly;
+            const setAsHomeBoardBtn = document.getElementById('setAsHomeBoardBtn');
+            if (setAsHomeBoardBtn) setAsHomeBoardBtn.disabled = !!isReadOnly;
         }
 
         function findButtonAtPosition(row, col) {
@@ -1267,6 +1274,10 @@
             document.getElementById('aiBulkPreviewList').textContent = 'No preview generated yet.';
             document.getElementById('aiBulkPreviewMeta').textContent = '';
             document.getElementById('aiBulkApplyBtn').disabled = true;
+            // Pre-populate from the board's existing topic and optional fields
+            document.getElementById('aiBulkTopic').value = currentBoardData.prompt_topic || '';
+            document.getElementById('aiBulkExamples').value = currentBoardData.prompt_examples || '';
+            document.getElementById('aiBulkExclusions').value = currentBoardData.prompt_exclusions || '';
             populateAIBulkTargetBoardDropdown();
             handleAIBulkAfterSelectionChange();
             document.getElementById('aiBulkBuilderModal').classList.remove('hidden');
@@ -1353,19 +1364,52 @@
                     return;
                 }
                 seen.add(key);
-                normalized.push(text);
+                const pluralVal = typeof item === 'object' ? (String(item?.plural || '').trim() || null) : null;
+                const pastVal = typeof item === 'object' ? (String(item?.past_tense || item?.past || '').trim() || null) : null;
+                normalized.push({
+                    label: text,
+                    plural: (pluralVal && pluralVal.toLowerCase() !== key) ? pluralVal : null,
+                    past_tense: (pastVal && pastVal.toLowerCase() !== key) ? pastVal : null,
+                });
             });
-            
+
             console.log(`Normalized ${source.length} raw items → ${normalized.length} unique options (max: ${maxCount})`);
             return normalized.slice(0, maxCount);
         }
 
+        async function enrichOptionsWithVariants(options) {
+            const labels = options.map(o => o.label).filter(Boolean);
+            if (!labels.length) return;
+            try {
+                const [pluralRes, pastRes] = await Promise.all([
+                    fetch('/api/tap-interface/word-variants', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ words: labels, mode: 'plural' }) }),
+                    fetch('/api/tap-interface/word-variants', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ words: labels, mode: 'past' }) }),
+                ]);
+                const pluralMap = pluralRes.ok ? ((await pluralRes.json()).variants || {}) : {};
+                const pastMap = pastRes.ok ? ((await pastRes.json()).variants || {}) : {};
+                console.log('[VARIANTS] pluralMap:', pluralMap, '| pastMap:', pastMap);
+                for (const opt of options) {
+                    const lbl = opt.label;
+                    const lblLower = lbl.toLowerCase();
+                    const plu = pluralMap[lbl] || pluralMap[lblLower];
+                    const pas = pastMap[lbl] || pastMap[lblLower];
+                    if (plu && plu.toLowerCase() !== lblLower) opt.plural = plu;
+                    if (pas && pas.toLowerCase() !== lblLower) opt.past_tense = pas;
+                }
+            } catch (e) {
+                console.warn('[VARIANTS] enrichment failed:', e);
+            }
+        }
+
         async function previewAIBulkOptions() {
-            const prompt = document.getElementById('aiBulkPrompt').value.trim();
-            const totalOptions = Math.min(84, Math.max(1, Number(document.getElementById('aiBulkTotalOptions').value) || 0));
-            const perRow = Math.min(12, Math.max(1, Number(document.getElementById('aiBulkOptionsPerRow').value) || 0));
-            if (!prompt) { showNotification('Enter a prompt first', 'error'); return; }
-            if (!totalOptions || !perRow) { showNotification('Enter valid option counts', 'error'); return; }
+            const topic = document.getElementById('aiBulkTopic').value.trim();
+            if (!topic) { showNotification('Enter a topic first', 'error'); return; }
+            const examples = document.getElementById('aiBulkExamples').value.trim();
+            const exclusions = document.getElementById('aiBulkExclusions').value.trim();
+            const prompt = `Generate AAC word and phrase options for a board about: ${topic}. Include common words, actions, objects, and short phrases that are relevant to this topic and useful for AAC communication. Options should be short (1-3 words).`;
+            const staticRows = getStaticRowsCount();
+            const perRow = GRID_COLS;
+            const totalOptions = Math.min(84, Math.max(1, staticRows * perRow));
 
             const previewList = document.getElementById('aiBulkPreviewList');
             const previewMeta = document.getElementById('aiBulkPreviewMeta');
@@ -1377,7 +1421,10 @@
             applyBtn.disabled = true;
 
             try {
-                const enhancedPrompt = `CRITICAL: Generate EXACTLY ${totalOptions} UNIQUE board button labels for AAC communication: ${prompt}\n\nREQUIREMENTS:\n1. Generate at least ${totalOptions} distinct, practical, usable options (NOT fewer)\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with an "option" key\n5. Each object MUST have at least an "option" key with the label text\n\nBE VERY EXPLICIT: If asked for ${totalOptions} options, return ${totalOptions} different options. Do not skimp on the count.\nReturn ONLY the JSON array - nothing else.`;
+                let enhancedPrompt = `CRITICAL: Generate EXACTLY ${totalOptions} UNIQUE board button labels for AAC communication: ${prompt}\n`;
+                if (examples) enhancedPrompt += `Examples of the type of options to generate: ${examples}\n`;
+                if (exclusions) enhancedPrompt += `Do NOT include any of these: ${exclusions}\n`;
+                enhancedPrompt += `\nREQUIREMENTS:\n1. Generate at least ${totalOptions} distinct, practical, usable options (NOT fewer)\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with an "option" key\n5. Each object MUST have at least an "option" key with the label text\n\nBE VERY EXPLICIT: If asked for ${totalOptions} options, return ${totalOptions} different options. Do not skimp on the count.\nReturn ONLY the JSON array - nothing else.`;
                 const response = await fetch('/llm', {
                     method: 'POST',
                     headers: getAuthHeaders(),
@@ -1396,8 +1443,10 @@
                     showNotification('No preview options returned', 'error');
                     return;
                 }
-                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map(opt => `<li>${escapeHtml(opt)}</li>`).join('')}</ol>`;
-                previewMeta.textContent = `${aiBulkPreviewOptions.length} option(s), ${perRow} per row`;
+                // Enrich with plural/past_tense during preview so they're ready on apply
+                await enrichOptionsWithVariants(aiBulkPreviewOptions);
+                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map(opt => `<li>${escapeHtml(opt.label)}</li>`).join('')}</ol>`;
+                previewMeta.textContent = `${aiBulkPreviewOptions.length} option(s) across ${staticRows} row(s)`;
                 applyBtn.disabled = false;
             } catch (error) {
                 console.error(error);
@@ -1435,7 +1484,7 @@
             return -1;
         }
 
-        function buildGeneratedButtonPayload(label, row, col, config) {
+        function buildGeneratedButtonPayload(label, row, col, config, plural = null, past_tense = null) {
             const actionType = config.afterSelection === 'navigate' ? 'navigate' : 'announce';
             return {
                 id: `btn_${row}_${col}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -1443,6 +1492,8 @@
                 row,
                 col,
                 speech_text: label,
+                plural: plural || null,
+                past_tense: past_tense || null,
                 after_selection: config.afterSelection,
                 action_type: actionType,
                 target_board_id: config.afterSelection === 'navigate' ? config.targetBoardId : null,
@@ -1460,7 +1511,7 @@
             if (!currentBoardData || isBoardReadOnly(currentBoardData)) return;
             if (!aiBulkPreviewOptions.length) { showNotification('Preview options first', 'error'); return; }
 
-            const perRow = Math.min(12, Math.max(1, Number(document.getElementById('aiBulkOptionsPerRow').value) || 1));
+            const perRow = GRID_COLS;
             const afterSelection = document.getElementById('aiBulkAfterSelection').value;
             const targetBoardId = document.getElementById('aiBulkTargetBoard').value.trim();
             const backgroundColor = document.getElementById('aiBulkBgColor').value.trim() || '#FFFFFF';
@@ -1512,11 +1563,21 @@
             const bulkConfig = { afterSelection, targetBoardId, backgroundColor };
             for (let i = 0; i < applyCount; i++) {
                 const slot = slots[i];
-                const label = aiBulkPreviewOptions[i];
-                workingButtons.push(buildGeneratedButtonPayload(label, slot.row, slot.col, bulkConfig));
+                const opt = aiBulkPreviewOptions[i];
+                workingButtons.push(buildGeneratedButtonPayload(opt.label, slot.row, slot.col, bulkConfig, opt.plural, opt.past_tense));
             }
 
             currentBoardData.buttons = workingButtons;
+
+            // Save topic, generated prompt, examples, and exclusions to the board
+            const appliedTopic = document.getElementById('aiBulkTopic').value.trim();
+            currentBoardData.prompt_topic = appliedTopic || null;
+            currentBoardData.llm_prompt = appliedTopic
+                ? `Generate AAC word and phrase options for a board about: ${appliedTopic}. Include common words, actions, objects, and short phrases that are relevant to this topic and useful for AAC communication. Options should be short (1-3 words).`
+                : null;
+            currentBoardData.prompt_examples = document.getElementById('aiBulkExamples').value.trim() || null;
+            currentBoardData.prompt_exclusions = document.getElementById('aiBulkExclusions').value.trim() || null;
+
             renderButtonGrid();
             closeAIBulkBuilderModal();
             if (applyCount < aiBulkPreviewOptions.length) {
@@ -1552,7 +1613,7 @@
                 default_columns: 12,
                 max_rows: 7,
                 buttons: buttons,
-                set_as_home: !!document.getElementById('setAsHomeBoard').checked,
+                set_as_home: false,
                 created_during_migration: (currentBoardData.created_during_migration && buttons.length === 0) ? true : false,
                 dynamic_rows: boardType === 'static' ? (currentBoardData.dynamic_rows !== undefined ? currentBoardData.dynamic_rows : null) : null,
                 is_customized: true,
@@ -1588,6 +1649,7 @@
             if (!currentBoardData) { showNotification('Select a board first', 'error'); return; }
             document.getElementById('translateTargetLanguage').value = '';
             document.getElementById('performTranslationBtn').disabled = true;
+            document.getElementById('performTranslationAllBtn').disabled = true;
             document.getElementById('translateResultsContainer').classList.add('hidden');
             document.getElementById('translateLoadingSpinner').classList.add('hidden');
             document.getElementById('translateResults').innerHTML = '';
@@ -1620,231 +1682,210 @@
             const targetLanguage = getBoardTranslateTargetLocale();
             if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
             if (!currentBoardData) { showNotification('No board selected', 'error'); return; }
-            
-            document.getElementById('performTranslationBtn').disabled = true;
+
+            const btn = document.getElementById('performTranslationBtn');
+            btn.disabled = true;
             document.getElementById('translateLoadingSpinner').classList.remove('hidden');
             document.getElementById('translateResultsContainer').classList.add('hidden');
-            
+
             try {
-                // Collect all text that needs translation
+                // Deduplicated ordered list of texts to translate
                 const textsToTranslate = [];
-                const textMap = {}; // Map original text to metadata
-                
-                // Add board label
-                if (currentBoardData.label) {
-                    textsToTranslate.push(currentBoardData.label);
-                    textMap[currentBoardData.label] = { type: 'board_label', boardId: currentBoardData.id };
-                }
-                
-                // Add button labels and speech text
-                for (let row = 0; row < GRID_ROWS; row++) {
-                    for (let col = 0; col < GRID_COLS; col++) {
-                        const key = `${row},${col}`;
-                        const button = findButtonAtPosition(row, col);
-                        if (button) {
-                            if (button.label) {
-                                const text = button.label;
-                                if (!textsToTranslate.includes(text)) textsToTranslate.push(text);
-                                if (!textMap[text]) textMap[text] = [];
-                                if (Array.isArray(textMap[text])) textMap[text].push({ type: 'button_text', position: key });
-                            }
-                            if (button.speech_text) {
-                                const text = button.speech_text;
-                                if (!textsToTranslate.includes(text)) textsToTranslate.push(text);
-                                if (!textMap[text]) textMap[text] = [];
-                                if (Array.isArray(textMap[text])) textMap[text].push({ type: 'speech_text', position: key });
-                            }
-                        }
-                    }
-                }
-                
+                const textIndex = {}; // text → index in textsToTranslate
+                const addText = (t) => {
+                    const s = String(t || '').trim();
+                    if (!s || s in textIndex) return;
+                    textIndex[s] = textsToTranslate.length;
+                    textsToTranslate.push(s);
+                };
+
+                // Board-level AI prompt
+                if (currentBoardData.llm_prompt) addText(currentBoardData.llm_prompt);
+
+                // Button fields: label, speech_text, plural, past_tense
+                const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+                buttons.forEach(btn => {
+                    addText(btn.label);
+                    if (btn.speech_text && btn.speech_text !== btn.label) addText(btn.speech_text);
+                    if (btn.plural) addText(btn.plural);
+                    if (btn.past_tense) addText(btn.past_tense);
+                });
+
                 if (textsToTranslate.length === 0) {
                     showNotification('No text to translate', 'error');
                     document.getElementById('translateLoadingSpinner').classList.add('hidden');
-                    document.getElementById('performTranslationBtn').disabled = false;
+                    btn.disabled = false;
                     return;
                 }
-                
-                // Call translation API
+
                 const response = await fetch('/api/translate-lines', {
                     method: 'POST',
                     headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        lines: textsToTranslate,
-                        source_locale: null,
-                        target_locale: targetLanguage
-                    })
+                    body: JSON.stringify({ lines: textsToTranslate, source_locale: null, target_locale: targetLanguage })
                 });
-                
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const payload = await response.json();
-                const translations = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
-                
-                // Display results
-                displayTranslationResults(translations, textMap, targetLanguage);
-                document.getElementById('translateLoadingSpinner').classList.add('hidden');
+                const translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+
+                // Build lookup: original → translated
+                const tr = (original) => {
+                    const s = String(original || '').trim();
+                    if (!s || !(s in textIndex)) return original;
+                    return translated[textIndex[s]] || original;
+                };
+
+                // Apply to board
+                if (currentBoardData.llm_prompt) {
+                    currentBoardData.llm_prompt = tr(currentBoardData.llm_prompt);
+                }
+                let labelCount = 0;
+                buttons.forEach(b => {
+                    if (b.label) { b.label = tr(b.label); labelCount++; }
+                    if (b.speech_text) b.speech_text = tr(b.speech_text);
+                    if (b.plural) b.plural = tr(b.plural);
+                    if (b.past_tense) b.past_tense = tr(b.past_tense);
+                });
+
+                // Save the board
+                await saveBoard();
+
+                document.getElementById('translateResults').innerHTML = `
+                    <div class="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm">
+                        <p class="font-semibold text-green-900">Translation complete</p>
+                        <p class="text-gray-700 mt-1">${labelCount} button label${labelCount !== 1 ? 's' : ''} translated to <span class="font-medium">${escapeHtml(targetLanguage)}</span>. Board saved.</p>
+                    </div>`;
                 document.getElementById('translateResultsContainer').classList.remove('hidden');
+                showNotification(`Board translated and saved (${labelCount} buttons)`, 'success');
+                renderButtonGrid();
             } catch (error) {
                 console.error(error);
                 showNotification('Translation failed: ' + error.message, 'error');
-                document.getElementById('translateLoadingSpinner').classList.add('hidden');
             } finally {
-                document.getElementById('performTranslationBtn').disabled = false;
+                document.getElementById('translateLoadingSpinner').classList.add('hidden');
+                btn.disabled = false;
             }
         }
 
-        async function performAllAiBoardsTranslation() {
+        async function performAllBoardsTranslation() {
             const targetLanguage = getBoardTranslateTargetLocale();
             if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
+            if (!Array.isArray(allBoards) || allBoards.length === 0) { showNotification('No boards loaded', 'error'); return; }
 
-            const runAllBtn = document.getElementById('performTranslateAllAiBoardsBtn');
-            const runCurrentBtn = document.getElementById('performTranslationBtn');
-            const loadingSpinner = document.getElementById('translateLoadingSpinner');
-            const resultsContainer = document.getElementById('translateResultsContainer');
-            const resultsEl = document.getElementById('translateResults');
+            const allBtn = document.getElementById('performTranslationAllBtn');
+            const singleBtn = document.getElementById('performTranslationBtn');
+            allBtn.disabled = true;
+            singleBtn.disabled = true;
+            document.getElementById('translateLoadingSpinner').classList.remove('hidden');
+            document.getElementById('translateResultsContainer').classList.add('hidden');
 
-            runAllBtn.disabled = true;
-            runCurrentBtn.disabled = true;
-            loadingSpinner.classList.remove('hidden');
-            resultsContainer.classList.add('hidden');
+            const resultsLog = [];
+            let successCount = 0;
 
             try {
-                const response = await fetch('/api/admin/translate-pages', {
-                    method: 'POST',
-                    headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        source_locale: null,
-                        target_locale: targetLanguage,
-                        scope: 'tap_boards',
-                        page_name: null,
-                        include_display_name: false,
-                        include_button_text: false,
-                        include_speech_phrase: false,
-                        include_llm_query: true,
-                    }),
-                });
+                for (const boardMeta of allBoards) {
+                    // allBoards already contains full board data including buttons from the list endpoint
+                    const boardId = boardMeta.id;
+                    const boardLabel = boardMeta.label || boardId;
 
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(formatApiErrorDetail(payload, response.status));
+                    const textsToTranslate = [];
+                    const textIndex = {};
+                    const addText = (t) => {
+                        const s = String(t || '').trim();
+                        if (!s || s in textIndex) return;
+                        textIndex[s] = textsToTranslate.length;
+                        textsToTranslate.push(s);
+                    };
+
+                    if (boardMeta.llm_prompt) addText(boardMeta.llm_prompt);
+                    const buttons = Array.isArray(boardMeta.buttons) ? boardMeta.buttons.map(b => ({ ...b })) : [];
+                    buttons.forEach(b => {
+                        addText(b.label);
+                        if (b.speech_text && b.speech_text !== b.label) addText(b.speech_text);
+                        if (b.plural) addText(b.plural);
+                        if (b.past_tense) addText(b.past_tense);
+                    });
+
+                    if (textsToTranslate.length === 0) {
+                        resultsLog.push({ boardId, label: boardLabel, skipped: true });
+                        continue;
+                    }
+
+                    let translated;
+                    try {
+                        const resp = await fetch('/api/translate-lines', {
+                            method: 'POST',
+                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lines: textsToTranslate, source_locale: null, target_locale: targetLanguage })
+                        });
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        const payload = await resp.json();
+                        translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+                    } catch (e) {
+                        resultsLog.push({ boardId, label: boardLabel, error: `Translate failed: ${e.message}` });
+                        continue;
+                    }
+
+                    const tr = (original) => {
+                        const s = String(original || '').trim();
+                        if (!s || !(s in textIndex)) return original;
+                        return translated[textIndex[s]] || original;
+                    };
+
+                    const translatedLlmPrompt = boardMeta.llm_prompt ? tr(boardMeta.llm_prompt) : boardMeta.llm_prompt;
+                    let labelCount = 0;
+                    buttons.forEach(b => {
+                        if (b.label) { b.label = tr(b.label); labelCount++; }
+                        if (b.speech_text) b.speech_text = tr(b.speech_text);
+                        if (b.plural) b.plural = tr(b.plural);
+                        if (b.past_tense) b.past_tense = tr(b.past_tense);
+                    });
+
+                    try {
+                        const saveResp = await fetch(`/api/tap-interface/boards/${boardId}`, {
+                            method: 'PUT',
+                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ label: boardMeta.label, buttons, llm_prompt: translatedLlmPrompt })
+                        });
+                        if (!saveResp.ok) throw new Error(`HTTP ${saveResp.status}`);
+                        resultsLog.push({ boardId, label: boardLabel, count: labelCount });
+                        successCount++;
+                    } catch (e) {
+                        resultsLog.push({ boardId, label: boardLabel, error: `Save failed: ${e.message}` });
+                    }
                 }
 
-                const changed = Number(payload?.tap_boards_prompts_changed || payload?.strings_changed || 0);
-                const unique = Number(payload?.unique_strings || 0);
-                resultsEl.innerHTML = `
-                    <div class="mb-3 p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded">
-                        <p class="font-semibold text-indigo-900 text-sm">Tap AI Boards Translation Complete</p>
-                        <p class="text-sm text-gray-700 mt-1">Target locale: <span class="font-medium">${escapeHtml(targetLanguage)}</span></p>
-                        <p class="text-sm text-gray-700">Unique prompts found: <span class="font-medium">${unique}</span></p>
-                        <p class="text-sm text-gray-700">Prompts updated: <span class="font-medium">${changed}</span></p>
-                    </div>
-                `;
-                resultsContainer.classList.remove('hidden');
-                showNotification(`Translated ${changed} AI board prompt(s)`, 'success');
+                let html = `<div class="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm mb-3">
+                    <p class="font-semibold text-green-900">${successCount} of ${allBoards.length} boards translated and saved to <span>${escapeHtml(targetLanguage)}</span></p>
+                </div>`;
+                resultsLog.forEach(r => {
+                    if (r.error) {
+                        html += `<div class="text-xs text-red-600 mb-1"><b>${escapeHtml(r.label)}:</b> ${escapeHtml(r.error)}</div>`;
+                    } else if (r.skipped) {
+                        html += `<div class="text-xs text-gray-500 mb-1"><b>${escapeHtml(r.label)}:</b> skipped (no text)</div>`;
+                    } else {
+                        html += `<div class="text-xs text-green-700 mb-1"><b>${escapeHtml(r.label)}:</b> ${r.count} button${r.count !== 1 ? 's' : ''} translated</div>`;
+                    }
+                });
+                document.getElementById('translateResults').innerHTML = html;
+                document.getElementById('translateResultsContainer').classList.remove('hidden');
+                showNotification(`${successCount} board(s) translated and saved`, 'success');
+
+                // Reload boards so current board reflects any translations
                 await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) { currentBoardData = refreshed; renderButtonGrid(); }
+                }
             } catch (error) {
                 console.error(error);
-                showNotification('Translate All AI Boards failed: ' + error.message, 'error');
+                showNotification('Translation error: ' + error.message, 'error');
             } finally {
-                loadingSpinner.classList.add('hidden');
-                const hasLocale = !!document.getElementById('translateTargetLanguage').value;
-                runCurrentBtn.disabled = !hasLocale;
-                runAllBtn.disabled = !hasLocale;
+                document.getElementById('translateLoadingSpinner').classList.add('hidden');
+                allBtn.disabled = false;
+                singleBtn.disabled = false;
             }
         }
 
-        function formatApiErrorDetail(payload, status) {
-            const detail = payload?.detail;
-            if (Array.isArray(detail)) {
-                const first = detail[0] || {};
-                const loc = Array.isArray(first.loc) ? first.loc.join('.') : 'request';
-                const msg = first.msg || 'Validation error';
-                return `${msg} (${loc})`;
-            }
-            if (detail && typeof detail === 'object') {
-                try {
-                    return JSON.stringify(detail);
-                } catch (_) {
-                    return `HTTP ${status}`;
-                }
-            }
-            if (typeof detail === 'string' && detail.trim()) {
-                return detail;
-            }
-            return `HTTP ${status}`;
-        }
-
-        function displayTranslationResults(translations, textMap, targetLanguage) {
-            const container = document.getElementById('translateResults');
-            let html = '';
-            
-            // Group translations by type
-            const boardLabelTrans = [];
-            const buttonTexts = {};
-            const speechTexts = {};
-            
-            const originalTexts = Object.keys(textMap);
-            translations.forEach((translated, index) => {
-                const originalText = originalTexts[index];
-                const items = originalText ? textMap[originalText] : null;
-                if (Array.isArray(items)) {
-                    items.forEach(item => {
-                        if (item.type === 'board_label') {
-                            boardLabelTrans.push({ original: originalText, translated });
-                        } else if (item.type === 'button_text') {
-                            if (!buttonTexts[item.position]) buttonTexts[item.position] = [];
-                            buttonTexts[item.position].push({ original: originalText, translated });
-                        } else if (item.type === 'speech_text') {
-                            if (!speechTexts[item.position]) speechTexts[item.position] = [];
-                            speechTexts[item.position].push({ original: originalText, translated });
-                        }
-                    });
-                } else if (items && items.type === 'board_label') {
-                    boardLabelTrans.push({ original: originalText, translated });
-                }
-            });
-            
-            // Render board label
-            if (boardLabelTrans.length > 0) {
-                html += `<div class="mb-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded">
-                    <p class="font-semibold text-blue-900 text-sm mb-2">Board Label:</p>
-                    ${boardLabelTrans.map(t => `<div class="text-sm">
-                        <span class="text-gray-600">EN:</span> ${t.original}<br>
-                        <span class="text-blue-600 font-semibold">${targetLanguage.toUpperCase()}:</span> ${t.translated}
-                    </div>`).join('')}
-                </div>`;
-            }
-            
-            // Render button translations
-            let buttonCount = 0;
-            for (const [position, texts] of Object.entries(buttonTexts)) {
-                if (texts.length > 0) {
-                    if (buttonCount === 0) html += `<div class="mb-4"><p class="font-semibold text-gray-800 text-sm mb-2">Button Labels:</p>`;
-                    buttonCount++;
-                    html += `<div class="text-sm mb-2 p-2 bg-gray-100 rounded">
-                        <span class="text-gray-600 font-medium">${position}:</span><br>
-                        ${texts.map(t => `<span class="text-gray-600">EN:</span> ${t.original}<br><span class="text-green-600 font-semibold">${targetLanguage.toUpperCase()}:</span> ${t.translated}`).join('<br>')}
-                    </div>`;
-                }
-            }
-            if (buttonCount > 0) html += `</div>`;
-            
-            // Render speech text translations
-            let speechCount = 0;
-            for (const [position, texts] of Object.entries(speechTexts)) {
-                if (texts.length > 0) {
-                    if (speechCount === 0) html += `<div class="mb-4"><p class="font-semibold text-gray-800 text-sm mb-2">Speech Announcements:</p>`;
-                    speechCount++;
-                    html += `<div class="text-sm mb-2 p-2 bg-gray-100 rounded">
-                        <span class="text-gray-600 font-medium">${position}:</span><br>
-                        ${texts.map(t => `<span class="text-gray-600">EN:</span> ${t.original}<br><span class="text-purple-600 font-semibold">${targetLanguage.toUpperCase()}:</span> ${t.translated}`).join('<br>')}
-                    </div>`;
-                }
-            }
-            if (speechCount > 0) html += `</div>`;
-            
-            container.innerHTML = html;
-        }
         async function uploadButtonAudioFile(e) {
             const file = e.target.files[0];
             if (!file) return;

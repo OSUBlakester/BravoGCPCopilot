@@ -156,8 +156,8 @@
             resize: none;
             background-color: #f9f9f9;
             transition: border-color 0.3s ease;
-            min-height: 34px;
-            height: 34px;
+            min-height: 68px;
+            height: 68px;
         }
 
         .build-space-textarea:focus {
@@ -186,9 +186,9 @@
             padding: 0;
             position: relative;
             overflow: hidden;
-            height: 34px;
-            box-shadow: 
-                0 4px 8px -2px rgba(50, 50, 93, 0.15), 
+            height: 68px;
+            box-shadow:
+                0 4px 8px -2px rgba(50, 50, 93, 0.15),
                 0 2px 5px -2px rgba(0, 0, 0, 0.2);
         }
 
@@ -3974,6 +3974,10 @@
                 return;
             }
 
+            // Only translate menu navigation labels (category names shown in the nav bar).
+            // Board button content is managed via the Translate Board feature and stored
+            // pre-translated — including that here would send hundreds of texts per load
+            // for non-English users, causing timeouts.
             const sourceLines = [];
             const collect = (node) => {
                 if (!node || typeof node !== 'object') {
@@ -3983,13 +3987,6 @@
                 if (labelSource) {
                     sourceLines.push(labelSource);
                 }
-                if (Array.isArray(node.board_word_options)) {
-                    node.board_word_options.forEach((opt) => {
-                        if (opt && typeof opt === 'object' && opt.text) {
-                            sourceLines.push(opt.text);
-                        }
-                    });
-                }
                 if (Array.isArray(node.children)) {
                     node.children.forEach(collect);
                 }
@@ -3997,9 +3994,6 @@
 
             if (Array.isArray(config.buttons)) {
                 config.buttons.forEach(collect);
-            }
-            if (Array.isArray(config.boards)) {
-                config.boards.forEach(collect);
             }
 
             const lineMap = await translateTapLinesBatch(sourceLines, tapTargetLocale);
@@ -4011,15 +4005,6 @@
                 if (labelSource) {
                     node.localized_label = lineMap.get(labelSource) || labelSource;
                 }
-                if (Array.isArray(node.board_word_options)) {
-                    node.board_word_options.forEach((opt) => {
-                        if (!opt || typeof opt !== 'object' || !opt.text) {
-                            return;
-                        }
-                        const source = String(opt.text).trim();
-                        opt.localized_text = lineMap.get(source) || source;
-                    });
-                }
                 if (Array.isArray(node.children)) {
                     node.children.forEach(applyLocalized);
                 }
@@ -4027,9 +4012,6 @@
 
             if (Array.isArray(config.buttons)) {
                 config.buttons.forEach(applyLocalized);
-            }
-            if (Array.isArray(config.boards)) {
-                config.boards.forEach(applyLocalized);
             }
         }
 
@@ -6537,11 +6519,20 @@
                 return upperRowButtons;
             }
 
-            // For bravo-build boards (source:"custom"), the server already generated all buttons
-            // with a focused, context-aware prompt. Use those pre-generated dynamic buttons on
-            // initial load. On Something Else (exclusions present), call bravo-suggest which uses
-            // the same focused prompt as bravo-build rather than the generic category-words path.
-            const isBravoBuildBoard = targetBoardObj && targetBoardObj.source === 'custom';
+            const activeCategory = categoryContext || currentCategory;
+            const currentSpeech = buildSpace.value.trim();
+            const staticWords = upperRowButtons.map(btn => btn.text || btn.label || btn.speech_text).filter(Boolean);
+            // Include any board-level exclusions the user configured via the AI prompt settings
+            const boardExclusions = activeCategory?.prompt_exclusions
+                ? String(activeCategory.prompt_exclusions).split(',').map(s => s.trim()).filter(Boolean)
+                : [];
+            const excludedWords = getTapSpecialButtonExclusions([...staticWords, ...extraExclusions, ...boardExclusions]);
+
+            // For bravo-build boards (source:"custom") WITHOUT an explicit llm_prompt, use pre-generated
+            // dynamic buttons on initial load, or bravo-suggest on Something Else. Boards with an
+            // explicit llm_prompt skip this path and use category-words with the configured prompt.
+            const hasCustomPrompt = !!(activeCategory?.llm_prompt || activeCategory?.words_prompt);
+            const isBravoBuildBoard = targetBoardObj && targetBoardObj.source === 'custom' && !hasCustomPrompt;
             const preConfiguredDynamic = configuredButtons.filter(btn => btn && Number(btn.row) >= splitRowIndex);
             if (isBravoBuildBoard) {
                 if (preConfiguredDynamic.length > 0 && extraExclusions.length === 0) {
@@ -6558,7 +6549,7 @@
                             label: boardLabel,
                             context: boardContext,
                             count: totalDynamicButtons,
-                            exclude_options: extraExclusions,
+                            exclude_options: [...staticWords, ...extraExclusions],
                         }),
                     });
                     if (suggestRes.ok) {
@@ -6576,11 +6567,6 @@
                     console.warn('[BRAVO-SUGGEST] fetch failed, falling through to category-words:', e);
                 }
             }
-
-            const activeCategory = categoryContext || currentCategory;
-            const currentSpeech = buildSpace.value.trim();
-            const staticWords = upperRowButtons.map(btn => btn.text || btn.label || btn.speech_text).filter(Boolean);
-            const excludedWords = getTapSpecialButtonExclusions([...staticWords, ...extraExclusions]);
             let dynamicWords = [];
             try {
                 if (activeCategory && isConfiguredHomeCategory(activeCategory) && !(activeCategory.words_prompt || activeCategory.llm_prompt)) {

@@ -1849,6 +1849,11 @@ WORD_VARIANTS = {
     "hardware store":   {"past_tense": None, "plural": "hardware stores"},
     "claws":            {"past_tense": None, "plural": "claws"},
     "hardware":         {"past_tense": None, "plural": "hardware"},
+    # ── DEMONSTRATIVES / PRONOUNS ─────────────────────────────────────────────
+    "this":             {"past_tense": None,    "plural": "these"},
+    "that":             {"past_tense": None,    "plural": "those"},
+    "it":               {"past_tense": None,    "plural": "them"},
+    "its":              {"past_tense": None,    "plural": "their"},
     # ── TO BE / AUXILIARIES ───────────────────────────────────────────────────
     "am":               {"past_tense": "was",     "plural": None},
     "is":               {"past_tense": "was",     "plural": None},

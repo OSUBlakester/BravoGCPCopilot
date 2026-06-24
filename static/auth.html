@@ -3648,7 +3648,7 @@ registerForm.addEventListener('submit', async (e) => {
                                 </div>
                                 <div style="flex:1;">
                                     <label class="wizard-field-label">Dynamic Rows (Optional)</label>
-                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${Math.max(0, (wizardState.wordsRows || 3) - 1)}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}">
+                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}">
                                 </div>
                             </div>
                             <div style="margin-top:12px; font-size:0.825rem; color:#4b5563; line-height:1.4;">
@@ -3678,8 +3678,8 @@ registerForm.addEventListener('submit', async (e) => {
                         if (total > 7) total = 7;
                         wordsInput.value = total;
                         
-                        const maxDynamic = Math.max(0, total - 1);
-                        
+                        const maxDynamic = total;
+
                         let dynamic = parseInt(dynamicInput.value, 10) || 0;
                         if (dynamic < 0) dynamic = 0;
                         if (dynamic > maxDynamic) dynamic = maxDynamic;
