@@ -367,9 +367,7 @@ function getVoicesForLocale(locale) {
 function filterVoicesByStyle(voices, voiceStyle) {
     if (!Array.isArray(voices) || voices.length === 0) return [];
     let style = ['adult', 'child'].includes(voiceStyle) ? voiceStyle : 'adult';
-    if (voiceStyle === 'teen') {
-        style = 'child';
-    }
+    if (voiceStyle === 'teen') style = 'child';
 
     let filtered = [];
     if (style === 'child') {

@@ -540,10 +540,9 @@
             /* Grid columns will be set dynamically via JS */
             gap: 8px;
             width: 100%;
-            height: 100%;
             margin: 0;
             padding: 0;
-            overflow-y: auto; /* Allow scrolling if needed */
+            overflow-y: auto;
         }
 
         /* Section Headers */
@@ -766,7 +765,6 @@
             width: 100%;
             flex: 1;
             min-height: 0;
-            height: auto;
             margin: 0;
             padding: 9px;
             justify-content: center;
@@ -800,9 +798,8 @@
             position: relative;
             overflow: hidden;
             width: 100%;
-            aspect-ratio: 1 / 1;
+            height: 100%;
             min-height: 45px;
-            height: auto;
         }
 
         .option-button:hover {
@@ -5824,17 +5821,34 @@
             const llmStaticOptions = document.getElementById('llmStaticOptions');
             const freestyleOptions = document.getElementById('freestyleOptions');
             if (!llmStaticOptions || !freestyleOptions) return;
-            const containerWidth = llmStaticOptions.clientWidth;
-            if (containerWidth > 0) {
-                const padding = 9 * 2;   // 9px padding on each side
-                const gap = 12;           // gap between columns
-                const freestyleColumns = Number(freestyleOptions.dataset.boardLayoutCols || gridColumns) || gridColumns;
-                const cellWidth = (containerWidth - padding - gap * (freestyleColumns - 1)) / freestyleColumns;
-                const rowHeight = Math.max(45, Math.round(cellWidth));
-                llmStaticOptions.style.gridAutoRows = `${rowHeight}px`;
-                freestyleOptions.style.gridAutoRows = `${rowHeight}px`;
-                console.log(`Grid row height: ${rowHeight}px for ${freestyleColumns} columns`);
+            // Use freestyleOptions width — llmStaticOptions may be hidden (display:none) when there are no phrases
+            const containerWidth = freestyleOptions.clientWidth || freestyleOptions.parentElement?.clientWidth || 0;
+            if (containerWidth <= 0) return;
+
+            const padding = 9 * 2;  // 9px padding each side
+            const colGap = 12;
+            const rowGap = 12;
+            const freestyleColumns = Number(freestyleOptions.dataset.boardLayoutCols || gridColumns) || gridColumns;
+
+            // Width-based: square cells
+            const cellWidth = (containerWidth - padding - colGap * (freestyleColumns - 1)) / freestyleColumns;
+            let rowHeight = Math.round(cellWidth);
+
+            // Height-based: measure the parent (.words-section) which has the true flex-constrained height,
+            // not freestyleOptions itself which may expand to content size.
+            const wordsSection = freestyleOptions.parentElement;
+            const availableHeight = wordsSection ? wordsSection.clientHeight : 0;
+            const numButtons = freestyleOptions.children.length;
+            const numRows = numButtons > 0 ? Math.ceil(numButtons / freestyleColumns) : 0;
+            if (availableHeight > 0 && numRows > 0) {
+                const maxFromHeight = Math.floor((availableHeight - padding - rowGap * (numRows - 1)) / numRows);
+                rowHeight = Math.min(rowHeight, maxFromHeight);
             }
+
+            rowHeight = Math.max(45, rowHeight);
+            llmStaticOptions.style.gridAutoRows = `${rowHeight}px`;
+            freestyleOptions.style.gridAutoRows = `${rowHeight}px`;
+            console.log(`Grid row height: ${rowHeight}px (cols: ${freestyleColumns}, rows: ${numRows}, wordsH: ${availableHeight})`);
         }
 
         function logTapLlmDiagnostics(response, source, requestStartMs = null, promptLength = null, requestedCount = null) {
@@ -17205,7 +17219,8 @@ ${getTapLanguageDirective()}
                 }
 
                 freestyleOptions.appendChild(boardFragment);
-                requestAnimationFrame(updateGridRowHeight);
+                // Double-RAF: first frame commits the DOM, second frame reads the settled flex layout height
+                requestAnimationFrame(() => requestAnimationFrame(updateGridRowHeight));
                 // Reset variant mode each time a board is rendered
                 if (variantMode) {
                     variantMode = null;

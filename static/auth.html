@@ -3401,6 +3401,7 @@ registerForm.addEventListener('submit', async (e) => {
             freestyleOptions: 4,
             partnerLanguage: 'en-US',
             partnerVoice: '',
+            voiceStyle: 'adult',
             gridColumns: 6,
             scanMode: 'auto',
             waitForSwitch: false,
@@ -3474,6 +3475,7 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 4;
                     wizardState.partnerLanguage = s.defaultPartnerLanguage || 'en-US';
                     wizardState.partnerVoice = s.defaultPartnerVoice || s.selected_tts_voice_name || '';
+                    wizardState.voiceStyle = s.voice_style || 'adult';
                     wizardState.gridColumns = s.gridColumns !== undefined ? s.gridColumns : 6;
                     wizardState.scanMode = s.scanMode || 'auto';
                     wizardState.waitForSwitch = s.waitForSwitchToScan || false;
@@ -3842,8 +3844,19 @@ registerForm.addEventListener('submit', async (e) => {
                             <label class="wizard-field-label">Partner Language</label>
                             <select id="wizardPartnerLanguage" class="wizard-input">${langOpts7}</select>
                         </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Age/Style</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="child" ${wizardState.voiceStyle === 'child' ? 'checked' : ''}> 👧 Child
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="adult" ${wizardState.voiceStyle !== 'child' ? 'checked' : ''}> 🧑 Adult
+                                </label>
+                            </div>
+                        </div>
                         <div>
-                            <label class="wizard-field-label">Partner Voice</label>
+                            <label class="wizard-field-label">Voice</label>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
                                 <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
                                     <option value="">-- Select a Voice --</option>
@@ -3857,6 +3870,9 @@ registerForm.addEventListener('submit', async (e) => {
                     document.getElementById('wizardPartnerLanguage').addEventListener('change', function() {
                         wizardState.partnerLanguage = this.value;
                         wizardFillVoiceSelect();
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
                     });
                 }
 
@@ -3873,8 +3889,19 @@ registerForm.addEventListener('submit', async (e) => {
                             <label class="wizard-field-label">Partner Language</label>
                             <select id="wizardPartnerLanguage" class="wizard-input">${langOpts8}</select>
                         </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Age/Style</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="child" ${wizardState.voiceStyle === 'child' ? 'checked' : ''}> 👧 Child
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="adult" ${wizardState.voiceStyle !== 'child' ? 'checked' : ''}> 🧑 Adult
+                                </label>
+                            </div>
+                        </div>
                         <div>
-                            <label class="wizard-field-label">Partner Voice</label>
+                            <label class="wizard-field-label">Voice</label>
                             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
                                 <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
                                     <option value="">-- Select a Voice --</option>
@@ -3888,6 +3915,9 @@ registerForm.addEventListener('submit', async (e) => {
                     document.getElementById('wizardPartnerLanguage').addEventListener('change', function() {
                         wizardState.partnerLanguage = this.value;
                         wizardFillVoiceSelect();
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
                     });
                 } else {
                     titleEl.textContent = 'Scanning Configuration';
@@ -3950,16 +3980,32 @@ registerForm.addEventListener('submit', async (e) => {
             const voiceSelect = document.getElementById('wizardPartnerVoice');
             if (!voiceSelect) return;
             const langLower = wizardState.partnerLanguage.toLowerCase();
-            const filtered = wizardState.ttsVoices.filter(v =>
+            let voices = wizardState.ttsVoices.filter(v =>
                 (v.language_codes || []).some(c => c.toLowerCase() === langLower)
             );
+            // Apply child/adult filter — child = Azure curated voices, adult = Google voices
+            const style = wizardState.voiceStyle === 'child' ? 'child' : 'adult';
+            if (style === 'child') {
+                const childVoices = voices.filter(v => v.provider === 'azure');
+                if (childVoices.length > 0) voices = childVoices;
+            } else {
+                const adultVoices = voices.filter(v => v.provider === 'google');
+                if (adultVoices.length > 0) voices = adultVoices;
+            }
             voiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>';
-            filtered.forEach(v => {
+            voices.forEach(v => {
                 const opt = document.createElement('option');
                 opt.value = v.name;
                 opt.textContent = `${v.name} (${(v.ssml_gender || 'unknown').toLowerCase()})`;
                 voiceSelect.appendChild(opt);
             });
+            // Preserve currently-saved voice even if filtered out
+            if (wizardState.partnerVoice && !voices.some(v => v.name === wizardState.partnerVoice)) {
+                const opt = document.createElement('option');
+                opt.value = wizardState.partnerVoice;
+                opt.textContent = `${wizardState.partnerVoice} (currently selected)`;
+                voiceSelect.appendChild(opt);
+            }
             if (wizardState.partnerVoice) voiceSelect.value = wizardState.partnerVoice;
         }
 
@@ -4259,6 +4305,7 @@ registerForm.addEventListener('submit', async (e) => {
                     defaultPartnerLanguage: wizardState.partnerLanguage,
                     defaultPartnerVoice: wizardState.partnerVoice,
                     selected_tts_voice_name: wizardState.partnerVoice,
+                    voice_style: wizardState.voiceStyle,
                     gridColumns: wizardState.gridColumns,
                     tapWordsRows: wizardState.wordsRows,
                     tapPhrasesRows: wizardState.phrasesRows,

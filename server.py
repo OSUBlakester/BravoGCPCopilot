@@ -15,7 +15,7 @@ print("DEBUG: HOME =", os.environ.get("HOME")) # Also check HOME
 
 # Import environment configuration
 try:
-    from config import CONFIG, SERVICE_ACCOUNT_KEY_PATH, ALLOWED_ORIGINS, DEBUG, LOG_LEVEL, HEALTH_INFO, DOMAIN
+    from config import CONFIG, SERVICE_ACCOUNT_KEY_PATH, ALLOWED_ORIGINS, DEBUG, LOG_LEVEL, HEALTH_INFO, DOMAIN, AZURE_SPEECH_KEY, AZURE_SPEECH_REGION
     print("✅ Loaded configuration from config.py")
 except ImportError:
     # Fallback to environment variables when config.py is not available (e.g., in deployment)
@@ -7615,20 +7615,30 @@ async def play_audio(request: PlayAudioRequest, current_ids: Annotated[Dict[str,
             wpm_rate=rate_to_use,      # Pass the value from settings
             language_code=language_code_to_use,
         )
-        import base64
-        encoded_audio = base64.b64encode(audio_bytes).decode('utf-8')
-        
+        import base64, wave, io
         # Save audio to a unique file in the static directory
         filename = f"play_audio_{uuid.uuid4().hex}.wav"
         file_path = os.path.join(static_file_path, filename)
-        
-        # Write raw audio with WAV header
-        import wave
-        with wave.open(file_path, 'wb') as wav_file:
-            wav_file.setnchannels(1)  # Mono
-            wav_file.setsampwidth(2)   # 16-bit = 2 bytes
-            wav_file.setframerate(sample_rate)
-            wav_file.writeframes(audio_bytes)
+
+        # Both Google LINEAR16 and Azure riff-24khz return WAV bytes with RIFF header.
+        # Write directly when already WAV; otherwise wrap raw PCM with headers.
+        is_wav = audio_bytes[:4] == b'RIFF'
+        if is_wav:
+            with open(file_path, 'wb') as f:
+                f.write(audio_bytes)
+            wav_bytes_for_response = audio_bytes
+        else:
+            wav_buf = io.BytesIO()
+            with wave.open(wav_buf, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio_bytes)
+            wav_bytes_for_response = wav_buf.getvalue()
+            with open(file_path, 'wb') as f:
+                f.write(wav_bytes_for_response)
+
+        encoded_audio = base64.b64encode(wav_bytes_for_response).decode('utf-8')
 
 
         audio_url = f"https://{DOMAIN}/static/{filename}"
@@ -7666,7 +7676,11 @@ def _infer_language_code_from_voice(voice_name: str, fallback_locale: str = "en-
 async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int, language_code: Optional[str] = None) -> tuple[bytes, int]:
     """
     Synthesizes speech using the provided parameters. No DB lookups.
+    Routes to Azure TTS for Azure voices, Google TTS otherwise.
     """
+    if voice_name in _AZURE_VOICE_NAMES:
+        return await _synthesize_azure_speech(text, voice_name, wpm_rate, language_code)
+
     if not tts_client:
         raise Exception("TTS service unavailable.")
 
@@ -8637,6 +8651,7 @@ class VoiceDetail(BaseModel):
     language_codes: List[str]
     natural_sample_rate_hertz: int
     ssml_gender: str
+    provider: str = 'google'
 
 class TestTTSVoiceRequest(BaseModel):
     voice_name: str
@@ -9698,6 +9713,67 @@ async def get_available_llm_models():
 
 
 
+# Azure child voices — hardcoded since Azure doesn't have a free listing API.
+# These voices are curated for younger-sounding profiles.
+AZURE_CHILD_VOICES = [
+    VoiceDetail(name="en-US-SaraNeural",                 language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="FEMALE", provider="azure"),
+    VoiceDetail(name="en-US-EvelynMultilingualNeural",   language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="FEMALE", provider="azure"),
+    VoiceDetail(name="en-US-AmberNeural",                language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="FEMALE", provider="azure"),
+    VoiceDetail(name="en-US-AnaNeural",                  language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="FEMALE", provider="azure"),
+    VoiceDetail(name="en-US-DustinMultilingualNeural",   language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="MALE",   provider="azure"),
+    VoiceDetail(name="en-US-BrianMultilingualNeural",    language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="MALE",   provider="azure"),
+    VoiceDetail(name="en-US-BrianNeural",                language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="MALE",   provider="azure"),
+    VoiceDetail(name="en-US-BrandonMultilingualNeural",  language_codes=["en-US"], natural_sample_rate_hertz=24000, ssml_gender="MALE",   provider="azure"),
+]
+
+_AZURE_VOICE_NAMES = {v.name for v in AZURE_CHILD_VOICES}
+
+async def _synthesize_azure_speech(text: str, voice_name: str, wpm_rate: int, language_code: Optional[str] = None) -> tuple[bytes, int]:
+    """Synthesize speech via Azure Cognitive Services TTS REST API. Returns raw PCM bytes at 24kHz 16-bit mono."""
+    if not AZURE_SPEECH_KEY:
+        raise Exception("Azure Speech key not configured (AZURE_SPEECH_KEY env var missing).")
+
+    region = AZURE_SPEECH_REGION or "westus2"
+    endpoint = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
+
+    lang = language_code or _infer_language_code_from_voice(voice_name)
+
+    if wpm_rate < 130:
+        prosody_rate = "-15%"
+    elif wpm_rate > 230:
+        prosody_rate = "+15%"
+    else:
+        prosody_rate = "+0%"
+
+    if text:
+        text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    ssml = (
+        f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{lang}'>"
+        f"<voice name='{voice_name}'>"
+        f"<prosody rate='{prosody_rate}'>{text}</prosody>"
+        f"</voice></speak>"
+    )
+
+    headers = {
+        "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "riff-24khz-16bit-mono-pcm",
+    }
+
+    import httpx
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(endpoint, content=ssml.encode("utf-8"), headers=headers)
+        if resp.status_code != 200:
+            raise Exception(f"Azure TTS error {resp.status_code}: {resp.text[:200]}")
+        wav_bytes = resp.content
+        # Parse actual sample rate from WAV header (offset 24, 4-byte little-endian uint)
+        import struct
+        actual_rate = struct.unpack_from('<I', wav_bytes, 24)[0] if len(wav_bytes) >= 28 else 24000
+        return wav_bytes, actual_rate
+
+
 @app.get("/api/tts-voices", response_model=List[VoiceDetail])
 async def get_tts_voices_endpoint(locale: Optional[str] = None):
     if not tts_client:
@@ -9711,9 +9787,16 @@ async def get_tts_voices_endpoint(locale: Optional[str] = None):
                 name=voice.name,
                 language_codes=list(voice.language_codes),
                 natural_sample_rate_hertz=voice.natural_sample_rate_hertz,
-                ssml_gender=google_tts.SsmlVoiceGender(voice.ssml_gender).name
+                ssml_gender=google_tts.SsmlVoiceGender(voice.ssml_gender).name,
+                provider="google"
             ))
-        voices.sort(key=lambda v: v.name) # Sort for consistent UI
+
+        # Append Azure child voices, filtered to the requested locale if specified
+        for av in AZURE_CHILD_VOICES:
+            if not normalized_locale or any(lc.lower() == normalized_locale.lower() for lc in av.language_codes):
+                voices.append(av)
+
+        voices.sort(key=lambda v: (v.provider, v.name))
         return voices
     except Exception as e:
         logging.error(f"Error fetching TTS voices: {e}", exc_info=True)
