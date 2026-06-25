@@ -805,13 +805,15 @@ async function loadSettings() {
         } else {
             renderLocationOverrideLanguagesTable({});
         }
-        refreshLanguageDependentVoiceControls();
-        if (defaultPartnerVoiceSelect) {
-            defaultPartnerVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
-        }
+        // Set voice style first so the dropdown is filtered correctly before populating
         setSelectedVoiceStyle(currentSettings.voice_style || 'adult');
+        refreshLanguageDependentVoiceControls();
+        const savedVoice = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
+        if (defaultPartnerVoiceSelect) {
+            defaultPartnerVoiceSelect.value = savedVoice;
+        }
         if (ttsVoiceSelect) {
-            ttsVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
+            ttsVoiceSelect.value = savedVoice;
         }
         // Load spellLetterOrder setting
         if (spellLetterOrderSelect) {
