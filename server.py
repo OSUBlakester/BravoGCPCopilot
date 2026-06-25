@@ -82,7 +82,9 @@ except ImportError:
     
     DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-    
+    AZURE_SPEECH_KEY = os.getenv('AZURE_SPEECH_KEY')
+    AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION', 'westus2')
+
     HEALTH_INFO = {
         'environment': ENVIRONMENT,
         'environment_name': CONFIG['environment_name'],
