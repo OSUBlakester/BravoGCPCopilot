@@ -3435,8 +3435,8 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // tap: 7 content steps + 1 menu step = 8; scan: 8 steps (no menu step)
-            return wizardState.interfaceMode === 'tap' ? 8 : 8;
+            // tap: 7 steps (rows merged into step 3); scan: 8 steps
+            return wizardState.interfaceMode === 'tap' ? 7 : 8;
         }
 
         async function openSetupWizard() {
@@ -3614,95 +3614,119 @@ registerForm.addEventListener('submit', async (e) => {
                     </div>`;
 
             } else if (step === 3) {
-                titleEl.textContent = 'Button Size';
-                contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:16px;">Adjust how many columns are shown in the grid. Fewer columns = larger buttons.</p>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <label class="wizard-field-label" style="margin:0;">Grid Columns</label>
-                        <span id="wizardGridColumnsVal" style="font-size:1.5rem;font-weight:700;color:#6366f1;">${wizardState.gridColumns}</span>
-                    </div>
-                    <input id="wizardGridColumns" type="range" min="2" max="12" value="${wizardState.gridColumns}" style="width:100%;accent-color:#6366f1;">
-                    <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#6b7280;margin-top:4px;">
-                        <span>2 (Large)</span><span>12 (Small)</span>
-                    </div>`;
-                document.getElementById('wizardGridColumns').addEventListener('input', function() {
-                    document.getElementById('wizardGridColumnsVal').textContent = this.value;
-                    wizardState.gridColumns = parseInt(this.value) || 6;
-                });
-
-            } else if (step === 4) {
                 if (wizardState.interfaceMode === 'tap') {
-                    titleEl.textContent = 'Grid Rows Configuration';
+                    titleEl.textContent = 'Button Layout';
                     contentEl.innerHTML = `
-                        <div style="margin-bottom:20px; border-bottom:1px solid #e5e7eb; padding-bottom:16px;">
-                            <h4 style="font-weight:600; color:#111827; margin:0 0 4px 0; font-size:1.05rem;">Words Configuration</h4>
-                            <p style="font-size:0.875rem; color:#4b5563; margin:0 0 12px 0; line-height:1.4;">
-                                Configure the number of rows for the Words section. Total Rows defines the overall row count, which is partitioned into Static and Dynamic rows. Static rows contain consistent options that can be changed manually, while Dynamic rows (which are optional) use AI to generate options and may vary.
-                            </p>
-                            <div style="display:flex; gap:16px; align-items:flex-end;">
+                        <div style="margin-bottom:20px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 6px 0;font-size:1.05rem;">Buttons per Row</h4>
+                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;">How many buttons appear in each row. Fewer = larger buttons.</p>
+                            <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}">
+                        </div>
+                        <div style="margin-bottom:20px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
+                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 12px 0;line-height:1.4;">Total Rows is split into Static (consistent options) and Dynamic (AI-generated, optional).</p>
+                            <div style="display:flex;gap:16px;align-items:flex-end;">
                                 <div style="flex:1;">
-                                    <label class="wizard-field-label">Total Rows (1–7)</label>
+                                    <label class="wizard-field-label">Total Rows</label>
                                     <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}">
                                 </div>
                                 <div style="flex:1;">
                                     <label class="wizard-field-label">Static Rows</label>
-                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="background:#f3f4f6; color:#374151; border-color:#d1d5db; cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
+                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="background:#f3f4f6;color:#374151;border-color:#d1d5db;cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
                                 </div>
                                 <div style="flex:1;">
-                                    <label class="wizard-field-label">Dynamic Rows (Optional)</label>
+                                    <label class="wizard-field-label">Dynamic Rows</label>
                                     <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}">
                                 </div>
                             </div>
-                            <div style="margin-top:12px; font-size:0.825rem; color:#4b5563; line-height:1.4;">
-                                💡 <strong>Note:</strong> Dynamic rows are optional. Set to 0 if you only want static, manually-managed rows.
-                            </div>
+                            <div style="margin-top:10px;font-size:0.825rem;color:#4b5563;">💡 Set Dynamic Rows to 0 for static-only rows.</div>
                         </div>
                         <div>
-                            <h4 style="font-weight:600; color:#111827; margin:0 0 4px 0; font-size:1.05rem;">Phrases Configuration</h4>
-                            <div style="display:flex; gap:16px; align-items:center;">
-                                <p style="font-size:0.875rem; color:#4b5563; margin:0; line-height:1.4; flex:1;">
-                                    Configure the phrases history bar rows at the top of the interface. Enter 0 to disable the phrases bar entirely.
-                                </p>
-                                <div style="display:flex; flex-direction:column; align-items:center; width:110px; flex-shrink:0;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0; font-size:0.75rem; text-align:center; white-space:nowrap;">Phrases Rows (0–10)</label>
-                                    <input id="wizardPhrasesRows" class="wizard-input wizard-input-number" type="number" min="0" max="10" value="${wizardState.phrasesRows !== undefined ? wizardState.phrasesRows : 0}" style="width:100%; height:36px; font-size:1.15rem; padding:4px 0; text-align:center; box-sizing:border-box;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Phrases Rows</h4>
+                            <div style="display:flex;gap:16px;align-items:center;">
+                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">Rows for the phrases history bar at the top. Set to 0 to disable.</p>
+                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Rows (0–10)</label>
+                                    <input id="wizardPhrasesRows" class="wizard-input wizard-input-number" type="number" min="0" max="10" value="${wizardState.phrasesRows !== undefined ? wizardState.phrasesRows : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
                                 </div>
                             </div>
                         </div>`;
-                    
+
+                    document.getElementById('wizardGridColumns').addEventListener('change', function() {
+                        wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(this.value) || 6));
+                    });
+
                     const wordsInput = document.getElementById('wizardWordsRows');
                     const dynamicInput = document.getElementById('wizardTapDynamicRows');
                     const staticDisplay = document.getElementById('wizardStaticRowsDisplay');
-                    
                     function updateRows() {
                         let total = parseInt(wordsInput.value, 10) || 3;
                         if (total < 1) total = 1;
                         if (total > 7) total = 7;
                         wordsInput.value = total;
-                        
-                        const maxDynamic = total;
-
                         let dynamic = parseInt(dynamicInput.value, 10) || 0;
                         if (dynamic < 0) dynamic = 0;
-                        if (dynamic > maxDynamic) dynamic = maxDynamic;
+                        if (dynamic > total) dynamic = total;
                         dynamicInput.value = dynamic;
-                        dynamicInput.max = maxDynamic;
-                        
-                        const staticCount = total - dynamic;
-                        staticDisplay.value = staticCount;
-                        
+                        dynamicInput.max = total;
+                        staticDisplay.value = total - dynamic;
                         wizardState.wordsRows = total;
                         wizardState.tapDynamicRows = dynamic;
                         wizardState.useHybridPages = dynamic > 0;
                     }
-                    
                     wordsInput.addEventListener('input', updateRows);
                     dynamicInput.addEventListener('input', updateRows);
                     wordsInput.addEventListener('change', updateRows);
                     dynamicInput.addEventListener('change', updateRows);
-                    
-                    // Call updateRows initially to sync constraints
                     updateRows();
+                } else {
+                    titleEl.textContent = 'Button Size';
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Adjust how many buttons are shown per row. Fewer buttons = larger buttons.</p>
+                        <label class="wizard-field-label">Buttons per Row</label>
+                        <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}">`;
+                    document.getElementById('wizardGridColumns').addEventListener('change', function() {
+                        wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(this.value) || 6));
+                    });
+                }
+
+            } else if (step === 4) {
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 4 = Button Action (was step 5)
+                    titleEl.textContent = 'Button Action';
+                    const actionVal = wizardState.defaultButtonAction || 'do_nothing';
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:12px;font-weight:600;">Configure default action after a button is selected.</p>
+                        <p style="font-size:0.875rem;color:#4b5563;margin-bottom:16px;line-height:1.4;">
+                            The Action setting determines what happens immediately after a button in the dynamic rows (or generated options) is selected.
+                        </p>
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <label class="wizard-option-card${actionVal === 'do_nothing' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
+                                <input type="radio" name="wizardButtonAction" value="do_nothing" ${actionVal === 'do_nothing' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                                <div><div style="font-weight:600;color:#374151;">Do Nothing</div><div style="font-size:0.8rem;color:#6b7280;">Keep the screen as is. No screen changes occur after a selection.</div></div>
+                            </label>
+                            <label class="wizard-option-card${actionVal === 'navigate_home' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
+                                <input type="radio" name="wizardButtonAction" value="navigate_home" ${actionVal === 'navigate_home' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                                <div><div style="font-weight:600;color:#374151;">Return Home</div><div style="font-size:0.8rem;color:#6b7280;">Navigate back to the Home board after making a selection.</div></div>
+                            </label>
+                            <label class="wizard-option-card${actionVal === 'use_ai' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
+                                <input type="radio" name="wizardButtonAction" value="use_ai" ${actionVal === 'use_ai' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                                <div><div style="font-weight:600;color:#374151;">Use AI to Generate next options</div><div style="font-size:0.8rem;color:#6b7280;">Use AI to dynamically generate and display contextually relevant follow-up options.</div></div>
+                            </label>
+                        </div>`;
+                    contentEl.querySelectorAll('.wizard-option-card').forEach(card => {
+                        card.addEventListener('click', () => {
+                            const radio = card.querySelector('input[type=radio]');
+                            if (radio) {
+                                radio.checked = true;
+                                wizardState.defaultButtonAction = radio.value;
+                                wizardState.useBravoBuild = radio.value === 'use_ai';
+                                contentEl.querySelectorAll('.wizard-option-card').forEach(c => {
+                                    c.classList.toggle('selected', c.querySelector('input[type=radio]')?.checked);
+                                });
+                            }
+                        });
+                    });
                 } else {
                     titleEl.textContent = 'Number of AI Options';
                     contentEl.innerHTML = `
@@ -3716,63 +3740,7 @@ registerForm.addEventListener('submit', async (e) => {
 
             } else if (step === 5) {
                 if (wizardState.interfaceMode === 'tap') {
-                    titleEl.textContent = 'Button Action';
-                    const actionVal = wizardState.defaultButtonAction || 'do_nothing';
-                    contentEl.innerHTML = `
-                        <p style="color:#374151;margin-bottom:12px;font-weight:600;">Configure default action after a button is selected.</p>
-                        <p style="font-size:0.875rem;color:#4b5563;margin-bottom:16px;line-height:1.4;">
-                            The Action setting determines what happens immediately after a button in the dynamic rows (or generated options) is selected.
-                        </p>
-                        <div style="display:flex; flex-direction:column; gap:12px;">
-                            <label class="wizard-option-card${actionVal === 'do_nothing' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
-                                <input type="radio" name="wizardButtonAction" value="do_nothing" ${actionVal === 'do_nothing' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
-                                <div>
-                                    <div style="font-weight:600;color:#374151;">Do Nothing</div>
-                                    <div style="font-size:0.8rem;color:#6b7280;">Keep the screen as is. No screen changes occur after a selection.</div>
-                                </div>
-                            </label>
-                            <label class="wizard-option-card${actionVal === 'navigate_home' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
-                                <input type="radio" name="wizardButtonAction" value="navigate_home" ${actionVal === 'navigate_home' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
-                                <div>
-                                    <div style="font-weight:600;color:#374151;">Return Home</div>
-                                    <div style="font-size:0.8rem;color:#6b7280;">Navigate back to the Home board after making a selection.</div>
-                                </div>
-                            </label>
-                            <label class="wizard-option-card${actionVal === 'use_ai' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
-                                <input type="radio" name="wizardButtonAction" value="use_ai" ${actionVal === 'use_ai' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
-                                <div>
-                                    <div style="font-weight:600;color:#374151;">Use AI to Generate next options</div>
-                                    <div style="font-size:0.8rem;color:#6b7280;">Use AI to dynamically generate and display contextually relevant follow-up options.</div>
-                                </div>
-                            </label>
-                        </div>`;
-                    
-                    contentEl.querySelectorAll('.wizard-option-card').forEach(card => {
-                        card.addEventListener('click', () => {
-                            const radio = card.querySelector('input[type=radio]');
-                            if (radio) {
-                                radio.checked = true;
-                                wizardState.defaultButtonAction = radio.value;
-                                wizardState.useBravoBuild = radio.value === 'use_ai';
-                                contentEl.querySelectorAll('.wizard-option-card').forEach(c => {
-                                    const r = c.querySelector('input[type=radio]');
-                                    c.classList.toggle('selected', r && r.checked);
-                                });
-                            }
-                        });
-                    });
-                } else {
-                    titleEl.textContent = 'Freestyle Options';
-                    contentEl.innerHTML = `
-                        <div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
-                               <strong>Scan interface</strong> — Defines how many options are shown on the Freestyle page.
-                           </div>
-                        <label class="wizard-field-label">Freestyle Options (1–50)</label>
-                        <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
-                }
-
-            } else if (step === 6) {
-                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 5 = Menu Options (was step 6)
                     titleEl.textContent = 'Menu Options';
                     const vis = wizardState.menuItemVisibility || {};
                     const tree = wizardState.menuItemsTree || [];
@@ -3812,6 +3780,27 @@ registerForm.addEventListener('submit', async (e) => {
                         this.textContent = anyUnchecked ? 'Deselect All' : 'Select All';
                     });
                 } else {
+                    titleEl.textContent = 'Freestyle Options';
+                    contentEl.innerHTML = `
+                        <div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
+                               <strong>Scan interface</strong> — Defines how many options are shown on the Freestyle page.
+                           </div>
+                        <label class="wizard-field-label">Freestyle Options (1–50)</label>
+                        <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
+                }
+
+            } else if (step === 6) {
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 6 = User Language (was step 7)
+                    titleEl.textContent = 'User Language';
+                    const langOpts6 = WIZARD_LANGUAGES.map(l =>
+                        `<option value="${l.value}"${wizardState.userLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                    ).join('');
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Select the primary language for the user. This is the language used for the buttons, interface labels, and the speech history bar.</p>
+                        <label class="wizard-field-label">User Language</label>
+                        <select id="wizardUserLanguage" class="wizard-input">${langOpts6}</select>`;
+                } else {
                     titleEl.textContent = 'User Language';
                     const langOpts = WIZARD_LANGUAGES.map(l =>
                         `<option value="${l.value}"${wizardState.userLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
@@ -3823,17 +3812,50 @@ registerForm.addEventListener('submit', async (e) => {
                 }
 
             } else if (step === 7) {
-                // tap: User Language  |  scan: Partner Language & Voice
                 if (wizardState.interfaceMode === 'tap') {
-                    titleEl.textContent = 'User Language';
-                    const langOpts7 = WIZARD_LANGUAGES.map(l =>
-                        `<option value="${l.value}"${wizardState.userLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                    // tap step 7 = Partner Language & Voice (was step 8) — LAST TAP STEP
+                    titleEl.textContent = 'Default Partner Language & Voice';
+                    const langOpts7tap = WIZARD_LANGUAGES.map(l =>
+                        `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
                     ).join('');
                     contentEl.innerHTML = `
-                        <p style="color:#374151;margin-bottom:16px;">Select the primary language for the user. This is the language used for the buttons, interface labels, and the speech history bar.</p>
-                        <label class="wizard-field-label">User Language</label>
-                        <select id="wizardUserLanguage" class="wizard-input">${langOpts7}</select>`;
+                        <p style="color:#374151;margin-bottom:16px;">Select the default language and text-to-speech voice for the communication partner responses.</p>
+                        <div style="margin-bottom:16px;">
+                            <label class="wizard-field-label">Partner Language</label>
+                            <select id="wizardPartnerLanguage" class="wizard-input">${langOpts7tap}</select>
+                        </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Age/Style</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="child" ${wizardState.voiceStyle === 'child' ? 'checked' : ''}> 👧 Child
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="adult" ${wizardState.voiceStyle !== 'child' ? 'checked' : ''}> 🧑 Adult
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="wizard-field-label">Voice</label>
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                                <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
+                                    <option value="">-- Select a Voice --</option>
+                                </select>
+                                <button id="wizardTestVoiceBtn" style="padding:10px 16px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:0.9rem;font-weight:500;">&#9654; Test</button>
+                            </div>
+                            <div id="wizardVoiceTestStatus" style="min-height:18px;font-size:0.85rem;color:#6b7280;"></div>
+                        </div>`;
+                    wizardFillVoiceSelect();
+                    document.getElementById('wizardTestVoiceBtn').addEventListener('click', wizardTestVoice);
+                    document.getElementById('wizardPartnerLanguage').addEventListener('change', function() {
+                        wizardState.partnerLanguage = this.value;
+                        wizardFillVoiceSelect();
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
                 } else {
+                    // scan step 7 = Partner Language & Voice
                     titleEl.textContent = 'Default Partner Language & Voice';
                     const langOpts7 = WIZARD_LANGUAGES.map(l =>
                         `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
@@ -3877,98 +3899,55 @@ registerForm.addEventListener('submit', async (e) => {
                 }
 
             } else if (step === 8) {
-                // tap: Partner Language & Voice  |  scan: Scanning Configuration
-                if (wizardState.interfaceMode === 'tap') {
-                    titleEl.textContent = 'Default Partner Language & Voice';
-                    const langOpts8 = WIZARD_LANGUAGES.map(l =>
-                        `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
-                    ).join('');
-                    contentEl.innerHTML = `
-                        <p style="color:#374151;margin-bottom:16px;">Select the default language and text-to-speech voice for the communication partner responses.</p>
-                        <div style="margin-bottom:16px;">
-                            <label class="wizard-field-label">Partner Language</label>
-                            <select id="wizardPartnerLanguage" class="wizard-input">${langOpts8}</select>
-                        </div>
-                        <div style="margin-bottom:12px;">
-                            <label class="wizard-field-label">Voice Age/Style</label>
-                            <div style="display:flex;gap:16px;margin-top:4px;">
-                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
-                                    <input type="radio" name="wizardVoiceStyle" value="child" ${wizardState.voiceStyle === 'child' ? 'checked' : ''}> 👧 Child
-                                </label>
-                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
-                                    <input type="radio" name="wizardVoiceStyle" value="adult" ${wizardState.voiceStyle !== 'child' ? 'checked' : ''}> 🧑 Adult
-                                </label>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="wizard-field-label">Voice</label>
-                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-                                <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
-                                    <option value="">-- Select a Voice --</option>
-                                </select>
-                                <button id="wizardTestVoiceBtn" style="padding:10px 16px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:0.9rem;font-weight:500;">&#9654; Test</button>
-                            </div>
-                            <div id="wizardVoiceTestStatus" style="min-height:18px;font-size:0.85rem;color:#6b7280;"></div>
-                        </div>`;
-                    wizardFillVoiceSelect();
-                    document.getElementById('wizardTestVoiceBtn').addEventListener('click', wizardTestVoice);
-                    document.getElementById('wizardPartnerLanguage').addEventListener('change', function() {
-                        wizardState.partnerLanguage = this.value;
-                        wizardFillVoiceSelect();
-                    });
-                    document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
-                        r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
-                    });
-                } else {
-                    titleEl.textContent = 'Scanning Configuration';
-                    contentEl.innerHTML = `
-                        <p style="color:#374151;margin-bottom:16px;">Configure scanning behavior for switch access.</p>
-                        <div style="margin-bottom:20px;">
-                            <label class="wizard-field-label">Scan Mode</label>
-                            <div style="display:flex;gap:10px;">
-                                <div class="wizard-scan-opt${wizardState.scanMode === 'auto' ? ' selected' : ''}" data-scan-mode="auto">
-                                    <input type="radio" name="wizardScanMode" value="auto" ${wizardState.scanMode === 'auto' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
-                                    <div>
-                                        <div style="font-weight:600;">Auto</div>
-                                        <div style="font-size:0.8rem;color:#6b7280;">Scans automatically at set speed</div>
-                                    </div>
-                                </div>
-                                <div class="wizard-scan-opt${wizardState.scanMode === 'step' ? ' selected' : ''}" data-scan-mode="step">
-                                    <input type="radio" name="wizardScanMode" value="step" ${wizardState.scanMode === 'step' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
-                                    <div>
-                                        <div style="font-weight:600;">Step</div>
-                                        <div style="font-size:0.8rem;color:#6b7280;">Advances on each switch press</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="margin-bottom:20px;">
-                            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-                                <input type="checkbox" id="wizardWaitForSwitch" ${wizardState.waitForSwitch ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                // scan only — tap mode ends at step 7
+                titleEl.textContent = 'Scanning Configuration';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Configure scanning behavior for switch access.</p>
+                    <div style="margin-bottom:20px;">
+                        <label class="wizard-field-label">Scan Mode</label>
+                        <div style="display:flex;gap:10px;">
+                            <div class="wizard-scan-opt${wizardState.scanMode === 'auto' ? ' selected' : ''}" data-scan-mode="auto">
+                                <input type="radio" name="wizardScanMode" value="auto" ${wizardState.scanMode === 'auto' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
                                 <div>
-                                    <div style="font-weight:600;color:#374151;">Wait for Switch</div>
-                                    <div style="font-size:0.8rem;color:#6b7280;">Scanning waits for a switch press before starting</div>
+                                    <div style="font-weight:600;">Auto</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;">Scans automatically at set speed</div>
                                 </div>
-                            </label>
-                        </div>
-                        <div>
-                            <label class="wizard-field-label">Scan Speed</label>
-                            <div style="display:flex;align-items:center;gap:12px;">
-                                <input id="wizardScanDelay" type="number" min="100" max="5000" step="100" value="${wizardState.scanDelay}" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:1rem;width:110px;">
-                                <span style="color:#6b7280;">milliseconds between scans</span>
                             </div>
-                            <p class="wizard-input-hint">Lower = faster scanning (100–5000 ms)</p>
-                        </div>`;
-                    contentEl.querySelectorAll('.wizard-scan-opt').forEach(opt => {
-                        opt.addEventListener('click', () => {
-                            wizardState.scanMode = opt.dataset.scanMode;
-                            contentEl.querySelectorAll('.wizard-scan-opt').forEach(o => {
-                                o.classList.toggle('selected', o.dataset.scanMode === wizardState.scanMode);
-                                o.querySelector('input[type=radio]').checked = o.dataset.scanMode === wizardState.scanMode;
-                            });
+                            <div class="wizard-scan-opt${wizardState.scanMode === 'step' ? ' selected' : ''}" data-scan-mode="step">
+                                <input type="radio" name="wizardScanMode" value="step" ${wizardState.scanMode === 'step' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                                <div>
+                                    <div style="font-weight:600;">Step</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;">Advances on each switch press</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:20px;">
+                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                            <input type="checkbox" id="wizardWaitForSwitch" ${wizardState.waitForSwitch ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                            <div>
+                                <div style="font-weight:600;color:#374151;">Wait for Switch</div>
+                                <div style="font-size:0.8rem;color:#6b7280;">Scanning waits for a switch press before starting</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="wizard-field-label">Scan Speed</label>
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <input id="wizardScanDelay" type="number" min="100" max="5000" step="100" value="${wizardState.scanDelay}" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:1rem;width:110px;">
+                            <span style="color:#6b7280;">milliseconds between scans</span>
+                        </div>
+                        <p class="wizard-input-hint">Lower = faster scanning (100–5000 ms)</p>
+                    </div>`;
+                contentEl.querySelectorAll('.wizard-scan-opt').forEach(opt => {
+                    opt.addEventListener('click', () => {
+                        wizardState.scanMode = opt.dataset.scanMode;
+                        contentEl.querySelectorAll('.wizard-scan-opt').forEach(o => {
+                            o.classList.toggle('selected', o.dataset.scanMode === wizardState.scanMode);
+                            o.querySelector('input[type=radio]').checked = o.dataset.scanMode === wizardState.scanMode;
                         });
                     });
-                }
+                });
             }
         }
 
@@ -4196,18 +4175,25 @@ registerForm.addEventListener('submit', async (e) => {
             } else if (step === 3) {
                 const el = document.getElementById('wizardGridColumns');
                 if (el) wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(el.value) || 6));
-            } else if (step === 4) {
                 if (wizardState.interfaceMode === 'tap') {
                     const wRows = document.getElementById('wizardWordsRows');
                     const pRows = document.getElementById('wizardPhrasesRows');
                     const dRows = document.getElementById('wizardTapDynamicRows');
-                    
-                    if (wRows) wizardState.wordsRows = Math.max(1, Math.min(10, parseInt(wRows.value) || 3));
+                    if (wRows) wizardState.wordsRows = Math.max(1, Math.min(7, parseInt(wRows.value) || 3));
                     if (pRows) wizardState.phrasesRows = Math.max(0, Math.min(10, parseInt(pRows.value) || 0));
                     if (dRows) {
                         const dVal = parseInt(dRows.value, 10) || 0;
                         wizardState.useHybridPages = dVal > 0;
                         wizardState.tapDynamicRows = Math.max(0, dVal);
+                    }
+                }
+            } else if (step === 4) {
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 4 = Button Action
+                    const actionEl = document.querySelector('input[name="wizardButtonAction"]:checked');
+                    if (actionEl) {
+                        wizardState.defaultButtonAction = actionEl.value;
+                        wizardState.useBravoBuild = actionEl.value === 'use_ai';
                     }
                 } else {
                     const el = document.getElementById('wizardLlmOptions');
@@ -4215,18 +4201,7 @@ registerForm.addEventListener('submit', async (e) => {
                 }
             } else if (step === 5) {
                 if (wizardState.interfaceMode === 'tap') {
-                    const actionEl = document.querySelector('input[name="wizardButtonAction"]:checked');
-                    if (actionEl) {
-                        wizardState.defaultButtonAction = actionEl.value;
-                        wizardState.useBravoBuild = actionEl.value === 'use_ai';
-                    }
-                } else {
-                    const el = document.getElementById('wizardFreestyleOptions');
-                    if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
-                }
-            } else if (step === 6) {
-                if (wizardState.interfaceMode === 'tap') {
-                    // Collect menu visibility checkboxes
+                    // tap step 5 = Menu Options
                     const boxes = document.querySelectorAll('.wizard-menu-checkbox');
                     if (boxes.length) {
                         boxes.forEach(cb => {
@@ -4234,33 +4209,35 @@ registerForm.addEventListener('submit', async (e) => {
                         });
                     }
                 } else {
-                    const el = document.getElementById('wizardUserLanguage');
-                    if (el) wizardState.userLanguage = el.value;
+                    const el = document.getElementById('wizardFreestyleOptions');
+                    if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
                 }
+            } else if (step === 6) {
+                // both modes: User Language
+                const el = document.getElementById('wizardUserLanguage');
+                if (el) wizardState.userLanguage = el.value;
             } else if (step === 7) {
                 if (wizardState.interfaceMode === 'tap') {
-                    const el = document.getElementById('wizardUserLanguage');
-                    if (el) wizardState.userLanguage = el.value;
+                    // tap step 7 = Partner Language & Voice (last tap step)
+                    const langEl = document.getElementById('wizardPartnerLanguage');
+                    const voiceEl = document.getElementById('wizardPartnerVoice');
+                    if (langEl) wizardState.partnerLanguage = langEl.value;
+                    if (voiceEl) wizardState.partnerVoice = voiceEl.value;
                 } else {
+                    // scan step 7 = Partner Language & Voice
                     const langEl = document.getElementById('wizardPartnerLanguage');
                     const voiceEl = document.getElementById('wizardPartnerVoice');
                     if (langEl) wizardState.partnerLanguage = langEl.value;
                     if (voiceEl) wizardState.partnerVoice = voiceEl.value;
                 }
             } else if (step === 8) {
-                if (wizardState.interfaceMode === 'tap') {
-                    const langEl = document.getElementById('wizardPartnerLanguage');
-                    const voiceEl = document.getElementById('wizardPartnerVoice');
-                    if (langEl) wizardState.partnerLanguage = langEl.value;
-                    if (voiceEl) wizardState.partnerVoice = voiceEl.value;
-                } else {
-                    const modeEl = document.querySelector('[name=wizardScanMode]:checked');
-                    if (modeEl) wizardState.scanMode = modeEl.value;
-                    const waitEl = document.getElementById('wizardWaitForSwitch');
-                    if (waitEl) wizardState.waitForSwitch = waitEl.checked;
-                    const delayEl = document.getElementById('wizardScanDelay');
-                    if (delayEl) wizardState.scanDelay = Math.max(100, parseInt(delayEl.value) || 800);
-                }
+                // scan only: Scanning Configuration
+                const modeEl = document.querySelector('[name=wizardScanMode]:checked');
+                if (modeEl) wizardState.scanMode = modeEl.value;
+                const waitEl = document.getElementById('wizardWaitForSwitch');
+                if (waitEl) wizardState.waitForSwitch = waitEl.checked;
+                const delayEl = document.getElementById('wizardScanDelay');
+                if (delayEl) wizardState.scanDelay = Math.max(100, parseInt(delayEl.value) || 800);
             }
         }
 
