@@ -3617,34 +3617,38 @@ registerForm.addEventListener('submit', async (e) => {
                 if (wizardState.interfaceMode === 'tap') {
                     titleEl.textContent = 'Button Layout';
                     contentEl.innerHTML = `
-                        <div style="margin-bottom:20px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 6px 0;font-size:1.05rem;">Buttons per Row</h4>
-                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;">How many buttons appear in each row. Fewer = larger buttons.</p>
-                            <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}">
-                        </div>
-                        <div style="margin-bottom:20px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
-                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 12px 0;line-height:1.4;">Total Rows is split into Static (consistent options) and Dynamic (AI-generated, optional).</p>
-                            <div style="display:flex;gap:16px;align-items:flex-end;">
-                                <div style="flex:1;">
-                                    <label class="wizard-field-label">Total Rows</label>
-                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}">
-                                </div>
-                                <div style="flex:1;">
-                                    <label class="wizard-field-label">Static Rows</label>
-                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="background:#f3f4f6;color:#374151;border-color:#d1d5db;cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
-                                </div>
-                                <div style="flex:1;">
-                                    <label class="wizard-field-label">Dynamic Rows</label>
-                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}">
+                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Buttons per Row</h4>
+                            <div style="display:flex;gap:16px;align-items:center;">
+                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">How many buttons appear in each row. Fewer = larger buttons.</p>
+                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Columns (2–12)</label>
+                                    <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
                                 </div>
                             </div>
-                            <div style="margin-top:10px;font-size:0.825rem;color:#4b5563;">💡 Set Dynamic Rows to 0 for static-only rows.</div>
+                        </div>
+                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
+                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;line-height:1.4;">Split into Static (fixed) and Dynamic (AI-generated, optional). Set Dynamic to 0 for static-only.</p>
+                            <div style="display:flex;gap:12px;align-items:flex-end;">
+                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Total (1–7)</label>
+                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                </div>
+                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Static</label>
+                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;background:#f3f4f6;color:#374151;border-color:#d1d5db;cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
+                                </div>
+                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Dynamic</label>
+                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                </div>
+                            </div>
                         </div>
                         <div>
                             <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Phrases Rows</h4>
                             <div style="display:flex;gap:16px;align-items:center;">
-                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">Rows for the phrases history bar at the top. Set to 0 to disable.</p>
+                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">Rows for AI-generated, fully-formed phrases for faster communication. Set to 0 to disable.</p>
                                 <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
                                     <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Rows (0–10)</label>
                                     <input id="wizardPhrasesRows" class="wizard-input wizard-input-number" type="number" min="0" max="10" value="${wizardState.phrasesRows !== undefined ? wizardState.phrasesRows : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
