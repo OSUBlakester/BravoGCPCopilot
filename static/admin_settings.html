@@ -393,25 +393,6 @@
                     </div>
                     <p class="text-xs text-gray-500 mt-1">Location Country to determine local info. Use 2-letter codes.</p>
                 </div>
-            </div>
-        </div>
-
-        <!-- Tap Interface Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-hand-pointer mr-2 text-indigo-600"></i>Tap Interface Settings
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label for="tapWordsRows" class="block text-lg font-medium text-gray-700 mb-2">Tap Words Rows:</label>
-                    <input type="number" id="tapWordsRows" name="tapWordsRows" min="1" max="10" step="1" class="w-full max-w-xs" placeholder="4">
-                    <p class="text-xs text-gray-500 mt-1">Number of rows in the Tap Interface grid (default 4)</p>
-                </div>
-                <div>
-                    <label for="tapPhrasesRows" class="block text-lg font-medium text-gray-700 mb-2">Tap Phrases Rows:</label>
-                    <input type="number" id="tapPhrasesRows" name="tapPhrasesRows" min="0" max="10" step="1" class="w-full max-w-xs" placeholder="1">
-                    <p class="text-xs text-gray-500 mt-1">Number of Phrases rows in the Tap Interface (default 1)</p>
-                </div>
                 <div>
                     <label for="vocabularyLevel" class="block text-lg font-medium text-gray-700 mb-2">Vocabulary Level:</label>
                     <select id="vocabularyLevel" name="vocabularyLevel" class="w-full max-w-xs">
@@ -423,20 +404,79 @@
                     <p class="text-xs text-gray-500 mt-1">Controls the complexity of AI-generated vocabulary to match the user's communication level. Higher levels use more advanced words.</p>
                 </div>
                 <div>
+                    <label for="spellLetterOrder" class="block text-lg font-medium text-gray-700 mb-2">Spell Page Letter Order:</label>
+                    <select id="spellLetterOrder" name="spellLetterOrder" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+                        <option value="alphabetical">Alphabetical (A-Z)</option>
+                        <option value="qwerty">QWERTY Keyboard</option>
+                        <option value="frequency">Frequency-Based</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Letter arrangement for the Spell page in Tap Interface.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tap Interface Settings Section -->
+        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
+                <i class="fas fa-hand-pointer mr-2 text-indigo-600"></i>Tap Interface Settings
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="gridColumnsSlider" class="block text-lg font-medium text-gray-700 mb-2">Buttons per Row:</label>
+                    <input type="number" id="gridColumnsSlider" name="gridColumnsSlider" min="2" max="18" step="1" value="6" class="w-24 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <p class="text-xs text-gray-500 mt-1">Number of buttons per row (2–18). Fewer = larger buttons.</p>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-lg font-medium text-gray-700 mb-1">Rows:</label>
+                    <p class="text-xs text-gray-500 mb-3">Words rows split into Static (fixed) and Dynamic (AI-generated). Phrases rows are AI-generated fully-formed phrases. Set Dynamic or Phrases to 0 to disable.</p>
+                    <div class="flex gap-4 items-end flex-wrap">
+                        <div>
+                            <label for="tapWordsRows" class="block text-xs font-medium text-gray-600 mb-1 text-center">Words Total (1–7)</label>
+                            <input type="number" id="tapWordsRows" name="tapWordsRows" min="1" max="7" step="1" class="w-20 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="3">
+                        </div>
+                        <div>
+                            <label for="tapStaticRowsDisplay" class="block text-xs font-medium text-gray-600 mb-1 text-center">Static</label>
+                            <input type="number" id="tapStaticRowsDisplay" name="tapStaticRowsDisplay" readonly class="w-20 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 bg-gray-100 text-gray-500 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label for="tapDynamicRows" class="block text-xs font-medium text-gray-600 mb-1 text-center">Dynamic</label>
+                            <input type="number" id="tapDynamicRows" name="tapDynamicRows" min="0" max="7" step="1" class="w-20 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0">
+                        </div>
+                        <div style="border-left:1px solid #e5e7eb;padding-left:1rem;margin-left:0.5rem;">
+                            <label for="tapPhrasesRows" class="block text-xs font-medium text-gray-600 mb-1 text-center">Phrases (0–10)</label>
+                            <input type="number" id="tapPhrasesRows" name="tapPhrasesRows" min="0" max="10" step="1" class="w-20 text-center text-lg font-semibold border border-gray-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="1">
+                        </div>
+                    </div>
+                </div>
+                <!-- Sight Words Subsection -->
+                <div class="md:col-span-2 mt-2 mb-2">
+                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
+                        <i class="fas fa-spell-check mr-2 text-indigo-500"></i>Sight Words
+                    </h3>
+                </div>
+                <div>
+                    <label for="enableSightWords" class="block text-lg font-medium text-gray-700 mb-2">Enable Sight Word Logic</label>
+                    <input type="checkbox" id="enableSightWords" name="enableSightWords" class="enablesightwords-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Use Dolch sight word logic to show sight words as text-only (no pictograms). When disabled, all words will show pictograms if pictograms are enabled.</p>
+                </div>
+                <div>
+                    <label for="sightWordGradeLevel" class="block text-lg font-medium text-gray-700 mb-2">Sight Words Grade Level:</label>
+                    <select id="sightWordGradeLevel" name="sightWordGradeLevel" class="w-full max-w-xs">
+                        <option value="pre_k">Pre-Kindergarten</option>
+                        <option value="kindergarten">Kindergarten (includes Pre-K)</option>
+                        <option value="first_grade">First Grade (includes Pre-K + K)</option>
+                        <option value="second_grade">Second Grade (includes Pre-K + K + 1st)</option>
+                        <option value="third_grade">Third Grade (includes Pre-K + K + 1st + 2nd)</option>
+                        <option value="third_grade_with_nouns">Third Grade + Nouns (complete list)</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Dolch sight words at or below this level will show as text-only buttons (no pictograms) even when pictograms are enabled. Selection is cumulative - higher grades include all lower grade words.</p>
+                </div>
+                <div>
                     <label for="disableTapPictograms" class="block text-lg font-medium text-gray-700 mb-2">Disable Tap Interface Pictograms</label>
                     <input type="checkbox" id="disableTapPictograms" name="disableTapPictograms" class="mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                     <p class="text-xs text-gray-500 mt-1">When enabled, the <strong>Tap Interface</strong> will not show pictogram/images on buttons and will not use Sight Word formatting. Buttons will display text only.</p>
                 </div>
-                <div>
-                    <label for="useHybridPages" class="block text-lg font-medium text-gray-700 mb-2">Use Hybrid Pages:</label>
-                    <input type="checkbox" id="useHybridPages" name="useHybridPages" class="mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">When enabled, category pages will mix static buttons and dynamic (AI-generated) buttons in the bottom rows.</p>
-                </div>
-                <div id="dynamicRowsContainer" style="display: none;">
-                    <label for="tapDynamicRows" class="block text-lg font-medium text-gray-700 mb-2">Tap Dynamic Rows:</label>
-                    <input type="number" id="tapDynamicRows" name="tapDynamicRows" min="1" max="10" step="1" class="w-full max-w-xs" placeholder="1">
-                    <p class="text-xs text-gray-500 mt-1">Number of rows at the bottom of the Tap Interface grid dedicated to dynamic options.</p>
-                </div>
+                <input type="hidden" id="useHybridPages" name="useHybridPages">
             </div>
         </div>
 
@@ -497,69 +537,10 @@
                     <input type="checkbox" id="enablePictograms" name="enablePictograms" class="enablepictograms-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                     <p class="text-xs text-gray-500 mt-1">Show pictogram images on buttons for the <strong>Auditory Scanning</strong> interface.</p>
                 </div>
-                <div class="flex items-center">
-                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
-                    <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
-                </div>
-            </div>
-        </div>
-
-        <!-- Display Settings Section -->
-        <div class="bg-white p-6 rounded-lg shadow-lg mb-6">
-            <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b border-gray-200 pb-3">
-                <i class="fas fa-desktop mr-2 text-purple-600"></i>Display Settings
-            </h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="md:col-span-2">
-                    <label for="gridColumnsSlider" class="block text-lg font-medium text-gray-700 mb-2">Button Size:</label>
-                    <div class="flex items-center space-x-4">
-                        <span class="text-sm text-gray-500 font-medium">Larger</span>
-                        <input type="range" id="gridColumnsSlider" name="gridColumnsSlider" min="2" max="18" step="1" value="6" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider">
-                        <span class="text-sm text-gray-500 font-medium">Smaller</span>
-                        <span id="gridColumnsValue" class="text-sm font-medium text-gray-700 min-w-[3ch] bg-gray-100 px-2 py-1 rounded">6</span>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-1">Adjust the number of columns to control button size (2 = largest buttons, 18 = smallest buttons).</p>
-                </div>
-
-                <div>
-                    <label for="spellLetterOrder" class="block text-lg font-medium text-gray-700 mb-2">Spell Page Letter Order:</label>
-                    <select id="spellLetterOrder" name="spellLetterOrder" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="alphabetical">Alphabetical (A-Z)</option>
-                        <option value="qwerty">QWERTY Keyboard</option>
-                        <option value="frequency">Frequency-Based</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Letter arrangement for the Spell page in Tap Interface.</p>
-                </div>
-
-                
-                <!-- Sight Words Subsection -->
-                <div class="md:col-span-2 mt-4 mb-2">
-                    <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                        <i class="fas fa-spell-check mr-2 text-purple-500"></i>Sight Words
-                    </h3>
-                </div>
-                <div>
-                    <label for="enableSightWords" class="block text-lg font-medium text-gray-700 mb-2">Enable Sight Word Logic</label>
-                    <input type="checkbox" id="enableSightWords" name="enableSightWords" class="enablesightwords-checkbox mr-1 h-3 w-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">Use Dolch sight word logic to show sight words as text-only (no pictograms). When disabled, all words will show pictograms if pictograms are enabled.</p>
-                </div>
-                <div>
-                    <label for="sightWordGradeLevel" class="block text-lg font-medium text-gray-700 mb-2">Sight Words Grade Level:</label>
-                    <select id="sightWordGradeLevel" name="sightWordGradeLevel" class="w-full max-w-xs">
-                        <option value="pre_k">Pre-Kindergarten</option>
-                        <option value="kindergarten">Kindergarten (includes Pre-K)</option>
-                        <option value="first_grade">First Grade (includes Pre-K + K)</option>
-                        <option value="second_grade">Second Grade (includes Pre-K + K + 1st)</option>
-                        <option value="third_grade">Third Grade (includes Pre-K + K + 1st + 2nd)</option>
-                        <option value="third_grade_with_nouns">Third Grade + Nouns (complete list)</option>
-                    </select>
-                    <p class="text-xs text-gray-500 mt-1">Dolch sight words at or below this level will show as text-only buttons (no pictograms) even when pictograms are enabled. Selection is cumulative - higher grades include all lower grade words.</p>
-                </div>
-                
                 <!-- Splash Screen Subsection -->
                 <div class="md:col-span-2 mt-4 mb-2">
                     <h3 class="text-lg font-semibold text-gray-800 border-b border-gray-200 pb-2">
-                        <i class="fas fa-comment-dots mr-2 text-purple-500"></i>Splash Screen
+                        <i class="fas fa-comment-dots mr-2 text-orange-500"></i>Splash Screen
                     </h3>
                 </div>
                 <div>
@@ -571,6 +552,10 @@
                     <label for="displaySplashTime" class="block text-lg font-medium text-gray-700 mb-2">Splash Screen Duration (ms)</label>
                     <input type="number" id="displaySplashTime" name="displaySplashTime" min="500" max="10000" step="100" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="3000">
                     <p class="text-xs text-gray-500 mt-1">Duration to display the speech bubble (500-10000 milliseconds, default 3000).</p>
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="ScanningOff" name="ScanningOff" class="mr-2 w-5 h-5">
+                    <label for="ScanningOff" class="text-lg font-medium text-gray-700">Disable Auditory Scanning</label>
                 </div>
             </div>
         </div>

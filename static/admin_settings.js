@@ -73,7 +73,8 @@ const enablePictogramsInput = document.getElementById('enablePictograms');
 const disableTapPictogramsInput = document.getElementById('disableTapPictograms');
 const useHybridPagesCheckbox = document.getElementById('useHybridPages');
 const tapDynamicRowsInput = document.getElementById('tapDynamicRows');
-const dynamicRowsContainer = document.getElementById('dynamicRowsContainer');
+const tapStaticRowsDisplay = document.getElementById('tapStaticRowsDisplay');
+const dynamicRowsContainer = null; // removed from UI
 const enableSightWordsInput = document.getElementById('enableSightWords');
 const sightWordGradeLevelInput = document.getElementById('sightWordGradeLevel');
 const autoCleanInput = document.getElementById('autoClean');
@@ -94,9 +95,19 @@ const addLocationOverrideRowButton = document.getElementById('addLocationOverrid
 const locationOverrideVoiceContainer = document.getElementById('locationOverrideVoiceContainer');
 const toolbarPINInput = document.getElementById('toolbarPIN');
 const spellLetterOrderSelect = document.getElementById('spellLetterOrder');
-// Grid slider elements will be assigned in initializePage when DOM is ready
+// Grid columns input assigned in initializePage when DOM is ready
 let gridColumnsSlider = null;
 let gridColumnsValue = null;
+
+function updateStaticRowsDisplay() {
+    if (!tapWordsRowsInput || !tapDynamicRowsInput || !tapStaticRowsDisplay) return;
+    let total = Math.max(1, Math.min(7, parseInt(tapWordsRowsInput.value) || 3));
+    let dynamic = Math.max(0, Math.min(total, parseInt(tapDynamicRowsInput.value) || 0));
+    tapWordsRowsInput.value = total;
+    tapDynamicRowsInput.value = dynamic;
+    tapDynamicRowsInput.max = total;
+    tapStaticRowsDisplay.value = total - dynamic;
+}
 // Volume slider elements
 let applicationVolumeSlider = null;
 let volumeDisplay = null;
@@ -758,15 +769,10 @@ async function loadSettings() {
         if (tapPhrasesRowsInput) {
             tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 0;
         }
-        if (useHybridPagesCheckbox) {
-            useHybridPagesCheckbox.checked = currentSettings.useHybridPages === true;
-            if (dynamicRowsContainer) {
-                dynamicRowsContainer.style.display = useHybridPagesCheckbox.checked ? 'block' : 'none';
-            }
-        }
         if (tapDynamicRowsInput) {
-            tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== null && currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 1;
+            tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== null && currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 0;
         }
+        updateStaticRowsDisplay();
         if (scanLoopLimitInput) { scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0; }
         if (scanModeInput) { scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto'; }
         
@@ -824,14 +830,8 @@ async function loadSettings() {
             vocabularyLevelSelect.value = currentSettings.vocabularyLevel || 'functional';
         }
         // Load gridColumns setting
-        if (gridColumnsSlider && currentSettings.gridColumns !== undefined) {
-            gridColumnsSlider.value = currentSettings.gridColumns;
-            if (gridColumnsValue) gridColumnsValue.textContent = currentSettings.gridColumns;
-            console.log(`Loaded gridColumns setting: ${currentSettings.gridColumns}`);
-        } else if (gridColumnsSlider) {
-            gridColumnsSlider.value = 6; // Default value
-            if (gridColumnsValue) gridColumnsValue.textContent = 6;
-            console.log("Using default gridColumns value: 6");
+        if (gridColumnsSlider) {
+            gridColumnsSlider.value = currentSettings.gridColumns !== undefined ? currentSettings.gridColumns : 6;
         }
         // Load toolbar PIN (account level)
         await loadToolbarPIN();
@@ -1071,8 +1071,8 @@ async function saveSettings() {
     console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
     const newTapWordsRows = tapWordsRowsInput ? tapWordsRowsInput.value : '';
     const newTapPhrasesRows = tapPhrasesRowsInput ? tapPhrasesRowsInput.value : '';
-    const newUseHybridPages = useHybridPagesCheckbox ? useHybridPagesCheckbox.checked : false;
     const newTapDynamicRows = tapDynamicRowsInput ? tapDynamicRowsInput.value : '';
+    const newUseHybridPages = newTapDynamicRows !== '' && parseInt(newTapDynamicRows) > 0;
     const newScanLoopLimit = scanLoopLimitInput.value;
     const newScanMode = scanModeInput ? scanModeInput.value : 'auto';
     
@@ -1294,15 +1294,10 @@ async function saveSettings() {
         if (tapPhrasesRowsInput) {
             tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 0;
         }
-        if (useHybridPagesCheckbox) {
-            useHybridPagesCheckbox.checked = currentSettings.useHybridPages === true;
-            if (dynamicRowsContainer) {
-                dynamicRowsContainer.style.display = useHybridPagesCheckbox.checked ? 'block' : 'none';
-            }
-        }
         if (tapDynamicRowsInput) {
-            tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 1;
+            tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 0;
         }
+        updateStaticRowsDisplay();
         if (scanLoopLimitInput) scanLoopLimitInput.value = currentSettings.scanLoopLimit !== undefined ? currentSettings.scanLoopLimit : 0;
         if (scanModeInput) scanModeInput.value = currentSettings.scanMode === 'step' ? 'step' : 'auto';
         if (ScanningOffInput) ScanningOffInput.checked = currentSettings.ScanningOff || false;
@@ -1327,10 +1322,8 @@ async function saveSettings() {
         }
         setSelectedVoiceStyle(currentSettings.voice_style || 'adult');
         if (ttsVoiceSelect) ttsVoiceSelect.value = currentSettings.defaultPartnerVoice || currentSettings.selected_tts_voice_name || '';
-        // Update gridColumns slider after save
         if (gridColumnsSlider && currentSettings.gridColumns !== undefined) {
             gridColumnsSlider.value = currentSettings.gridColumns;
-            if (gridColumnsValue) gridColumnsValue.textContent = currentSettings.gridColumns;
         }
         // Update spellLetterOrder select
         if (spellLetterOrderSelect) {
@@ -1750,7 +1743,6 @@ async function initializePage() {
         // Assign DOM Elements
         scanDelayInput = document.getElementById('scanDelay');
         gridColumnsSlider = document.getElementById('gridColumnsSlider');
-        gridColumnsValue = document.getElementById('gridColumnsValue');
         // The following are already assigned globally as const, no need to re-assign:
         // wakeWordInterjectionInput, wakeWordNameInput, CountryCodeInput, speechRateInput,
         // LLMOptionsInput, ScanningOffInput, SummaryOffInput, ttsVoiceSelect,
@@ -1764,38 +1756,8 @@ async function initializePage() {
             return;
         }
 
-        // Debug: Check if slider elements were found
-        console.log("Slider elements found:", {
-            gridColumnsSlider: !!gridColumnsSlider,
-            gridColumnsValue: !!gridColumnsValue
-        });
-
-        if (gridColumnsSlider) {
-            console.log("gridColumnsSlider details:", {
-                id: gridColumnsSlider.id,
-                value: gridColumnsSlider.value,
-                min: gridColumnsSlider.min,
-                max: gridColumnsSlider.max
-            });
-        }
-
-        if (gridColumnsValue) {
-            console.log("gridColumnsValue details:", {
-                id: gridColumnsValue.id,
-                textContent: gridColumnsValue.textContent,
-                innerHTML: gridColumnsValue.innerHTML
-            });
-        }
-
         // Add Event Listeners
         if (saveSettingsButton) saveSettingsButton.addEventListener('click', saveSettings);
-        if (useHybridPagesCheckbox) {
-            useHybridPagesCheckbox.addEventListener('change', function() {
-                if (dynamicRowsContainer) {
-                    dynamicRowsContainer.style.display = this.checked ? 'block' : 'none';
-                }
-            });
-        }
         if (testTtsVoiceButton) testTtsVoiceButton.addEventListener('click', testSelectedVoice);
         const testDefaultPartnerVoiceButton = document.getElementById('testDefaultPartnerVoiceButton');
         if (testDefaultPartnerVoiceButton) testDefaultPartnerVoiceButton.addEventListener('click', testDefaultPartnerVoice);
@@ -1840,27 +1802,11 @@ async function initializePage() {
             importProfileSettingsFileInput.addEventListener('change', handleImportProfileSettingsFileSelection);
         }
         
-        // Mood-related event listeners
-        // Grid columns slider event listener
-        if (gridColumnsSlider && gridColumnsValue) {
-            // Update value display when slider moves
-            const updateSliderValue = function() {
-                gridColumnsValue.textContent = gridColumnsSlider.value;
-                console.log(`Grid columns slider updated to: ${gridColumnsSlider.value}`);
-            };
-            
-            gridColumnsSlider.addEventListener('input', updateSliderValue);
-            gridColumnsSlider.addEventListener('change', updateSliderValue);
-            
-            // Set initial value
-            updateSliderValue();
-            console.log("Grid columns slider event listeners added successfully");
-        } else {
-            console.error("Grid columns slider elements not found:", {
-                gridColumnsSlider: !!gridColumnsSlider,
-                gridColumnsValue: !!gridColumnsValue
-            });
-        }
+        // Words rows static calculation listeners
+        if (tapWordsRowsInput) tapWordsRowsInput.addEventListener('input', updateStaticRowsDisplay);
+        if (tapWordsRowsInput) tapWordsRowsInput.addEventListener('change', updateStaticRowsDisplay);
+        if (tapDynamicRowsInput) tapDynamicRowsInput.addEventListener('input', updateStaticRowsDisplay);
+        if (tapDynamicRowsInput) tapDynamicRowsInput.addEventListener('change', updateStaticRowsDisplay);
 
 
         // Initial data loading
