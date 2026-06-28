@@ -1655,6 +1655,7 @@
         let tapDynamicRows = 1;
         let useBravoBuild = true;
         let defaultButtonAction = 'do_nothing';
+        let tapMascot = 'buddy';
         const QUESTION_TEXTAREA_ID = 'question-display';
         const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening';
 
@@ -4713,7 +4714,7 @@
                 
                 // Use unified button-search that searches Firestore collections with keywords support
                 // Use the normalized term for server search
-                let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(normalizedSearchTerm.trim())}&limit=1&locale=${encodeURIComponent(tapTargetLocale || 'en-US')}`;
+                let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(normalizedSearchTerm.trim())}&limit=1&locale=${encodeURIComponent(tapTargetLocale || 'en-US')}&mascot=${encodeURIComponent(tapMascot || 'buddy')}`;
                 if (keywords && keywords.length > 0) {
                     symbolsUrl += `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
                 }
@@ -5761,6 +5762,9 @@
                 } else {
                     autoClean = false; // Default value
                 }
+
+                // Load mascot setting
+                tapMascot = (settings && settings.mascot) ? settings.mascot : 'buddy';
 
                 if (settings && typeof settings.useHybridPages === 'boolean') {
                     useHybridPages = settings.useHybridPages;

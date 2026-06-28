@@ -95,6 +95,7 @@ const addLocationOverrideRowButton = document.getElementById('addLocationOverrid
 const locationOverrideVoiceContainer = document.getElementById('locationOverrideVoiceContainer');
 const toolbarPINInput = document.getElementById('toolbarPIN');
 const spellLetterOrderSelect = document.getElementById('spellLetterOrder');
+const mascotSelect = document.getElementById('mascot');
 // Grid columns input assigned in initializePage when DOM is ready
 let gridColumnsSlider = null;
 let gridColumnsValue = null;
@@ -829,6 +830,10 @@ async function loadSettings() {
         if (vocabularyLevelSelect) {
             vocabularyLevelSelect.value = currentSettings.vocabularyLevel || 'functional';
         }
+        // Load mascot setting
+        if (mascotSelect) {
+            mascotSelect.value = currentSettings.mascot || 'buddy';
+        }
         // Load gridColumns setting
         if (gridColumnsSlider) {
             gridColumnsSlider.value = currentSettings.gridColumns !== undefined ? currentSettings.gridColumns : 6;
@@ -1115,6 +1120,7 @@ async function saveSettings() {
     const newToolbarPIN = toolbarPINInput ? toolbarPINInput.value.trim() : null;
     const newSpellLetterOrder = spellLetterOrderSelect ? spellLetterOrderSelect.value : 'alphabetical';
     const newVocabularyLevel = vocabularyLevelSelect ? vocabularyLevelSelect.value : 'functional';
+    const newMascot = mascotSelect ? mascotSelect.value : 'buddy';
     
     console.log(`DEBUG vocabularyLevel - Save value:
         - vocabularyLevelSelect exists: ${!!vocabularyLevelSelect}
@@ -1243,7 +1249,8 @@ async function saveSettings() {
         locationOverrideVoices: newLocationOverrideVoices,
         gridColumns: newGridColumns, // Add gridColumns to save payload
         spellLetterOrder: newSpellLetterOrder, // Add spell letter order setting
-        vocabularyLevel: newVocabularyLevel // Add vocabulary level setting
+        vocabularyLevel: newVocabularyLevel, // Add vocabulary level setting
+        mascot: newMascot
     };
     console.log('DEBUG FreestyleOptions - Payload value:', settingsToSave.FreestyleOptions);
     console.log('DEBUG enablePictograms - Payload value:', settingsToSave.enablePictograms);
@@ -1336,7 +1343,11 @@ async function saveSettings() {
         if (vocabularyLevelSelect) {
             vocabularyLevelSelect.value = currentSettings.vocabularyLevel || 'functional';
         }
-        
+        // Update mascot select
+        if (mascotSelect) {
+            mascotSelect.value = currentSettings.mascot || 'buddy';
+        }
+
         // Save toolbar PIN separately (account level)
         if (newToolbarPIN) {
             await saveToolbarPIN(newToolbarPIN);

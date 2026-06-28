@@ -1776,7 +1776,8 @@ DEFAULT_SETTINGS = {
     "useBravoBuild": True,
     "defaultButtonAction": "do_nothing",
     "hasLoggedIn": False,
-    "regenerate_boards": False
+    "regenerate_boards": False,
+    "mascot": "buddy"
 }
 
 
@@ -20768,7 +20769,8 @@ async def button_symbol_search(
     q: str = "",
     keywords: str = "",
     locale: str = "en-US",
-    limit: int = 5
+    limit: int = 5,
+    mascot: str = ""
 ):
     """
     Fast AAC button symbol search with keyword matching and AI fallback.
@@ -21009,7 +21011,8 @@ async def button_symbol_search(
                             'match_score': image['match_score'],
                             'matched_term': term,
                             'search_phase': "bravo_image_match",
-                            'source': 'bravo_images'
+                            'source': 'bravo_images',
+                            'mascot': image.get('mascot')
                         }
                         matched_symbols.append(symbol_data)
             except Exception as e:
@@ -21229,9 +21232,22 @@ async def button_symbol_search(
         except Exception as e:
             logging.debug(f"Custom images search failed: {e}")
 
+        def _apply_mascot_scores(symbols: list, selected_mascot: str) -> list:
+            """Boost mascot-matching images, penalize wrong-mascot images, leave generic neutral."""
+            if not selected_mascot:
+                return symbols
+            for s in symbols:
+                img_mascot = s.get('mascot')
+                if img_mascot == selected_mascot:
+                    s['match_score'] = s.get('match_score', 0) + 25
+                elif img_mascot and img_mascot != selected_mascot:
+                    s['match_score'] = s.get('match_score', 0) - 20
+            return symbols
+
         # Fast return path for Tap interface (limit=1): avoid expensive fallback phases.
         # Placed here (after custom images) so custom subconcept/concept matches are included.
         if limit <= 1 and matched_symbols:
+            _apply_mascot_scores(matched_symbols, mascot)
             matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
             return JSONResponse(content={
                 "symbols": matched_symbols[:1],
@@ -21423,6 +21439,7 @@ async def button_symbol_search(
                 logging.error(f"Comprehensive search failed: {e}")
         
         # Sort by match score and clean up response
+        _apply_mascot_scores(matched_symbols, mascot)
         matched_symbols.sort(key=lambda x: x.get('match_score', 0), reverse=True)
 
         # Recursively clean non-JSON-native values (e.g., Firestore DatetimeWithNanoseconds)

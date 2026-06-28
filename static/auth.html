@@ -3394,6 +3394,7 @@ registerForm.addEventListener('submit', async (e) => {
             displayName: null,
             ttsVoices: [],
             interfaceMode: 'tap',
+            mascot: 'buddy',
             userLanguage: 'en-US',
             wakeWordInterjection: '',
             wakeWordName: '',
@@ -3435,8 +3436,8 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // tap: 7 steps (rows merged into step 3); scan: 8 steps
-            return wizardState.interfaceMode === 'tap' ? 7 : 8;
+            // tap: 8 steps (mascot added as step 2); scan: 9 steps
+            return wizardState.interfaceMode === 'tap' ? 8 : 9;
         }
 
         async function openSetupWizard() {
@@ -3599,6 +3600,35 @@ registerForm.addEventListener('submit', async (e) => {
                 });
 
             } else if (step === 2) {
+                titleEl.textContent = 'Choose a Mascot';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:16px;">Select the mascot character shown in button images throughout the app.</p>
+                    <div class="wizard-option-card${wizardState.mascot === 'buddy' ? ' selected' : ''}" data-mascot="buddy">
+                        <input type="radio" name="wizardMascot" value="buddy" ${wizardState.mascot === 'buddy' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                        <div>
+                            <div style="font-weight:600;color:#111827;">Buddy</div>
+                            <div style="font-size:0.875rem;color:#6b7280;margin-top:2px;">Male mascot character (default)</div>
+                        </div>
+                    </div>
+                    <div class="wizard-option-card${wizardState.mascot === 'bonnie' ? ' selected' : ''}" data-mascot="bonnie">
+                        <input type="radio" name="wizardMascot" value="bonnie" ${wizardState.mascot === 'bonnie' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                        <div>
+                            <div style="font-weight:600;color:#111827;">Bonnie</div>
+                            <div style="font-size:0.875rem;color:#6b7280;margin-top:2px;">Female mascot character</div>
+                        </div>
+                    </div>
+                    <p style="font-size:0.8rem;color:#9ca3af;margin-top:12px;">More mascot options coming soon.</p>`;
+                contentEl.querySelectorAll('.wizard-option-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        wizardState.mascot = card.dataset.mascot;
+                        contentEl.querySelectorAll('.wizard-option-card').forEach(c => {
+                            c.classList.toggle('selected', c.dataset.mascot === wizardState.mascot);
+                            c.querySelector('input[type=radio]').checked = c.dataset.mascot === wizardState.mascot;
+                        });
+                    });
+                });
+
+            } else if (step === 3) {
                 titleEl.textContent = 'Wake Word';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:16px;">Configure the wake word that activates the app.</p>
@@ -3613,7 +3643,7 @@ registerForm.addEventListener('submit', async (e) => {
                         <p class="wizard-input-hint">The name spoken to wake the app</p>
                     </div>`;
 
-            } else if (step === 3) {
+            } else if (step === 4) {
                 if (wizardState.interfaceMode === 'tap') {
                     titleEl.textContent = 'Button Layout';
                     contentEl.innerHTML = `
@@ -3694,9 +3724,9 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 }
 
-            } else if (step === 4) {
+            } else if (step === 5) {
                 if (wizardState.interfaceMode === 'tap') {
-                    // tap step 4 = Button Action (was step 5)
+                    // tap step 5 = Button Action (was step 4)
                     titleEl.textContent = 'Button Action';
                     const actionVal = wizardState.defaultButtonAction || 'do_nothing';
                     contentEl.innerHTML = `
@@ -3742,9 +3772,9 @@ registerForm.addEventListener('submit', async (e) => {
                         <p class="wizard-input-hint">Set to 0 to disable AI-generated options</p>`;
                 }
 
-            } else if (step === 5) {
+            } else if (step === 6) {
                 if (wizardState.interfaceMode === 'tap') {
-                    // tap step 5 = Menu Options (was step 6)
+                    // tap step 6 = Menu Options
                     titleEl.textContent = 'Menu Options';
                     const vis = wizardState.menuItemVisibility || {};
                     const tree = wizardState.menuItemsTree || [];
@@ -3793,9 +3823,9 @@ registerForm.addEventListener('submit', async (e) => {
                         <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
                 }
 
-            } else if (step === 6) {
+            } else if (step === 7) {
                 if (wizardState.interfaceMode === 'tap') {
-                    // tap step 6 = User Language (was step 7)
+                    // tap step 7 = User Language
                     titleEl.textContent = 'User Language';
                     const langOpts6 = WIZARD_LANGUAGES.map(l =>
                         `<option value="${l.value}"${wizardState.userLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
@@ -3815,9 +3845,9 @@ registerForm.addEventListener('submit', async (e) => {
                         <select id="wizardUserLanguage" class="wizard-input">${langOpts}</select>`;
                 }
 
-            } else if (step === 7) {
+            } else if (step === 8) {
                 if (wizardState.interfaceMode === 'tap') {
-                    // tap step 7 = Partner Language & Voice (was step 8) — LAST TAP STEP
+                    // tap step 8 = Partner Language & Voice — LAST TAP STEP
                     titleEl.textContent = 'Default Partner Language & Voice';
                     const langOpts7tap = WIZARD_LANGUAGES.map(l =>
                         `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
@@ -3902,8 +3932,8 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 }
 
-            } else if (step === 8) {
-                // scan only — tap mode ends at step 7
+            } else if (step === 9) {
+                // scan only — tap mode ends at step 8
                 titleEl.textContent = 'Scanning Configuration';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:16px;">Configure scanning behavior for switch access.</p>
@@ -4172,11 +4202,17 @@ registerForm.addEventListener('submit', async (e) => {
         function wizardCollectCurrentStep() {
             const step = wizardState.currentStep;
             if (step === 2) {
+                // step 2 = Mascot (captured by click handler; read here as fallback)
+                const el = document.querySelector('input[name="wizardMascot"]:checked');
+                if (el) wizardState.mascot = el.value;
+            } else if (step === 3) {
+                // step 3 = Wake Word
                 const i = document.getElementById('wizardWakeInterjection');
                 const n = document.getElementById('wizardWakeName');
                 if (i) wizardState.wakeWordInterjection = i.value.trim();
                 if (n) wizardState.wakeWordName = n.value.trim();
-            } else if (step === 3) {
+            } else if (step === 4) {
+                // step 4 = Button Layout
                 const el = document.getElementById('wizardGridColumns');
                 if (el) wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(el.value) || 6));
                 if (wizardState.interfaceMode === 'tap') {
@@ -4191,9 +4227,9 @@ registerForm.addEventListener('submit', async (e) => {
                         wizardState.tapDynamicRows = Math.max(0, dVal);
                     }
                 }
-            } else if (step === 4) {
+            } else if (step === 5) {
                 if (wizardState.interfaceMode === 'tap') {
-                    // tap step 4 = Button Action
+                    // tap step 5 = Button Action
                     const actionEl = document.querySelector('input[name="wizardButtonAction"]:checked');
                     if (actionEl) {
                         wizardState.defaultButtonAction = actionEl.value;
@@ -4203,9 +4239,9 @@ registerForm.addEventListener('submit', async (e) => {
                     const el = document.getElementById('wizardLlmOptions');
                     if (el) wizardState.llmOptions = Math.max(0, Math.min(50, parseInt(el.value) || 0));
                 }
-            } else if (step === 5) {
+            } else if (step === 6) {
                 if (wizardState.interfaceMode === 'tap') {
-                    // tap step 5 = Menu Options
+                    // tap step 6 = Menu Options
                     const boxes = document.querySelectorAll('.wizard-menu-checkbox');
                     if (boxes.length) {
                         boxes.forEach(cb => {
@@ -4216,25 +4252,17 @@ registerForm.addEventListener('submit', async (e) => {
                     const el = document.getElementById('wizardFreestyleOptions');
                     if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
                 }
-            } else if (step === 6) {
+            } else if (step === 7) {
                 // both modes: User Language
                 const el = document.getElementById('wizardUserLanguage');
                 if (el) wizardState.userLanguage = el.value;
-            } else if (step === 7) {
-                if (wizardState.interfaceMode === 'tap') {
-                    // tap step 7 = Partner Language & Voice (last tap step)
-                    const langEl = document.getElementById('wizardPartnerLanguage');
-                    const voiceEl = document.getElementById('wizardPartnerVoice');
-                    if (langEl) wizardState.partnerLanguage = langEl.value;
-                    if (voiceEl) wizardState.partnerVoice = voiceEl.value;
-                } else {
-                    // scan step 7 = Partner Language & Voice
-                    const langEl = document.getElementById('wizardPartnerLanguage');
-                    const voiceEl = document.getElementById('wizardPartnerVoice');
-                    if (langEl) wizardState.partnerLanguage = langEl.value;
-                    if (voiceEl) wizardState.partnerVoice = voiceEl.value;
-                }
             } else if (step === 8) {
+                // both modes: Partner Language & Voice (last tap step)
+                const langEl = document.getElementById('wizardPartnerLanguage');
+                const voiceEl = document.getElementById('wizardPartnerVoice');
+                if (langEl) wizardState.partnerLanguage = langEl.value;
+                if (voiceEl) wizardState.partnerVoice = voiceEl.value;
+            } else if (step === 9) {
                 // scan only: Scanning Configuration
                 const modeEl = document.querySelector('[name=wizardScanMode]:checked');
                 if (modeEl) wizardState.scanMode = modeEl.value;
@@ -4294,6 +4322,7 @@ registerForm.addEventListener('submit', async (e) => {
                     tapDynamicRows: wizardState.tapDynamicRows,
                     useBravoBuild: wizardState.useBravoBuild,
                     defaultButtonAction: wizardState.defaultButtonAction,
+                    mascot: wizardState.mascot,
                     hasLoggedIn: true,
                     regenerate_boards: true
                 };
