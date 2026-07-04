@@ -8545,6 +8545,7 @@ class SettingsModel(BaseModel):
     defaultButtonAction: Optional[str] = Field(None, description="Default action type for Tap Interface options.")
     hasLoggedIn: Optional[bool] = Field(None, description="Whether the user profile has completed initial setup/login.")
     regenerate_boards: Optional[bool] = Field(None, description="Trigger board regeneration on settings save.")
+    mascot: Optional[str] = Field(None, description="Mascot character for button images (e.g., 'buddy', 'bonnie').")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -22037,6 +22038,7 @@ async def download_image_library(
                 'localized_labels': localized_labels,
                 'search_terms': search_terms,
                 'source': data.get('source'),
+                'mascot': data.get('mascot'),
                 # Include any other metadata that might be useful for search
                 'category': data.get('category'),
                 'subcategory': data.get('subcategory')

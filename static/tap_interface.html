@@ -4874,6 +4874,14 @@
             if (aliases.some(t => t.includes(normalizedQuery))) score += 20;
             if (terms.some(t => t.includes(normalizedQuery))) score += 15;
 
+            // Mascot scoring: boost matching mascot, penalize wrong mascot, neutral for generic
+            const activeMascot = tapMascot || '';
+            const imgMascot = candidate.mascot || '';
+            if (activeMascot) {
+                if (imgMascot === activeMascot) score += 50;
+                else if (imgMascot && imgMascot !== activeMascot) score -= 40;
+            }
+
             return score;
         }
 
@@ -5765,6 +5773,7 @@
 
                 // Load mascot setting
                 tapMascot = (settings && settings.mascot) ? settings.mascot : 'buddy';
+                window.currentMascot = tapMascot;
 
                 if (settings && typeof settings.useHybridPages === 'boolean') {
                     useHybridPages = settings.useHybridPages;

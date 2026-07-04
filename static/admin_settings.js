@@ -1174,8 +1174,8 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Tap Phrases Rows. Must be a number between 0 and 10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-    if (newTapDynamicRows !== '' && (isNaN(parseInt(newTapDynamicRows)) || parseInt(newTapDynamicRows) < 1 || parseInt(newTapDynamicRows) > 10)) {
-        settingsStatus.textContent = 'Invalid Tap Dynamic Rows. Must be a number between 1 and 10.';
+    if (newTapDynamicRows !== '' && (isNaN(parseInt(newTapDynamicRows)) || parseInt(newTapDynamicRows) < 0 || parseInt(newTapDynamicRows) > 10)) {
+        settingsStatus.textContent = 'Invalid Tap Dynamic Rows. Must be a number between 0 and 10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
     if (newScanLoopLimit !== '' && (isNaN(parseInt(newScanLoopLimit)) || parseInt(newScanLoopLimit) < 0 || parseInt(newScanLoopLimit) > 10)) {
@@ -1224,7 +1224,7 @@ async function saveSettings() {
         tapWordsRows: newTapWordsRows !== '' ? parseInt(newTapWordsRows) : 4,
         tapPhrasesRows: newTapPhrasesRows !== '' ? parseInt(newTapPhrasesRows) : 0,
         useHybridPages: newUseHybridPages,
-        tapDynamicRows: newTapDynamicRows !== '' ? parseInt(newTapDynamicRows) : 1,
+        tapDynamicRows: newTapDynamicRows !== '' ? parseInt(newTapDynamicRows) : 0,
         scanLoopLimit: newScanLoopLimit !== '' ? parseInt(newScanLoopLimit) : 0,
         scanMode: newScanMode,
         ScanningOff: newScanningOff,    
