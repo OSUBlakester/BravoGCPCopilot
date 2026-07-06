@@ -1761,7 +1761,7 @@ DEFAULT_SETTINGS = {
     "enableMoodSelection": True,  # Default mood selection enabled
     "enablePictograms": False,  # Default AAC pictograms disabled
     "disableTapPictograms": False,  # Default Tap Interface pictograms enabled
-    "enableSightWords": True,  # Default sight word logic enabled
+    "enableSightWords": False,  # Default sight word logic disabled
     "sightWordGradeLevel": "pre_k",  # Default sight word grade level
     "useTapInterface": False,  # Default to gridpage interface
     "applicationVolume": 8,  # Default application volume (80%)
@@ -8545,7 +8545,7 @@ class SettingsModel(BaseModel):
     defaultButtonAction: Optional[str] = Field(None, description="Default action type for Tap Interface options.")
     hasLoggedIn: Optional[bool] = Field(None, description="Whether the user profile has completed initial setup/login.")
     regenerate_boards: Optional[bool] = Field(None, description="Trigger board regeneration on settings save.")
-    mascot: Optional[str] = Field(None, description="Mascot character for button images (e.g., 'buddy', 'bonnie').")
+    mascot: Optional[str] = Field(None, description="Mascot character for button images (e.g., 'bobby', 'bonnie', 'buddy').")
 
 
     @field_validator('wakeWordInterjection', 'wakeWordName', 'CountryCode', mode='before')
@@ -19422,6 +19422,7 @@ async def browse_images_for_admin(
                 "aliases": data.get("aliases", []),
                 "localized_tags": data.get("localized_tags", {}),
                 "localized_labels": data.get("localized_labels", {}),
+                "mascot": data.get("mascot"),
             }
             images.append(admin_data)
         
@@ -19488,6 +19489,27 @@ async def api_update_image_tags(
         raise
     except Exception as e:
         logging.error(f"Error in update image tags API: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/admin/images/{image_id}/mascot")
+async def api_update_image_mascot(
+    image_id: str,
+    payload: Dict = Body(...),
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)] = None
+):
+    """Update the mascot field for an AAC image. Pass null to clear (generic)."""
+    try:
+        doc_ref = firestore_db.collection("aac_images").document(image_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Image not found")
+        mascot = payload.get("mascot")  # None/null means generic
+        await asyncio.to_thread(doc_ref.update, {"mascot": mascot, "updated_at": datetime.now(timezone.utc)})
+        return {"success": True, "mascot": mascot}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating image mascot: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/imagecreator/images/{image_id}/multilingual")
@@ -24025,13 +24047,13 @@ def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[
         'text_color': '#000000',
         'special_function': None,
         'custom_audio_file': None,
-        'words_prompt': None,
+        'words_prompt': 'Generate single words and very short phrases (2 words max) for the help board. Use only core help vocabulary like: hurt, sick, help, need, hungry, thirsty, tired, hot, cold, pain, emergency, bathroom, medicine, water, food, dizzy, scared, uncomfortable, itchy, nauseous. Single words or 2-word phrases only. No full sentences.',
         'id': 'help_btn',
         'prompt_exclusions': None,
         'speech_text': 'I need help',
         'prompt_category': 'help',
-        'llm_prompt': 'Generate AAC-friendly phrases for asking for help or assistance, covering a range of urgency and intensity. Include mild requests (I could use some help, Can you help me please, I need a little help), moderate requests (I need help right now, Please help me, I am having trouble and need assistance), and urgent phrases (I need help immediately, This is an emergency, Please call for help now, I need someone right away). Phrases should be clear, direct, and appropriate for someone with a communication disability.',
-        'static_options': None,
+        'llm_prompt': None,
+        'static_options': 'help, need help, hurt, sick, emergency, doctor, medicine, bathroom, thirsty, hungry, stop, go, more, all done, want, need, can I, please help, assist, care, nurse, hospital, water, food, drink, restroom, warm, cool, call family, call friend',
         'label': 'Help',
         'image_url': None,
         'prompt_examples': None,
@@ -24113,6 +24135,12 @@ def normalize_compose_tap_config(config_data: Optional[Dict]) -> Tuple[Optional[
             normalized = True
         if btn.get('llm_prompt') != expected_help_button['llm_prompt']:
             btn['llm_prompt'] = expected_help_button['llm_prompt']
+            normalized = True
+        if btn.get('static_options') != expected_help_button['static_options']:
+            btn['static_options'] = expected_help_button['static_options']
+            normalized = True
+        if btn.get('words_prompt') != expected_help_button['words_prompt']:
+            btn['words_prompt'] = expected_help_button['words_prompt']
             normalized = True
 
     # Also normalize the boards_menu (source of truth for migrated configs).
@@ -24304,13 +24332,13 @@ def create_default_tap_config(account_id: str, aac_user_id: str, use_hybrid_page
             "text_color": "#000000",
             "special_function": None,
             "custom_audio_file": None,
-            "words_prompt": None,
+            "words_prompt": "Generate single words and very short phrases (2 words max) for the help board. Use only core help vocabulary like: hurt, sick, help, need, hungry, thirsty, tired, hot, cold, pain, emergency, bathroom, medicine, water, food, dizzy, scared, uncomfortable, itchy, nauseous. Single words or 2-word phrases only. No full sentences.",
             "id": "help_btn",
             "prompt_exclusions": None,
             "speech_text": "I need help",
             "prompt_category": "help",
-            "llm_prompt": "Generate AAC-friendly phrases for asking for help or assistance, covering a range of urgency and intensity. Include mild requests (I could use some help, Can you help me please, I need a little help), moderate requests (I need help right now, Please help me, I am having trouble and need assistance), and urgent phrases (I need help immediately, This is an emergency, Please call for help now, I need someone right away). Phrases should be clear, direct, and appropriate for someone with a communication disability.",
-            "static_options": None,
+            "llm_prompt": None,
+            "static_options": "help, need help, hurt, sick, emergency, doctor, medicine, bathroom, thirsty, hungry, stop, go, more, all done, want, need, can I, please help, assist, care, nurse, hospital, water, food, drink, restroom, warm, cool, call family, call friend",
             "label": "Help",
             "image_url": None,
             "prompt_examples": None,

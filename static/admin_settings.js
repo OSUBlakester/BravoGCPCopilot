@@ -95,7 +95,7 @@ const addLocationOverrideRowButton = document.getElementById('addLocationOverrid
 const locationOverrideVoiceContainer = document.getElementById('locationOverrideVoiceContainer');
 const toolbarPINInput = document.getElementById('toolbarPIN');
 const spellLetterOrderSelect = document.getElementById('spellLetterOrder');
-const mascotSelect = document.getElementById('mascot');
+const mascotSelect = document.getElementById('mascot'); // hidden input — driven by mascot-picker cards
 // Grid columns input assigned in initializePage when DOM is ready
 let gridColumnsSlider = null;
 let gridColumnsValue = null;
@@ -833,6 +833,7 @@ async function loadSettings() {
         // Load mascot setting
         if (mascotSelect) {
             mascotSelect.value = currentSettings.mascot || 'buddy';
+            setActiveMascotCard(mascotSelect.value);
         }
         // Load gridColumns setting
         if (gridColumnsSlider) {
@@ -1346,6 +1347,7 @@ async function saveSettings() {
         // Update mascot select
         if (mascotSelect) {
             mascotSelect.value = currentSettings.mascot || 'buddy';
+            setActiveMascotCard(mascotSelect.value);
         }
 
         // Save toolbar PIN separately (account level)
@@ -1892,9 +1894,31 @@ if (window.adminContextInitializedByInlineScript === true) {
     authContextIsReady();
 }
 
+function setActiveMascotCard(value) {
+    const picker = document.getElementById('mascot-picker');
+    if (!picker) return;
+    picker.querySelectorAll('.mascot-card').forEach(card => {
+        const active = card.dataset.mascot === value;
+        card.style.borderColor = active ? '#6366f1' : 'transparent';
+        card.style.background = active ? '#eef2ff' : '';
+        card.style.boxShadow = active ? '0 0 0 2px #6366f1' : '';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     console.log("admin_settings.js: DOMContentLoaded event.");
     isDomContentLoaded = true;
     initializePage();
     setupAdminToolbarButtons(); // Add toolbar button functionality
+
+    // Mascot image picker
+    const picker = document.getElementById('mascot-picker');
+    if (picker) {
+        picker.querySelectorAll('.mascot-card').forEach(card => {
+            card.addEventListener('click', () => {
+                if (mascotSelect) mascotSelect.value = card.dataset.mascot;
+                setActiveMascotCard(card.dataset.mascot);
+            });
+        });
+    }
 });

@@ -3608,29 +3608,31 @@ registerForm.addEventListener('submit', async (e) => {
 
             } else if (step === 2) {
                 titleEl.textContent = 'Choose a Mascot';
+                const mascots = [
+                    { value: 'bobby',  label: 'Bobby',  desc: 'Boy',  img: '/static/images/mascot_bobby.png' },
+                    { value: 'bonnie', label: 'Bonnie', desc: 'Girl', img: '/static/images/mascot_bonnie.png' },
+                    { value: 'buddy',  label: 'Buddy',  desc: 'Dog',  img: '/static/images/mascot_buddy.png' },
+                ];
                 contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:16px;">Select the mascot character shown in button images throughout the app.</p>
-                    <div class="wizard-option-card${wizardState.mascot === 'buddy' ? ' selected' : ''}" data-mascot="buddy">
-                        <input type="radio" name="wizardMascot" value="buddy" ${wizardState.mascot === 'buddy' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
-                        <div>
-                            <div style="font-weight:600;color:#111827;">Buddy</div>
-                            <div style="font-size:0.875rem;color:#6b7280;margin-top:2px;">Male mascot character (default)</div>
-                        </div>
-                    </div>
-                    <div class="wizard-option-card${wizardState.mascot === 'bonnie' ? ' selected' : ''}" data-mascot="bonnie">
-                        <input type="radio" name="wizardMascot" value="bonnie" ${wizardState.mascot === 'bonnie' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
-                        <div>
-                            <div style="font-weight:600;color:#111827;">Bonnie</div>
-                            <div style="font-size:0.875rem;color:#6b7280;margin-top:2px;">Female mascot character</div>
-                        </div>
-                    </div>
-                    <p style="font-size:0.8rem;color:#9ca3af;margin-top:12px;">More mascot options coming soon.</p>`;
-                contentEl.querySelectorAll('.wizard-option-card').forEach(card => {
+                    <p style="color:#374151;margin-bottom:20px;">Select the mascot character shown in button images throughout the app.</p>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
+                        ${mascots.map(m => `
+                        <div class="wizard-mascot-card" data-mascot="${m.value}" style="
+                            cursor:pointer;border-radius:14px;border:3px solid ${wizardState.mascot === m.value ? '#6366f1' : 'transparent'};
+                            background:${wizardState.mascot === m.value ? '#eef2ff' : '#f9fafb'};
+                            padding:12px;text-align:center;width:110px;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+                            <img src="${m.img}" alt="${m.label}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;margin-bottom:8px;">
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">${m.label}</div>
+                            <div style="font-size:0.78rem;color:#6b7280;">${m.desc}</div>
+                        </div>`).join('')}
+                    </div>`;
+                contentEl.querySelectorAll('.wizard-mascot-card').forEach(card => {
                     card.addEventListener('click', () => {
                         wizardState.mascot = card.dataset.mascot;
-                        contentEl.querySelectorAll('.wizard-option-card').forEach(c => {
-                            c.classList.toggle('selected', c.dataset.mascot === wizardState.mascot);
-                            c.querySelector('input[type=radio]').checked = c.dataset.mascot === wizardState.mascot;
+                        contentEl.querySelectorAll('.wizard-mascot-card').forEach(c => {
+                            const active = c.dataset.mascot === wizardState.mascot;
+                            c.style.borderColor = active ? '#6366f1' : 'transparent';
+                            c.style.background = active ? '#eef2ff' : '#f9fafb';
                         });
                     });
                 });

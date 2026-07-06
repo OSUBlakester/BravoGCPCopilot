@@ -1362,6 +1362,8 @@ WORD_VARIANTS = {
     "set":              {"past_tense": None, "plural": "sets"},
     "pitch":            {"past_tense": "pitched", "plural": "pitches"},
     # ── HEALTH ────────────────────────────────────────────────────────────────
+    "assist":           {"past_tense": "assisted",         "plural": None},
+    "care":             {"past_tense": "cared",            "plural": None},
     "pill":             {"past_tense": None, "plural": "pills"},
     "vitamin":          {"past_tense": None, "plural": "vitamins"},
     "shot":             {"past_tense": None, "plural": "shots"},
@@ -1370,6 +1372,13 @@ WORD_VARIANTS = {
     "allergy":          {"past_tense": None, "plural": "allergies"},
     "appointment":      {"past_tense": None, "plural": "appointments"},
     "prescription":     {"past_tense": None, "plural": "prescriptions"},
+    "emergency":        {"past_tense": None, "plural": "emergencies"},
+    "medicine":         {"past_tense": None, "plural": "medicines"},
+    "painkiller":       {"past_tense": None, "plural": "painkillers"},
+    "ice pack":         {"past_tense": None, "plural": "ice packs"},
+    "restroom":         {"past_tense": None, "plural": "restrooms"},
+    "diaper":           {"past_tense": None, "plural": "diapers"},
+    "bath":             {"past_tense": None, "plural": "baths"},
     # ── OUTSIDE & NATURE ──────────────────────────────────────────────────────
     "tree":             {"past_tense": None, "plural": "trees"},
     "leaf":             {"past_tense": None, "plural": "leaves"},
@@ -2015,25 +2024,28 @@ CATEGORY_STATIC_POOLS = {
         'how do you say', 'which way', 'are you okay', 'do you see',
     ],
     "help": [
-        # Mild / routine requests
-        'help', 'please help', 'can you help', 'I need a little help', 'can you help me please',
-        'I could use some help', 'could you help me', 'excuse me', 'pardon me', 'I need assistance',
-        # Moderate urgency
-        'I need help', 'help me please', 'please assist me', 'I am having trouble', 'I need help right now',
-        'I need someone to help me', 'please come help me', 'I need support', 'I cannot do this alone', 'I need you',
-        # Urgent
-        'I need help immediately', 'this is urgent', 'please hurry', 'please call for help now',
-        'I need someone right away', 'this is an emergency', 'call 911', 'call for help', 'emergency', 'call my family',
-        # Physical needs
-        'I am hurt', 'I am sick', 'I am in pain', 'I need a doctor', 'I need a nurse', 'I need medicine',
-        'I need water', 'I need food', 'I am thirsty', 'I am hungry', 'I need the bathroom', 'I need to stop',
+        # Core requests
+        'help', 'need help', 'hurt', 'sick', 'emergency', 'doctor', 'medicine', 'bathroom',
+        'thirsty', 'hungry', 'stop', 'go', 'more', 'all done', 'want', 'need', 'can I', 'please help',
+        # Assistance
+        'open this', 'close this', 'turn on', 'turn off', 'assist', 'care', 'nurse', 'hospital',
+        # Medical supplies
+        'pill', 'bandage', 'ice pack', 'wheelchair', 'walker', 'braces', 'painkiller',
+        # Sustenance
+        'water', 'food', 'snack', 'drink', 'restroom', 'toilet', 'diaper',
+        # Personal care
+        'change me', 'wash hands', 'shower', 'bath', 'brush teeth', 'comb hair', 'dress me', 'undress me',
         # Comfort and environment
-        'I am too hot', 'I am too cold', 'I need a blanket', 'I need a pillow', 'I need to lie down',
-        'I need to sit down', 'I am tired', 'I need rest', 'please be quiet', 'it is too loud',
-        # Practical help
-        'open this', 'close this', 'turn on', 'turn off', 'I need my wheelchair', 'I need my walker',
-        'call my caregiver', 'I need to go to the hospital', 'I need my medication', 'change me',
-        'wash my hands', 'I need a bandage', 'something is wrong', 'I do not feel well', 'something hurts',
+        'blanket', 'pillow', 'warm', 'cool', 'fan', 'heater',
+        'light on', 'light off', 'tv on', 'tv off', 'volume up', 'volume down',
+        # Communication devices
+        'remote control', 'phone', 'call family', 'call friend',
+        # Mobility
+        'sit down', 'stand up', 'lie down', 'walk', 'run', 'ride',
+        # Location / environment
+        'outside', 'inside', 'quiet', 'loud', 'softer', 'harder',
+        # Timing
+        'slow down', 'hurry up', 'wait', 'now', 'later', 'today', 'tomorrow', 'yesterday',
     ],
     "emergency": [
         'help', 'call 911', 'emergency', 'danger', 'fire', 'police', 'ambulance', 'hurt', 'bleeding', 'not breathing',
