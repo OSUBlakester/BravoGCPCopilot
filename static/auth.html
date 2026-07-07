@@ -1252,6 +1252,9 @@
                     const aliases = Array.isArray(candidate.aliases) ? candidate.aliases.map(normalizeSearchText) : [];
                     const terms = Array.isArray(candidate.search_terms) ? candidate.search_terms.map(normalizeSearchText) : [];
                     let score = 0;
+                    // Exact label match gets a large bonus to ensure "you" beats "pleasure to meet you"
+                    if (subconcept === normalizedQuery) score += 2000;
+                    if (concept === normalizedQuery) score += 2000;
                     if (subconcept === normalizedQuery) score += 240;
                     if (concept === normalizedQuery) score += 220;
                     if (tags.includes(normalizedQuery)) score += 200;
@@ -1309,12 +1312,12 @@
                 for (const variation of searchVariations) {
                     const normalizedVariation = normalizeSearchText(variation);
                     if (!normalizedVariation) continue;
-                    const request = searchIndex.getAll(normalizedVariation, 20);
+                    const request = searchIndex.getAll(normalizedVariation);
                     const candidates = await new Promise((resolve, reject) => {
                         request.onsuccess = () => resolve(request.result);
                         request.onerror = () => reject(request.error);
                     });
-                    
+
                     const bestUrl = pickBestImageCandidate(candidates, searchText);
                     if (bestUrl) {
                         return bestUrl;
@@ -1349,6 +1352,9 @@
                     const tags  = (candidate.tags || []).map(normalizeText);
                     const terms = (candidate.search_terms || []).map(normalizeText);
                     let score = 0;
+                    // Exact label match gets a large bonus to ensure "you" beats "pleasure to meet you"
+                    if (subconcept === normalizedQuery) score += 2000;
+                    if (concept    === normalizedQuery) score += 2000;
                     if (subconcept === normalizedQuery) score += 240;
                     if (concept    === normalizedQuery) score += 220;
                     if (tags.includes(normalizedQuery))  score += 200;
@@ -1386,7 +1392,7 @@
                     let bestScore = -1;
 
                     for (const variation of searchVariations) {
-                        const request = searchIndex.getAll(normalizeText(variation), 20);
+                        const request = searchIndex.getAll(normalizeText(variation));
                         const candidates = await new Promise((resolve, reject) => {
                             request.onsuccess = () => resolve(request.result);
                             request.onerror  = () => reject(request.error);
