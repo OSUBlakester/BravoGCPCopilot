@@ -1267,12 +1267,13 @@
                     if (tags.some(t => t.includes(normalizedQuery))) score += 25;
                     if (aliases.some(t => t.includes(normalizedQuery))) score += 20;
                     if (terms.some(t => t.includes(normalizedQuery))) score += 15;
-                    // Mascot scoring: boost matching mascot, penalize wrong mascot, neutral for generic
+                    // Mascot scoring: dominant over text score so wrong-mascot images never beat generic.
+                    // Matching mascot: +10000, wrong mascot: -10000, generic (no mascot): 0.
                     const activeMascot = window.currentMascot || '';
                     const imgMascot = candidate.mascot || '';
                     if (activeMascot) {
-                        if (imgMascot === activeMascot) score += 50;
-                        else if (imgMascot && imgMascot !== activeMascot) score -= 40;
+                        if (imgMascot === activeMascot) score += 10000;
+                        else if (imgMascot && imgMascot !== activeMascot) score -= 10000;
                     }
                     return score;
                 };
@@ -1356,12 +1357,13 @@
                     if (concept.startsWith(normalizedQuery))    score += 80;
                     if (subconcept.includes(normalizedQuery))   score += 35;
                     if (concept.includes(normalizedQuery))      score += 30;
-                    // Mascot scoring: prefer matching mascot, penalize wrong mascot
+                    // Mascot scoring: dominant over text score so wrong-mascot images never beat generic.
+                    // Matching mascot: +10000, wrong mascot: -10000, generic (no mascot): 0.
                     const activeMascot = window.currentMascot || '';
                     const imgMascot    = candidate.mascot || '';
                     if (activeMascot) {
-                        if (imgMascot === activeMascot) score += 50;
-                        else if (imgMascot && imgMascot !== activeMascot) score -= 40;
+                        if (imgMascot === activeMascot) score += 10000;
+                        else if (imgMascot && imgMascot !== activeMascot) score -= 10000;
                     }
                     return score;
                 };
