@@ -1087,7 +1087,7 @@
         async function downloadImageLibrary(token, aacUserId) {
             try {
                 // Don't update loading status - parent shows "Loading user data..."
-                const LIBRARY_SCHEMA_VERSION = 6;
+                const LIBRARY_SCHEMA_VERSION = 7;
                 
                 // Check if library is already downloaded and fresh
                 const db = await initImageLibraryDB();
@@ -1337,44 +1337,73 @@
                 if (!imageLibraryDB) {
                     imageLibraryDB = await initImageLibraryDB();
                 }
-                
+
+                const normalizeText = (t) => String(t || '').toLowerCase().replace(/[.,!?;:\"'()\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
+
+                // Shared mascot-aware scorer (mirrors searchLocalImageLibrary above)
+                const scoreCandidate = (candidate, normalizedQuery) => {
+                    if (!candidate || !candidate.image_url) return -1;
+                    const concept    = normalizeText(candidate.concept || '');
+                    const subconcept = normalizeText(candidate.subconcept || '');
+                    const tags  = (candidate.tags || []).map(normalizeText);
+                    const terms = (candidate.search_terms || []).map(normalizeText);
+                    let score = 0;
+                    if (subconcept === normalizedQuery) score += 240;
+                    if (concept    === normalizedQuery) score += 220;
+                    if (tags.includes(normalizedQuery))  score += 200;
+                    if (terms.includes(normalizedQuery)) score += 160;
+                    if (subconcept.startsWith(normalizedQuery)) score += 90;
+                    if (concept.startsWith(normalizedQuery))    score += 80;
+                    if (subconcept.includes(normalizedQuery))   score += 35;
+                    if (concept.includes(normalizedQuery))      score += 30;
+                    // Mascot scoring: prefer matching mascot, penalize wrong mascot
+                    const activeMascot = window.currentMascot || '';
+                    const imgMascot    = candidate.mascot || '';
+                    if (activeMascot) {
+                        if (imgMascot === activeMascot) score += 50;
+                        else if (imgMascot && imgMascot !== activeMascot) score -= 40;
+                    }
+                    return score;
+                };
+
                 const results = new Map();
                 const transaction = imageLibraryDB.transaction(['images'], 'readonly');
                 const store = transaction.objectStore('images');
                 const searchIndex = store.index('search_terms');
-                
-                // Search all texts in parallel
+
+                // Search all texts in parallel — fetch ALL candidates per term and pick best
                 const searchPromises = searchTexts.map(async (searchText) => {
-                    const normalizedText = searchText.trim().toLowerCase();
+                    const normalizedText = normalizeText(searchText);
                     const searchVariations = [
                         normalizedText,
-                        normalizedText.charAt(0).toUpperCase() + normalizedText.slice(1),
-                        searchText.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-                        searchText.toUpperCase()
-                    ];
-                    
+                        searchText.trim().toLowerCase(),
+                        searchText.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').toLowerCase(),
+                    ].filter((v, i, a) => v && a.indexOf(v) === i); // dedupe
+
+                    let bestCandidate = null;
+                    let bestScore = -1;
+
                     for (const variation of searchVariations) {
-                        const request = searchIndex.get(variation.toLowerCase());
-                        const result = await new Promise((resolve, reject) => {
+                        const request = searchIndex.getAll(normalizeText(variation), 20);
+                        const candidates = await new Promise((resolve, reject) => {
                             request.onsuccess = () => resolve(request.result);
-                            request.onerror = () => reject(request.error);
+                            request.onerror  = () => reject(request.error);
                         });
-                        
-                        if (result && result.image_url) {
-                            results.set(searchText, result.image_url);
-                            return; // Found match, move to next search text
+                        for (const c of (candidates || [])) {
+                            const s = scoreCandidate(c, normalizedText);
+                            if (s > bestScore) { bestScore = s; bestCandidate = c; }
                         }
+                        if (bestCandidate) break; // stop at first variation that found candidates
                     }
-                    
-                    // No match found
-                    results.set(searchText, null);
+
+                    results.set(searchText, bestCandidate?.image_url || null);
                 });
-                
+
                 await Promise.all(searchPromises);
-                
+
                 console.log(`📦 Batch search complete: ${results.size} lookups, ${Array.from(results.values()).filter(v => v !== null).length} found`);
                 return results;
-                
+
             } catch (error) {
                 console.error('Error batch searching local library:', error);
                 return new Map();
