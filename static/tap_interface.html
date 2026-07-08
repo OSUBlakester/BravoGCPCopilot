@@ -5482,6 +5482,15 @@
                 tags: 240
             };
 
+            // Prefer correct-mascot images; penalise wrong-mascot images; 0 for generic.
+            const imgMascot = (image?.mascot || '').toLowerCase();
+            const activeMascot = (tapMascot || '').toLowerCase();
+            let mascotBonus = 0;
+            if (activeMascot) {
+                if (imgMascot === activeMascot) mascotBonus = 1000;
+                else if (imgMascot && imgMascot !== activeMascot) mascotBonus = -1000;
+            }
+
             const sources = [
                 ['subconcept', image?.subconcept],
                 ['concept', image?.concept],
@@ -5498,7 +5507,7 @@
                 for (const term of terms) {
                     // Slightly boost multi-word exact metadata phrases over single tokens.
                     const tieBreak = term.includes(' ') ? 2 : 1;
-                    out.push({ term, priority: basePriority + tieBreak });
+                    out.push({ term, priority: basePriority + mascotBonus + tieBreak });
                 }
             }
 
@@ -5780,6 +5789,12 @@
                 // Load mascot setting
                 tapMascot = (settings && settings.mascot) ? settings.mascot : 'buddy';
                 window.currentMascot = tapMascot;
+                // Rebuild the custom image index now that the active mascot is known.
+                // preloadCustomImages() ran before settings loaded, so the initial index
+                // was built with the default mascot. Rebuild so categories pick the right image.
+                if (window.customImagesCache && window.customImagesCache.length > 0) {
+                    buildCustomImageTermIndex();
+                }
 
                 if (settings && typeof settings.useHybridPages === 'boolean') {
                     useHybridPages = settings.useHybridPages;
