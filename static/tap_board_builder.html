@@ -65,6 +65,7 @@
                 <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
                 <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
                 <button id="translateBoardBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-language mr-1"></i>Translate Board</button>
+                <button id="reassignImagesBtn" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"><i class="fas fa-images mr-1"></i>Reassign Images</button>
         </div>
     </div>
 
@@ -126,7 +127,14 @@
                     <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
                 </div>
             </div>
-            <p class="text-gray-600 mb-3">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
+            <div class="flex items-center justify-between mb-3">
+                <p class="text-gray-600">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
+                <div id="poolPaginationControls" class="hidden flex items-center gap-3">
+                    <button id="poolPrevPageBtn" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-40" disabled>← Prev</button>
+                    <span id="poolPageIndicator" class="text-sm text-gray-600 font-medium">Page 1 of 1</span>
+                    <button id="poolNextPageBtn" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-40">Next →</button>
+                </div>
+            </div>
             <div id="buttonGrid"></div>
             <div id="gridReadOnlyOverlay" class="readonly-overlay hidden">Read-only board</div>
         </section>
@@ -417,6 +425,19 @@
         </div>
     </div>
 
+    <!-- Reassign Images Modal -->
+    <div id="reassignImagesModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6100;">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Reassign Images</h3>
+            <p class="text-sm text-gray-600 mb-5">Look up and assign the best matching image for every button. Run this after changing your mascot or adding new images.</p>
+            <div class="flex flex-col gap-3">
+                <button id="reassignThisBoardBtn" class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium">Reassign — This Board Only</button>
+                <button id="reassignAllBoardsBtn" class="w-full px-4 py-2 bg-purple-800 text-white rounded-md hover:bg-purple-900 font-medium">Reassign — All Boards</button>
+                <button id="reassignCancelBtn" class="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let GRID_ROWS = 7, GRID_COLS = 12;
         let tapWordsRows = 4;
@@ -424,6 +445,7 @@
         let useHybridPages = false;
         let authToken = null, currentAacUserId = null;
         let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
+        let adminPageIndex = 0; // Current pool page shown in the button grid (0 = first page)
         let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
         let aiBulkPreviewOptions = [];
         let showMigrationBoardsOnly = false;
@@ -469,6 +491,14 @@
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
             document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
+            document.getElementById('reassignImagesBtn').addEventListener('click', openReassignImagesModal);
+            document.getElementById('poolPrevPageBtn').addEventListener('click', () => {
+                if (adminPageIndex > 0) { adminPageIndex--; renderButtonGrid(); }
+            });
+            document.getElementById('poolNextPageBtn').addEventListener('click', () => {
+                adminPageIndex++;
+                renderButtonGrid();
+            });
             document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
@@ -674,6 +704,7 @@
             if (!boardId) { currentBoardData = null; clearBoardForm(); return; }
             const board = allBoards.find(b => b.id === boardId);
             if (!board) return;
+            adminPageIndex = 0; // Reset to page 1 when switching boards
             currentBoardData = JSON.parse(JSON.stringify(board));
             bindBoardToForm();
             renderButtonGrid();
@@ -778,20 +809,60 @@
             const grid = document.getElementById('buttonGrid');
             grid.innerHTML = '';
             if (!currentBoardData) return;
-            
+
             GRID_ROWS = tapWordsRows;
             grid.style.gridTemplateColumns = `repeat(${GRID_COLS}, minmax(100px, 1fr))`;
-            
+
             const boardType = String(currentBoardData.board_type || '').toLowerCase();
             const staticRowsCount = getStaticRowsCount();
-            
+            const pageSize = staticRowsCount * GRID_COLS;
+
+            // Build a virtual position map for overflow pool buttons when viewing page > 0
+            let overflowPageMap = null; // Map "row:col" → button (for non-page-0 views)
+            const allButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            const totalPoolOptions = allButtons.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
+            const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(totalPoolOptions / pageSize)) : 1;
+
+            if (adminPageIndex > 0 && pageSize > 0) {
+                const startIdx = adminPageIndex * pageSize;
+                const endIdx = startIdx + pageSize;
+                const pageButtons = allButtons.filter(b =>
+                    b && b.pool_index !== null && b.pool_index !== undefined &&
+                    Number(b.pool_index) >= startIdx && Number(b.pool_index) < endIdx
+                ).sort((a, b) => Number(a.pool_index) - Number(b.pool_index));
+
+                overflowPageMap = new Map();
+                pageButtons.forEach((btn, i) => {
+                    const r = Math.floor(i / GRID_COLS);
+                    const c = i % GRID_COLS;
+                    if (r < staticRowsCount) {
+                        overflowPageMap.set(`${r}:${c}`, btn);
+                    }
+                });
+            }
+
+            // Update pagination controls
+            const paginationEl = document.getElementById('poolPaginationControls');
+            const pageIndicatorEl = document.getElementById('poolPageIndicator');
+            const prevBtn = document.getElementById('poolPrevPageBtn');
+            const nextBtn = document.getElementById('poolNextPageBtn');
+            if (totalPages > 1) {
+                paginationEl.classList.remove('hidden');
+                pageIndicatorEl.textContent = `Page ${adminPageIndex + 1} of ${totalPages}`;
+                prevBtn.disabled = adminPageIndex === 0;
+                nextBtn.disabled = adminPageIndex >= totalPages - 1;
+            } else {
+                paginationEl.classList.add('hidden');
+                adminPageIndex = 0;
+            }
+
             for (let row = 0; row < GRID_ROWS; row++) {
                 for (let col = 0; col < GRID_COLS; col++) {
                     const buttonDiv = document.createElement('div');
                     buttonDiv.className = 'visual-button';
                     buttonDiv.dataset.row = String(row);
                     buttonDiv.dataset.col = String(col);
-                    
+
                     let activeDynamicRows = 0;
                     if (currentBoardData && currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
                         activeDynamicRows = currentBoardData.dynamic_rows;
@@ -799,7 +870,10 @@
                         activeDynamicRows = tapDynamicRows;
                     }
                     const isDynamicSlot = (boardType === 'ai') || ((activeDynamicRows > 0) && boardType === 'static' && row >= staticRowsCount);
-                    const buttonData = findButtonAtPosition(row, col);
+                    // On page > 0, use the overflow map for static rows; for dynamic rows use normal lookup
+                    const buttonData = (overflowPageMap && row < staticRowsCount)
+                        ? (overflowPageMap.get(`${row}:${col}`) || null)
+                        : findButtonAtPosition(row, col);
                     
                     if (isDynamicSlot) {
                         buttonDiv.classList.add('has-content');
@@ -2562,6 +2636,95 @@
                 });
             });
         });
+
+    // ── Reassign Images ─────────────────────────────────────────────────────────
+    function openReassignImagesModal() {
+        document.getElementById('reassignImagesModal').classList.remove('hidden');
+    }
+
+    function closeReassignImagesModal() {
+        document.getElementById('reassignImagesModal').classList.add('hidden');
+    }
+
+    async function reassignImages(allBoards) {
+        const btn = document.getElementById(allBoards ? 'reassignAllBoardsBtn' : 'reassignThisBoardBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Assigning…';
+        closeReassignImagesModal();
+        showNotification('Reassigning images — this may take a moment…', 'info');
+
+        try {
+            const token = sessionStorage.getItem('firebase_id_token');
+            const userId = sessionStorage.getItem('aac_user_id');
+            if (!token || !userId) throw new Error('Not authenticated');
+
+            const configResp = await fetch(`/api/tap-interface/config?t=${Date.now()}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!configResp.ok) throw new Error('Failed to load board config');
+            const config = await configResp.json();
+
+            const boards = Array.isArray(config.boards) ? config.boards : [];
+            const targetBoardId = allBoards ? null : (currentBoardData?.id || null);
+
+            for (const board of boards) {
+                const boardId = String(board.id || '').trim();
+                if (!boardId) continue;
+                if (targetBoardId && boardId !== targetBoardId) continue;
+
+                const buttons = Array.isArray(board.buttons) ? board.buttons : [];
+                const assignments = [];
+
+                for (const btn2 of buttons) {
+                    if (!btn2 || !btn2.id) continue;
+                    const label = btn2.label || '';
+                    if (!label) continue;
+                    // Look up image via symbol search API
+                    try {
+                        const searchResp = await fetch('/api/symbols/batch-search', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ terms: [label], limit: 1 })
+                        });
+                        if (searchResp.ok) {
+                            const searchData = await searchResp.json();
+                            const results = searchData.results || {};
+                            const images = results[label] || results[label.toLowerCase()] || [];
+                            if (images.length > 0 && images[0].image_url) {
+                                assignments.push({ button_id: btn2.id, image_url: images[0].image_url });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`Image lookup failed for "${label}":`, e);
+                    }
+                }
+
+                if (assignments.length > 0) {
+                    await fetch(`/api/tap-interface/boards/${boardId}/assign-images`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ assignments })
+                    });
+                }
+            }
+
+            showNotification('Images reassigned successfully', 'success');
+        } catch (err) {
+            console.error('Reassign images failed:', err);
+            showNotification('Failed to reassign images: ' + err.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+
+    document.getElementById('reassignImagesModal').addEventListener('click', e => {
+        if (e.target === document.getElementById('reassignImagesModal')) closeReassignImagesModal();
+    });
+    document.getElementById('reassignCancelBtn').addEventListener('click', closeReassignImagesModal);
+    document.getElementById('reassignThisBoardBtn').addEventListener('click', () => reassignImages(false));
+    document.getElementById('reassignAllBoardsBtn').addEventListener('click', () => reassignImages(true));
 
     })();
     </script>

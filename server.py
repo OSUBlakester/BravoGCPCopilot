@@ -8918,27 +8918,33 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                             pool = CATEGORY_STATIC_POOLS.get(_to_pool_key(str(board.get('label') or '')), [])
                         if pool:
                             max_buttons = static_rows * grid_cols
-                            pool_words = pool[:max_buttons]
-                            def _make_pool_button(idx, word, board_id):
+                            def _make_pool_button(pool_idx, word, board_id, is_overflow):
                                 variants = WORD_VARIANTS.get(str(word).strip().lower(), {})
                                 btn = {
-                                    'id': f"btn_{board_id}_{idx // grid_cols}_{idx % grid_cols}",
+                                    'id': f"btn_{board_id}_pool_{pool_idx}",
                                     'label': word,
-                                    'row': idx // grid_cols,
-                                    'col': idx % grid_cols,
                                     'background_color': '#FFFFFF',
                                     'text_color': '#000000',
                                     'after_selection': default_button_action,
                                     'button_type': 'static',
+                                    'pool_index': pool_idx,
                                 }
+                                if is_overflow:
+                                    # Overflow buttons are not placed in the grid on page 0;
+                                    # they exist solely to carry image_url for Something Else cycling.
+                                    btn['row'] = None
+                                    btn['col'] = None
+                                else:
+                                    btn['row'] = pool_idx // grid_cols
+                                    btn['col'] = pool_idx % grid_cols
                                 if variants.get('past_tense'):
                                     btn['past_tense'] = variants['past_tense']
                                 if variants.get('plural'):
                                     btn['plural'] = variants['plural']
                                 return btn
                             board['buttons'] = [
-                                _make_pool_button(idx, word, board['id'])
-                                for idx, word in enumerate(pool_words)
+                                _make_pool_button(idx, word, board['id'], idx >= max_buttons)
+                                for idx, word in enumerate(pool)
                             ]
 
                 logging.warning(
@@ -23624,33 +23630,48 @@ def compose_legacy_buttons_from_boards_menu(config_data: Dict[str, Any]) -> List
 
     def _build_word_options_from_board(board: Dict[str, Any]) -> List[Dict[str, Any]]:
         raw_buttons = board.get('buttons') if isinstance(board.get('buttons'), list) else []
+        # Overflow pool buttons have row/col=None; sort them after displayed buttons.
+        def _sort_key(b):
+            pool_idx = b.get('pool_index')
+            if pool_idx is not None:
+                return (1 if b.get('row') is None else 0, int(pool_idx))
+            r = b.get('row')
+            c = b.get('col')
+            return (0, int(r or 0) * 10000 + int(c or 0))
         sorted_buttons = sorted(
             [b for b in raw_buttons if isinstance(b, dict)],
-            key=lambda b: (int(b.get('row', 0) or 0), int(b.get('col', 0) or 0), str(b.get('id') or '')),
+            key=_sort_key,
         )
         word_options: List[Dict[str, Any]] = []
         for index, btn in enumerate(sorted_buttons):
             if bool(btn.get('hidden', False)):
                 continue
             label = str(btn.get('label') or '').strip()
-            if label:
-                word_options.append({
-                    'text': label,
-                    'row': int(btn.get('row', 0) or 0),
-                    'col': int(btn.get('col', 0) or 0),
-                    'speech_text': (str(btn.get('speech_text') or '').strip() or None),
-                    'modifier_trigger_id': btn.get('modifier_trigger_id'),
-                    'modifier_variants': btn.get('modifier_variants') if isinstance(btn.get('modifier_variants'), dict) else {},
-                    'image_url': btn.get('image_url'),
-                    'custom_audio_file': btn.get('custom_audio_file'),
-                    'action_type': btn.get('action_type'),
-                    'after_selection': btn.get('after_selection') or 'do_nothing',
-                    'target_board_id': btn.get('target_board_id'),
-                    'temporary_navigation': bool(btn.get('temporary_navigation', False)),
-                    'background_color': btn.get('background_color') or '#FFFFFF',
-                    'text_color': btn.get('text_color') or '#000000',
-                    'button_type': btn.get('button_type') or 'static',
-                })
+            if not label:
+                continue
+            raw_row = btn.get('row')
+            raw_col = btn.get('col')
+            word_options.append({
+                'text': label,
+                # Preserve None for overflow pool buttons (row/col=None means not displayed on page 0).
+                'row': None if raw_row is None else int(raw_row),
+                'col': None if raw_col is None else int(raw_col),
+                'pool_index': btn.get('pool_index'),
+                'speech_text': (str(btn.get('speech_text') or '').strip() or None),
+                'modifier_trigger_id': btn.get('modifier_trigger_id'),
+                'modifier_variants': btn.get('modifier_variants') if isinstance(btn.get('modifier_variants'), dict) else {},
+                'image_url': btn.get('image_url'),
+                'custom_audio_file': btn.get('custom_audio_file'),
+                'action_type': btn.get('action_type'),
+                'after_selection': btn.get('after_selection') or 'do_nothing',
+                'target_board_id': btn.get('target_board_id'),
+                'temporary_navigation': bool(btn.get('temporary_navigation', False)),
+                'background_color': btn.get('background_color') or '#FFFFFF',
+                'text_color': btn.get('text_color') or '#000000',
+                'button_type': btn.get('button_type') or 'static',
+                'past_tense': btn.get('past_tense'),
+                'plural': btn.get('plural'),
+            })
         return word_options
 
     def _build_menu_node(menu_item: Dict[str, Any], path_index: str) -> Dict[str, Any]:
@@ -25905,6 +25926,58 @@ async def update_tap_board(
         raise
     except Exception as e:
         logging.error(f"Error updating tap board {board_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/tap-interface/boards/{board_id}/assign-images")
+async def assign_board_button_images(
+    board_id: str,
+    payload: Dict[str, Any],
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Batch-update image_url on board buttons. Used by client-side image pre-assignment."""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    assignments = payload.get('assignments')
+    if not isinstance(assignments, list) or not assignments:
+        raise HTTPException(status_code=400, detail='assignments list is required')
+
+    try:
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        board = next((b for b in boards if isinstance(b, dict) and str(b.get('id') or '') == board_id), None)
+        if board is None:
+            raise HTTPException(status_code=404, detail='Board not found')
+
+        # Build lookup map from button id → button dict
+        buttons = board.get('buttons') if isinstance(board.get('buttons'), list) else []
+        btn_by_id = {str(b.get('id') or ''): b for b in buttons if isinstance(b, dict)}
+
+        updated_count = 0
+        for item in assignments:
+            btn_id = str(item.get('button_id') or '')
+            image_url = item.get('image_url')
+            if btn_id and btn_id in btn_by_id and image_url:
+                btn_by_id[btn_id]['image_url'] = image_url
+                updated_count += 1
+
+        board['buttons'] = list(btn_by_id.values())
+        config_data['updated_at'] = dt.now().isoformat()
+
+        success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+        if not success:
+            raise HTTPException(status_code=500, detail='Failed to save image assignments')
+
+        logging.info(f"✅ Assigned images to {updated_count} buttons on board {board_id} for {account_id}/{aac_user_id}")
+        return JSONResponse(content={'success': True, 'updated': updated_count})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error assigning images to board {board_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1656,6 +1656,9 @@
         let useBravoBuild = true;
         let defaultButtonAction = 'do_nothing';
         let tapMascot = 'buddy';
+        // Tracks how many pool entries to skip for the current board's static section.
+        // Incremented on each Something Else press; reset when entering a different board.
+        let currentStaticPageOffset = 0;
         const QUESTION_TEXTAREA_ID = 'question-display';
         const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening';
 
@@ -5594,6 +5597,75 @@
         }
         
         /**
+         * Pre-assign images to all buttons on a single board and persist to Firestore.
+         * Skips buttons that already have an image_url.
+         * @param {string} boardId
+         * @param {Array} buttons - button objects (may include overflow entries with pool_index)
+         */
+        async function assignImagesToBoard(boardId, buttons) {
+            if (!boardId || !Array.isArray(buttons) || buttons.length === 0) return;
+
+            const assignments = [];
+            for (const btn of buttons) {
+                if (!btn || !btn.id) continue;
+                if (btn.image_url) continue; // already assigned
+                const label = btn.text || btn.label || '';
+                if (!label) continue;
+                try {
+                    const imageUrl = await getSymbolImageForText(extractKeywordForImage(label));
+                    if (imageUrl) {
+                        assignments.push({ button_id: btn.id, image_url: imageUrl });
+                    }
+                } catch (err) {
+                    console.warn(`Image lookup failed for "${label}":`, err);
+                }
+            }
+
+            if (assignments.length === 0) return;
+
+            try {
+                const response = await authenticatedFetch(`/api/tap-interface/boards/${boardId}/assign-images`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assignments })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log(`🖼️ Assigned images: ${data.updated} buttons on board ${boardId}`);
+                } else {
+                    console.warn(`Image assignment API failed for board ${boardId}:`, response.status);
+                }
+            } catch (err) {
+                console.error(`Error saving image assignments for board ${boardId}:`, err);
+            }
+        }
+
+        /**
+         * Pre-assign images to all boards for the current profile.
+         * Runs in the background after wizard completion or mascot change.
+         * @param {string} [targetBoardId] - If set, only assign for this board; otherwise all boards.
+         */
+        async function assignImagesToAllBoards(targetBoardId = null) {
+            if (!tapConfig || !Array.isArray(tapConfig.boards)) {
+                console.warn('assignImagesToAllBoards: no tapConfig.boards available');
+                return;
+            }
+
+            console.log('🖼️ Starting image pre-assignment for boards…');
+            for (const board of tapConfig.boards) {
+                const boardId = String(board.id || '').trim();
+                if (!boardId) continue;
+                if (targetBoardId && boardId !== targetBoardId) continue;
+
+                const buttons = Array.isArray(board.buttons) ? board.buttons : [];
+                if (buttons.length === 0) continue;
+
+                await assignImagesToBoard(boardId, buttons);
+            }
+            console.log('✅ Image pre-assignment complete');
+        }
+
+        /**
          * Batch preload custom images for specific button texts (before showing modal)
          * @param {Array<string>} buttonTexts - Array of button text labels
          */
@@ -6066,7 +6138,31 @@
                 
                 // Pre-cache images in BACKGROUND - DISABLED for performance
                 // preCacheCategoryImages();
-                
+
+                // After everything renders, run image pre-assignment in the background if:
+                //   (a) any displayed button is missing image_url (first run / wizard completion), OR
+                //   (b) the mascot stored from the last assignment run differs from tapMascot
+                //       (mascot was changed — user should also click "Reassign Images" in board admin).
+                setTimeout(async () => {
+                    try {
+                        const assignmentKey = `tap_img_assigned_mascot_${currentAacUserId}`;
+                        const lastAssignedMascot = localStorage.getItem(assignmentKey);
+                        const mascotMismatch = lastAssignedMascot !== tapMascot;
+                        const missingImages = tapConfig && Array.isArray(tapConfig.boards) &&
+                            tapConfig.boards.some(board =>
+                                Array.isArray(board.buttons) &&
+                                board.buttons.some(b => b && b.row !== null && b.row !== undefined && !b.image_url)
+                            );
+                        if (missingImages || mascotMismatch) {
+                            console.log(`🖼️ Running background image pre-assignment (missingImages=${missingImages}, mascotMismatch=${mascotMismatch})`);
+                            await assignImagesToAllBoards();
+                            localStorage.setItem(assignmentKey, tapMascot);
+                        }
+                    } catch (err) {
+                        console.warn('Background image assignment check failed:', err);
+                    }
+                }, 2000);
+
                 // Start wake word listener
                 setupWakeWordDetection();
                 
@@ -6477,7 +6573,7 @@
             return Promise.all(fetchPromises);
         }
 
-        async function resolveHybridBoardButtons(configuredButtons = [], categoryContext = null, extraExclusions = []) {
+        async function resolveHybridBoardButtons(configuredButtons = [], categoryContext = null, extraExclusions = [], staticOffset = 0) {
             const totalRows = Math.max(1, Number(tapWordsRows) || 1);
             const cols = Math.max(1, Number(gridColumns) || 1);
             
@@ -6511,49 +6607,83 @@
             const staticRows = Math.max(0, totalRows - numDynamic);
             const splitRowIndex = staticRows;
             
-            // 1. Keep pre-defined buttons in rows < splitRowIndex
-            let upperRowButtons = configuredButtons.filter(btn => btn && Number(btn.row) < splitRowIndex);
-
-            // Build a set of occupied cell coordinates in the upper rows
-            const occupiedCoords = new Set(upperRowButtons.map(btn => `${btn.row}:${btn.col}`));
             const totalUpperSlots = splitRowIndex * cols;
-            
-            // Fill any unoccupied slots in the upper rows with category fallback words (only for non-customized boards)
-            if (!isCustomized && occupiedCoords.size < totalUpperSlots && categoryContext) {
+
+            // 1. Build static (upper) row buttons
+            let upperRowButtons;
+
+            if (!isCustomized && staticOffset > 0 && categoryContext) {
+                // Something Else cycling: skip page-0 configured buttons entirely;
+                // pull the next page of pool words starting at staticOffset.
                 const categoryLabel = categoryContext.label || 'general';
-                // Fetch a generous pool of fallback words (double the total slots) to ensure unique suggestions
-                const fallbackWords = getCategoryFallbackWords(categoryLabel, totalUpperSlots * 2);
-                let fallbackIdx = 0;
-                
+                const poolSlice = getCategoryFallbackWords(categoryLabel, totalUpperSlots, staticOffset);
+                upperRowButtons = [];
+                let poolIdx = 0;
                 for (let r = 0; r < splitRowIndex; r++) {
-                    for (let col = 0; col < cols; col++) {
-                        const coordKey = `${r}:${col}`;
-                        if (!occupiedCoords.has(coordKey)) {
-                            // Find the next candidate word that is not duplicate
-                            let wordOpt = null;
-                            while (fallbackIdx < fallbackWords.length) {
-                                const candidate = fallbackWords[fallbackIdx++];
-                                const isDup = upperRowButtons.some(btn => btn.text && btn.text.toLowerCase() === candidate.text.toLowerCase());
-                                if (!isDup) {
-                                    wordOpt = candidate;
-                                    break;
+                    for (let c = 0; c < cols; c++) {
+                        const wordOpt = poolSlice[poolIdx++];
+                        if (wordOpt) {
+                            upperRowButtons.push({
+                                id: `btn_static_pool_p${staticOffset}_${r}_${c}`,
+                                text: wordOpt.text,
+                                label: wordOpt.text,
+                                row: r,
+                                col: c,
+                                speech_text: wordOpt.text,
+                                action_type: 'announce',
+                                after_selection: defaultButtonAction,
+                                target_board_id: null,
+                                image_url: wordOpt.image_url || null,
+                                button_type: 'static'
+                            });
+                        }
+                    }
+                }
+            } else {
+                // Page 0 (default): keep pre-defined configured buttons in rows < splitRowIndex.
+                // Exclude overflow pool entries (row === null/undefined) — they exist only for image_url storage.
+                upperRowButtons = configuredButtons.filter(btn =>
+                    btn && btn.row !== null && btn.row !== undefined && Number(btn.row) < splitRowIndex
+                );
+
+                // Build a set of occupied cell coordinates in the upper rows
+                const occupiedCoords = new Set(upperRowButtons.map(btn => `${btn.row}:${btn.col}`));
+
+                // Fill any unoccupied slots with category fallback words (only for non-customized boards)
+                if (!isCustomized && occupiedCoords.size < totalUpperSlots && categoryContext) {
+                    const categoryLabel = categoryContext.label || 'general';
+                    // Fetch a generous pool of fallback words (double the total slots) to ensure unique suggestions
+                    const fallbackWords = getCategoryFallbackWords(categoryLabel, totalUpperSlots * 2);
+                    let fallbackIdx = 0;
+
+                    for (let r = 0; r < splitRowIndex; r++) {
+                        for (let col = 0; col < cols; col++) {
+                            const coordKey = `${r}:${col}`;
+                            if (!occupiedCoords.has(coordKey)) {
+                                let wordOpt = null;
+                                while (fallbackIdx < fallbackWords.length) {
+                                    const candidate = fallbackWords[fallbackIdx++];
+                                    const isDup = upperRowButtons.some(btn => btn.text && btn.text.toLowerCase() === candidate.text.toLowerCase());
+                                    if (!isDup) {
+                                        wordOpt = candidate;
+                                        break;
+                                    }
                                 }
-                            }
-                            
-                            if (wordOpt) {
-                                upperRowButtons.push({
-                                    id: `btn_static_fallback_${r}_${col}_${fallbackIdx}`,
-                                    text: wordOpt.text,
-                                    label: wordOpt.text,
-                                    row: r,
-                                    col: col,
-                                    speech_text: wordOpt.text,
-                                    action_type: 'announce',
-                                    after_selection: defaultButtonAction,
-                                    target_board_id: null,
-                                    image_url: wordOpt.image_url || null,
-                                    button_type: 'static'
-                                });
+                                if (wordOpt) {
+                                    upperRowButtons.push({
+                                        id: `btn_static_fallback_${r}_${col}_${fallbackIdx}`,
+                                        text: wordOpt.text,
+                                        label: wordOpt.text,
+                                        row: r,
+                                        col: col,
+                                        speech_text: wordOpt.text,
+                                        action_type: 'announce',
+                                        after_selection: defaultButtonAction,
+                                        target_board_id: null,
+                                        image_url: wordOpt.image_url || null,
+                                        button_type: 'static'
+                                    });
+                                }
                             }
                         }
                     }
@@ -13304,11 +13434,22 @@ VARIETY RULES:
             return [...merged];
         }
 
-        function getCategoryFallbackWords(category, count = null) {
+        function getCategoryFallbackWords(category, count = null, offset = 0) {
             const desiredCount = Math.max(1, Number(count) || FreestyleWordOptions || 29);
             const pool = _get_static_pool_for_category(category);
             if (pool && pool.length > 0) {
-                return pool.slice(0, desiredCount).map(text => ({ text, keywords: [] }));
+                if (offset <= 0) {
+                    return pool.slice(0, desiredCount).map(text => ({ text, keywords: [] }));
+                }
+                // Wrap-around: start at offset (mod pool length) and collect desiredCount items
+                const start = offset % pool.length;
+                let slice;
+                if (start + desiredCount <= pool.length) {
+                    slice = pool.slice(start, start + desiredCount);
+                } else {
+                    slice = [...pool.slice(start), ...pool.slice(0, desiredCount - (pool.length - start))];
+                }
+                return slice.map(text => ({ text, keywords: [] }));
             }
             return getFallbackStarterWords(desiredCount);
         }
@@ -14597,8 +14738,9 @@ VARIETY RULES:
                 event.target.classList.add('active');
             }
             
+            currentStaticPageOffset = 0; // Reset static cycling when entering a new board
             currentCategory = getEffectiveCategoryConfig(category);
-            
+
             // If category has children, show modal (pass parent path so nested selection builds full path)
             if (category.children && category.children.length > 0) {
                 console.log('Category has', category.children.length, 'children, showing modal');
@@ -14952,6 +15094,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 // IMPORTANT: Use just the subcategory name for API calls, not the full path
                 // This ensures "Insects" is sent instead of "Animals, Insects" which matches server expectations
                 const categoryForApi = subcategory.label; // Just "Insects", not "Animals, Insects"
+                currentStaticPageOffset = 0; // Reset static cycling when entering a subcategory
                 // Set currentCategory to preserve context for future freestyle calls
                 // Preserve board_id/board_word_options so child buttons behave like root board buttons.
                 currentCategory = effectiveSubcategory;
@@ -16533,6 +16676,39 @@ ${getTapLanguageDirective()}
             await navigateToHomeBoard();
         }
 
+        // Advances to the next page of static pool options and refreshes dynamic options.
+        // Called by the Something Else button on every board (static and hybrid).
+        async function cycleToNextPage() {
+            if (!currentCategory) return;
+
+            const totalRows = Math.max(1, Number(tapWordsRows) || 1);
+            const cols = Math.max(1, Number(gridColumns) || 1);
+            const currentBoardId = getCategoryBoardId(currentCategory);
+            const targetBoardObj = currentBoardId ? boardsById[String(currentBoardId).trim()] : null;
+            const boardDrExplicit = targetBoardObj && targetBoardObj.dynamic_rows !== undefined && targetBoardObj.dynamic_rows !== null;
+            const numDynamic = boardDrExplicit
+                ? Math.max(0, Number(targetBoardObj.dynamic_rows))
+                : Math.max(0, Number(tapDynamicRows) || 0);
+            const staticRows = Math.max(0, totalRows - numDynamic);
+            const pageSize = staticRows * cols;
+
+            if (pageSize > 0) {
+                currentStaticPageOffset += pageSize;
+            }
+
+            console.log(`🔄 Something Else: cycling to static offset ${currentStaticPageOffset}`);
+
+            const newOptions = await resolveHybridBoardButtons(
+                currentCategory.board_word_options || [],
+                currentCategory,
+                [],
+                currentStaticPageOffset
+            );
+
+            currentWordOptions = newOptions.slice();
+            renderFreestyleOptions(newOptions, true);
+        }
+
         async function rebuildCurrentBoard(extraExclusions = []) {
             const currentBoardId = getCategoryBoardId(currentCategory);
             let resolvedBoardType = getResolvedBoardType(currentCategory);
@@ -17145,14 +17321,21 @@ ${getTapLanguageDirective()}
 
                 const boardFragment = document.createDocumentFragment();
 
-                // Only show Something Else when the board has dynamic (AI-generated) content
-                // to regenerate. Static boards with dynamic_rows=0 have no dynamic content.
+                // Show Something Else if the board has dynamic rows OR if the static pool
+                // has more options than fit on one page (enabling static option cycling).
                 const linkedBoardForSE = currentBoardId ? boardsById[String(currentBoardId).trim()] : null;
                 const boardDrExplicitForSE = linkedBoardForSE && linkedBoardForSE.dynamic_rows !== undefined && linkedBoardForSE.dynamic_rows !== null;
                 const effectiveBoardDrForSE = boardDrExplicitForSE
                     ? Number(linkedBoardForSE.dynamic_rows)
                     : (Number(tapDynamicRows) || 0);
-                const showSomethingElseInBoard = effectiveBoardDrForSE > 0;
+                const isCustomizedBoardForSE = linkedBoardForSE && (linkedBoardForSE.is_customized || linkedBoardForSE.source === 'custom');
+                const seStaticRows = Math.max(0, effectiveDisplayRows - effectiveBoardDrForSE);
+                const sePageSize = seStaticRows * effectiveBoardCols;
+                const sePool = !isCustomizedBoardForSE && currentCategory
+                    ? _get_static_pool_for_category(currentCategory.label || 'general')
+                    : null;
+                const hasMoreStaticOptions = sePool && sePool.length > sePageSize;
+                const showSomethingElseInBoard = effectiveBoardDrForSE > 0 || hasMoreStaticOptions;
 
                 for (let row = 0; row < effectiveDisplayRows; row++) {
                     for (let col = 0; col < effectiveBoardCols; col++) {
@@ -17206,7 +17389,7 @@ ${getTapLanguageDirective()}
                             btn.dataset.specialButton = 'something-else';
                             setTapSpecialButtonLabel(btn, getTapSpecialButtonLabelSync('something-else'));
                             localizeTapSpecialButton(btn).catch(() => {});
-                            
+
                             if (!deferImages) {
                                 const specialButtonConfig = getTapSpecialButtonConfig('something-else');
                                 getSymbolImageForText(specialButtonConfig.imageLookupText, specialButtonConfig.imageKeywords).then(imageUrl => {
@@ -17216,30 +17399,21 @@ ${getTapLanguageDirective()}
                                     }
                                 });
                             }
-                            
+
                             btn.addEventListener('click', async () => {
                                 await runTapActionOnce(btn, async () => {
-                                    console.log('🔄 Something Else (Regenerate Board) clicked');
+                                    console.log('🔄 Something Else clicked — cycling static + dynamic options');
                                     btn.classList.add('loading');
                                     try {
-                                        const exclusions = currentWordOptions
-                                            .map(opt => {
-                                                if (!opt) return null;
-                                                if (typeof opt === 'object') {
-                                                    return opt.text || opt.label || opt.speech_text || null;
-                                                }
-                                                return opt;
-                                            })
-                                            .filter(text => typeof text === 'string' && text.trim() !== '');
-                                        await rebuildCurrentBoard(exclusions);
+                                        await cycleToNextPage();
                                     } catch (err) {
-                                        console.error('Error during rebuild board:', err);
+                                        console.error('Error during page cycle:', err);
                                     } finally {
                                         btn.classList.remove('loading');
                                     }
                                 });
                             });
-                            
+
                             boardFragment.appendChild(btn);
                             continue;
                         }
