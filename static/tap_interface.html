@@ -533,6 +533,7 @@
             width: 100%;
             margin: 0;
             padding: 0;
+            justify-content: center;
         }
 
         .freestyle-options {
@@ -543,6 +544,7 @@
             margin: 0;
             padding: 0;
             overflow-y: auto;
+            justify-content: center;
         }
 
         /* Section Headers */
@@ -887,6 +889,10 @@
             max-width: 80%;
             text-align: center;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            transition: opacity 0.6s ease;
+        }
+        .status-message.faded {
+            opacity: 0;
         }
 
         /* Options Grid Container - Full Height */
@@ -3813,8 +3819,8 @@
 
         const TAP_SPECIAL_BUTTON_CONFIG = {
             'something-else': {
-                sourceLabel: 'Something Else',
-                imageLookupText: 'Something Else',
+                sourceLabel: 'More Options',
+                imageLookupText: 'More Options',
                 imageKeywords: ['refresh', 'more', 'other']
             },
             'go-back': {
@@ -4056,11 +4062,16 @@
         const statusMessage = document.getElementById('statusMessage');
 
         // Status message helper function
+        let _statusFadeTimer = null;
         function updateStatusMessage(message) {
             const statusMessageElement = document.getElementById('statusMessage');
-            if (statusMessageElement) {
-                statusMessageElement.textContent = message;
-            }
+            if (!statusMessageElement) return;
+            statusMessageElement.classList.remove('faded');
+            statusMessageElement.textContent = message;
+            if (_statusFadeTimer) clearTimeout(_statusFadeTimer);
+            _statusFadeTimer = setTimeout(() => {
+                statusMessageElement.classList.add('faded');
+            }, 3000);
         }
 
         async function runTapActionOnce(buttonElement, action) {
@@ -5954,6 +5965,9 @@
             rowHeight = Math.max(45, rowHeight);
             llmStaticOptions.style.gridAutoRows = `${rowHeight}px`;
             freestyleOptions.style.gridAutoRows = `${rowHeight}px`;
+            // When height-constrained, also shrink column width to keep buttons square
+            llmStaticOptions.style.gridTemplateColumns = `repeat(${freestyleColumns}, ${rowHeight}px)`;
+            freestyleOptions.style.gridTemplateColumns = `repeat(${freestyleColumns}, ${rowHeight}px)`;
             console.log(`Grid row height: ${rowHeight}px (cols: ${freestyleColumns}, rows: ${numRows}, wordsH: ${availableHeight})`);
         }
 
@@ -13431,7 +13445,7 @@ VARIETY RULES:
 
         function getTapSpecialButtonExclusions(customExclusions = []) {
             const defaultExclusions = [
-                'Something Else', 'Go Back', 'Clear', 'Speak', 'Backspace', 'Something Else A-Z',
+                'More Options', 'Go Back', 'Clear', 'Speak', 'Backspace', 'More Options A-Z',
                 getTapSpecialButtonLabelSync('something-else'),
                 getTapSpecialButtonLabelSync('go-back')
             ].filter(Boolean);
@@ -13680,7 +13694,7 @@ VARIETY RULES:
             
             // Batch preload custom image matches for all phrase options (non-blocking)
             // Exclude 'Something Else' from batch search
-            const phraseTexts = options.map(opt => typeof opt === 'object' ? opt.option : opt).filter(text => text !== 'Something Else');
+            const phraseTexts = options.map(opt => typeof opt === 'object' ? opt.option : opt).filter(text => text !== 'More Options');
             if (phraseTexts.length > 0) {
                 batchPreloadCustomImageMatches(phraseTexts).catch(error => {
                     console.error('Error batch preloading phrase images:', error);
@@ -13832,7 +13846,7 @@ VARIETY RULES:
             
             // Batch preload custom image matches for all word options (non-blocking)
             // Exclude 'Something Else' from batch search
-            const wordTexts = options.map(opt => typeof opt === 'object' ? (opt.text || opt.option) : opt).filter(text => text !== 'Something Else');
+            const wordTexts = options.map(opt => typeof opt === 'object' ? (opt.text || opt.option) : opt).filter(text => text !== 'More Options');
             if (wordTexts.length > 0) {
                 batchPreloadCustomImageMatches(wordTexts).catch(error => {
                     console.error('Error batch preloading word images:', error);
