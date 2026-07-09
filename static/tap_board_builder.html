@@ -10,7 +10,7 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #111827; }
         #buttonGrid { display: grid; grid-template-columns: repeat(12, minmax(100px, 1fr)); gap: 8px; width: 100%; border: 1px solid #d1d5db; margin-top: 1rem; margin-bottom: 1rem; background-color: #f9fafb; overflow-x: auto; padding: 8px; }
-        .visual-button { border: 2px solid #d1d5db; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; background-color: white; min-height: 70px; cursor: pointer; transition: all 0.2s ease; font-size: 0.8rem; font-weight: 500; text-align: center; word-wrap: break-word; position: relative; }
+        .visual-button { border: 2px solid #d1d5db; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; background-color: white; aspect-ratio: 1 / 1; cursor: pointer; transition: all 0.2s ease; font-size: 0.8rem; font-weight: 500; text-align: center; word-wrap: break-word; position: relative; overflow: hidden; }
         .visual-button:hover { border-color: #3b82f6; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); transform: translateY(-1px); }
         .visual-button.undefined { background-color: #f9fafb; color: #6b7280; border-style: dashed; font-style: italic; }
         .visual-button.has-content { background-color: #ffffff; color: #1f2937; border-color: #059669; }
@@ -25,7 +25,14 @@
         .notification.show { transform: translateX(0); }
         .notification.success { background: #16a34a; }
         .notification.error { background: #dc2626; }
+        .notification.info { background: #2563eb; }
         .readonly-overlay { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.85); border: 2px dashed #f59e0b; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #92400e; font-weight: 600; font-size: 0.9rem; z-index: 20; }
+        .drag-zone { position: absolute; top: 0; bottom: 0; width: 56px; z-index: 20; display: none; align-items: center; justify-content: center; writing-mode: vertical-rl; font-size: 11px; font-weight: 700; letter-spacing: 1px; pointer-events: none; transition: background 0.15s; }
+        .drag-zone.active { background: rgba(99,102,241,0.25) !important; }
+        #dragZoneLeft  { left: 0;  background: rgba(99,102,241,0.10); color: #4338ca; border-right: 3px dashed #6366f1; }
+        #dragZoneRight { right: 0; background: rgba(99,102,241,0.10); color: #4338ca; border-left:  3px dashed #6366f1; }
+        .drag-zones-active .drag-zone { display: flex; pointer-events: all; }
+        .drag-zone.hidden-zone { opacity: 0.2; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -118,7 +125,7 @@
             </div>
         </div>
 
-        <section id="gridSection" class="bg-white p-4 border rounded-md relative">
+        <div id="gridSectionHeader" class="bg-white px-4 pt-4 pb-2 border border-b-0 rounded-t-md sticky top-0 z-10">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
                 <div class="flex gap-2 flex-wrap">
@@ -127,16 +134,20 @@
                     <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
                 </div>
             </div>
-            <div class="flex items-center justify-between mb-3">
-                <p class="text-gray-600">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
-                <div id="poolPaginationControls" class="hidden flex items-center gap-3">
+            <div class="flex items-center justify-between pb-2">
+                <p class="text-gray-600 text-sm">Click any cell to define a button. Drag and drop to rearrange.</p>
+                <div id="poolPaginationControls" class="flex items-center gap-3" style="display:none">
                     <button id="poolPrevPageBtn" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-40" disabled>← Prev</button>
                     <span id="poolPageIndicator" class="text-sm text-gray-600 font-medium">Page 1 of 1</span>
                     <button id="poolNextPageBtn" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-40">Next →</button>
                 </div>
             </div>
+        </div>
+        <section id="gridSection" class="bg-white px-4 pb-4 border border-t-0 rounded-b-md relative">
             <div id="buttonGrid"></div>
             <div id="gridReadOnlyOverlay" class="readonly-overlay hidden">Read-only board</div>
+            <div id="dragZoneLeft"  class="drag-zone">◀ PREV</div>
+            <div id="dragZoneRight" class="drag-zone">NEXT ▶</div>
         </section>
     </main>
 
@@ -446,8 +457,11 @@
         let authToken = null, currentAacUserId = null;
         let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
         let adminPageIndex = 0; // Current pool page shown in the button grid (0 = first page)
+        let dragPageTimer = null;
+        let currentOverflowPageMap = null; // Elevated from renderButtonGrid so drag handlers can access it
         let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
         let aiBulkPreviewOptions = [];
+        let pendingImageAssignmentAfterSave = false;
         let showMigrationBoardsOnly = false;
 
         async function loadUserSettings() {
@@ -474,7 +488,7 @@
 
         function setupEventListeners() {
             document.getElementById('selectBoard').addEventListener('change', handleBoardSelected);
-            document.getElementById('createNewBoardBtn').addEventListener('click', createNewBoardDraft);
+            document.getElementById('createNewBoardBtn').addEventListener('click', promptCreateNewBoard);
             document.getElementById('openTouchChatMigrationBtn').addEventListener('click', openTouchChatMigrationModal);
             document.getElementById('closeTouchChatMigrationModal').addEventListener('click', closeTouchChatMigrationModal);
             document.getElementById('switch-user-button').addEventListener('click', () => {
@@ -492,6 +506,9 @@
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
             document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
             document.getElementById('reassignImagesBtn').addEventListener('click', openReassignImagesModal);
+            document.getElementById('reassignThisBoardBtn').addEventListener('click', () => reassignImages('this'));
+            document.getElementById('reassignAllBoardsBtn').addEventListener('click', () => reassignImages('all'));
+            document.getElementById('reassignCancelBtn').addEventListener('click', closeReassignImagesModal);
             document.getElementById('poolPrevPageBtn').addEventListener('click', () => {
                 if (adminPageIndex > 0) { adminPageIndex--; renderButtonGrid(); }
             });
@@ -720,8 +737,14 @@
             document.getElementById('gridReadOnlyOverlay').classList.add('hidden');
         }
 
-        function createNewBoardDraft() {
-            currentBoardData = { id: '', label: 'New Board', board_type: 'static', source: 'custom', owner_scope: 'user', hidden: false, llm_prompt: '', prompt_topic: '', prompt_examples: '', prompt_exclusions: '', static_options: null, buttons: [] };
+        function promptCreateNewBoard() {
+            const name = window.prompt('Enter a name for the new board:', '');
+            if (name === null) return; // cancelled
+            createNewBoardDraft(name.trim() || 'New Board');
+        }
+
+        function createNewBoardDraft(label = 'New Board') {
+            currentBoardData = { id: '', label, board_type: 'static', source: 'custom', owner_scope: 'user', hidden: false, llm_prompt: '', prompt_topic: '', prompt_examples: '', prompt_exclusions: '', static_options: null, buttons: [] };
             document.getElementById('selectBoard').value = '';
             bindBoardToForm();
             renderButtonGrid();
@@ -802,7 +825,13 @@
 
         function findButtonAtPosition(row, col) {
             if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return null;
-            return currentBoardData.buttons.find(btn => Number(btn.row) === row && Number(btn.col) === col);
+            // Exclude pool overflow buttons (row/col === null) — Number(null)=0 would make them
+            // falsely match position (0,0) and cause duplication during drag-and-drop or editing.
+            return currentBoardData.buttons.find(btn =>
+                btn.row !== null && btn.row !== undefined &&
+                btn.col !== null && btn.col !== undefined &&
+                Number(btn.row) === row && Number(btn.col) === col
+            );
         }
 
         function renderButtonGrid() {
@@ -818,7 +847,7 @@
             const pageSize = staticRowsCount * GRID_COLS;
 
             // Build a virtual position map for overflow pool buttons when viewing page > 0
-            let overflowPageMap = null; // Map "row:col" → button (for non-page-0 views)
+            currentOverflowPageMap = null; // Reset module-level map; drag handlers read it
             const allButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
             const totalPoolOptions = allButtons.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
             const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(totalPoolOptions / pageSize)) : 1;
@@ -831,12 +860,12 @@
                     Number(b.pool_index) >= startIdx && Number(b.pool_index) < endIdx
                 ).sort((a, b) => Number(a.pool_index) - Number(b.pool_index));
 
-                overflowPageMap = new Map();
+                currentOverflowPageMap = new Map();
                 pageButtons.forEach((btn, i) => {
                     const r = Math.floor(i / GRID_COLS);
                     const c = i % GRID_COLS;
                     if (r < staticRowsCount) {
-                        overflowPageMap.set(`${r}:${c}`, btn);
+                        currentOverflowPageMap.set(`${r}:${c}`, btn);
                     }
                 });
             }
@@ -847,12 +876,12 @@
             const prevBtn = document.getElementById('poolPrevPageBtn');
             const nextBtn = document.getElementById('poolNextPageBtn');
             if (totalPages > 1) {
-                paginationEl.classList.remove('hidden');
+                paginationEl.style.display = 'flex';
                 pageIndicatorEl.textContent = `Page ${adminPageIndex + 1} of ${totalPages}`;
                 prevBtn.disabled = adminPageIndex === 0;
                 nextBtn.disabled = adminPageIndex >= totalPages - 1;
             } else {
-                paginationEl.classList.add('hidden');
+                paginationEl.style.display = 'none';
                 adminPageIndex = 0;
             }
 
@@ -871,8 +900,8 @@
                     }
                     const isDynamicSlot = (boardType === 'ai') || ((activeDynamicRows > 0) && boardType === 'static' && row >= staticRowsCount);
                     // On page > 0, use the overflow map for static rows; for dynamic rows use normal lookup
-                    const buttonData = (overflowPageMap && row < staticRowsCount)
-                        ? (overflowPageMap.get(`${row}:${col}`) || null)
+                    const buttonData = (currentOverflowPageMap && row < staticRowsCount)
+                        ? (currentOverflowPageMap.get(`${row}:${col}`) || null)
                         : findButtonAtPosition(row, col);
                     
                     if (isDynamicSlot) {
@@ -928,7 +957,10 @@
  
                     
                     if (!isBoardReadOnly(currentBoardData) && !isDynamicSlot) {
-                        buttonDiv.addEventListener('click', () => openButtonEditor(row, col));
+                        // On page > 0, overflow buttons are identified by their ID (pool_index-based),
+                        // not by visual row/col which maps to page-0 buttons.
+                        const overflowBtnId = (currentOverflowPageMap && row < staticRowsCount && buttonData) ? (buttonData.id || null) : null;
+                        buttonDiv.addEventListener('click', () => openButtonEditor(row, col, overflowBtnId));
                         buttonDiv.draggable = true;
                         buttonDiv.addEventListener('dragstart', handleDragStart);
                         buttonDiv.addEventListener('dragover', handleDragOver);
@@ -940,16 +972,176 @@
             }
         }
 
-        function handleDragStart(e) { draggedButton = { row: parseInt(e.target.dataset.row, 10), col: parseInt(e.target.dataset.col, 10) }; e.target.classList.add('dragging'); }
-        function handleDragOver(e) { e.preventDefault(); e.target.classList.add('drop-target'); }
-        function handleDrop(e) { e.preventDefault(); e.target.classList.remove('drop-target'); if (!draggedButton) return; const targetRow = parseInt(e.target.dataset.row, 10); const targetCol = parseInt(e.target.dataset.col, 10); if (Number.isNaN(targetRow) || Number.isNaN(targetCol)) return; if (draggedButton.row === targetRow && draggedButton.col === targetCol) return; swapButtons(draggedButton.row, draggedButton.col, targetRow, targetCol); renderButtonGrid(); }
-        function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); draggedButton = null; }
+        function handleDragStart(e) {
+            const el = e.currentTarget;
+            const visualRow = parseInt(el.dataset.row, 10);
+            const visualCol = parseInt(el.dataset.col, 10);
+            let btn = null;
+            if (adminPageIndex > 0 && currentOverflowPageMap) {
+                btn = currentOverflowPageMap.get(`${visualRow}:${visualCol}`) || null;
+            } else {
+                btn = findButtonAtPosition(visualRow, visualCol);
+            }
+            draggedButton = {
+                row: visualRow,
+                col: visualCol,
+                pool_index: btn ? btn.pool_index : null,
+                pageIndex: adminPageIndex,
+                origRow: btn ? btn.row : null,
+                origCol: btn ? btn.col : null,
+            };
+            el.classList.add('dragging');
+            _showDragZones();
+        }
+        function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drop-target'); }
+        function handleDrop(e) {
+            e.preventDefault();
+            const el = e.currentTarget;
+            el.classList.remove('drop-target');
+            if (!draggedButton) return;
+            const targetRow = parseInt(el.dataset.row, 10);
+            const targetCol = parseInt(el.dataset.col, 10);
+            if (Number.isNaN(targetRow) || Number.isNaN(targetCol)) return;
+
+            // Find source button by pool_index (stable across page changes)
+            let fromBtn = null;
+            if (draggedButton.pool_index !== null && draggedButton.pool_index !== undefined) {
+                fromBtn = (currentBoardData?.buttons || []).find(b => Number(b.pool_index) === Number(draggedButton.pool_index)) || null;
+            }
+            if (!fromBtn) {
+                fromBtn = findButtonAtPosition(draggedButton.origRow ?? draggedButton.row, draggedButton.origCol ?? draggedButton.col);
+            }
+            if (!fromBtn) return;
+
+            // Find target button
+            let toBtn = null;
+            if (adminPageIndex > 0 && currentOverflowPageMap) {
+                toBtn = currentOverflowPageMap.get(`${targetRow}:${targetCol}`) || null;
+            } else {
+                toBtn = findButtonAtPosition(targetRow, targetCol);
+            }
+
+            if (fromBtn === toBtn) return;
+
+            // Full position swap: exchange pool_index AND row/col between both buttons.
+            // This correctly handles page-0 ↔ page-0, overflow ↔ overflow, and cross-page.
+            const savedPoolIndex = fromBtn.pool_index;
+            const savedRow      = fromBtn.row;
+            const savedCol      = fromBtn.col;
+
+            if (toBtn) {
+                fromBtn.pool_index = toBtn.pool_index;
+                fromBtn.row        = toBtn.row;
+                fromBtn.col        = toBtn.col;
+                toBtn.pool_index   = savedPoolIndex;
+                toBtn.row          = savedRow;
+                toBtn.col          = savedCol;
+            } else {
+                // Dropping onto an empty slot on the current page
+                if (adminPageIndex === 0) {
+                    // Empty page-0 slot: move there, keep pool_index
+                    fromBtn.row = targetRow;
+                    fromBtn.col = targetCol;
+                }
+                // Empty overflow slot: no-op (slots are virtual, not addressable)
+            }
+
+            _hideDragZones();
+            renderButtonGrid();
+        }
+        function handleDragEnd(e) {
+            e.currentTarget.classList.remove('dragging');
+            document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+            draggedButton = null;
+            _hideDragZones();
+        }
+
+        function _showDragZones() {
+            if (!currentBoardData) return;
+            const allBtns = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            const totalPool = allBtns.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
+            const ps = getStaticRowsCount() * GRID_COLS;
+            const totalPages = ps > 0 ? Math.max(1, Math.ceil(totalPool / ps)) : 1;
+            if (totalPages <= 1) return;
+            document.getElementById('gridSection').classList.add('drag-zones-active');
+            document.getElementById('dragZoneLeft').classList.toggle('hidden-zone', adminPageIndex === 0);
+            document.getElementById('dragZoneRight').classList.toggle('hidden-zone', adminPageIndex >= totalPages - 1);
+            _bindDragZoneEvents();
+        }
+
+        function _hideDragZones() {
+            clearTimeout(dragPageTimer);
+            dragPageTimer = null;
+            document.getElementById('gridSection').classList.remove('drag-zones-active');
+            ['dragZoneLeft', 'dragZoneRight'].forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.remove('active', 'hidden-zone');
+            });
+        }
+
+        function _bindDragZoneEvents() {
+            ['dragZoneLeft', 'dragZoneRight'].forEach(id => {
+                const el = document.getElementById(id);
+                // Only bind once
+                if (el.dataset.zoneBound) return;
+                el.dataset.zoneBound = '1';
+                const isPrev = id === 'dragZoneLeft';
+
+                el.addEventListener('dragover', ev => { ev.preventDefault(); });
+                el.addEventListener('dragenter', () => {
+                    if (el.classList.contains('hidden-zone')) return;
+                    el.classList.add('active');
+                    clearTimeout(dragPageTimer);
+                    dragPageTimer = setTimeout(() => {
+                        const allBtns = Array.isArray(currentBoardData?.buttons) ? currentBoardData.buttons : [];
+                        const totalPool = allBtns.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
+                        const ps = getStaticRowsCount() * GRID_COLS;
+                        const totalPages = ps > 0 ? Math.max(1, Math.ceil(totalPool / ps)) : 1;
+                        if (isPrev && adminPageIndex > 0) {
+                            adminPageIndex--;
+                            renderButtonGrid();
+                            _updateDragZoneVisibility(totalPages);
+                        } else if (!isPrev && adminPageIndex < totalPages - 1) {
+                            adminPageIndex++;
+                            renderButtonGrid();
+                            _updateDragZoneVisibility(totalPages);
+                        }
+                    }, 600);
+                });
+                el.addEventListener('dragleave', () => {
+                    el.classList.remove('active');
+                    clearTimeout(dragPageTimer);
+                    dragPageTimer = null;
+                });
+                el.addEventListener('drop', ev => {
+                    ev.preventDefault();
+                    el.classList.remove('active');
+                    clearTimeout(dragPageTimer);
+                    dragPageTimer = null;
+                });
+            });
+        }
+
+        function _updateDragZoneVisibility(totalPages) {
+            const leftEl  = document.getElementById('dragZoneLeft');
+            const rightEl = document.getElementById('dragZoneRight');
+            leftEl.classList.toggle('hidden-zone',  adminPageIndex === 0);
+            rightEl.classList.toggle('hidden-zone', adminPageIndex >= totalPages - 1);
+            leftEl.classList.remove('active');
+            rightEl.classList.remove('active');
+        }
 
         function swapButtons(fromRow, fromCol, toRow, toCol) {
             if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return;
             const fromButton = findButtonAtPosition(fromRow, fromCol);
             const toButton = findButtonAtPosition(toRow, toCol);
-            currentBoardData.buttons = currentBoardData.buttons.filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === fromRow && c === fromCol) && !(r === toRow && c === toCol); });
+            // Skip overflow pool buttons (row/col === null) — Number(null)=0 would incorrectly match them
+            currentBoardData.buttons = currentBoardData.buttons.filter(btn => {
+                if (btn.row === null || btn.row === undefined || btn.col === null || btn.col === undefined) return true;
+                const r = Number(btn.row);
+                const c = Number(btn.col);
+                return !(r === fromRow && c === fromCol) && !(r === toRow && c === toCol);
+            });
             if (fromButton) { fromButton.row = toRow; fromButton.col = toCol; currentBoardData.buttons.push(fromButton); }
             if (toButton) { toButton.row = fromRow; toButton.col = fromCol; currentBoardData.buttons.push(toButton); }
         }
@@ -970,45 +1162,50 @@
             document.getElementById('buttonLlmPromptWrapper').style.display = isDynamic ? '' : 'none';
         }
 
-        function openButtonEditor(row, col) {
-            currentEditingButton = { row, col };
-            const buttonData = findButtonAtPosition(row, col) || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, temporary_navigation: false, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
-            const btnType = buttonData.button_type || 'static';
+        function openButtonEditor(row, col, buttonId = null) {
+            currentEditingButton = { row, col, buttonId };
+            // For overflow pool buttons (page > 0), look up by ID; otherwise by visual position.
+            const buttonData = buttonId
+                ? (currentBoardData && Array.isArray(currentBoardData.buttons)
+                    ? currentBoardData.buttons.find(b => b.id === buttonId) : null) || null
+                : findButtonAtPosition(row, col);
+            const resolvedData = buttonData || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, temporary_navigation: false, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
+            const btnType = resolvedData.button_type || 'static';
             document.getElementById('buttonType').value = btnType;
-            document.getElementById('buttonLlmPrompt').value = buttonData.llm_prompt || '';
+            document.getElementById('buttonLlmPrompt').value = resolvedData.llm_prompt || '';
             updateButtonEditorVisibility(btnType);
 
-            document.getElementById('buttonText').value = buttonData.label || '';
-            document.getElementById('speechText').value = buttonData.speech_text || '';
-            document.getElementById('pastTenseVariant').value = buttonData.past_tense || '';
-            document.getElementById('pluralVariant').value = buttonData.plural || '';
-            document.getElementById('buttonHidden').checked = !!buttonData.hidden;
-            document.getElementById('assignedImageUrl').value = buttonData.image_url || '';
-            document.getElementById('customAudioFileUrl').value = buttonData.custom_audio_file || '';
-            document.getElementById('buttonBgColor').value = buttonData.background_color || '#FFFFFF';
-            let afterSel = buttonData.after_selection || (buttonData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
+            document.getElementById('buttonText').value = resolvedData.label || '';
+            document.getElementById('speechText').value = resolvedData.speech_text || '';
+            document.getElementById('pastTenseVariant').value = resolvedData.past_tense || '';
+            document.getElementById('pluralVariant').value = resolvedData.plural || '';
+            document.getElementById('buttonHidden').checked = !!resolvedData.hidden;
+            document.getElementById('assignedImageUrl').value = resolvedData.image_url || '';
+            document.getElementById('customAudioFileUrl').value = resolvedData.custom_audio_file || '';
+            document.getElementById('buttonBgColor').value = resolvedData.background_color || '#FFFFFF';
+            let afterSel = resolvedData.after_selection || (resolvedData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
             if (!['do_nothing', 'navigate', 'navigate_home', 'use_ai'].includes(afterSel)) {
                 afterSel = 'do_nothing';
             }
             document.getElementById('afterSelection').value = afterSel;
             document.getElementById('targetBoardWrapper').style.display = afterSel === 'navigate' ? '' : 'none';
             document.getElementById('temporaryNavigationWrapper').classList.toggle('hidden', afterSel !== 'navigate');
-            document.getElementById('temporaryNavigation').checked = (afterSel === 'navigate') && !!buttonData.temporary_navigation;
-            populateTargetBoardDropdown(buttonData.target_board_id || '');
-            updateAssignedImagePreview(buttonData.image_url || '');
+            document.getElementById('temporaryNavigation').checked = (afterSel === 'navigate') && !!resolvedData.temporary_navigation;
+            populateTargetBoardDropdown(resolvedData.target_board_id || '');
+            updateAssignedImagePreview(resolvedData.image_url || '');
             const audioStatus = document.getElementById('audioUploadStatus');
-            if (buttonData.custom_audio_file) { audioStatus.className = 'text-xs mt-1 text-green-600'; audioStatus.textContent = 'Audio file assigned'; audioStatus.classList.remove('hidden'); }
+            if (resolvedData.custom_audio_file) { audioStatus.className = 'text-xs mt-1 text-green-600'; audioStatus.textContent = 'Audio file assigned'; audioStatus.classList.remove('hidden'); }
             else audioStatus.classList.add('hidden');
             document.getElementById('positionInfo').textContent = `Row ${row + 1}, Column ${col + 1}`;
             // Modifier state info (read-only, from TouchChat import)
             const modifierInfoRow = document.getElementById('modifierInfoRow');
-            const hasModifier = buttonData.modifier_trigger_id || (buttonData.modifier_variants && Object.keys(buttonData.modifier_variants).length > 0);
+            const hasModifier = resolvedData.modifier_trigger_id || (resolvedData.modifier_variants && Object.keys(resolvedData.modifier_variants).length > 0);
             if (hasModifier) {
                 modifierInfoRow.classList.remove('hidden');
-                document.getElementById('modifierTriggerInfo').textContent = buttonData.modifier_trigger_id ? `modifier ${buttonData.modifier_trigger_id}` : 'No';
+                document.getElementById('modifierTriggerInfo').textContent = resolvedData.modifier_trigger_id ? `modifier ${resolvedData.modifier_trigger_id}` : 'No';
                 const variantsList = document.getElementById('modifierVariantsList');
                 variantsList.innerHTML = '';
-                const variants = buttonData.modifier_variants || {};
+                const variants = resolvedData.modifier_variants || {};
                 Object.entries(variants).forEach(([modId, v]) => {
                     const li = document.createElement('li');
                     const triggerText = v.modifier_trigger_id ? ` → triggers modifier ${v.modifier_trigger_id}` : '';
@@ -1038,21 +1235,32 @@
             const customAudio = buttonType === 'dynamic' ? null : document.getElementById('customAudioFileUrl').value.trim();
             const imageUrl = buttonType === 'dynamic' ? null : document.getElementById('assignedImageUrl').value.trim();
             const bgColor = document.getElementById('buttonBgColor').value.trim() || '#FFFFFF';
-            const existingButton = findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
+            // For overflow buttons, look up by ID; otherwise by visual position
+            const existingButton = currentEditingButton.buttonId
+                ? (currentBoardData.buttons || []).find(b => b.id === currentEditingButton.buttonId)
+                : findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
             const textColor = (existingButton && existingButton.text_color) ? existingButton.text_color : '#000000';
             const modifierTriggerId = existingButton ? (existingButton.modifier_trigger_id ?? null) : null;
             const modifierVariants = (existingButton && existingButton.modifier_variants && typeof existingButton.modifier_variants === 'object')
                 ? existingButton.modifier_variants
                 : {};
             const hidden = document.getElementById('buttonHidden').checked;
-            currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            // Remove the existing button (by ID for overflow buttons, by row/col for page-0 buttons)
+            if (currentEditingButton.buttonId) {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => btn.id !== currentEditingButton.buttonId);
+            } else {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            }
             if (label || speechText || targetBoard || customAudio || imageUrl || (buttonType === 'dynamic' && llmPrompt) || ['navigate_home', 'use_ai'].includes(afterSelection)) {
                 const actionType = afterSelection === 'navigate' ? 'navigate' : (customAudio ? 'audio' : 'announce');
+                // Overflow buttons preserve their ID, pool_index, row=null, col=null
+                const isOverflow = !!currentEditingButton.buttonId && existingButton && (existingButton.row === null || existingButton.row === undefined);
                 currentBoardData.buttons.push({
-                    id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`,
+                    id: currentEditingButton.buttonId || `btn_${currentEditingButton.row}_${currentEditingButton.col}`,
                     label: label || (buttonType === 'dynamic' ? 'AI Dynamic Option' : `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`),
-                    row: currentEditingButton.row,
-                    col: currentEditingButton.col,
+                    row: isOverflow ? null : currentEditingButton.row,
+                    col: isOverflow ? null : currentEditingButton.col,
+                    pool_index: existingButton ? (existingButton.pool_index ?? null) : null,
                     speech_text: speechText || null,
                     past_tense: pastTenseVariant || null,
                     plural: pluralVariant || null,
@@ -1078,7 +1286,11 @@
 
         function clearCurrentButton() {
             if (!currentEditingButton || !currentBoardData) return;
-            currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            if (currentEditingButton.buttonId) {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => btn.id !== currentEditingButton.buttonId);
+            } else {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            }
             renderButtonGrid();
             closeButtonEditor();
         }
@@ -1483,7 +1695,8 @@
             const prompt = `Generate AAC word and phrase options for a board about: ${topic}. Include common words, actions, objects, and short phrases that are relevant to this topic and useful for AAC communication. Options should be short (1-3 words).`;
             const staticRows = getStaticRowsCount();
             const perRow = GRID_COLS;
-            const totalOptions = Math.min(84, Math.max(1, staticRows * perRow));
+            const maxOnPage = staticRows * perRow;
+            const maxPool = 30;
 
             const previewList = document.getElementById('aiBulkPreviewList');
             const previewMeta = document.getElementById('aiBulkPreviewMeta');
@@ -1495,14 +1708,14 @@
             applyBtn.disabled = true;
 
             try {
-                let enhancedPrompt = `CRITICAL: Generate EXACTLY ${totalOptions} UNIQUE board button labels for AAC communication: ${prompt}\n`;
+                let enhancedPrompt = `Generate UP TO ${maxPool} UNIQUE board button labels for AAC communication: ${prompt}\n`;
                 if (examples) enhancedPrompt += `Examples of the type of options to generate: ${examples}\n`;
                 if (exclusions) enhancedPrompt += `Do NOT include any of these: ${exclusions}\n`;
-                enhancedPrompt += `\nREQUIREMENTS:\n1. Generate at least ${totalOptions} distinct, practical, usable options (NOT fewer)\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with an "option" key\n5. Each object MUST have at least an "option" key with the label text\n\nBE VERY EXPLICIT: If asked for ${totalOptions} options, return ${totalOptions} different options. Do not skimp on the count.\nReturn ONLY the JSON array - nothing else.`;
+                enhancedPrompt += `\nREQUIREMENTS:\n1. Generate as many distinct, practical options as possible (up to ${maxPool})\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with these keys:\n   - "option": the label text\n   - "plural": plural form if it is a NOUN (e.g. "apple"->"apples", "cookie"->"cookies"), otherwise null\n   - "past_tense": past tense if it is an ACTION VERB (e.g. "run"->"ran", "eat"->"ate", "swing"->"swung"), otherwise null\n5. Set both "plural" and "past_tense" to null if neither applies (e.g. adjectives, prepositions)\n\nReturn ONLY the JSON array - nothing else.`;
                 const response = await fetch('/llm', {
                     method: 'POST',
                     headers: getAuthHeaders(),
-                    body: JSON.stringify({ count: totalOptions, prompt: enhancedPrompt, response_format: 'json' }),
+                    body: JSON.stringify({ count: maxPool, prompt: enhancedPrompt, response_format: 'json' }),
                 });
                 if (!response.ok) {
                     const errText = await response.text();
@@ -1510,7 +1723,7 @@
                 }
                 const data = await response.json();
                 console.log('Raw LLM response:', data, 'Type:', typeof data, 'Is Array:', Array.isArray(data));
-                aiBulkPreviewOptions = normalizeAIBulkGeneratedOptions(data, totalOptions);
+                aiBulkPreviewOptions = normalizeAIBulkGeneratedOptions(data, maxPool);
                 console.log('Normalized options:', aiBulkPreviewOptions, 'Count:', aiBulkPreviewOptions.length);
                 if (!aiBulkPreviewOptions.length) {
                     previewList.textContent = 'No options returned. Try a different prompt.';
@@ -1519,8 +1732,15 @@
                 }
                 // Enrich with plural/past_tense during preview so they're ready on apply
                 await enrichOptionsWithVariants(aiBulkPreviewOptions);
-                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map(opt => `<li>${escapeHtml(opt.label)}</li>`).join('')}</ol>`;
-                previewMeta.textContent = `${aiBulkPreviewOptions.length} option(s) across ${staticRows} row(s)`;
+                const onPage = Math.min(aiBulkPreviewOptions.length, maxOnPage);
+                const overflow = Math.max(0, aiBulkPreviewOptions.length - maxOnPage);
+                const metaParts = [`${aiBulkPreviewOptions.length} option(s) — ${onPage} on page 1`];
+                if (overflow > 0) metaParts.push(`${overflow} on next page (via Something Else)`);
+                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map((opt, i) => {
+                    const pageTag = i >= maxOnPage ? ' <span class="text-gray-400 text-xs">(next page)</span>' : '';
+                    return `<li>${escapeHtml(opt.label)}${pageTag}</li>`;
+                }).join('')}</ol>`;
+                previewMeta.textContent = metaParts.join(' · ');
                 applyBtn.disabled = false;
             } catch (error) {
                 console.error(error);
@@ -1558,13 +1778,14 @@
             return -1;
         }
 
-        function buildGeneratedButtonPayload(label, row, col, config, plural = null, past_tense = null) {
+        function buildGeneratedButtonPayload(label, row, col, config, plural = null, past_tense = null, pool_index = null) {
             const actionType = config.afterSelection === 'navigate' ? 'navigate' : 'announce';
             return {
-                id: `btn_${row}_${col}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                id: `btn_pool_${pool_index !== null ? pool_index : (row + '_' + col)}_${Date.now()}`,
                 label,
                 row,
                 col,
+                pool_index,
                 speech_text: label,
                 plural: plural || null,
                 past_tense: past_tense || null,
@@ -1578,6 +1799,7 @@
                 background_color: config.backgroundColor,
                 text_color: '#000000',
                 hidden: false,
+                button_type: 'static',
             };
         }
 
@@ -1613,32 +1835,51 @@
             }
 
             const workingButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
-            const startRow = mode === 'add' ? findFirstCompletelyEmptyRow(workingButtons) : 0;
-            if (startRow < 0) {
-                showNotification('No empty row available to add options', 'error');
-                return;
-            }
-
-            const maxStaticRow = getStaticRowsCount();
-
-            const slots = [];
-            for (let row = startRow; row < maxStaticRow; row++) {
-                for (let col = 0; col < perRow; col++) {
-                    const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
-                    if (!occupied) slots.push({ row, col });
-                }
-            }
-            if (!slots.length) {
-                showNotification('No space available for generated options', 'error');
-                return;
-            }
-
-            const applyCount = Math.min(aiBulkPreviewOptions.length, slots.length);
+            // Compute static rows from global settings — getStaticRowsCount() returns 0 for 'ai'
+            // boards and can give wrong results for unsaved boards, so bypass it here.
+            const boardExplicitDynamic = (currentBoardData?.dynamic_rows !== null && currentBoardData?.dynamic_rows !== undefined)
+                ? Number(currentBoardData.dynamic_rows)
+                : (useHybridPages ? tapDynamicRows : 0);
+            const maxStaticRow = Math.max(0, tapWordsRows - boardExplicitDynamic);
+            const maxOnPage = maxStaticRow * perRow;
             const bulkConfig = { afterSelection, targetBoardId, backgroundColor };
-            for (let i = 0; i < applyCount; i++) {
-                const slot = slots[i];
-                const opt = aiBulkPreviewOptions[i];
-                workingButtons.push(buildGeneratedButtonPayload(opt.label, slot.row, slot.col, bulkConfig, opt.plural, opt.past_tense));
+
+            if (mode === 'replace') {
+                // Assign pool_index to all options; first page gets row/col, overflow gets null/null
+                for (let i = 0; i < aiBulkPreviewOptions.length; i++) {
+                    const opt = aiBulkPreviewOptions[i];
+                    const isOverflow = i >= maxOnPage;
+                    const row = isOverflow ? null : Math.floor(i / perRow);
+                    const col = isOverflow ? null : (i % perRow);
+                    workingButtons.push(buildGeneratedButtonPayload(opt.label, row, col, bulkConfig, opt.plural, opt.past_tense, i));
+                }
+            } else {
+                // Add mode: find available visible slots, fill them first; remaining go as overflow
+                const startRow = findFirstCompletelyEmptyRow(workingButtons);
+                if (startRow < 0) {
+                    showNotification('No empty row available to add options', 'error');
+                    return;
+                }
+                const slots = [];
+                for (let row = startRow; row < maxStaticRow; row++) {
+                    for (let col = 0; col < perRow; col++) {
+                        const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
+                        if (!occupied) slots.push({ row, col });
+                    }
+                }
+                // Determine next pool_index to continue from
+                const existingPoolIndices = workingButtons
+                    .map(b => b.pool_index)
+                    .filter(idx => idx !== null && idx !== undefined)
+                    .map(Number);
+                let nextPoolIndex = existingPoolIndices.length > 0 ? Math.max(...existingPoolIndices) + 1 : 0;
+                for (let i = 0; i < aiBulkPreviewOptions.length; i++) {
+                    const opt = aiBulkPreviewOptions[i];
+                    const slot = slots[i] || null;
+                    const row = slot ? slot.row : null;
+                    const col = slot ? slot.col : null;
+                    workingButtons.push(buildGeneratedButtonPayload(opt.label, row, col, bulkConfig, opt.plural, opt.past_tense, nextPoolIndex + i));
+                }
             }
 
             currentBoardData.buttons = workingButtons;
@@ -1652,13 +1893,15 @@
             currentBoardData.prompt_examples = document.getElementById('aiBulkExamples').value.trim() || null;
             currentBoardData.prompt_exclusions = document.getElementById('aiBulkExclusions').value.trim() || null;
 
+            const onPage = Math.min(aiBulkPreviewOptions.length, maxOnPage);
+            const overflow = Math.max(0, aiBulkPreviewOptions.length - maxOnPage);
+            pendingImageAssignmentAfterSave = true;
             renderButtonGrid();
             closeAIBulkBuilderModal();
-            if (applyCount < aiBulkPreviewOptions.length) {
-                showNotification(`Applied ${applyCount} options (grid full)`, 'success');
-            } else {
-                showNotification(`Applied ${applyCount} options`, 'success');
-            }
+            const msg = overflow > 0
+                ? `Applied ${aiBulkPreviewOptions.length} options (${onPage} visible, ${overflow} on next page)`
+                : `Applied ${aiBulkPreviewOptions.length} options`;
+            showNotification(msg, 'success');
         }
 
         async function saveBoard() {
@@ -1672,6 +1915,7 @@
             } else {
                 buttons = buttons.filter(btn => Number(btn.row) < staticRowsCount);
             }
+            console.log('[saveBoard] boardType:', boardType, 'staticRowsCount:', staticRowsCount, 'total buttons in memory:', (currentBoardData.buttons||[]).length, 'buttons to send:', buttons.length, 'pool buttons:', buttons.filter(b=>b.pool_index!=null).length);
             const payload = {
                 label: document.getElementById('boardLabel').value.trim() || 'Untitled Board',
                 board_type: boardType,
@@ -1696,13 +1940,51 @@
                 let response;
                 if (currentBoardData.id) response = await fetch('/api/tap-interface/boards/' + encodeURIComponent(currentBoardData.id), { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(payload) });
                 else response = await fetch('/api/tap-interface/boards', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) });
-                if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${response.status}`); }
+                if (!response.ok) { const err = await response.json().catch(() => ({})); const detail = Array.isArray(err.detail) ? err.detail.map(e => e.msg || JSON.stringify(e)).join('; ') : (err.detail || `HTTP ${response.status}`); throw new Error(detail); }
                 const body = await response.json();
                 boardSettings = body.board_settings || boardSettings;
                 await loadBoards();
                 if (body.board && body.board.id) { document.getElementById('selectBoard').value = body.board.id; handleBoardSelected(); }
                 showNotification('Board saved', 'success');
+                if (pendingImageAssignmentAfterSave) {
+                    pendingImageAssignmentAfterSave = false;
+                    assignImagesInBackground();
+                }
             } catch (error) { console.error(error); showNotification('Save failed: ' + error.message, 'error'); }
+        }
+
+        async function assignImagesInBackground() {
+            showNotification('Assigning images to generated options…', 'info');
+            try {
+                const resp = await fetch('/api/tap-interface/boards/assign-all-images', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({})
+                });
+                const respBody = await resp.json().catch(() => ({}));
+                console.log('[assignImages] response', resp.status, respBody);
+                if (!resp.ok) {
+                    console.error('[assignImages] server error:', respBody);
+                    showNotification('Image assignment failed: ' + (respBody.detail || resp.status), 'error');
+                    return;
+                }
+                await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) {
+                        const withImgs = (refreshed.buttons || []).filter(b => b.image_url);
+                        console.log('[assignImages] refreshed board buttons with image_url:', withImgs.length, '/', (refreshed.buttons || []).length);
+                        currentBoardData = JSON.parse(JSON.stringify(refreshed));
+                        renderButtonGrid();
+                    } else {
+                        console.warn('[assignImages] refreshed board not found in allBoards');
+                    }
+                }
+                showNotification('Images assigned', 'success');
+            } catch (err) {
+                console.error('[assignImages] exception:', err);
+                showNotification('Image assignment error: ' + err.message, 'error');
+            }
         }
 
         async function deleteBoard() {
@@ -2063,6 +2345,54 @@
         }
 
         function escapeHtml(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
+
+        // ── Reassign Images ────────────────────────────────────────────────────
+        function openReassignImagesModal() {
+            document.getElementById('reassignImagesModal').classList.remove('hidden');
+        }
+
+        function closeReassignImagesModal() {
+            document.getElementById('reassignImagesModal').classList.add('hidden');
+        }
+
+        async function reassignImages(scope) {
+            const isAll = scope === 'all';
+            const clickedBtn = document.getElementById(isAll ? 'reassignAllBoardsBtn' : 'reassignThisBoardBtn');
+            const originalText = clickedBtn.textContent;
+            clickedBtn.disabled = true;
+            clickedBtn.textContent = 'Assigning…';
+            closeReassignImagesModal();
+            showNotification('Reassigning images — this may take a moment…', 'info');
+
+            try {
+                const resp = await fetch('/api/tap-interface/boards/assign-all-images', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({})
+                });
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.detail || `Server error ${resp.status}`);
+                }
+
+                // Reload the current board so the grid reflects the newly saved image_urls
+                await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) {
+                        currentBoardData = JSON.parse(JSON.stringify(refreshed));
+                        renderButtonGrid();
+                    }
+                }
+                showNotification('Images reassigned successfully', 'success');
+            } catch (err) {
+                console.error('Reassign images failed:', err);
+                showNotification('Failed to reassign images: ' + err.message, 'error');
+            } finally {
+                clickedBtn.disabled = false;
+                clickedBtn.textContent = originalText;
+            }
+        }
     </script>
 
     <!-- Help Modal -->
@@ -2636,95 +2966,6 @@
                 });
             });
         });
-
-    // ── Reassign Images ─────────────────────────────────────────────────────────
-    function openReassignImagesModal() {
-        document.getElementById('reassignImagesModal').classList.remove('hidden');
-    }
-
-    function closeReassignImagesModal() {
-        document.getElementById('reassignImagesModal').classList.add('hidden');
-    }
-
-    async function reassignImages(allBoards) {
-        const btn = document.getElementById(allBoards ? 'reassignAllBoardsBtn' : 'reassignThisBoardBtn');
-        const originalText = btn.textContent;
-        btn.disabled = true;
-        btn.textContent = 'Assigning…';
-        closeReassignImagesModal();
-        showNotification('Reassigning images — this may take a moment…', 'info');
-
-        try {
-            const token = sessionStorage.getItem('firebase_id_token');
-            const userId = sessionStorage.getItem('aac_user_id');
-            if (!token || !userId) throw new Error('Not authenticated');
-
-            const configResp = await fetch(`/api/tap-interface/config?t=${Date.now()}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (!configResp.ok) throw new Error('Failed to load board config');
-            const config = await configResp.json();
-
-            const boards = Array.isArray(config.boards) ? config.boards : [];
-            const targetBoardId = allBoards ? null : (currentBoardData?.id || null);
-
-            for (const board of boards) {
-                const boardId = String(board.id || '').trim();
-                if (!boardId) continue;
-                if (targetBoardId && boardId !== targetBoardId) continue;
-
-                const buttons = Array.isArray(board.buttons) ? board.buttons : [];
-                const assignments = [];
-
-                for (const btn2 of buttons) {
-                    if (!btn2 || !btn2.id) continue;
-                    const label = btn2.label || '';
-                    if (!label) continue;
-                    // Look up image via symbol search API
-                    try {
-                        const searchResp = await fetch('/api/symbols/batch-search', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                            body: JSON.stringify({ terms: [label], limit: 1 })
-                        });
-                        if (searchResp.ok) {
-                            const searchData = await searchResp.json();
-                            const results = searchData.results || {};
-                            const images = results[label] || results[label.toLowerCase()] || [];
-                            if (images.length > 0 && images[0].image_url) {
-                                assignments.push({ button_id: btn2.id, image_url: images[0].image_url });
-                            }
-                        }
-                    } catch (e) {
-                        console.warn(`Image lookup failed for "${label}":`, e);
-                    }
-                }
-
-                if (assignments.length > 0) {
-                    await fetch(`/api/tap-interface/boards/${boardId}/assign-images`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                        body: JSON.stringify({ assignments })
-                    });
-                }
-            }
-
-            showNotification('Images reassigned successfully', 'success');
-        } catch (err) {
-            console.error('Reassign images failed:', err);
-            showNotification('Failed to reassign images: ' + err.message, 'error');
-        } finally {
-            btn.disabled = false;
-            btn.textContent = originalText;
-        }
-    }
-
-    document.getElementById('reassignImagesModal').addEventListener('click', e => {
-        if (e.target === document.getElementById('reassignImagesModal')) closeReassignImagesModal();
-    });
-    document.getElementById('reassignCancelBtn').addEventListener('click', closeReassignImagesModal);
-    document.getElementById('reassignThisBoardBtn').addEventListener('click', () => reassignImages(false));
-    document.getElementById('reassignAllBoardsBtn').addEventListener('click', () => reassignImages(true));
 
     })();
     </script>

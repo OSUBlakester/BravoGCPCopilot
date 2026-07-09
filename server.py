@@ -8886,6 +8886,11 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                 # 'static' board types (i.e. whenever tap_dynamic_rows == 0 OR use_hybrid_pages).
                 create_as_hybrid = use_hybrid_pages or (tap_dynamic_rows == 0)
                 new_tap_config = create_default_tap_config(account_id, aac_user_id, use_hybrid_pages=create_as_hybrid)
+                # create_default_tap_config returns a config with 'buttons' (board templates)
+                # but no 'boards' list. Populate 'boards' via ensure_tap_boards_structure so
+                # the pool-assignment loop below actually finds boards to populate.
+                new_tap_config, _ = normalize_compose_tap_config(new_tap_config)
+                new_tap_config, _ = ensure_tap_boards_structure(new_tap_config, use_hybrid_pages=create_as_hybrid)
                 logging.warning(
                     f"DEBUG regenerate_boards: create_as_hybrid={create_as_hybrid} "
                     f"board_types_sample={[b.get('board_type') for b in new_tap_config.get('boards', []) if isinstance(b, dict)][:5]}"
@@ -8905,45 +8910,13 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                         and not board.get('buttons')
                         and CATEGORY_STATIC_POOLS
                     ):
-                        def _to_pool_key(s: str) -> str:
-                            k = ''.join(ch if ch.isalnum() else '_' for ch in s.strip().lower())
-                            while '__' in k:
-                                k = k.replace('__', '_')
-                            return k.strip('_')
-                        # Try prompt_category first, then fall back to label so that boards
-                        # like Home (prompt_category='general_conversation', label='Home')
-                        # still find their pool via the label key.
-                        pool = CATEGORY_STATIC_POOLS.get(_to_pool_key(str(board.get('prompt_category') or '')), [])
+                        pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
                         if not pool:
-                            pool = CATEGORY_STATIC_POOLS.get(_to_pool_key(str(board.get('label') or '')), [])
+                            pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
                         if pool:
                             max_buttons = static_rows * grid_cols
-                            def _make_pool_button(pool_idx, word, board_id, is_overflow):
-                                variants = WORD_VARIANTS.get(str(word).strip().lower(), {})
-                                btn = {
-                                    'id': f"btn_{board_id}_pool_{pool_idx}",
-                                    'label': word,
-                                    'background_color': '#FFFFFF',
-                                    'text_color': '#000000',
-                                    'after_selection': default_button_action,
-                                    'button_type': 'static',
-                                    'pool_index': pool_idx,
-                                }
-                                if is_overflow:
-                                    # Overflow buttons are not placed in the grid on page 0;
-                                    # they exist solely to carry image_url for Something Else cycling.
-                                    btn['row'] = None
-                                    btn['col'] = None
-                                else:
-                                    btn['row'] = pool_idx // grid_cols
-                                    btn['col'] = pool_idx % grid_cols
-                                if variants.get('past_tense'):
-                                    btn['past_tense'] = variants['past_tense']
-                                if variants.get('plural'):
-                                    btn['plural'] = variants['plural']
-                                return btn
                             board['buttons'] = [
-                                _make_pool_button(idx, word, board['id'], idx >= max_buttons)
+                                _make_pool_button_entry(idx, word, board['id'], idx >= max_buttons, grid_cols, default_button_action)
                                 for idx, word in enumerate(pool)
                             ]
 
@@ -8955,6 +8928,12 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                 logging.info(
                     f"✅ Regenerated tap boards for {account_id}/{aac_user_id}: "
                     f"use_hybrid_pages={use_hybrid_pages}, tap_dynamic_rows={tap_dynamic_rows}"
+                )
+                # Assign images to all static pool buttons in the background.
+                # Use a fresh copy of the saved config so in-place mutation is safe.
+                _mascot_for_assign = str(saved_settings_dict.get('mascot') or 'buddy').strip().lower()
+                asyncio.create_task(
+                    _assign_images_to_tap_config(new_tap_config, _mascot_for_assign, account_id, aac_user_id)
                 )
             except Exception as e:
                 logging.error(f"Failed to regenerate tap boards after settings update: {e}", exc_info=True)
@@ -21523,6 +21502,349 @@ _batch_search_cache: dict = {}
 _BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 
 
+def _make_pool_button_entry(
+    pool_idx: int,
+    word: str,
+    board_id: str,
+    is_overflow: bool,
+    grid_cols: int,
+    default_button_action: str,
+) -> Dict[str, Any]:
+    """Create a single static pool button dict (shared between regenerate_boards and backfill)."""
+    variants = WORD_VARIANTS.get(str(word).strip().lower(), {})
+    btn: Dict[str, Any] = {
+        'id': f"btn_{board_id}_pool_{pool_idx}",
+        'label': word,
+        'background_color': '#FFFFFF',
+        'text_color': '#000000',
+        'after_selection': default_button_action,
+        'button_type': 'static',
+        'pool_index': pool_idx,
+    }
+    if is_overflow:
+        btn['row'] = None
+        btn['col'] = None
+    else:
+        btn['row'] = pool_idx // grid_cols
+        btn['col'] = pool_idx % grid_cols
+    if variants.get('past_tense'):
+        btn['past_tense'] = variants['past_tense']
+    if variants.get('plural'):
+        btn['plural'] = variants['plural']
+    return btn
+
+
+def _pool_key(s: str) -> str:
+    k = ''.join(ch if ch.isalnum() else '_' for ch in str(s or '').strip().lower())
+    while '__' in k:
+        k = k.replace('__', '_')
+    return k.strip('_')
+
+
+async def _lookup_images_for_labels(
+    labels: List[str],
+    mascot: str = '',
+    account_id: str = '',
+    aac_user_id: str = '',
+) -> Dict[str, str]:
+    """
+    Batch-look up the best symbol image for each label string.
+    Returns {original_label: image_url}. Missing results are omitted.
+    Shared by board generation, assign-all-images endpoint, and board builder.
+    """
+    import re as _re
+
+    if not labels or not firestore_db:
+        return {}
+
+    def _norm(s: str) -> str:
+        return ' '.join(_re.sub(r'[^a-z0-9]+', ' ', str(s or '').strip().lower()).split())
+
+    mascot_clean = str(mascot or '').strip().lower()
+    unique_labels = list(dict.fromkeys(labels))  # preserve order, dedupe
+    norm_map = {lbl: _norm(lbl) for lbl in unique_labels}  # label → normalized
+
+    all_norm = set(v for v in norm_map.values() if v)
+
+    if not all_norm:
+        return {}
+
+    images_ref = firestore_db.collection("aac_images")
+
+    def _chunked(seq, n=10):
+        seq = list(seq)
+        for i in range(0, len(seq), n):
+            yield seq[i:i + n]
+
+    def _stream(q):
+        return list(q.stream())
+
+    # Build parallel queries mirroring batch-search: search_terms (primary), tags (legacy fallback)
+    queries = []
+    for chunk in _chunked(all_norm, 10):
+        queries.append(("search_terms", images_ref.where("search_terms", "array_contains_any", chunk).limit(300)))
+        queries.append(("tags_legacy",  images_ref.where("source", "==", "bravo_images").where("tags", "array_contains_any", chunk).limit(250)))
+
+    # Run in small batches to avoid saturating the shared ThreadPoolExecutor and
+    # blocking unrelated Firestore operations on other in-flight requests.
+    _BATCH = 5
+    streams: List[Any] = []
+    try:
+        asyncio.get_running_loop()
+        for _i in range(0, len(queries), _BATCH):
+            _batch = queries[_i: _i + _BATCH]
+            _results = await asyncio.gather(
+                *[asyncio.to_thread(_stream, q) for _, q in _batch],
+                return_exceptions=True,
+            )
+            streams.extend(_results)
+    except RuntimeError:
+        streams = [_stream(q) for _, q in queries]
+
+    # Index candidates by doc id.
+    # search_terms query has no source filter — mirror batch-search's path1 rule:
+    # only accept docs where source == "bravo_images".
+    candidate_docs: Dict[str, dict] = {}
+    for (qtype, _), result in zip(queries, streams):
+        if isinstance(result, Exception):
+            continue
+        for doc in result:
+            data = doc.to_dict() or {}
+            if not data.get("image_url"):
+                continue
+            if qtype == "search_terms" and data.get("source") != "bravo_images":
+                continue
+            candidate_docs[doc.id] = data
+
+    # Load custom images (mascot-specific assets live here)
+    custom_candidates: List[dict] = []
+    if account_id and aac_user_id:
+        try:
+            custom_ref = (firestore_db.collection("accounts").document(account_id)
+                          .collection("profiles").document(aac_user_id)
+                          .collection("custom_images"))
+            for doc in (await asyncio.to_thread(lambda: list(custom_ref.where("active", "==", True).limit(500).stream()))):
+                d = doc.to_dict() or {}
+                if d.get("image_url"):
+                    custom_candidates.append({
+                        "id": doc.id,
+                        "url": d["image_url"],
+                        "subconcept": _norm(d.get("subconcept") or ""),
+                        "concept":    _norm(d.get("concept") or ""),
+                        "tags":       [_norm(t) for t in (d.get("tags") or []) if _norm(t)],
+                        "mascot":     str(d.get("mascot") or "").strip().lower(),
+                    })
+        except Exception as _ce:
+            logging.debug(f"_lookup_images_for_labels: custom image load failed: {_ce}")
+
+    # Pre-normalize candidate data once so _score doesn't redo it per label.
+    processed: List[dict] = []
+    for doc_id, data in candidate_docs.items():
+        url = data.get("image_url")
+        if not url:
+            continue
+        sub = _norm(data.get("subconcept") or "")
+        con = _norm(data.get("concept") or "")
+        tags = [_norm(t) for t in (data.get("tags") or []) if t]
+        st   = [_norm(t) for t in (data.get("search_terms") or []) if t] if isinstance(data.get("search_terms"), list) else []
+        all_terms = set(tags + st + [sub, con]) - {''}
+        processed.append({
+            "url": url,
+            "sub": sub,
+            "con": con,
+            "all_terms": all_terms,
+            "mascot": str(data.get("mascot") or "").strip().lower(),
+        })
+
+    for cc in custom_candidates:
+        url = cc.get("url")
+        if not url:
+            continue
+        sub = cc.get("subconcept") or ""
+        con = cc.get("concept") or ""
+        tags = cc.get("tags") or []
+        all_terms = set(tags + [sub, con]) - {''}
+        processed.append({
+            "url": url,
+            "sub": sub,
+            "con": con,
+            "all_terms": all_terms,
+            "mascot": cc.get("mascot") or "",
+        })
+
+    def _score(norm_label: str, cand: dict) -> int:
+        score = 0
+        if norm_label == cand["sub"]:
+            score += 1000
+        elif norm_label == cand["con"]:
+            score += 900
+        elif norm_label in cand["all_terms"]:
+            # 780 so a tag match survives the -400 wrong-mascot penalty (780-400=380 > 0).
+            score += 780
+        else:
+            return -9999  # no textual match; skip mascot adjustment
+
+        if mascot_clean:
+            img_m = cand["mascot"]
+            if img_m == mascot_clean:
+                score += 500
+            elif img_m and img_m != mascot_clean:
+                score -= 400
+        return score
+
+    # Score all pre-processed candidates for each label.
+    label_to_url: Dict[str, str] = {}
+    for lbl in unique_labels:
+        norm_lbl = norm_map.get(lbl, '')
+        if not norm_lbl:
+            continue
+        best_score = 0  # require a genuine textual match (score > 0)
+        best_url = None
+
+        for cand in processed:
+            s = _score(norm_lbl, cand)
+            if s > best_score:
+                best_score = s
+                best_url = cand["url"]
+
+        if best_url:
+            label_to_url[lbl] = best_url
+
+    logging.info(f"_lookup_images_for_labels: {len(label_to_url)}/{len(unique_labels)} labels resolved (mascot={mascot_clean!r})")
+    return label_to_url
+
+
+async def _assign_images_to_tap_config(
+    config_data: Dict[str, Any],
+    mascot: str,
+    account_id: str,
+    aac_user_id: str,
+) -> None:
+    """
+    Background task: resolve images for every static pool button in the tap config
+    and save the updated config to Firestore. Also backfills missing pool buttons
+    for static boards that were created before the pool-assignment feature existed.
+
+    Uses config_data only to collect labels; reloads a fresh copy from Firestore
+    before saving so concurrent writes (e.g. wizard boards-menu save) are not lost.
+    """
+    try:
+        # Load a fresh copy from Firestore so we work with the latest state.
+        fresh_config = await load_tap_nav_config(account_id, aac_user_id)
+        if not fresh_config:
+            fresh_config = config_data
+
+        # --- Backfill missing pool buttons ---
+        # Static boards created before the pool feature have no pool_index buttons.
+        # Re-populate them now using CATEGORY_STATIC_POOLS so pagination works.
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        tap_words_rows   = int(settings.get('tapWordsRows',   4) or 4)
+        grid_cols        = int(settings.get('gridColumns',    6) or 6)
+        tap_dynamic_rows = int(settings.get('tapDynamicRows', 0) or 0)
+        static_rows      = max(0, tap_words_rows - tap_dynamic_rows)
+        default_action   = str(settings.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+
+        backfill_changed = False
+        for board in (fresh_config.get('boards') or []):
+            if not isinstance(board, dict) or board.get('board_type') != 'static':
+                continue
+            existing = board.get('buttons') or []
+            has_pool = any(
+                isinstance(b, dict) and b.get('pool_index') is not None
+                for b in existing
+            )
+            if has_pool:
+                continue  # already populated
+            pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
+            if not pool:
+                pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
+            if not pool:
+                continue
+            max_on_page = static_rows * grid_cols
+            board['buttons'] = [
+                _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
+                for idx, word in enumerate(pool)
+            ]
+            board['dynamic_rows'] = tap_dynamic_rows
+            backfill_changed = True
+
+        # Collect all unique labels for image lookup (includes newly added pool buttons)
+        all_labels: List[str] = []
+        for board in (fresh_config.get('boards') or []):
+            if not isinstance(board, dict):
+                continue
+            for btn in (board.get('buttons') or []):
+                if not isinstance(btn, dict):
+                    continue
+                lbl = str(btn.get('label') or '').strip()
+                if lbl:
+                    all_labels.append(lbl)
+
+        if not all_labels and not backfill_changed:
+            return
+
+        label_to_url: Dict[str, str] = {}
+        if all_labels:
+            label_to_url = await _lookup_images_for_labels(all_labels, mascot, account_id, aac_user_id)
+
+        # Write image_url onto every matching button
+        img_changed = False
+        for board in (fresh_config.get('boards') or []):
+            if not isinstance(board, dict):
+                continue
+            for btn in (board.get('buttons') or []):
+                if not isinstance(btn, dict):
+                    continue
+                lbl = str(btn.get('label') or '').strip()
+                url = label_to_url.get(lbl)
+                if url and btn.get('image_url') != url:
+                    btn['image_url'] = url
+                    img_changed = True
+
+        if backfill_changed or img_changed:
+            await save_tap_nav_config(account_id, aac_user_id, fresh_config)
+            logging.info(
+                f"✅ Pool/image assignment complete for {account_id}/{aac_user_id}: "
+                f"backfill={backfill_changed} images={len(label_to_url)}"
+            )
+    except Exception as e:
+        logging.error(f"_assign_images_to_tap_config failed for {account_id}/{aac_user_id}: {e}", exc_info=True)
+
+
+@app.post("/api/tap-interface/boards/assign-all-images")
+async def assign_all_board_images(
+    payload: Dict[str, Any],
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    Assign (or re-assign) images to all static pool buttons across all boards.
+    Used by the board builder Reassign Images button.
+    Accepts optional 'mascot' override; falls back to the user's saved setting.
+    """
+    aac_user_id = current_ids["aac_user_id"]
+    account_id  = current_ids["account_id"]
+
+    try:
+        mascot = str(payload.get('mascot') or '').strip().lower()
+        if not mascot:
+            settings = await load_settings_from_file(account_id, aac_user_id)
+            mascot = str(settings.get('mascot') or 'buddy').strip().lower()
+
+        config_data = await load_tap_nav_config(account_id, aac_user_id)
+        if not config_data:
+            raise HTTPException(status_code=404, detail='Board config not found')
+
+        # Run synchronously so the response confirms completion
+        await _assign_images_to_tap_config(config_data, mascot, account_id, aac_user_id)
+
+        return JSONResponse(content={'success': True, 'mascot': mascot})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"assign_all_board_images failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/symbols/batch-search")
 async def batch_symbol_search(
     request: Request,
@@ -21538,6 +21860,7 @@ async def batch_symbol_search(
         terms = data.get('terms', [])
         locale = str(data.get('locale') or 'en-US').strip().lower()
         locale_base = locale.split('-')[0] if '-' in locale else locale
+        mascot = str(data.get('mascot') or '').strip().lower()
 
         def _normalize_quotes_and_space(v):
             text = str(v or '').strip().lower()
@@ -21689,11 +22012,10 @@ async def batch_symbol_search(
             return JSONResponse(content={"results": {}})
 
         def _batch_cache_key(item_rec):
-            # Scope cache per account/profile/locale and search-term set.
-            # This prevents stale generic mappings (e.g. red->color) from leaking
-            # across users or keyword contexts.
+            # Scope cache per account/profile/locale/mascot and search-term set.
+            # Mascot is part of the key so that changing mascot returns mascot-appropriate images.
             terms_sig = "|".join(item_rec.get("search_terms", []))
-            return f"v2:{account_id}:{aac_user_id}:{locale_base}:{item_rec.get('query_lower', '')}:{terms_sig}"
+            return f"v3:{account_id}:{aac_user_id}:{locale_base}:{mascot}:{item_rec.get('query_lower', '')}:{terms_sig}"
 
         # --- Serve cached results without hitting Firestore ---
         now_ts = time.time()
@@ -21879,6 +22201,8 @@ async def batch_symbol_search(
                     "concept": concept,
                     "subconcept": subconcept,
                     "searchable_terms": searchable_terms,
+                    "mascot": str(custom_image.get('mascot') or '').strip().lower(),
+                    "source": "custom_images",
                 }
                 custom_candidates.append(rec)
                 for term in searchable_terms:
@@ -21941,6 +22265,14 @@ async def batch_symbol_search(
                     score += max(8, 24 - (idx * 2))
                 if tags and tags[0] == term:
                     score += 6
+
+            # Mascot scoring: strongly prefer matching mascot, penalize wrong mascot.
+            if mascot:
+                img_mascot = cand.get("mascot") or ""
+                if img_mascot == mascot:
+                    score += 500
+                elif img_mascot and img_mascot != mascot:
+                    score -= 400
 
             # Mild source preference: custom images win close ties.
             if cand.get("source") == "custom_images":
@@ -22676,8 +23008,9 @@ class TapBoardButton(BaseModel):
     """Static board button definition for board-oriented AAC mode."""
     id: str = Field(..., description="Unique button ID")
     label: str = Field(..., description="Display label")
-    row: int = Field(0, ge=0, description="Zero-based row in board grid")
-    col: int = Field(0, ge=0, description="Zero-based column in board grid")
+    row: Optional[int] = Field(None, description="Zero-based row in board grid (None for pool overflow buttons)")
+    col: Optional[int] = Field(None, description="Zero-based column in board grid (None for pool overflow buttons)")
+    pool_index: Optional[int] = Field(None, description="Position in the pool for pagination cycling")
     speech_text: Optional[str] = Field(None, description="Speech output text")
     modifier_trigger_id: Optional[int] = Field(None, description="TouchChat modifier id triggered after tapping this button")
     modifier_variants: Dict[str, Dict[str, Any]] = Field(default_factory=dict, description="Alternate button states keyed by modifier id")
@@ -22871,11 +23204,19 @@ def _normalize_after_selection(value: Any) -> Optional[str]:
 
 
 def _normalize_board_button_payload(button: Dict[str, Any], index: int) -> Dict[str, Any]:
+    # Pool overflow buttons have row/col=None — preserve None rather than defaulting to 0.
+    raw_row = button.get('row')
+    raw_col = button.get('col')
+    pool_index = button.get('pool_index')
+    has_pool_index = pool_index is not None
+    row = None if (raw_row is None and has_pool_index) else int(raw_row if raw_row is not None else index // 12)
+    col = None if (raw_col is None and has_pool_index) else int(raw_col if raw_col is not None else index % 12)
     return {
         'id': str(button.get('id') or f'btn_{index + 1}'),
         'label': str(button.get('label') or ''),
-        'row': int(button.get('row', index // 12) or 0),
-        'col': int(button.get('col', index % 12) or 0),
+        'row': row,
+        'col': col,
+        'pool_index': int(pool_index) if has_pool_index else None,
         'speech_text': button.get('speech_text'),
         'modifier_trigger_id': button.get('modifier_trigger_id'),
         'modifier_variants': button.get('modifier_variants') if isinstance(button.get('modifier_variants'), dict) else {},
@@ -25543,11 +25884,15 @@ async def get_word_variants(
 
     if request.mode == 'past':
         prompt = (
-            f"Given these AAC button labels, return a JSON object mapping each ACTION VERB to its past tense form. "
-            f"Include ONLY verbs — skip nouns, adjectives, prepositions, and already-past forms. "
-            f"For multi-word phrases convert only the main verb: 'go home'->'went home'. "
-            f"Examples: play->played, swim->swam, eat->ate, go->went, run->ran, want->wanted, feel->felt, have->had. "
-            f"Return ONLY valid JSON. Return {{}} if nothing qualifies. Do not include a word mapped to itself. "
+            f"Given these AAC button labels, return a JSON object mapping each action verb or verb phrase to its past tense form. "
+            f"Include single verbs AND multi-word verb phrases that start with or contain an action verb. "
+            f"Convert the main verb to past tense and keep the rest of the phrase: "
+            f"'wake up'->'woke up', 'get up'->'got up', 'eat breakfast'->'ate breakfast', 'drink milk'->'drank milk', "
+            f"'go home'->'went home', 'brush teeth'->'brushed teeth', 'take bath'->'took bath', 'put on'->'put on'. "
+            f"Single verb examples: play->played, swim->swam, eat->ate, go->went, run->ran, feel->felt, have->had, wake->woke. "
+            f"Skip pure nouns, adjectives, or prepositions that have no verb (e.g. 'milk', 'cereal', 'happy'). "
+            f"Skip labels that are already in past tense. Do not map a label to itself. "
+            f"Return ONLY valid JSON object. Return {{}} if nothing qualifies. "
             f"Words: {words_json}"
         )
     else:
@@ -25755,6 +26100,35 @@ async def list_tap_boards(
             config_data, boards_changed = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
             if was_normalized or boards_changed:
                 await save_tap_nav_config(account_id, aac_user_id, config_data)
+
+        # Backfill pool buttons for any static boards that are missing them.
+        # This auto-repairs boards created before the pool-assignment feature.
+        tap_words_rows   = int(settings.get('tapWordsRows',   4) or 4)
+        grid_cols        = int(settings.get('gridColumns',    6) or 6)
+        tap_dynamic_rows = int(settings.get('tapDynamicRows', 0) or 0)
+        static_rows      = max(0, tap_words_rows - tap_dynamic_rows)
+        default_action   = str(settings.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+        pool_backfilled  = False
+        for board in (config_data.get('boards') or []):
+            if not isinstance(board, dict) or board.get('board_type') != 'static':
+                continue
+            existing_btns = board.get('buttons') or []
+            if any(isinstance(b, dict) and b.get('pool_index') is not None for b in existing_btns):
+                continue  # already has pool buttons
+            pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
+            if not pool:
+                pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
+            if not pool:
+                continue
+            max_on_page = static_rows * grid_cols
+            board['buttons'] = [
+                _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
+                for idx, word in enumerate(pool)
+            ]
+            board['dynamic_rows'] = tap_dynamic_rows
+            pool_backfilled = True
+        if pool_backfilled:
+            await save_tap_nav_config(account_id, aac_user_id, config_data)
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
@@ -26341,10 +26715,14 @@ async def create_ai_target_board(
         tap_dynamic_rows = int(_dr) if _dr is not None else 1
         static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
 
+        max_pool = 30
+        per_row = int(settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6)
+        max_on_page = static_rows_count * per_row
+
         gen_prompt = (
             f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
             f"A user has just tapped a button that says \"{label}\".\n"
-            f"Generate EXACTLY {payload.num_options} short button labels for words or phrases that would naturally "
+            f"Generate UP TO {max_pool} short button labels for words or phrases that would naturally "
             f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
             f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
             f"Example: if the word is \"eat\", good options are: more, now, lunch, snack, dinner, a lot, slowly, together, outside, please, later.\n"
@@ -26364,14 +26742,14 @@ async def create_ai_target_board(
         if not generated_options:
             raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
 
-        generated_options = generated_options[:payload.num_options]
-        per_row = payload.options_per_row
+        generated_options = generated_options[:max_pool]
         ts_base = int(time.time() * 1000)
         buttons: List[Dict[str, Any]] = []
 
         for i, opt_label in enumerate(generated_options):
-            row = i // per_row
-            col = i % per_row
+            is_overflow = i >= max_on_page
+            row = None if is_overflow else i // per_row
+            col = None if is_overflow else i % per_row
             image_url: Optional[str] = None
             for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
                 try:
@@ -26387,13 +26765,12 @@ async def create_ai_target_board(
                 if image_url:
                     break
 
-            btn_type = "static" if row < static_rows_count else "dynamic"
-
             buttons.append({
-                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "id": f"btn_pool_{i}_{ts_base}",
                 "label": opt_label,
                 "row": row,
                 "col": col,
+                "pool_index": i,
                 "speech_text": opt_label,
                 "action_type": "announce",
                 "after_selection": after_selection,
@@ -26405,7 +26782,7 @@ async def create_ai_target_board(
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "hidden": False,
-                "button_type": btn_type,
+                "button_type": "static",
             })
 
         config_data = await load_tap_nav_config(account_id, aac_user_id)
@@ -26562,20 +26939,21 @@ async def bravo_build(
             label = str(payload.button_label).strip()
 
         options_per_row = settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6
-        num_options = options_per_row * tap_words_rows
-        
+        max_pool = 30
+        max_on_page = static_rows_count * options_per_row
+
         if context:
             prompt_text = (
                 f"The user is building a sentence on an AAC device. So far, they have said: \"{context}\".\n"
                 f"They just tapped the button \"{label}\" (so the combined sentence context is \"{context} {label}\").\n"
-                f"Generate EXACTLY {num_options} unique, short button labels for words or phrases that would naturally "
+                f"Generate UP TO {max_pool} unique, short button labels for words or phrases that would naturally "
                 f"FOLLOW \"{label}\" to continue the sentence \"{context} {label}\" in spoken conversation.\n\n"
             )
         else:
             prompt_text = (
                 f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
                 f"A user has just tapped a button that says \"{label}\".\n"
-                f"Generate EXACTLY {num_options} short button labels for words or phrases that would naturally "
+                f"Generate UP TO {max_pool} short button labels for words or phrases that would naturally "
                 f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
             )
 
@@ -26604,13 +26982,14 @@ async def bravo_build(
         if not generated_options:
             raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
 
-        generated_options = generated_options[:num_options]
+        generated_options = generated_options[:max_pool]
         ts_base = int(time.time() * 1000)
         buttons: List[Dict[str, Any]] = []
 
         for i, opt_label in enumerate(generated_options):
-            row = i // options_per_row
-            col = i % options_per_row
+            is_overflow = i >= max_on_page
+            row = None if is_overflow else i // options_per_row
+            col = None if is_overflow else i % options_per_row
             image_url: Optional[str] = None
             for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
                 try:
@@ -26626,16 +27005,15 @@ async def bravo_build(
                 if image_url:
                     break
 
-            btn_type = "static" if row < static_rows_count else "dynamic"
-
             buttons.append({
-                "id": f"btn_{row}_{col}_{ts_base}_{i}",
+                "id": f"btn_pool_{i}_{ts_base}",
                 "label": opt_label,
                 "row": row,
                 "col": col,
+                "pool_index": i,
                 "speech_text": opt_label,
                 "action_type": "announce",
-                "after_selection": "use_ai",  # Allow continuous AI generation!
+                "after_selection": "do_nothing",
                 "target_board_id": None,
                 "temporary_navigation": False,
                 "custom_audio_file": None,
@@ -26644,7 +27022,7 @@ async def bravo_build(
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "hidden": False,
-                "button_type": btn_type,
+                "button_type": "static",
             })
 
         existing_ids: set = {str(b.get('id') or '') for b in boards if isinstance(b, dict)}

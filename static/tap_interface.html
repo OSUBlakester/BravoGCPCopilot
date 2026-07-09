@@ -6139,29 +6139,8 @@
                 // Pre-cache images in BACKGROUND - DISABLED for performance
                 // preCacheCategoryImages();
 
-                // After everything renders, run image pre-assignment in the background if:
-                //   (a) any displayed button is missing image_url (first run / wizard completion), OR
-                //   (b) the mascot stored from the last assignment run differs from tapMascot
-                //       (mascot was changed — user should also click "Reassign Images" in board admin).
-                setTimeout(async () => {
-                    try {
-                        const assignmentKey = `tap_img_assigned_mascot_${currentAacUserId}`;
-                        const lastAssignedMascot = localStorage.getItem(assignmentKey);
-                        const mascotMismatch = lastAssignedMascot !== tapMascot;
-                        const missingImages = tapConfig && Array.isArray(tapConfig.boards) &&
-                            tapConfig.boards.some(board =>
-                                Array.isArray(board.buttons) &&
-                                board.buttons.some(b => b && b.row !== null && b.row !== undefined && !b.image_url)
-                            );
-                        if (missingImages || mascotMismatch) {
-                            console.log(`🖼️ Running background image pre-assignment (missingImages=${missingImages}, mascotMismatch=${mascotMismatch})`);
-                            await assignImagesToAllBoards();
-                            localStorage.setItem(assignmentKey, tapMascot);
-                        }
-                    } catch (err) {
-                        console.warn('Background image assignment check failed:', err);
-                    }
-                }, 2000);
+                // Images are pre-assigned server-side during board generation.
+                // Use Reassign Images in board admin if mascot changes.
 
                 // Start wake word listener
                 setupWakeWordDetection();
@@ -6491,13 +6470,14 @@
             const sortedButtons = [...board.buttons]
                 .filter(btn => btn && typeof btn === 'object' && !btn.hidden)
                 .sort((a, b) => {
-                    const rowA = Number(a.row || 0);
-                    const rowB = Number(b.row || 0);
+                    // Overflow pool buttons (row=null) sort after all displayed buttons
+                    const rowA = (a.row === null || a.row === undefined) ? 999999 : Number(a.row);
+                    const rowB = (b.row === null || b.row === undefined) ? 999999 : Number(b.row);
                     if (rowA !== rowB) {
                         return rowA - rowB;
                     }
-                    const colA = Number(a.col || 0);
-                    const colB = Number(b.col || 0);
+                    const colA = (a.col === null || a.col === undefined) ? 999999 : Number(a.col);
+                    const colB = (b.col === null || b.col === undefined) ? 999999 : Number(b.col);
                     return colA - colB;
                 });
 
@@ -6515,8 +6495,9 @@
                     return {
                         id: btn.id || null,
                         text,
-                        row: Number(btn.row || 0),
-                        col: Number(btn.col || 0),
+                        // Preserve null for overflow pool buttons so resolveHybridBoardButtons can filter them out
+                        row: (btn.row === null || btn.row === undefined) ? null : Number(btn.row),
+                        col: (btn.col === null || btn.col === undefined) ? null : Number(btn.col),
                         speech_text: (String(btn.speech_text || '').trim() || null),
                         button_type: btnType,
                         llm_prompt: btn.llm_prompt || null,
@@ -6532,6 +6513,7 @@
                         text_color: btn.text_color || null,
                         past_tense: btn.past_tense || null,
                         plural: btn.plural || null,
+                        pool_index: (btn.pool_index !== null && btn.pool_index !== undefined) ? Number(btn.pool_index) : null,
                     };
                 })
                 .filter(Boolean);
@@ -6609,10 +6591,32 @@
             
             const totalUpperSlots = splitRowIndex * cols;
 
+            // Detect AI-generated boards with pool_index overflow (30-option pools)
+            const allPoolBtns = configuredButtons
+                .filter(b => b && b.pool_index !== null && b.pool_index !== undefined)
+                .sort((a, b) => Number(a.pool_index) - Number(b.pool_index));
+            const hasPoolOverflow = allPoolBtns.length > 0 && allPoolBtns.some(b => b.row === null || b.row === undefined);
+
             // 1. Build static (upper) row buttons
             let upperRowButtons;
 
-            if (!isCustomized && staticOffset > 0 && categoryContext) {
+            if (hasPoolOverflow) {
+                // Pool cycling for AI-generated boards: handles all pages including page 0.
+                // When staticOffset=0 and some buttons already have row/col (normal case),
+                // this still produces the correct first-page ordering by pool_index.
+                const totalPool = allPoolBtns.length;
+                const effectiveOffset = totalPool > 0 ? staticOffset % totalPool : 0;
+                const pageBtns = allPoolBtns.slice(effectiveOffset, effectiveOffset + totalUpperSlots);
+                const remaining = totalUpperSlots - pageBtns.length;
+                if (remaining > 0 && totalPool > 0) {
+                    pageBtns.push(...allPoolBtns.slice(0, remaining));
+                }
+                upperRowButtons = pageBtns.map((btn, idx) => ({
+                    ...btn,
+                    row: Math.floor(idx / cols),
+                    col: idx % cols,
+                }));
+            } else if (!isCustomized && staticOffset > 0 && categoryContext) {
                 // Something Else cycling: skip page-0 configured buttons entirely;
                 // pull the next page of pool words starting at staticOffset.
                 const categoryLabel = categoryContext.label || 'general';
@@ -6709,10 +6713,11 @@
             // For bravo-build boards (source:"custom") WITHOUT an explicit llm_prompt, use pre-generated
             // dynamic buttons on initial load, or bravo-suggest on Something Else. Boards with an
             // explicit llm_prompt skip this path and use category-words with the configured prompt.
+            // Boards with pool_index overflow skip this path entirely — pool cycling handles pagination.
             const hasCustomPrompt = !!(activeCategory?.llm_prompt || activeCategory?.words_prompt);
             const isBravoBuildBoard = targetBoardObj && targetBoardObj.source === 'custom' && !hasCustomPrompt;
             const preConfiguredDynamic = configuredButtons.filter(btn => btn && Number(btn.row) >= splitRowIndex);
-            if (isBravoBuildBoard) {
+            if (isBravoBuildBoard && !hasPoolOverflow) {
                 if (preConfiguredDynamic.length > 0 && extraExclusions.length === 0) {
                     return [...upperRowButtons, ...preConfiguredDynamic];
                 }
@@ -13635,7 +13640,8 @@ VARIETY RULES:
                     },
                     body: JSON.stringify({
                         terms: normalizedTerms,
-                        locale: tapTargetLocale || 'en-US'
+                        locale: tapTargetLocale || 'en-US',
+                        mascot: tapMascot || 'buddy'
                     })
                 });
                 
@@ -16707,6 +16713,7 @@ ${getTapLanguageDirective()}
 
             currentWordOptions = newOptions.slice();
             renderFreestyleOptions(newOptions, true);
+            setTimeout(() => loadImagesForWords(newOptions, true), 50);
         }
 
         async function rebuildCurrentBoard(extraExclusions = []) {
@@ -17334,7 +17341,11 @@ ${getTapLanguageDirective()}
                 const sePool = !isCustomizedBoardForSE && currentCategory
                     ? _get_static_pool_for_category(currentCategory.label || 'general')
                     : null;
-                const hasMoreStaticOptions = sePool && sePool.length > sePageSize;
+                // Also show Something Else for AI-generated boards with pool_index overflow
+                const hasPoolOverflowForSE = isCustomizedBoardForSE && linkedBoardForSE
+                    && Array.isArray(linkedBoardForSE.buttons)
+                    && linkedBoardForSE.buttons.some(b => b && b.pool_index !== null && b.pool_index !== undefined && (b.row === null || b.row === undefined));
+                const hasMoreStaticOptions = (sePool && sePool.length > sePageSize) || hasPoolOverflowForSE;
                 const showSomethingElseInBoard = effectiveBoardDrForSE > 0 || hasMoreStaticOptions;
 
                 for (let row = 0; row < effectiveDisplayRows; row++) {
