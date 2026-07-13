@@ -13739,6 +13739,7 @@ VARIETY RULES:
 
             // Background pass: do one server batch fetch for remaining misses.
             if (!initialLoad) {
+                console.log(`🎭 BG PASS: tapMascot="${tapMascot}", starting phrase background server fetch`);
                 const missingEntries = [];
                 for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
                     const option = options[i];
@@ -13750,26 +13751,40 @@ VARIETY RULES:
                     if (!speechText || speechText === 'Something Else') continue;
                     const cacheKey = `tap_${String(speechText).trim().toLowerCase()}`;
                     const cached = window.symbolImageCache.get(cacheKey);
-                    if (!cached || !cached.imageUrl || !cached.verified) {
-                        missingEntries.push({ text: speechText, keywords: phraseKeywords });
-                    }
+                    console.log(`  🔍 "${speechText}": cached=${cached?.imageUrl ? 'yes' : 'no'} verified=${cached?.verified}`);
+                    missingEntries.push({ text: speechText, keywords: phraseKeywords });
                 }
 
                 if (missingEntries.length > 0) {
-                    console.log(`📦 Batch server searching ${missingEntries.length} phrase misses...`);
+                    console.log(`📦 Batch server searching ${missingEntries.length} phrase entries (mascot: ${tapMascot})...`);
                     // Resolve primary keywords for each missing phrase.
                     const phraseKeyToSpeechTextBg = new Map();
+                    const speechTextToIndexBg = new Map();
                     const missingWithPrimaryKeys = missingEntries.map(entry => {
                         const primaryKey = (Array.isArray(entry.keywords) && entry.keywords[0]) || entry.text;
                         phraseKeyToSpeechTextBg.set(String(primaryKey).toLowerCase().trim(), entry.text);
                         return { text: primaryKey, keywords: entry.keywords };
                     });
+                    // Build index of speech text → button position for direct DOM update
+                    for (let i = 0; i < Math.min(options.length, buttons.length); i++) {
+                        const opt = options[i];
+                        const st = typeof opt === 'object' ? opt.option : opt;
+                        if (st) speechTextToIndexBg.set(String(st).toLowerCase().trim(), i);
+                    }
                     const bgResults = await batchLoadImages(missingWithPrimaryKeys);
+                    console.log(`📦 BG server results (${Object.keys(bgResults||{}).length} items):`, bgResults);
                     for (const [primaryKey, imageUrl] of Object.entries(bgResults || {})) {
                         const origPhrase = phraseKeyToSpeechTextBg.get(String(primaryKey).toLowerCase().trim());
+                        console.log(`  📌 key="${primaryKey}" phrase="${origPhrase}" url=${imageUrl ? imageUrl.substring(imageUrl.lastIndexOf('/')+1) : 'null'}`);
                         if (origPhrase && imageUrl) {
                             const ck = `tap_${origPhrase.toLowerCase().trim()}`;
                             window.symbolImageCache.set(ck, { imageUrl, timestamp: Date.now(), verified: true });
+                            // Directly update the button — rendering loop skips existing images so we must push here
+                            const btnIdx = speechTextToIndexBg.get(origPhrase.toLowerCase().trim());
+                            console.log(`  🖼️ Applying to button[${btnIdx}]`, buttons[btnIdx] ? 'found' : 'NOT FOUND');
+                            if (btnIdx !== undefined && buttons[btnIdx]) {
+                                applyImageToButton(buttons[btnIdx], imageUrl, origPhrase);
+                            }
                         }
                     }
                 }
@@ -13909,7 +13924,21 @@ VARIETY RULES:
 
                 if (missingEntries.length > 0) {
                     console.log(`📦 Batch server searching ${missingEntries.length} word misses...`);
-                    await batchLoadImages(missingEntries);
+                    const wordResults = await batchLoadImages(missingEntries);
+                    // Directly update buttons — rendering loop skips existing images so we must push here
+                    for (const [resultText, imageUrl] of Object.entries(wordResults || {})) {
+                        if (!imageUrl) continue;
+                        const ck = `tap_${String(resultText).trim().toLowerCase()}`;
+                        window.symbolImageCache.set(ck, { imageUrl, timestamp: Date.now(), verified: true });
+                        const targetBtn = buttons.find(b => {
+                            const idx = Number(b.dataset.optionIndex);
+                            if (Number.isNaN(idx)) return false;
+                            const opt = options[idx];
+                            const t = typeof opt === 'object' ? (opt.text || opt.option) : opt;
+                            return String(t).toLowerCase().trim() === String(resultText).toLowerCase().trim();
+                        });
+                        if (targetBtn) applyImageToButton(targetBtn, imageUrl, resultText);
+                    }
                 }
             }
             
@@ -14862,6 +14891,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                     console.log('⏱️ Words ready at:', Date.now(), 'count:', wordsOptions.length);
                     renderFreestyleOptions(wordsOptions, true); // true = defer images
                     setTimeout(() => loadImagesForWords(wordsOptions, true), 50);
+                    setTimeout(() => loadImagesForWords(wordsOptions, false), 2500);
 
                     return wordsOptions;
                 });
@@ -14888,6 +14918,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                         console.log('⏱️ Phrases ready at:', Date.now(), 'count:', finalPhrasesOptions.length);
                         renderCategoryOptions(finalPhrasesOptions, true); // true = defer images
                         setTimeout(() => loadImagesForPhrases(finalPhrasesOptions, true), 50);
+                        setTimeout(() => loadImagesForPhrases(finalPhrasesOptions, false), 2500);
                     }
 
                     return finalPhrasesOptions;

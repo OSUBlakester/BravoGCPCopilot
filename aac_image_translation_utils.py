@@ -5,7 +5,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set
 
-import google.generativeai as genai
+import google.genai as genai
+import google.genai.types as genai_types
 
 STANDARD_LOCALES: List[str] = [
     "es",
@@ -202,7 +203,7 @@ def _extract_json_object(raw_text: str) -> Dict[str, Any]:
 
 
 class AacGeminiTranslator:
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         api_key = (
             os.getenv("GEMINI_API_KEY")
             or os.getenv("GOOGLE_API_KEY")
@@ -210,8 +211,8 @@ class AacGeminiTranslator:
         ).strip()
         if not api_key:
             raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY before running translation scripts.")
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(model_name)
+        self._client = genai.Client(api_key=api_key)
+        self._model_name = model_name
 
     def translate_lines(
         self,
@@ -235,20 +236,24 @@ class AacGeminiTranslator:
             f"LINES_JSON:\n{json.dumps(clean_lines, ensure_ascii=False)}"
         )
 
-        strict_cfg = genai.GenerationConfig(
+        strict_cfg = genai_types.GenerateContentConfig(
             temperature=0,
             response_mime_type="application/json",
         )
 
         response_text = ""
         try:
-            response = self._model.generate_content(prompt, generation_config=strict_cfg)
-            response_text = (getattr(response, "text", "") or "").strip()
+            response = self._client.models.generate_content(
+                model=self._model_name, contents=prompt, config=strict_cfg
+            )
+            response_text = (response.text or "").strip()
             translated = _extract_json_array(response_text, len(clean_lines))
             return [line if line else fallback for line, fallback in zip(translated, clean_lines)]
         except Exception:
-            response = self._model.generate_content(prompt)
-            response_text = (getattr(response, "text", "") or "").strip()
+            response = self._client.models.generate_content(
+                model=self._model_name, contents=prompt
+            )
+            response_text = (response.text or "").strip()
             translated = _extract_json_array(response_text, len(clean_lines))
             return [line if line else fallback for line, fallback in zip(translated, clean_lines)]
 
@@ -276,8 +281,10 @@ class AacGeminiTranslator:
             f"TERMS_JSON:\n{json.dumps(clean_terms, ensure_ascii=False)}"
         )
 
-        response = self._model.generate_content(prompt)
-        response_text = (getattr(response, "text", "") or "").strip()
+        response = self._client.models.generate_content(
+            model=self._model_name, contents=prompt
+        )
+        response_text = (response.text or "").strip()
         parsed = _extract_json_object(response_text)
 
         output: Dict[str, List[str]] = {}

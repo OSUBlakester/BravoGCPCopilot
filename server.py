@@ -21241,15 +21241,17 @@ async def button_symbol_search(
             logging.debug(f"Custom images search failed: {e}")
 
         def _apply_mascot_scores(symbols: list, selected_mascot: str) -> list:
-            """Boost mascot-matching images, penalize wrong-mascot images, leave generic neutral."""
+            """Boost mascot-matching images, penalize wrong-mascot images, leave generic neutral.
+            Scores must dominate text match variance (text scores go up to ~900) so mascot
+            preference is always respected: correct > generic > wrong mascot."""
             if not selected_mascot:
                 return symbols
             for s in symbols:
                 img_mascot = s.get('mascot')
                 if img_mascot == selected_mascot:
-                    s['match_score'] = s.get('match_score', 0) + 25
+                    s['match_score'] = s.get('match_score', 0) + 1000
                 elif img_mascot and img_mascot != selected_mascot:
-                    s['match_score'] = s.get('match_score', 0) - 20
+                    s['match_score'] = s.get('match_score', 0) - 1000
             return symbols
 
         # Fast return path for Tap interface (limit=1): avoid expensive fallback phases.
@@ -22163,6 +22165,7 @@ async def batch_symbol_search(
                 "concept": concept,
                 "subconcept": subconcept,
                 "searchable_terms": searchable_terms,
+                "mascot": _normalize_term(image.get("mascot") or "") or None,
             }
             processed_candidates.append(record)
 
@@ -26540,6 +26543,8 @@ async def convert_ai_boards_to_static(
                 buttons: List[Dict[str, Any]] = []
                 ts_base = int(time.time() * 1000)
 
+                board_settings = await load_settings_from_file(account_id, aac_user_id)
+                board_mascot = str(board_settings.get("mascot") or "").strip().lower()
                 for i, label in enumerate(generated_options):
                     row = i // per_row
                     col = i % per_row
@@ -26547,12 +26552,24 @@ async def convert_ai_boards_to_static(
                     image_url: Optional[str] = None
                     for term in [label, label.lower(), label.capitalize()]:
                         try:
-                            q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
-                            docs = await asyncio.to_thread(q.get)
-                            for doc in docs:
-                                img_data = doc.to_dict()
-                                if img_data.get("image_url"):
-                                    image_url = img_data["image_url"]
+                            images_col = firestore_db.collection("aac_images")
+                            search_queries = []
+                            if board_mascot:
+                                search_queries.append(images_col.where("tags", "array_contains", term).where("mascot", "==", board_mascot).limit(1))
+                                search_queries.append(images_col.where("search_terms", "array_contains", term).where("mascot", "==", board_mascot).limit(1))
+                            search_queries.append(images_col.where("tags", "array_contains", term).limit(5))
+                            search_queries.append(images_col.where("search_terms", "array_contains", term).limit(5))
+                            for q in search_queries:
+                                docs = await asyncio.to_thread(q.get)
+                                for doc in docs:
+                                    img_data = doc.to_dict()
+                                    img_mascot = str(img_data.get("mascot") or "").strip().lower()
+                                    if board_mascot and img_mascot and img_mascot != board_mascot:
+                                        continue
+                                    if img_data.get("image_url"):
+                                        image_url = img_data["image_url"]
+                                        break
+                                if image_url:
                                     break
                         except Exception as img_err:
                             logging.debug(f"Image search error for '{term}': {img_err}")
@@ -26746,6 +26763,7 @@ async def create_ai_target_board(
         ts_base = int(time.time() * 1000)
         buttons: List[Dict[str, Any]] = []
 
+        create_mascot = str(settings.get("mascot") or "").strip().lower()
         for i, opt_label in enumerate(generated_options):
             is_overflow = i >= max_on_page
             row = None if is_overflow else i // per_row
@@ -26753,12 +26771,24 @@ async def create_ai_target_board(
             image_url: Optional[str] = None
             for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
                 try:
-                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
-                    docs = await asyncio.to_thread(q.get)
-                    for doc in docs:
-                        img_data = doc.to_dict()
-                        if img_data.get("image_url"):
-                            image_url = img_data["image_url"]
+                    images_col = firestore_db.collection("aac_images")
+                    search_queries = []
+                    if create_mascot:
+                        search_queries.append(images_col.where("tags", "array_contains", term).where("mascot", "==", create_mascot).limit(1))
+                        search_queries.append(images_col.where("search_terms", "array_contains", term).where("mascot", "==", create_mascot).limit(1))
+                    search_queries.append(images_col.where("tags", "array_contains", term).limit(5))
+                    search_queries.append(images_col.where("search_terms", "array_contains", term).limit(5))
+                    for q in search_queries:
+                        docs = await asyncio.to_thread(q.get)
+                        for doc in docs:
+                            img_data = doc.to_dict()
+                            img_mascot = str(img_data.get("mascot") or "").strip().lower()
+                            if create_mascot and img_mascot and img_mascot != create_mascot:
+                                continue
+                            if img_data.get("image_url"):
+                                image_url = img_data["image_url"]
+                                break
+                        if image_url:
                             break
                 except Exception:
                     pass
@@ -26986,6 +27016,7 @@ async def bravo_build(
         ts_base = int(time.time() * 1000)
         buttons: List[Dict[str, Any]] = []
 
+        selected_mascot = str(settings.get("mascot") or "").strip().lower()
         for i, opt_label in enumerate(generated_options):
             is_overflow = i >= max_on_page
             row = None if is_overflow else i // options_per_row
@@ -26993,12 +27024,24 @@ async def bravo_build(
             image_url: Optional[str] = None
             for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
                 try:
-                    q = firestore_db.collection("aac_images").where("tags", "array_contains", term).limit(1)
-                    docs = await asyncio.to_thread(q.get)
-                    for doc in docs:
-                        img_data = doc.to_dict()
-                        if img_data.get("image_url"):
-                            image_url = img_data["image_url"]
+                    images_col = firestore_db.collection("aac_images")
+                    search_queries = []
+                    if selected_mascot:
+                        search_queries.append(images_col.where("tags", "array_contains", term).where("mascot", "==", selected_mascot).limit(1))
+                        search_queries.append(images_col.where("search_terms", "array_contains", term).where("mascot", "==", selected_mascot).limit(1))
+                    search_queries.append(images_col.where("tags", "array_contains", term).limit(5))
+                    search_queries.append(images_col.where("search_terms", "array_contains", term).limit(5))
+                    for q in search_queries:
+                        docs = await asyncio.to_thread(q.get)
+                        for doc in docs:
+                            img_data = doc.to_dict()
+                            img_mascot = str(img_data.get("mascot") or "").strip().lower()
+                            if selected_mascot and img_mascot and img_mascot != selected_mascot:
+                                continue
+                            if img_data.get("image_url"):
+                                image_url = img_data["image_url"]
+                                break
+                        if image_url:
                             break
                 except Exception:
                     pass
@@ -27013,7 +27056,7 @@ async def bravo_build(
                 "pool_index": i,
                 "speech_text": opt_label,
                 "action_type": "announce",
-                "after_selection": "do_nothing",
+                "after_selection": "ai_build_board",
                 "target_board_id": None,
                 "temporary_navigation": False,
                 "custom_audio_file": None,
