@@ -249,6 +249,7 @@ let currentButtonIndex = -1;
 let defaultDelay = 3500;
 let ScanningOff = false;
 let scanMode = 'auto';
+let waitForSwitchToScan = false;
 let wakeWordInterjection = 'hey';
 let wakeWordName = 'bravo';
 let gridColumns = 6;
@@ -270,6 +271,15 @@ let isSettingUpRecognition = false;
 let waitingForWakeWord = false;
 let waitingForGuess = false;
 let skipOnendRestart = false; // Prevents onend from auto-restarting during controlled transitions
+
+// TTS echo guard: ms timestamp of when the last announcement audio finished.
+// Recognition handlers discard results that arrive within TTS_SILENCE_BUFFER_MS of audio ending,
+// because the microphone can pick up the app's own TTS output.
+let lastAnnouncementEndMs = 0;
+const TTS_SILENCE_BUFFER_MS = 1200;
+function _isTtsEcho() {
+    return isAnnouncingNow || (Date.now() - lastAnnouncementEndMs < TTS_SILENCE_BUFFER_MS);
+}
 
 // Initialize the game
 async function initializeGame() {
@@ -363,6 +373,10 @@ async function loadGuessWhoSettings() {
 
         ScanningOff = settings.ScanningOff === true;
         scanMode = settings.scanMode === 'step' ? 'step' : 'auto';
+        waitForSwitchToScan = settings.waitForSwitchToScan === true;
+        if (waitForSwitchToScan) {
+            window.waitingForInitialSwitch = true;
+        }
         useTapInterface = settings.useTapInterface === true;
         
         // Force pictograms on for tap interface users
@@ -715,10 +729,8 @@ async function startModeB() {
     gameState.guessOptionsAll = [];
     gameState.guessOptionsShown = [];
     
-    // Announce instructions (don't await - let it play while we set up recognition)
-    announceText(`Let's see if I can guess a ${gameState.selectedCategory} that you pick! Say "ready" when you have thought of a ${gameState.selectedCategory}.`, false);
-    
-    // Start listening for "ready" immediately
+    // Await the announcement so recognition doesn't start while TTS is saying "ready"
+    await announceText(`Let's see if I can guess a ${gameState.selectedCategory} that you pick! Say "ready" when you have thought of a ${gameState.selectedCategory}.`, false);
     listenForReady();
 }
 
@@ -748,17 +760,15 @@ async function handleReadyHeard() {
         recognition = null;
     }
     
-    // Announce next instruction (don't await - let it play in background)
-    announceText(`Great! Next you need to give me a clue. Say ${getWakeWordPhrase()} when you have thought of a clue.`, false);
-    
-    // Start listening for wake word immediately (during announcement)
+    // Await the announcement so recognition doesn't start while TTS is saying the wake word phrase
+    await announceText(`Great! Next you need to give me a clue. Say ${getWakeWordPhrase()} when you have thought of a clue.`, false);
+
+    // Re-enable onend auto-restart, then start listening
+    skipOnendRestart = false;
     waitingForWakeWord = true;
     isSettingUpRecognition = false;
     showListeningIndicator(`Listening for: "${getWakeWordPhrase()}"`);
     setupWakeWordRecognition();
-    
-    // Re-enable onend auto-restart after a short delay
-    setTimeout(() => { skipOnendRestart = false; }, 100);
 }
 
 async function handleWakeWordForClue() {
@@ -873,7 +883,14 @@ async function generateAndShowGuesses() {
         });
         
         const data = await response.json();
-        gameState.guessOptionsAll = data.guesses || [];
+        // Shuffle on the client so the most likely answer isn't always displayed first,
+        // regardless of the order the LLM returned them.
+        const rawGuesses = data.guesses || [];
+        for (let i = rawGuesses.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rawGuesses[i], rawGuesses[j]] = [rawGuesses[j], rawGuesses[i]];
+        }
+        gameState.guessOptionsAll = rawGuesses;
         gameState.guessOptionsShown = [];
         
         // Show first set of guesses
@@ -949,10 +966,8 @@ async function selectGuess(guess) {
     hideListeningIndicator();
     stopAuditoryScanning();
     
-    // Announce the guess and ask for confirmation (don't await - start listening during announcement)
-    announceText(`Is it ${guess}? Please say 'yes' or 'no'.`, false);
-    
-    // Start listening for yes/no immediately
+    // Await the announcement — it contains "yes" and "no", which recognition would otherwise echo
+    await announceText(`Is it ${guess}? Please say 'yes' or 'no'.`, false);
     showListeningIndicator('Listening for: "yes" or "no"');
     listenForYesNo();
 }
@@ -1284,13 +1299,17 @@ function setupWakeWordRecognition() {
     };
 
     recognition.onresult = async (event) => {
+        // Discard results that arrive while the app's own TTS is playing or just finished —
+        // the microphone can pick up the app's announcements and trigger false activations.
+        if (_isTtsEcho()) return;
+
         const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
         const interjectionToUse = wakeWordInterjection || 'hey';
         const nameToUse = wakeWordName || 'bravo';
         const phraseWithSpace = `${interjectionToUse} ${nameToUse}`;
         const phraseWithComma = `${interjectionToUse}, ${nameToUse}`;
         const phraseWithCommaNoSpace = `${interjectionToUse},${nameToUse}`;
-        
+
         console.log('[RECOGNITION] Heard:', transcript, 'Mode:', gameState.selectedMode, 'Phase:', gameState.modeBPhase);
 
         // Mode B: Handle "ready" detection
@@ -1427,10 +1446,28 @@ function stopWakeWordRecognition() {
 
 function listenForModeBGuess() {
     if (gameState.selectedMode !== 'mode-b') return;
-    
-    // Set up voice recognition for guess selection by voice
+
+    // Delay starting recognition so the mic buffer is clear of any auditory-scanning
+    // TTS audio that was playing when the guess buttons appeared.  Without this delay
+    // the browser immediately fires a result for whatever the scanner just said ("Go Back",
+    // the first button it announces), causing the app to navigate away before the user
+    // has a chance to make a selection.
+    const startDelay = Math.max(defaultDelay || 0, 1500);
+    setTimeout(_startModeBGuessRecognition, startDelay);
+}
+
+function _startModeBGuessRecognition() {
+    // Bail if the game has already moved on during the delay.
+    if (gameState.selectedMode !== 'mode-b' || gameState.phase !== 'guesses') return;
+
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionAPI) return;
+
+    // Also bail if TTS is still playing when the timer fires.
+    if (_isTtsEcho()) {
+        setTimeout(_startModeBGuessRecognition, 500);
+        return;
+    }
 
     let guessRecognition = new SpeechRecognitionAPI();
     guessRecognition.lang = 'en-US';
@@ -1439,37 +1476,30 @@ function listenForModeBGuess() {
     guessRecognition.maxAlternatives = 1;
 
     guessRecognition.onresult = (event) => {
-        let interimTranscript = '';
+        // Discard results that arrive while the app's TTS is active (auditory scanning
+        // announces each button by name — we don't want those triggering selection).
+        if (_isTtsEcho()) return;
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (!event.results[i].isFinal) continue;
             const transcriptPart = event.results[i][0].transcript.toLowerCase();
-            if (event.results[i].isFinal) {
-                // Check if transcript matches any of the visible guesses
-                const buttons = document.querySelectorAll('#guess-screen .gridContainer button');
-                for (let btn of buttons) {
-                    const buttonText = btn.textContent.toLowerCase().trim();
-                    // Simple word matching
-                    const transcriptWords = transcriptPart.split(/\s+/);
-                    const buttonWords = buttonText.split(/\s+/);
-                    
-                    // Check if most words match
-                    let matchCount = 0;
-                    for (let word of buttonWords) {
-                        if (word.length > 2 && transcriptPart.includes(word)) {
-                            matchCount++;
-                        }
-                    }
-                    
-                    if (matchCount > 0 && matchCount >= buttonWords.length / 2) {
-                        console.log('[MODE B GUESS] Selected guess by voice:', buttonText);
-                        hideListeningIndicator();
-                        try { guessRecognition.stop(); } catch (e) {}
-                        // Trigger the button click
-                        btn.click();
-                        return;
+            const buttons = document.querySelectorAll('#guess-screen .gridContainer button');
+            for (let btn of buttons) {
+                const buttonText = btn.textContent.toLowerCase().trim();
+                const buttonWords = buttonText.split(/\s+/);
+                let matchCount = 0;
+                for (let word of buttonWords) {
+                    if (word.length > 2 && transcriptPart.includes(word)) {
+                        matchCount++;
                     }
                 }
-            } else {
-                interimTranscript += transcriptPart;
+                if (matchCount > 0 && matchCount >= buttonWords.length / 2) {
+                    console.log('[MODE B GUESS] Selected guess by voice:', buttonText);
+                    hideListeningIndicator();
+                    try { guessRecognition.stop(); } catch (e) {}
+                    btn.click();
+                    return;
+                }
             }
         }
     };
@@ -1481,11 +1511,8 @@ function listenForModeBGuess() {
     };
 
     guessRecognition.onend = () => {
-        // Recognition ended, optionally restart if still in guess-screen
         if (gameState.phase === 'guesses' && gameState.selectedMode === 'mode-b') {
-            setTimeout(() => {
-                listenForModeBGuess();
-            }, 500);
+            setTimeout(_startModeBGuessRecognition, 500);
         }
     };
 
@@ -1840,6 +1867,7 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) { return; }
+    if (waitForSwitchToScan && window.waitingForInitialSwitch) { return; }
 
     if (scanMode === 'step') {
         currentButtonIndex = -1;
@@ -2169,6 +2197,7 @@ async function processAnnouncementQueue() {
 
         const audioDataArrayBuffer = base64ToArrayBuffer(audioData);
         await playAudioToDevice(audioDataArrayBuffer, sampleRate);
+        lastAnnouncementEndMs = Date.now();
 
         resolve();
     } catch (error) {
@@ -2536,6 +2565,16 @@ function setupCustomCategoriesUI() {
     
     // Close modal on Escape key
     document.addEventListener('keydown', (e) => {
+        // Handle initial switch press to begin scanning (when waitForSwitchToScan is on)
+        if (waitForSwitchToScan && window.waitingForInitialSwitch) {
+            if (e.code === 'Space' || e.code === 'Tab' || e.code === 'Enter') {
+                e.preventDefault();
+                window.waitingForInitialSwitch = false;
+                startAuditoryScanning();
+                return;
+            }
+        }
+
         if (e.code === 'Tab' && scanMode === 'step') {
             e.preventDefault();
             interruptScanningAnnouncementPlayback();

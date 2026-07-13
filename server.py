@@ -15924,11 +15924,13 @@ Question and Answer History:
 
 Generate {llm_options} specific {request.category} options that are consistent with ALL the yes/no answers above. Each guess should be:
 1. A specific {request.category} (not generic categories)
-2. Completely consistent with all the Q&A answers
+2. Consistent with the Q&A answers
 3. Realistic and well-known
 4. Different from each other
 5. Formatted as just the name/title (no extra text)
 6. MUST NOT be any of the previously guessed wrong answers listed above
+
+IMPORTANT: The best-matching answer (the one most consistent with ALL the clues) MUST be included somewhere in the list. Do NOT deliberately exclude the most obvious match — the user needs a fair chance to guess correctly. The order will be randomized separately.
 
 Examples of good format:
 - For person: "Albert Einstein", "Taylor Swift", "Abraham Lincoln"
@@ -15938,7 +15940,7 @@ Examples of good format:
 Return your response as a simple JSON array of strings. Each guess should be just the name. Example format:
 [
   "Albert Einstein",
-  "Taylor Swift", 
+  "Taylor Swift",
   "Abraham Lincoln"
 ]
 
@@ -27090,6 +27092,21 @@ async def bravo_build(
         if not generated_options:
             raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
 
+        # Drop options that are pure prefix extensions of a shorter sibling.
+        # e.g. "I want to" is dominated by "I want"; "I need to" by "I need".
+        _lower_opts = [o.lower() for o in generated_options]
+        _deduped: List[str] = []
+        for _i, _opt in enumerate(generated_options):
+            _opt_l = _lower_opts[_i]
+            _dominated = any(
+                _opt_l.startswith(_other_l + " ")
+                for _j, _other_l in enumerate(_lower_opts)
+                if _j != _i
+            )
+            if not _dominated:
+                _deduped.append(_opt)
+        generated_options = _deduped
+
         generated_options = generated_options[:max_pool]
         ts_base = int(time.time() * 1000)
 
@@ -27098,11 +27115,58 @@ async def bravo_build(
         selected_mascot = str(settings.get("mascot") or "").strip().lower()
         label_to_url = await _lookup_images_for_labels(generated_options, selected_mascot, account_id, aac_user_id)
 
+        # Batch-generate past_tense and plural for all options in a single LLM call
+        variants_map: Dict[str, Dict[str, Optional[str]]] = {}
+        try:
+            opts_json = json.dumps(generated_options)
+            variants_prompt = (
+                f"Given these AAC button labels, return a JSON object where each key is a label and each value "
+                f"is an object with two fields: \"past_tense\" and \"plural\". "
+                f"Rules:\n"
+                f"- past_tense: the past tense form if the label is an action verb or verb phrase (e.g. am->was, see->saw, want->wanted, go->went, eat->ate). "
+                f"  For multi-word phrases, convert the main verb (e.g. 'wake up'->'woke up', 'go home'->'went home'). "
+                f"  Set to null if the label is not a verb, is already past tense, or has no meaningful past tense.\n"
+                f"- plural: the plural form if the label is a noun (e.g. dog->dogs, child->children, cookie->cookies). "
+                f"  For multi-word noun phrases, pluralize the head noun. "
+                f"  Special pronouns: this->these, that->those, it->them. "
+                f"  Set to null if the label is not a noun, pronoun, or has no meaningful plural.\n"
+                f"- Never map a label to itself in either field.\n"
+                f"- Every label must appear as a key, even if both values are null.\n"
+                f"Return ONLY valid JSON. Example: {{\"want\": {{\"past_tense\": \"wanted\", \"plural\": null}}, "
+                f"\"cookie\": {{\"past_tense\": null, \"plural\": \"cookies\"}}}}\n"
+                f"Labels: {opts_json}"
+            )
+            variants_raw = await _generate_gemini_content_with_fallback(
+                variants_prompt,
+                {"response_mime_type": "application/json", "temperature": 0.1},
+                account_id,
+                aac_user_id,
+            )
+            if variants_raw:
+                stripped = variants_raw.strip()
+                fence_m = re.search(r'```(?:json)?\s*(.*?)\s*```', stripped, re.DOTALL)
+                if fence_m:
+                    stripped = fence_m.group(1).strip()
+                obj_m = re.search(r'\{.*\}', stripped, re.DOTALL)
+                if obj_m:
+                    stripped = obj_m.group(0)
+                parsed_variants = json.loads(stripped)
+                if isinstance(parsed_variants, dict):
+                    for lbl, v in parsed_variants.items():
+                        if isinstance(v, dict):
+                            variants_map[lbl] = {
+                                "past_tense": v.get("past_tense") or None,
+                                "plural": v.get("plural") or None,
+                            }
+        except Exception as _ve:
+            logging.warning(f"bravo_build: variants LLM call failed, skipping: {_ve}")
+
         buttons: List[Dict[str, Any]] = []
         for i, opt_label in enumerate(generated_options):
             is_overflow = i >= max_on_page
             row = None if is_overflow else i // options_per_row
             col = None if is_overflow else i % options_per_row
+            vdata = variants_map.get(opt_label, {})
             buttons.append({
                 "id": f"btn_pool_{i}_{ts_base}",
                 "label": opt_label,
@@ -27117,6 +27181,8 @@ async def bravo_build(
                 "custom_audio_file": None,
                 "special_function": None,
                 "image_url": label_to_url.get(opt_label),
+                "past_tense": vdata.get("past_tense"),
+                "plural": vdata.get("plural"),
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "hidden": False,
@@ -27179,6 +27245,310 @@ async def bravo_build(
     except Exception as e:
         logging.error(f"Error in bravo_build: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/tap-interface/boards/{board_id}/next-boards-status")
+async def get_next_boards_status(
+    board_id: str,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Return the existing-board status for every static button on the given board."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    boards: List[Dict[str, Any]] = config_data.get('boards', [])
+    source_board = next((b for b in boards if b.get('id') == board_id), None)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Board not found")
+
+    board_by_id: Dict[str, Dict] = {b['id']: b for b in boards if b.get('id')}
+    board_by_label: Dict[str, Dict] = {}
+    for b in boards:
+        if b.get('id') == board_id:
+            continue
+        lbl = str(b.get('label') or '').strip().lower()
+        if lbl:
+            board_by_label.setdefault(lbl, b)
+
+    results = []
+    for btn in source_board.get('buttons', []):
+        if btn.get('button_type') != 'static':
+            continue
+        btn_label = str(btn.get('label') or '').strip()
+        if not btn_label:
+            continue
+
+        existing = None
+        tid = btn.get('target_board_id')
+        if tid and tid != board_id and tid in board_by_id:
+            existing = board_by_id[tid]
+        if not existing:
+            existing = board_by_label.get(btn_label.lower())
+
+        results.append({
+            "button_id": btn.get('id'),
+            "label": btn_label,
+            "has_existing": existing is not None,
+            "existing_board_id": existing.get('id') if existing else None,
+            "existing_board_label": str(existing.get('label') or '') if existing else None,
+        })
+
+    return JSONResponse(content={
+        "buttons": results,
+        "board_label": str(source_board.get('label') or board_id),
+    })
+
+
+class NextBoardDecision(BaseModel):
+    button_id: str
+    label: str
+    action: str  # "use_existing" | "generate" | "replace" | "skip"
+    existing_board_id: Optional[str] = None
+
+
+class CreateNextBoardsRequest(BaseModel):
+    source_board_id: str
+    decisions: List[NextBoardDecision]
+    new_board_after_selection: str = "use_ai"
+
+
+@app.post("/api/tap-interface/boards/create-next-boards")
+async def create_next_boards(
+    payload: CreateNextBoardsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """
+    For each static button on a board: link to an existing board, replace it, or generate a new one.
+    All option generation runs in parallel; image and variant lookups are batched across all boards.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+
+    config_data = await load_tap_nav_config(account_id, aac_user_id)
+    if not config_data:
+        raise HTTPException(status_code=404, detail="Config not found")
+
+    settings = await load_settings_from_file(account_id, aac_user_id)
+    tap_words_rows = int(settings.get("tapWordsRows", 4) or 4)
+    _dr = settings.get("tapDynamicRows")
+    tap_dynamic_rows = int(_dr) if _dr is not None else 1
+    static_rows_count = max(0, tap_words_rows - tap_dynamic_rows)
+    options_per_row = int(settings.get("gridColumns") or DEFAULT_SETTINGS.get("gridColumns") or 6)
+    max_pool = 30
+    max_on_page = static_rows_count * options_per_row
+    selected_mascot = str(settings.get("mascot") or "").strip().lower()
+    use_hybrid_pages = settings.get("useHybridPages", False)
+
+    config_data, _ = normalize_compose_tap_config(config_data)
+    config_data, _ = ensure_tap_boards_structure(config_data, use_hybrid_pages=use_hybrid_pages)
+
+    boards: List[Dict[str, Any]] = config_data.get('boards', [])
+    board_by_id: Dict[str, Dict] = {b['id']: b for b in boards if b.get('id')}
+
+    source_board = board_by_id.get(payload.source_board_id)
+    if not source_board:
+        raise HTTPException(status_code=404, detail="Source board not found")
+
+    btn_by_id: Dict[str, Dict] = {
+        b['id']: b for b in source_board.get('buttons', []) if b.get('id')
+    }
+
+    use_existing_decisions = [d for d in payload.decisions if d.action == "use_existing"]
+    generate_decisions = [d for d in payload.decisions if d.action in ("generate", "replace")]
+
+    # Link use_existing buttons immediately — no LLM needed
+    for dec in use_existing_decisions:
+        btn = btn_by_id.get(dec.button_id)
+        if btn and dec.existing_board_id and dec.existing_board_id in board_by_id:
+            btn['after_selection'] = 'navigate'
+            btn['target_board_id'] = dec.existing_board_id
+
+    # Parallel option generation for all generate/replace decisions
+    async def _gen_options(label: str) -> List[str]:
+        gen_prompt = (
+            f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
+            f"A user has just tapped a button that says \"{label}\".\n"
+            f"Generate UP TO {max_pool} short button labels for words or phrases that would naturally "
+            f"FOLLOW the word \"{label}\" when the user is building a spoken sentence.\n\n"
+            f"IMPORTANT: These are the NEXT words in a sentence — NOT synonyms, categories, or related concepts.\n"
+            f"PRIORITY ORDER for what to generate:\n"
+            f"  1. Direct objects / complements (WHAT, WHO, WHERE)\n"
+            f"  2. Common qualifiers that add clear, unique meaning\n"
+            f"  3. Avoid vague intensity adverbs unless the sentence has no better objects\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Every option must make sense coming AFTER \"{label}\" in speech\n"
+            f"2. No duplicates\n"
+            f"3. Each label 1-4 words, clear and concise\n"
+            f"4. Return ONLY a JSON array of strings — no explanation, no markdown."
+        )
+        raw = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        opts: List[str] = []
+        try:
+            text = (raw or '').strip()
+            text = re.sub(r'```(?:json)?\s*', '', text).strip()
+            arr_m = re.search(r'\[[\s\S]*\]', text)
+            if arr_m:
+                text = arr_m.group(0)
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                seen: set = set()
+                for item in parsed:
+                    opt = str(item).strip() if isinstance(item, str) else ''
+                    if opt and opt.lower() not in seen:
+                        seen.add(opt.lower())
+                        opts.append(opt)
+        except Exception:
+            pass
+        # Prefix dedup ("I want to" dominated by "I want")
+        lower_opts = [o.lower() for o in opts]
+        deduped = [
+            opt for i, opt in enumerate(opts)
+            if not any(lower_opts[i].startswith(lower_opts[j] + " ") for j in range(len(opts)) if j != i)
+        ]
+        return deduped[:max_pool]
+
+    if generate_decisions:
+        option_lists: List[List[str]] = list(
+            await asyncio.gather(*[_gen_options(d.label) for d in generate_decisions])
+        )
+    else:
+        option_lists = []
+
+    # Batch image + variants lookup across all generated options
+    all_unique: List[str] = list(dict.fromkeys(
+        opt for opts in option_lists for opt in opts
+    ))
+
+    label_to_url: Dict[str, Any] = {}
+    if all_unique:
+        label_to_url = await _lookup_images_for_labels(all_unique, selected_mascot, account_id, aac_user_id)
+
+    variants_map: Dict[str, Dict[str, Any]] = {}
+    if all_unique:
+        try:
+            opts_json = json.dumps(all_unique)
+            variants_prompt = (
+                f"Given these AAC button labels, return a JSON object where each key is a label and each value "
+                f"is an object with two fields: \"past_tense\" and \"plural\". "
+                f"Rules: past_tense = past tense of verb phrase (null if not a verb or already past tense). "
+                f"plural = plural of noun (null if not a noun; this->these, that->those, it->them). "
+                f"Never map a label to itself. Every label must appear as a key. "
+                f"Return ONLY valid JSON. Labels: {opts_json}"
+            )
+            v_raw = await _generate_gemini_content_with_fallback(
+                variants_prompt, {"response_mime_type": "application/json", "temperature": 0.1},
+                account_id, aac_user_id
+            )
+            if v_raw:
+                v_stripped = v_raw.strip()
+                fm = re.search(r'```(?:json)?\s*(.*?)\s*```', v_stripped, re.DOTALL)
+                if fm:
+                    v_stripped = fm.group(1).strip()
+                om = re.search(r'\{.*\}', v_stripped, re.DOTALL)
+                if om:
+                    v_stripped = om.group(0)
+                pv = json.loads(v_stripped)
+                if isinstance(pv, dict):
+                    for lbl, v in pv.items():
+                        if isinstance(v, dict):
+                            variants_map[lbl] = {
+                                "past_tense": v.get("past_tense") or None,
+                                "plural": v.get("plural") or None,
+                            }
+        except Exception as ve:
+            logging.warning(f"create_next_boards: variants call failed: {ve}")
+
+    # Build and attach boards
+    ts_base = int(time.time() * 1000)
+    existing_ids: set = set(board_by_id.keys())
+    boards_created = 0
+    boards_updated = 0
+
+    for dec, options in zip(generate_decisions, option_lists):
+        btn = btn_by_id.get(dec.button_id)
+        if btn is None:
+            continue
+
+        new_buttons: List[Dict[str, Any]] = []
+        for i, opt_label in enumerate(options):
+            is_overflow = i >= max_on_page
+            row = None if is_overflow else i // options_per_row
+            col = None if is_overflow else i % options_per_row
+            vdata = variants_map.get(opt_label, {})
+            new_buttons.append({
+                "id": f"btn_pool_{i}_{ts_base}_{(dec.button_id or '')[-4:]}",
+                "label": opt_label,
+                "row": row, "col": col, "pool_index": i,
+                "speech_text": opt_label,
+                "action_type": "announce",
+                "after_selection": payload.new_board_after_selection,
+                "target_board_id": None,
+                "temporary_navigation": False,
+                "custom_audio_file": None,
+                "special_function": None,
+                "image_url": label_to_url.get(opt_label),
+                "past_tense": vdata.get("past_tense"),
+                "plural": vdata.get("plural"),
+                "background_color": "#FFFFFF",
+                "text_color": "#000000",
+                "hidden": False,
+                "button_type": "static",
+            })
+
+        slug = re.sub(r'[^a-z0-9]+', '_', dec.label.lower()).strip('_')
+
+        if dec.action == "replace" and dec.existing_board_id and dec.existing_board_id in board_by_id:
+            target_board = board_by_id[dec.existing_board_id]
+            target_board['buttons'] = new_buttons
+            target_board['source'] = 'custom'
+            btn['after_selection'] = 'navigate'
+            btn['target_board_id'] = dec.existing_board_id
+            boards_updated += 1
+        else:
+            base_id = f"{slug}_target"
+            new_id = base_id
+            suffix = 2
+            while new_id in existing_ids:
+                new_id = f"{base_id}_{suffix}"
+                suffix += 1
+            existing_ids.add(new_id)
+
+            regen_prompt = (
+                f"Words or short phrases that naturally follow '{dec.label}' to complete "
+                f"a spoken sentence. Prioritize direct objects, activities, people, and places."
+            )
+            new_board: Dict[str, Any] = {
+                "id": new_id,
+                "label": dec.label,
+                "board_type": "static",
+                "source": "custom",
+                "dynamic_rows": tap_dynamic_rows,
+                "words_prompt": regen_prompt,
+                "buttons": new_buttons,
+            }
+            boards.append(new_board)
+            board_by_id[new_id] = new_board
+            btn['after_selection'] = 'navigate'
+            btn['target_board_id'] = new_id
+            boards_created += 1
+
+    config_data['boards'] = boards
+    config_data['updated_at'] = dt.now().isoformat()
+
+    success = await save_tap_nav_config(account_id, aac_user_id, config_data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save config")
+
+    return JSONResponse(content={
+        "success": True,
+        "boards_created": boards_created,
+        "boards_updated": boards_updated,
+        "use_existing_linked": len(use_existing_decisions),
+    })
 
 
 class BravoSuggestRequest(BaseModel):
@@ -29904,24 +30274,22 @@ async def _generate_guesses(request: GuessWhoGenerateGuessesRequest, current_ids
 The clues given by Player 2 were:
 {clues_context}{previous_guesses_context}
 
-Generate exactly {total_guesses_needed} diverse guess options - {item_type_plural} from the "{request.category}" category that could match these clues.
+Generate UP TO {total_guesses_needed} {item_type_plural} from the "{request.category}" category as guess options.
 
-IMPORTANT: Consider ALL clues together. A good guess should reasonably match ALL the clues provided.
+STRICT QUALITY RULES — follow these in order:
+1. The most obvious match for the clues MUST appear in the list. Do NOT omit the likely correct answer — that makes the game unwinnable.
+2. Every other option must still be plausible given the clues. If a clue says "I like to swing on webs", only include {item_type_plural} that could plausibly relate to webs, swinging, or the context implied — do NOT pad with unrelated {item_type_plural}.
+3. Fewer high-quality options are better than more low-quality ones. If the clues are specific, it is fine to return fewer than {total_guesses_needed} options rather than padding with poor fits.
+4. All options must be well-known and from the "{request.category}" category.
+5. Do NOT include any of the previous incorrect guesses.
+6. The order does not matter; it will be randomized separately.
 
-Requirements:
-1. Each guess must be from the "{request.category}" category
-2. Guesses should be plausible based on ALL the clues
-3. Include a mix of obvious and creative guesses
-4. Randomize the order - do NOT put the most likely guess first
-5. Make them well-known and recognizable
-6. Do NOT include any of the previous incorrect guesses
-
-Return your response as a JSON array of strings, in RANDOM order.
+Return your response as a JSON array of strings (return fewer items if you cannot find enough quality matches).
 
 Example format:
 ["{item_type.title()} 1", "{item_type.title()} 2", "{item_type.title()} 3"]
 
-Generate {total_guesses_needed} unique guesses now:"""
+Generate UP TO {total_guesses_needed} unique guesses now:"""
         
         response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
         
