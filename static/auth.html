@@ -4447,6 +4447,16 @@ registerForm.addEventListener('submit', async (e) => {
                     } catch (_) { /* non-fatal: menu visibility can be adjusted in admin settings */ }
                 }
 
+                // Assign images to all board buttons using the selected mascot
+                try {
+                    setWizardStatus('Assigning images to boards…', false);
+                    await fetch('/api/tap-interface/boards/assign-all-images', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ mascot: wizardState.mascot || '' })
+                    });
+                } catch (_) { /* non-fatal: images will be assigned on first use */ }
+
                 closeSetupWizard();
 
                 sessionStorage.setItem('firebaseIdToken', window.currentIdToken);

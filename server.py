@@ -8869,7 +8869,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                 tap_words_rows = int(saved_settings_dict.get('tapWordsRows', 4) or 4)
                 grid_cols = int(saved_settings_dict.get('gridColumns', 6) or 6)
                 static_rows = max(0, tap_words_rows - tap_dynamic_rows)
-                default_button_action = str(saved_settings_dict.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+                default_button_action = 'use_ai' if saved_settings_dict.get('useBravoBuild') else (str(saved_settings_dict.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing')
 
                 logging.warning(
                     f"DEBUG regenerate_boards: update_data tapDynamicRows={update_data.get('tapDynamicRows')!r} "
@@ -21562,11 +21562,40 @@ async def _lookup_images_for_labels(
     def _norm(s: str) -> str:
         return ' '.join(_re.sub(r'[^a-z0-9]+', ' ', str(s or '').strip().lower()).split())
 
+    # Stop words stripped from the START of a phrase to extract the key searchable term.
+    # e.g. "to go"→"go", "a drink"→"drink", "I want"→"want", "I'm thinking"→"thinking".
+    # Negators ("not") are intentionally excluded so negation is preserved.
+    # Contraction residuals: _norm() strips apostrophes, so "I'm"→"i m", "we're"→"we re".
+    _LEAD_STOPS = frozenset({
+        # Articles
+        'a', 'an', 'the',
+        # Prepositions / particles
+        'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
+        # Possessive adjectives
+        'my', 'your', 'his', 'her', 'its', 'our', 'their',
+        # Quantifiers / demonstratives acting as articles
+        'some', 'any', 'this', 'that', 'these', 'those',
+        # Subject pronouns — e.g. "I want", "we can", "you need"
+        'i', 'we', 'you', 'he', 'she', 'they', 'it',
+        # Contraction residuals after _norm strips apostrophes:
+        # "I'm"→"i m", "we're"→"we re", "I've"→"i ve", "I'll"→"i ll", "I'd"→"i d", "he's"→"he s"
+        'm', 're', 've', 'll', 'd', 's',
+    })
+
+    def _key_term(norm: str) -> str:
+        words = norm.split()
+        while len(words) > 1 and words[0] in _LEAD_STOPS:
+            words = words[1:]
+        return ' '.join(words)
+
     mascot_clean = str(mascot or '').strip().lower()
     unique_labels = list(dict.fromkeys(labels))  # preserve order, dedupe
     norm_map = {lbl: _norm(lbl) for lbl in unique_labels}  # label → normalized
+    key_term_map = {lbl: _key_term(norm_map[lbl]) for lbl in unique_labels if norm_map.get(lbl)}
 
+    # Include key terms in the query set so images keyed by the stripped term are fetched.
     all_norm = set(v for v in norm_map.values() if v)
+    all_norm |= {kt for kt in key_term_map.values() if kt}
 
     if not all_norm:
         return {}
@@ -21581,9 +21610,11 @@ async def _lookup_images_for_labels(
     def _stream(q):
         return list(q.stream())
 
-    # Build parallel queries mirroring batch-search: search_terms (primary), tags (legacy fallback)
+    # Build parallel queries mirroring batch-search: subconcept/concept (exact), search_terms, tags
     queries = []
     for chunk in _chunked(all_norm, 10):
+        queries.append(("subconcept",   images_ref.where("source", "==", "bravo_images").where("subconcept", "in", chunk).limit(100)))
+        queries.append(("concept",      images_ref.where("source", "==", "bravo_images").where("concept",    "in", chunk).limit(100)))
         queries.append(("search_terms", images_ref.where("search_terms", "array_contains_any", chunk).limit(300)))
         queries.append(("tags_legacy",  images_ref.where("source", "==", "bravo_images").where("tags", "array_contains_any", chunk).limit(250)))
 
@@ -21674,22 +21705,47 @@ async def _lookup_images_for_labels(
             "mascot": cc.get("mascot") or "",
         })
 
-    def _score(norm_label: str, cand: dict) -> int:
+    def _score(norm_label: str, cand: dict, key_term: str = '') -> int:
+        # Negation mismatch guard: a positive label must not match a negative image and vice versa.
+        label_neg = norm_label.startswith('not ')
+        cand_neg = (
+            cand["sub"].startswith('not ')
+            or cand["con"].startswith('not ')
+            or any(t.startswith('not ') for t in cand["all_terms"])
+        )
+        if label_neg != cand_neg:
+            return -9999
+
+        # Tier-based scoring: tiers are spaced 1000+ apart so the mascot adjustment
+        # (+200 / -400) can never push a lower-quality text match above a higher one.
+        # Priority (high→low):
+        #   1. Exact subconcept match  (10000)
+        #   2. Exact concept match     (9000)
+        #   3. Key-term subconcept     (8000)  — leading stops stripped, e.g. "to go" → "go"
+        #   4. Key-term concept        (7000)
+        #   5. Full-label tag match    (5000)
+        #   6. Key-term tag match      (3500)
+        # Mascot tiebreaker within each tier: +200 (correct), 0 (none), -400 (wrong).
         score = 0
         if norm_label == cand["sub"]:
-            score += 1000
+            score += 10000
         elif norm_label == cand["con"]:
-            score += 900
+            score += 9000
+        elif key_term and key_term != norm_label and key_term == cand["sub"]:
+            score += 8000
+        elif key_term and key_term != norm_label and key_term == cand["con"]:
+            score += 7000
         elif norm_label in cand["all_terms"]:
-            # 780 so a tag match survives the -400 wrong-mascot penalty (780-400=380 > 0).
-            score += 780
+            score += 5000
+        elif key_term and key_term != norm_label and key_term in cand["all_terms"]:
+            score += 3500
         else:
-            return -9999  # no textual match; skip mascot adjustment
+            return -9999  # no textual match at all
 
         if mascot_clean:
             img_m = cand["mascot"]
             if img_m == mascot_clean:
-                score += 500
+                score += 200
             elif img_m and img_m != mascot_clean:
                 score -= 400
         return score
@@ -21700,11 +21756,13 @@ async def _lookup_images_for_labels(
         norm_lbl = norm_map.get(lbl, '')
         if not norm_lbl:
             continue
+        kt = key_term_map.get(lbl, '')
+        key_term = kt if kt != norm_lbl else ''  # only pass if stripping actually changed it
         best_score = 0  # require a genuine textual match (score > 0)
         best_url = None
 
         for cand in processed:
-            s = _score(norm_lbl, cand)
+            s = _score(norm_lbl, cand, key_term)
             if s > best_score:
                 best_score = s
                 best_url = cand["url"]
@@ -21721,15 +21779,16 @@ async def _assign_images_to_tap_config(
     mascot: str,
     account_id: str,
     aac_user_id: str,
-) -> None:
+) -> Dict[str, Any]:
     """
-    Background task: resolve images for every static pool button in the tap config
-    and save the updated config to Firestore. Also backfills missing pool buttons
-    for static boards that were created before the pool-assignment feature existed.
+    Resolve images for every static pool button in the tap config and save to Firestore.
+    Also backfills missing pool buttons for static boards created before the pool feature.
 
+    Returns a stats dict with labels_found, images_resolved, save_ok, backfill_changed.
     Uses config_data only to collect labels; reloads a fresh copy from Firestore
     before saving so concurrent writes (e.g. wizard boards-menu save) are not lost.
     """
+    stats: Dict[str, Any] = {"labels_found": 0, "images_resolved": 0, "save_ok": False, "backfill_changed": False, "error": None}
     try:
         # Load a fresh copy from Firestore so we work with the latest state.
         fresh_config = await load_tap_nav_config(account_id, aac_user_id)
@@ -21744,7 +21803,7 @@ async def _assign_images_to_tap_config(
         grid_cols        = int(settings.get('gridColumns',    6) or 6)
         tap_dynamic_rows = int(settings.get('tapDynamicRows', 0) or 0)
         static_rows      = max(0, tap_words_rows - tap_dynamic_rows)
-        default_action   = str(settings.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+        default_action   = 'use_ai' if settings.get('useBravoBuild') else (str(settings.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing')
 
         backfill_changed = False
         for board in (fresh_config.get('boards') or []):
@@ -21782,15 +21841,21 @@ async def _assign_images_to_tap_config(
                 if lbl:
                     all_labels.append(lbl)
 
+        stats["labels_found"] = len(all_labels)
+        stats["backfill_changed"] = backfill_changed
+
         if not all_labels and not backfill_changed:
-            return
+            return stats
 
         label_to_url: Dict[str, str] = {}
         if all_labels:
             label_to_url = await _lookup_images_for_labels(all_labels, mascot, account_id, aac_user_id)
 
-        # Write image_url onto every matching button
+        stats["images_resolved"] = len(label_to_url)
+
+        # Write image_url and fix after_selection onto every static pool button
         img_changed = False
+        correct_action = default_action  # "ai_build_board" when useBravoBuild, else user preference
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict):
                 continue
@@ -21802,15 +21867,28 @@ async def _assign_images_to_tap_config(
                 if url and btn.get('image_url') != url:
                     btn['image_url'] = url
                     img_changed = True
+                # Fix after_selection on static pool buttons when useBravoBuild is on
+                if correct_action == 'use_ai' and btn.get('button_type') == 'static':
+                    current_sel = btn.get('after_selection')
+                    if current_sel in ('do_nothing', 'ai_build_board', None, ''):
+                        btn['after_selection'] = 'use_ai'
+                        img_changed = True
 
         if backfill_changed or img_changed:
-            await save_tap_nav_config(account_id, aac_user_id, fresh_config)
+            save_ok = await save_tap_nav_config(account_id, aac_user_id, fresh_config)
+            stats["save_ok"] = bool(save_ok)
             logging.info(
                 f"✅ Pool/image assignment complete for {account_id}/{aac_user_id}: "
-                f"backfill={backfill_changed} images={len(label_to_url)}"
+                f"backfill={backfill_changed} images={len(label_to_url)} save_ok={save_ok}"
             )
+        else:
+            stats["save_ok"] = True  # nothing to save, not an error
+
+        return stats
     except Exception as e:
+        stats["error"] = str(e)
         logging.error(f"_assign_images_to_tap_config failed for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        return stats
 
 
 @app.post("/api/tap-interface/boards/assign-all-images")
@@ -21837,9 +21915,9 @@ async def assign_all_board_images(
             raise HTTPException(status_code=404, detail='Board config not found')
 
         # Run synchronously so the response confirms completion
-        await _assign_images_to_tap_config(config_data, mascot, account_id, aac_user_id)
+        stats = await _assign_images_to_tap_config(config_data, mascot, account_id, aac_user_id)
 
-        return JSONResponse(content={'success': True, 'mascot': mascot})
+        return JSONResponse(content={'success': True, 'mascot': mascot, 'debug': stats})
     except HTTPException:
         raise
     except Exception as e:
@@ -26110,7 +26188,7 @@ async def list_tap_boards(
         grid_cols        = int(settings.get('gridColumns',    6) or 6)
         tap_dynamic_rows = int(settings.get('tapDynamicRows', 0) or 0)
         static_rows      = max(0, tap_words_rows - tap_dynamic_rows)
-        default_action   = str(settings.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing'
+        default_action   = 'use_ai' if settings.get('useBravoBuild') else (str(settings.get('defaultButtonAction') or 'do_nothing').strip() or 'do_nothing')
         pool_backfilled  = False
         for board in (config_data.get('boards') or []):
             if not isinstance(board, dict) or board.get('board_type') != 'static':
@@ -27014,40 +27092,17 @@ async def bravo_build(
 
         generated_options = generated_options[:max_pool]
         ts_base = int(time.time() * 1000)
-        buttons: List[Dict[str, Any]] = []
 
+        # Batch-resolve images for all options using the shared scored lookup
+        # (handles key-term stripping, negation guard, and mascot priority in one pass).
         selected_mascot = str(settings.get("mascot") or "").strip().lower()
+        label_to_url = await _lookup_images_for_labels(generated_options, selected_mascot, account_id, aac_user_id)
+
+        buttons: List[Dict[str, Any]] = []
         for i, opt_label in enumerate(generated_options):
             is_overflow = i >= max_on_page
             row = None if is_overflow else i // options_per_row
             col = None if is_overflow else i % options_per_row
-            image_url: Optional[str] = None
-            for term in [opt_label, opt_label.lower(), opt_label.capitalize()]:
-                try:
-                    images_col = firestore_db.collection("aac_images")
-                    search_queries = []
-                    if selected_mascot:
-                        search_queries.append(images_col.where("tags", "array_contains", term).where("mascot", "==", selected_mascot).limit(1))
-                        search_queries.append(images_col.where("search_terms", "array_contains", term).where("mascot", "==", selected_mascot).limit(1))
-                    search_queries.append(images_col.where("tags", "array_contains", term).limit(5))
-                    search_queries.append(images_col.where("search_terms", "array_contains", term).limit(5))
-                    for q in search_queries:
-                        docs = await asyncio.to_thread(q.get)
-                        for doc in docs:
-                            img_data = doc.to_dict()
-                            img_mascot = str(img_data.get("mascot") or "").strip().lower()
-                            if selected_mascot and img_mascot and img_mascot != selected_mascot:
-                                continue
-                            if img_data.get("image_url"):
-                                image_url = img_data["image_url"]
-                                break
-                        if image_url:
-                            break
-                except Exception:
-                    pass
-                if image_url:
-                    break
-
             buttons.append({
                 "id": f"btn_pool_{i}_{ts_base}",
                 "label": opt_label,
@@ -27056,12 +27111,12 @@ async def bravo_build(
                 "pool_index": i,
                 "speech_text": opt_label,
                 "action_type": "announce",
-                "after_selection": "ai_build_board",
+                "after_selection": "use_ai",
                 "target_board_id": None,
                 "temporary_navigation": False,
                 "custom_audio_file": None,
                 "special_function": None,
-                "image_url": image_url,
+                "image_url": label_to_url.get(opt_label),
                 "background_color": "#FFFFFF",
                 "text_color": "#000000",
                 "hidden": False,

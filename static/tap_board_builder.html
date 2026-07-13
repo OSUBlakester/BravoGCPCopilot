@@ -2370,9 +2370,10 @@
                     headers: getAuthHeaders(),
                     body: JSON.stringify({})
                 });
+                const respData = await resp.json().catch(() => ({}));
+                console.log('[reassignImages] response', resp.status, respData);
                 if (!resp.ok) {
-                    const errData = await resp.json().catch(() => ({}));
-                    throw new Error(errData.detail || `Server error ${resp.status}`);
+                    throw new Error(respData.detail || `Server error ${resp.status}`);
                 }
 
                 // Reload the current board so the grid reflects the newly saved image_urls
