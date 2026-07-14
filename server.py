@@ -21583,12 +21583,31 @@ async def _lookup_images_for_labels(
         # Contraction residuals after _norm strips apostrophes:
         # "I'm"→"i m", "we're"→"we re", "I've"→"i ve", "I'll"→"i ll", "I'd"→"i d", "he's"→"he s"
         'm', 're', 've', 'll', 'd', 's',
+        # All forms of "to be" — "is coming"→"coming", "was playing"→"playing",
+        # "will be going"→"going", "have been eating"→"eating"
+        'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        # Modal / auxiliary verbs that precede the content word
+        'will', 'would', 'shall', 'should',
+        'can', 'could', 'may', 'might', 'must',
+        'have', 'has', 'had', 'do', 'does', 'did',
+    })
+
+    # Temporal/aspectual adverbs that appear at the END of a label and modify
+    # *when* something happens rather than *what* the action is.
+    # Stripping these lets "playing now" → key_term "playing", matching the
+    # "playing" image at tier-7000 instead of falling through with no match.
+    _TRAIL_STOPS = frozenset({
+        'now', 'later', 'soon',
+        'today', 'tomorrow', 'tonight', 'yesterday',
+        'already', 'again', 'still', 'yet', 'then', 'next',
     })
 
     def _key_term(norm: str) -> str:
         words = norm.split()
         while len(words) > 1 and words[0] in _LEAD_STOPS:
             words = words[1:]
+        while len(words) > 1 and words[-1] in _TRAIL_STOPS:
+            words = words[:-1]
         return ' '.join(words)
 
     mascot_clean = str(mascot or '').strip().lower()

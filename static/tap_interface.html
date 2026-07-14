@@ -6360,8 +6360,11 @@
                         max_options: wordsCount,
                         exclude_words: mergedExclusions,
                         target_locale: getEffectiveTapWordLocale(),
-                        custom_prompt: wordsPrompt || null, // Use custom_prompt for server priority
-                        current_mood: currentMood
+                        custom_prompt: wordsPrompt || null,
+                        current_mood: currentMood,
+                        source_page: 'tap_interface',
+                        originating_button_text: category || null,
+                        is_llm_generated: false
                     };
                     
                     console.log('🟡 Sending exclusion request to /api/freestyle/category-words:', requestBody);
@@ -6781,13 +6784,11 @@
                     // Use the board's configured prompt as-is. The exclusion list handles
                     // filtering out words already shown. No prompt synthesis needed.
 
-                    // Wake word boards pass the current build space so the LLM generates
-                    // contextual responses that grow with what the user has already selected.
-                    // Category vocabulary boards pass empty string to prevent sentence-context
-                    // from pulling generation off-course.
-                    const buildSpaceForRequest = activeCategory?.is_wake_word_board
-                        ? currentSpeech
-                        : '';
+                    // Always pass current speech history so dynamic rows suggest words that
+                    // naturally follow what the user has already selected. On initial load
+                    // currentSpeech is empty, so the LLM falls back to category-appropriate
+                    // starters; after a selection it generates contextual follow-ups.
+                    const buildSpaceForRequest = currentSpeech;
 
                     console.log(`🔮 Generating hybrid dynamic words for category: "${categoryName}", prompt: "${wordsPrompt}", excluding:`, excludedWords);
 
@@ -16225,15 +16226,15 @@ ${getTapLanguageDirective()}
             const mergedExclusions = getTapSpecialButtonExclusions(excludeWords);
             console.log('🎯 Using FREESTYLE.JS logic for:', speechText, 'excluding:', mergedExclusions);
             try {
-                // Use the EXACT same requestPayload structure as freestyle.js line 935-942
                 const requestPayload = {
-                    build_space_text: speechText,  // This is the key - exactly like freestyle.js
-                    context: null,  // Keep simple like freestyle.js
-                    source_page: null,  // Keep simple like freestyle.js
+                    build_space_text: speechText,
+                    context: null,
+                    source_page: 'tap_interface',
                     is_llm_generated: false,
                     target_locale: getEffectiveTapWordLocale(),
                     originating_button_text: null,
-                    exclude_words: mergedExclusions
+                    exclude_words: mergedExclusions,
+                    current_mood: getCurrentMood ? getCurrentMood() : null
                 };
                 
                 console.log('🎯 Using freestyle.js requestPayload format:', requestPayload);
@@ -17310,6 +17311,17 @@ ${getTapLanguageDirective()}
                         console.log('🎯 Generating next options based on updated Speech History:', buildSpace.value);
                         const isDynamic = option && option.button_type === 'dynamic';
                         await updateFreestyleOptionsWithSelectedWord(text, isDynamic);
+                    } else {
+                        // Static button with do_nothing (or no navigation target) on a hybrid board —
+                        // speech was just added, so refresh the dynamic rows with contextual suggestions.
+                        const hasDynamicRows = freestyleOptions
+                            ? Array.from(freestyleOptions.querySelectorAll('.option-button'))
+                                .some(b => b.dataset.buttonType === 'dynamic' || b.classList.contains('dynamic-button'))
+                            : false;
+                        if (hasDynamicRows) {
+                            console.log('🔄 Static button on hybrid board — refreshing dynamic rows:', buildSpace.value);
+                            await updateFreestyleOptionsWithSelectedWord(text, false);
+                        }
                     }
                 });
             });
