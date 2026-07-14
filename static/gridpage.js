@@ -283,6 +283,7 @@ let playLlmOptionsChimePending = false; // One-shot guard for the next interacti
 let suppressSwitchActivationUntil = 0; // Timestamp guard to prevent immediate button activation after starting scan
 let SummaryOff = false; // Default summary state
 let gridColumns = 10; // Default number of grid columns for button sizing
+let gridMascot = 'buddy';
 const WAIT_FOR_SWITCH_CHIME_URL = '/static/notification.mp3';
 const QUESTION_TEXTAREA_ID = 'question-display'; // ID of the question textarea
 const LISTENING_HIGHLIGHT_CLASS = 'highlight-listening'; // CSS class for highlighting
@@ -2076,11 +2077,11 @@ async function getSymbolImageForText(text, keywords = null) {
         }, 10000); // 10 second timeout
         
         // Use unified button-search that searches Firestore collections with keywords support (same as tap interface)
-        let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1`;
+        let symbolsUrl = `/api/symbols/button-search?q=${encodeURIComponent(text.trim())}&limit=1&mascot=${encodeURIComponent(gridMascot || 'buddy')}`;
         if (keywords && keywords.length > 0) {
             symbolsUrl += `&keywords=${encodeURIComponent(JSON.stringify(keywords))}`;
         }
-        
+
         const response = await authenticatedFetch(symbolsUrl, {
             signal: controller.signal
         });
@@ -2314,6 +2315,9 @@ async function loadScanSettings() {
         } else {
             gridColumns = 10; // Default value
         }
+
+        // Load mascot setting
+        gridMascot = (settings && settings.mascot) ? settings.mascot : 'buddy';
 
         // --- ADD THIS NEW LOGIC FOR TTS SETTINGS ---
         // Load Speech Rate

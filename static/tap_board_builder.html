@@ -10,7 +10,7 @@
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; color: #111827; }
         #buttonGrid { display: grid; grid-template-columns: repeat(12, minmax(100px, 1fr)); gap: 8px; width: 100%; border: 1px solid #d1d5db; margin-top: 1rem; margin-bottom: 1rem; background-color: #f9fafb; overflow-x: auto; padding: 8px; }
-        .visual-button { border: 2px solid #d1d5db; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; background-color: white; min-height: 70px; cursor: pointer; transition: all 0.2s ease; font-size: 0.8rem; font-weight: 500; text-align: center; word-wrap: break-word; position: relative; }
+        .visual-button { border: 2px solid #d1d5db; border-radius: 8px; padding: 10px; display: flex; align-items: center; justify-content: center; background-color: white; aspect-ratio: 1 / 1; cursor: pointer; transition: all 0.2s ease; font-size: 0.8rem; font-weight: 500; text-align: center; word-wrap: break-word; position: relative; overflow: hidden; }
         .visual-button:hover { border-color: #3b82f6; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); transform: translateY(-1px); }
         .visual-button.undefined { background-color: #f9fafb; color: #6b7280; border-style: dashed; font-style: italic; }
         .visual-button.has-content { background-color: #ffffff; color: #1f2937; border-color: #059669; }
@@ -25,7 +25,14 @@
         .notification.show { transform: translateX(0); }
         .notification.success { background: #16a34a; }
         .notification.error { background: #dc2626; }
+        .notification.info { background: #2563eb; }
         .readonly-overlay { position: absolute; inset: 0; background: rgba(255, 255, 255, 0.85); border: 2px dashed #f59e0b; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #92400e; font-weight: 600; font-size: 0.9rem; z-index: 20; }
+        .drag-zone { position: absolute; top: 0; bottom: 0; width: 56px; z-index: 20; display: none; align-items: center; justify-content: center; writing-mode: vertical-rl; font-size: 11px; font-weight: 700; letter-spacing: 1px; pointer-events: none; transition: background 0.15s; }
+        .drag-zone.active { background: rgba(99,102,241,0.25) !important; }
+        #dragZoneLeft  { left: 0;  background: rgba(99,102,241,0.10); color: #4338ca; border-right: 3px dashed #6366f1; }
+        #dragZoneRight { right: 0; background: rgba(99,102,241,0.10); color: #4338ca; border-left:  3px dashed #6366f1; }
+        .drag-zones-active .drag-zone { display: flex; pointer-events: all; }
+        .drag-zone.hidden-zone { opacity: 0.2; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -65,7 +72,7 @@
                 <button id="saveBoardBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"><i class="fas fa-save mr-1"></i>Save Board</button>
                 <button id="deleteBoardBtn" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"><i class="fas fa-trash mr-1"></i>Delete Board</button>
                 <button id="translateBoardBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-language mr-1"></i>Translate Board</button>
-                <button id="translateAllAiBoardsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-globe mr-1"></i>Translate All AI Boards</button>
+                <button id="reassignImagesBtn" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"><i class="fas fa-images mr-1"></i>Reassign Images</button>
         </div>
     </div>
 
@@ -77,7 +84,9 @@
                         <label for="selectBoard" class="block text-sm font-medium text-gray-700">Select Board</label>
                         <button id="showMigrationOnlyBtn" type="button" class="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 hidden" title="Show only boards created during migration that need configuration">Show Migration Boards</button>
                     </div>
-                    <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+                    <div class="flex flex-col gap-2">
+                        <select id="selectBoard" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></select>
+                    </div>
                 </div>
                 <div>
                     <button id="createNewBoardBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-plus mr-1"></i>Create New Board</button>
@@ -87,77 +96,59 @@
                 </div>
             </div>
             <p class="text-sm text-gray-600 mt-3">Recommended workflow: build or edit boards here first, then open Boards Menu to decide how those boards appear in Tap Interface.</p>
-            <p id="readOnlyHint" class="text-sm text-amber-700 mt-2 hidden">This board is read-only because it is a standard legacy/system board.</p>
+            <p id="readOnlyHint" class="text-sm text-amber-700 mt-2 hidden">This board is read-only (system board).</p>
         </div>
 
         <form id="boardForm" class="mb-6 p-4 border rounded-md bg-white">
             <h3 class="text-xl font-semibold mb-3">Board Details</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label for="boardLabel" class="block text-sm font-medium text-gray-700">Display Name</label>
-                    <input type="text" id="boardLabel" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g., Home, Food, Feelings">
-                </div>
-                <div>
-                    <label for="boardType" class="block text-sm font-medium text-gray-700">Board Mode</label>
-                    <select id="boardType" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
-                        <option value="ai">AI-defined Board</option>
-                        <option value="static">Static Board</option>
-                        <option value="system">System Board</option>
-                    </select>
-                </div>
-            </div>
-
-            <div id="aiSettingsSection" class="mt-4">
-                <h4 class="font-semibold text-gray-800 mb-2">AI Settings</h4>
-                <div class="grid grid-cols-1 gap-3">
-                    <div>
-                        <label for="llmPrompt" class="block text-sm font-medium text-gray-700">LLM Prompt</label>
-                        <textarea id="llmPrompt" rows="3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe what the AI board should generate"></textarea>
+            <div class="grid grid-cols-1 gap-4">
+                <div class="flex items-end gap-3">
+                    <div class="flex-1">
+                        <label for="boardLabel" class="block text-sm font-medium text-gray-700">Display Name</label>
+                        <input type="text" id="boardLabel" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g., Home, Food, Feelings">
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div>
-                            <label for="promptTopic" class="block text-sm font-medium text-gray-700">Prompt Topic</label>
-                            <input type="text" id="promptTopic" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">
-                        </div>
-                        <div>
-                            <label for="promptExamples" class="block text-sm font-medium text-gray-700">Prompt Examples</label>
-                            <input type="text" id="promptExamples" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
-                        </div>
-                        <div>
-                            <label for="promptExclusions" class="block text-sm font-medium text-gray-700">Prompt Exclusions</label>
-                            <input type="text" id="promptExclusions" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Comma-separated">
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="homeBoardAssignmentSection" class="mt-4 p-4 border border-amber-200 bg-amber-50 rounded-md">
-                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                    <div>
-                        <h4 class="font-semibold text-gray-800">Home Board Assignment</h4>
-                        <p id="homeBoardCurrentStatus" class="text-sm text-gray-700 mt-1">Current Home Board: none selected</p>
-                        <p id="homeBoardChangeStatus" class="text-sm text-amber-700 mt-1 hidden"></p>
-                        <p class="text-xs text-gray-600 mt-2">Use this to choose which board opens first in Tap Interface.</p>
-                    </div>
-                    <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input type="checkbox" id="setAsHomeBoard" class="h-4 w-4">
-                        Set this board as Home
-                    </label>
+                    <button type="button" id="setAsHomeBoardBtn" class="px-3 py-2 text-sm bg-amber-500 text-white rounded-md hover:bg-amber-600 whitespace-nowrap">
+                        <i class="fas fa-home mr-1"></i>Set as Home Board
+                    </button>
                 </div>
             </div>
         </form>
 
-        <section id="gridSection" class="bg-white p-4 border rounded-md relative">
+        <div id="setAsHomeBoardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6000;">
+            <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+                <h3 class="text-lg font-bold text-gray-900 mb-3">Set as Home Board</h3>
+                <p id="setAsHomeBoardMsg" class="text-gray-700 text-sm mb-5"></p>
+                <div class="flex justify-end gap-3">
+                    <button id="setAsHomeBoardCancel" type="button" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Cancel</button>
+                    <button id="setAsHomeBoardConfirm" type="button" class="px-4 py-2 bg-amber-500 text-white rounded-md hover:bg-amber-600">Yes, Set as Home Board</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="gridSectionHeader" class="bg-white px-4 pt-4 pb-2 border border-b-0 rounded-t-md sticky top-0 z-10">
             <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <h3 class="text-xl font-semibold">Board Buttons (7 x 12 Grid)</h3>
                 <div class="flex gap-2 flex-wrap">
-                    <button id="setAllAfterSelectionBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Set All After Selection</button>
-                    <button id="aiBulkBuildBtn" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>AI Build Options</button>
+                    <button id="aiBulkBuildBtn" type="button" class="px-4 py-2 bg-violet-600 text-white rounded-md hover:bg-violet-700"><i class="fas fa-wand-magic-sparkles mr-1"></i>Use AI to Create Buttons</button>
+                    <button id="setDynamicRowsBtn" type="button" class="px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700"><i class="fas fa-sliders-h mr-1"></i>Configure Dynamic Rows</button>
+                    <button id="setAllAfterSelectionBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"><i class="fas fa-check-double mr-1"></i>Mass Update Action</button>
+                    <button id="createNextBoardsBtn" type="button" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"><i class="fas fa-sitemap mr-1"></i>Create Next Boards</button>
                 </div>
             </div>
-            <p class="text-gray-600 mb-3">Click any cell to define a button. Drag and drop to rearrange buttons.</p>
+            <div class="flex items-center justify-between pb-2">
+                <p class="text-gray-600 text-sm">Click any cell to define a button. Drag and drop to rearrange.</p>
+                <div id="poolPaginationControls" class="flex items-center gap-3" style="display:none">
+                    <button id="poolPrevPageBtn" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-40" disabled>← Prev</button>
+                    <span id="poolPageIndicator" class="text-sm text-gray-600 font-medium">Page 1 of 1</span>
+                    <button id="poolNextPageBtn" class="px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 disabled:opacity-40">Next →</button>
+                </div>
+            </div>
+        </div>
+        <section id="gridSection" class="bg-white px-4 pb-4 border border-t-0 rounded-b-md relative">
             <div id="buttonGrid"></div>
             <div id="gridReadOnlyOverlay" class="readonly-overlay hidden">Read-only board</div>
+            <div id="dragZoneLeft"  class="drag-zone">◀ PREV</div>
+            <div id="dragZoneRight" class="drag-zone">NEXT ▶</div>
         </section>
     </main>
 
@@ -169,8 +160,19 @@
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <div class="mb-4"><label for="buttonText" class="block text-sm font-medium text-gray-700 mb-2">Button Label</label><input type="text" id="buttonText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Enter button text"></div>
                     <div class="mb-4">
+                        <label for="buttonType" class="block text-sm font-medium text-gray-700 mb-2">Button Type</label>
+                        <select id="buttonType" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="static">Static (fixed content)</option>
+                            <option value="dynamic">Dynamic (AI-generated content)</option>
+                        </select>
+                    </div>
+                    <div class="mb-4" id="buttonLlmPromptWrapper" style="display:none;">
+                        <label for="buttonLlmPrompt" class="block text-sm font-medium text-gray-700 mb-2">AI Prompt</label>
+                        <textarea id="buttonLlmPrompt" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" placeholder="AI prompt for generating dynamic label & announcement on this button"></textarea>
+                    </div>
+                    <div class="mb-4" id="buttonTextWrapper"><label for="buttonText" class="block text-sm font-medium text-gray-700 mb-2">Button Label</label><input type="text" id="buttonText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Enter button text"></div>
+                    <div class="mb-4" id="buttonImageWrapper">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Button Image (Optional)</label>
                         <div class="flex items-center space-x-3">
                             <div id="assignedImagePreview" class="w-16 h-16 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center bg-gray-50 hidden"><img id="assignedImageThumb" class="w-full h-full object-cover rounded-md" alt="Selected image"></div>
@@ -181,8 +183,12 @@
                         </div>
                         <input type="hidden" id="assignedImageUrl" value="">
                     </div>
-                    <div class="mb-4"><label for="speechText" class="block text-sm font-medium text-gray-700 mb-2">Announcement (Optional)</label><input type="text" id="speechText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Announced out loud on selection"></div>
-                    <div class="mb-4">
+                    <div class="mb-4" id="speechTextWrapper"><label for="speechText" class="block text-sm font-medium text-gray-700 mb-2">Announcement (Optional)</label><input type="text" id="speechText" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Announced out loud on selection"></div>
+                    <div class="mb-4 grid grid-cols-2 gap-3" id="variantFieldsWrapper">
+                        <div><label for="pastTenseVariant" class="block text-sm font-medium text-gray-700 mb-2">Past Tense (Optional)</label><input type="text" id="pastTenseVariant" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. wanted"></div>
+                        <div><label for="pluralVariant" class="block text-sm font-medium text-gray-700 mb-2">Plural (Optional)</label><input type="text" id="pluralVariant" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. friends"></div>
+                    </div>
+                    <div class="mb-4" id="customAudioFileWrapper">
                         <label for="customAudioFile" class="block text-sm font-medium text-gray-700 mb-2">Custom Audio File (Optional)</label>
                         <input type="file" id="customAudioFile" accept="audio/*" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                         <input type="hidden" id="customAudioFileUrl" value="">
@@ -190,7 +196,7 @@
                     </div>
                     <div class="mb-4">
                         <div class="flex items-center justify-between mb-2">
-                            <label for="afterSelection" class="block text-sm font-medium text-gray-700">After Selection</label>
+                            <label for="afterSelection" class="block text-sm font-medium text-gray-700">Action</label>
                             <button type="button" id="aiGenerateTargetBtn" class="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700" title="Use AI to generate a static target board for this button">
                                 <i class="fas fa-wand-magic-sparkles"></i> AI Generate Target Board
                             </button>
@@ -241,12 +247,12 @@
     <div id="setAllAfterSelectionModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5250;">
         <div class="relative top-32 mx-auto p-5 border w-11/12 max-w-md shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Set After Selection — All Buttons</h3>
+                <h3 class="text-lg font-bold text-gray-900">Set Action — All Buttons</h3>
                 <button id="closeSetAllAfterSelectionModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
             </div>
             <p class="text-sm text-gray-600 mb-4">Choose what happens after the user taps any button on this board. This will overwrite the current setting on every button.</p>
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-700 mb-2">After Selection</label>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Action</label>
                 <select id="setAllAfterSelectionValue" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                     <option value="do_nothing">Do nothing (stay on current board)</option>
                     <option value="use_ai">Use AI to generate next options</option>
@@ -265,6 +271,68 @@
         </div>
     </div>
 
+    <div id="setDynamicRowsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5250;">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-lg shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900" id="dynamicRowsModalTitle">Configure Dynamic Rows</h3>
+                <button id="closeSetDynamicRowsModal" type="button" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <!-- Step 1: AI Prompt + Examples/Exclusions -->
+            <div id="setDynamicRowsStep1">
+                <div class="mb-4">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Step 1 of 2</span>
+                    <h4 class="text-md font-semibold text-gray-800 mt-1">AI Prompt for Dynamic Rows</h4>
+                    <p class="text-sm text-gray-600 mt-1 mb-3">Specify what kind of words or phrases the AI should generate for the dynamic rows at the bottom of this board.</p>
+                    <textarea id="dynamicRowsPromptInput" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. Generate action words and phrases for common activities..."></textarea>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Examples <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                        <input type="text" id="dynamicRowsExamplesInput" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. Hello, Goodbye, Thank you">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Exclusions <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                        <input type="text" id="dynamicRowsExclusionsInput" class="mt-1 w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. words to avoid">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 mt-5">
+                    <button id="setDynamicRowsCancelBtn1" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">Cancel</button>
+                    <button id="setDynamicRowsNextBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Next <i class="fas fa-arrow-right ml-1"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 2: Row Count -->
+            <div id="setDynamicRowsStep2" class="hidden">
+                <div class="mb-4">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Step 2 of 2</span>
+                    <h4 class="text-md font-semibold text-gray-800 mt-1">Number of Dynamic Rows</h4>
+                    <p class="text-sm text-gray-600 mt-1 mb-3">Set the number of dynamic rows (0 to <span id="maxDynamicRowsVal">10</span>). Enter 0 to disable dynamic rows.</p>
+                    <input type="number" id="dynamicRowsCountInput" min="0" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g. 1">
+                </div>
+                <div class="flex justify-end gap-2 mt-5">
+                    <button id="setDynamicRowsBackBtn" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold"><i class="fas fa-arrow-left mr-1"></i> Back</button>
+                    <button id="setDynamicRowsCancelBtn2" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">Cancel</button>
+                    <button id="setDynamicRowsApplyBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Apply &amp; Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirmFillRowsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5350;">
+        <div class="relative top-40 mx-auto p-5 border w-11/12 max-w-md shadow-lg rounded-md bg-white">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-900">Fill Vacated Rows?</h3>
+                <button id="closeConfirmFillRowsModal" type="button" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">You have reduced the number of dynamic rows. Would you like to fill the newly available rows with default static vocabulary options?</p>
+            <div class="flex justify-end gap-3 mt-5">
+                <button id="confirmFillRowsNoBtn" type="button" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 font-semibold">No, leave blank</button>
+                <button id="confirmFillRowsYesBtn" type="button" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold">Yes, fill them</button>
+            </div>
+        </div>
+    </div>
+
     <div id="aiBulkBuilderModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5200;">
         <div class="relative top-10 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4">
@@ -273,19 +341,20 @@
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="md:col-span-2">
-                    <label for="aiBulkPrompt" class="block text-sm font-medium text-gray-700 mb-2">Prompt</label>
-                    <textarea id="aiBulkPrompt" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Example: Generate common food choices for lunch"></textarea>
+                    <label for="aiBulkTopic" class="block text-sm font-medium text-gray-700 mb-1">What is this board about?</label>
+                    <p class="text-xs text-gray-500 mb-2">e.g. School, At the Beach, Feelings, Favorite Songs, Morning Routine</p>
+                    <input type="text" id="aiBulkTopic" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="Describe the topic or theme of this board">
                 </div>
                 <div>
-                    <label for="aiBulkTotalOptions" class="block text-sm font-medium text-gray-700 mb-2">Total Options</label>
-                    <input type="number" id="aiBulkTotalOptions" min="1" max="84" value="24" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <label for="aiBulkExamples" class="block text-sm font-medium text-gray-700 mb-2">Examples <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="aiBulkExamples" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. eat, drink, play, go">
                 </div>
                 <div>
-                    <label for="aiBulkOptionsPerRow" class="block text-sm font-medium text-gray-700 mb-2">Options Per Row</label>
-                    <input type="number" id="aiBulkOptionsPerRow" min="1" max="12" value="12" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <label for="aiBulkExclusions" class="block text-sm font-medium text-gray-700 mb-2">Exclusions <span class="text-gray-400 font-normal">(optional)</span></label>
+                    <input type="text" id="aiBulkExclusions" class="w-full px-3 py-2 border border-gray-300 rounded-md" placeholder="e.g. more, yes, no, all done">
                 </div>
                 <div>
-                    <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default After Selection</label>
+                    <label for="aiBulkAfterSelection" class="block text-sm font-medium text-gray-700 mb-2">Default Action</label>
                     <select id="aiBulkAfterSelection" class="w-full px-3 py-2 border border-gray-300 rounded-md">
                         <option value="do_nothing">Do nothing (default)</option>
                         <option value="use_ai">Use AI</option>
@@ -332,11 +401,12 @@
     <div id="notification" class="notification"></div>
 
     <div id="translateBoardModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden" style="z-index: 5300;">
-        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+        <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-2xl shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-gray-900">Translate Board Labels</h3>
+                <h3 class="text-lg font-bold text-gray-900">Translate Board</h3>
                 <button id="closeTranslateModal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
             </div>
+            <p class="text-sm text-gray-600 mb-4">Translates all button labels, speech text, plural and past tense values, and the AI prompt into the selected language. The board will be saved automatically.</p>
             <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-700 mb-2">Target Language</label>
                 <select id="translateTargetLanguage" class="w-full px-3 py-2 border border-gray-300 rounded-md">
@@ -353,8 +423,7 @@
                     <option value="ko">Korean</option>
                 </select>
             </div>
-            <div id="translateResultsContainer" class="bg-gray-50 p-4 rounded-md max-h-[400px] overflow-y-auto hidden">
-                <h4 class="text-sm font-semibold mb-3">Translations:</h4>
+            <div id="translateResultsContainer" class="bg-gray-50 p-4 rounded-md hidden">
                 <div id="translateResults"></div>
             </div>
             <div id="translateLoadingSpinner" class="text-center py-4 hidden">
@@ -362,19 +431,112 @@
             </div>
             <div class="flex justify-end gap-2 mt-4">
                 <button id="cancelTranslateModal" class="px-4 py-2 bg-gray-300 rounded-md hover:bg-gray-400">Close</button>
-                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate Current Board</button>
-                <button id="performTranslateAllAiBoardsBtn" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700" disabled>Translate All AI Boards</button>
+                <button id="performTranslationAllBtn" class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700" disabled>Translate &amp; Save All Boards</button>
+                <button id="performTranslationBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700" disabled>Translate &amp; Save Board</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reassign Images Modal -->
+    <div id="reassignImagesModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6100;">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Reassign Images</h3>
+            <p class="text-sm text-gray-600 mb-5">Look up and assign the best matching image for every button. Run this after changing your mascot or adding new images.</p>
+            <div class="flex flex-col gap-3">
+                <button id="reassignThisBoardBtn" class="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium">Reassign — This Board Only</button>
+                <button id="reassignAllBoardsBtn" class="w-full px-4 py-2 bg-purple-800 text-white rounded-md hover:bg-purple-900 font-medium">Reassign — All Boards</button>
+                <button id="reassignCancelBtn" class="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Next Boards Modal -->
+    <div id="createNextBoardsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden" style="z-index: 6200;">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 flex flex-col" style="max-height:90vh;">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-gray-900">Create Next Boards — <span id="cnbBoardLabel" class="text-indigo-700"></span></h3>
+                <button onclick="closeCreateNextBoardsModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <!-- Loading state -->
+            <div id="cnbLoading" class="flex flex-col items-center py-10 gap-3">
+                <div class="animate-spin rounded-full h-10 w-10 border-4 border-indigo-600 border-t-transparent"></div>
+                <p class="text-sm text-gray-500">Checking existing boards…</p>
+            </div>
+
+            <!-- Button decision list -->
+            <div id="cnbContent" class="hidden flex flex-col gap-4 overflow-hidden">
+                <p class="text-sm text-gray-600">Choose an action for each static button. Buttons marked <span class="font-medium text-amber-600">Existing board</span> already have a target board.</p>
+
+                <div class="overflow-y-auto flex-1 border border-gray-200 rounded-md" style="max-height:340px;">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="text-left px-3 py-2 font-medium text-gray-700 w-1/3">Button</th>
+                                <th class="text-left px-3 py-2 font-medium text-gray-700 w-1/3">Status</th>
+                                <th class="text-left px-3 py-2 font-medium text-gray-700 w-1/3">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cnbButtonRows" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+
+                <div class="border-t pt-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Default action for buttons on newly created boards:</label>
+                    <select id="cnbNewBoardAction" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm">
+                        <option value="use_ai">Use AI to generate next options</option>
+                        <option value="do_nothing">Do Nothing</option>
+                        <option value="navigate_home">Return Home</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center justify-between pt-2">
+                    <button onclick="closeCreateNextBoardsModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">Cancel</button>
+                    <button id="cnbExecuteBtn" onclick="executeCreateNextBoards()" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm font-medium">
+                        <i class="fas fa-magic mr-1"></i><span id="cnbExecuteLabel">Process Boards</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Progress state -->
+            <div id="cnbProgress" class="hidden flex flex-col items-center py-10 gap-3">
+                <div class="animate-spin rounded-full h-10 w-10 border-4 border-indigo-600 border-t-transparent"></div>
+                <p id="cnbProgressMsg" class="text-sm text-gray-600 text-center">Generating boards… this may take a moment.</p>
             </div>
         </div>
     </div>
 
     <script>
-        const GRID_ROWS = 7, GRID_COLS = 12;
+        let GRID_ROWS = 7, GRID_COLS = 12;
+        let tapWordsRows = 4;
+        let tapDynamicRows = 1;
+        let useHybridPages = false;
         let authToken = null, currentAacUserId = null;
         let allBoards = [], boardSettings = {}, currentBoardData = null, currentEditingButton = null, draggedButton = null;
+        let adminPageIndex = 0; // Current pool page shown in the button grid (0 = first page)
+        let dragPageTimer = null;
+        let currentOverflowPageMap = null; // Elevated from renderButtonGrid so drag handlers can access it
         let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
         let aiBulkPreviewOptions = [];
+        let pendingImageAssignmentAfterSave = false;
         let showMigrationBoardsOnly = false;
+
+        async function loadUserSettings() {
+            try {
+                const settingsResponse = await fetch('/api/settings', { headers: getAuthHeaders() });
+                if (settingsResponse.ok) {
+                    const settings = await settingsResponse.json();
+                    GRID_COLS = settings.gridColumns !== undefined ? settings.gridColumns : 6;
+                    tapWordsRows = settings.tapWordsRows !== undefined ? settings.tapWordsRows : 4;
+                    tapDynamicRows = settings.tapDynamicRows !== undefined ? settings.tapDynamicRows : 1;
+                    useHybridPages = settings.useHybridPages !== undefined ? settings.useHybridPages : false;
+                    GRID_ROWS = tapWordsRows;
+                    console.log(`Grid settings loaded: GRID_ROWS=${GRID_ROWS}, GRID_COLS=${GRID_COLS}, tapDynamicRows=${tapDynamicRows}, useHybridPages=${useHybridPages}`);
+                }
+            } catch (e) {
+                console.warn('Failed to load user grid settings:', e);
+            }
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
@@ -383,7 +545,7 @@
 
         function setupEventListeners() {
             document.getElementById('selectBoard').addEventListener('change', handleBoardSelected);
-            document.getElementById('createNewBoardBtn').addEventListener('click', createNewBoardDraft);
+            document.getElementById('createNewBoardBtn').addEventListener('click', promptCreateNewBoard);
             document.getElementById('openTouchChatMigrationBtn').addEventListener('click', openTouchChatMigrationModal);
             document.getElementById('closeTouchChatMigrationModal').addEventListener('click', closeTouchChatMigrationModal);
             document.getElementById('switch-user-button').addEventListener('click', () => {
@@ -399,19 +561,30 @@
             });
             document.getElementById('saveBoardBtn').addEventListener('click', saveBoard);
             document.getElementById('deleteBoardBtn').addEventListener('click', deleteBoard);
-            document.getElementById('boardType').addEventListener('change', updateBoardModeUI);
             document.getElementById('translateBoardBtn').addEventListener('click', openTranslateModal);
-            document.getElementById('translateAllAiBoardsBtn').addEventListener('click', openTranslateModal);
+            document.getElementById('reassignImagesBtn').addEventListener('click', openReassignImagesModal);
+            document.getElementById('createNextBoardsBtn').addEventListener('click', openCreateNextBoardsModal);
+            document.getElementById('reassignThisBoardBtn').addEventListener('click', () => reassignImages('this'));
+            document.getElementById('reassignAllBoardsBtn').addEventListener('click', () => reassignImages('all'));
+            document.getElementById('reassignCancelBtn').addEventListener('click', closeReassignImagesModal);
+            document.getElementById('poolPrevPageBtn').addEventListener('click', () => {
+                if (adminPageIndex > 0) { adminPageIndex--; renderButtonGrid(); }
+            });
+            document.getElementById('poolNextPageBtn').addEventListener('click', () => {
+                adminPageIndex++;
+                renderButtonGrid();
+            });
             document.getElementById('closeTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('cancelTranslateModal').addEventListener('click', closeTranslateModal);
             document.getElementById('performTranslationBtn').addEventListener('click', performBoardTranslation);
-            document.getElementById('performTranslateAllAiBoardsBtn').addEventListener('click', performAllAiBoardsTranslation);
-            document.getElementById('setAsHomeBoard').addEventListener('change', refreshHomeBoardAssignmentUI);
-            document.getElementById('boardLabel').addEventListener('input', refreshHomeBoardAssignmentUI);
+            document.getElementById('performTranslationAllBtn').addEventListener('click', performAllBoardsTranslation);
+            document.getElementById('setAsHomeBoardBtn').addEventListener('click', openSetAsHomeBoardModal);
+            document.getElementById('setAsHomeBoardCancel').addEventListener('click', closeSetAsHomeBoardModal);
+            document.getElementById('setAsHomeBoardConfirm').addEventListener('click', confirmSetAsHomeBoard);
             document.getElementById('translateTargetLanguage').addEventListener('change', () => {
                 const hasLocale = !!document.getElementById('translateTargetLanguage').value;
                 document.getElementById('performTranslationBtn').disabled = !hasLocale;
-                document.getElementById('performTranslateAllAiBoardsBtn').disabled = !hasLocale;
+                document.getElementById('performTranslationAllBtn').disabled = !hasLocale;
             });
             document.getElementById('aiBulkBuildBtn').addEventListener('click', openAIBulkBuilderModal);
             document.getElementById('setAllAfterSelectionBtn').addEventListener('click', openSetAllAfterSelectionModal);
@@ -422,12 +595,32 @@
                 const val = document.getElementById('setAllAfterSelectionValue').value;
                 document.getElementById('setAllTargetBoardWrapper').classList.toggle('hidden', val !== 'navigate');
             });
+            document.getElementById('setDynamicRowsBtn').addEventListener('click', openSetDynamicRowsModal);
+            document.getElementById('closeSetDynamicRowsModal').addEventListener('click', closeSetDynamicRowsModal);
+            document.getElementById('setDynamicRowsCancelBtn1').addEventListener('click', closeSetDynamicRowsModal);
+            document.getElementById('setDynamicRowsCancelBtn2').addEventListener('click', closeSetDynamicRowsModal);
+            document.getElementById('setDynamicRowsNextBtn').addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById('setDynamicRowsStep1').classList.add('hidden');
+                document.getElementById('setDynamicRowsStep2').classList.remove('hidden');
+            });
+            document.getElementById('setDynamicRowsBackBtn').addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById('setDynamicRowsStep2').classList.add('hidden');
+                document.getElementById('setDynamicRowsStep1').classList.remove('hidden');
+            });
+            document.getElementById('setDynamicRowsApplyBtn').addEventListener('click', applySetDynamicRows);
             document.getElementById('closeButtonEditor').addEventListener('click', closeButtonEditor);
             document.getElementById('cancelButtonEdit').addEventListener('click', closeButtonEditor);
             document.getElementById('saveButtonEdit').addEventListener('click', saveButtonEdit);
             document.getElementById('clearButtonBtn').addEventListener('click', clearCurrentButton);
             document.getElementById('showMigrationOnlyBtn').addEventListener('click', toggleMigrationBoardsFilter);
-            ['buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor', 'temporaryNavigation'].forEach(id => {
+            document.getElementById('buttonType').addEventListener('change', () => {
+                const val = document.getElementById('buttonType').value;
+                updateButtonEditorVisibility(val);
+                updateButtonPreview();
+            });
+            ['buttonType', 'buttonLlmPrompt', 'buttonText', 'speechText', 'targetBoard', 'buttonHidden', 'assignedImageUrl', 'customAudioFileUrl', 'buttonBgColor', 'temporaryNavigation'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) { el.addEventListener('input', updateButtonPreview); el.addEventListener('change', updateButtonPreview); }
             });
@@ -484,13 +677,13 @@
                 currentAacUserId = sessionStorage.getItem('currentAacUserId');
                 if (!currentAacUserId) { window.location.href = 'auth.html'; return; }
                 authToken = await user.getIdToken();
+                await loadUserSettings();
                 await loadBoards();
                 const params = new URLSearchParams(window.location.search);
                 const boardId = params.get('board_id');
                 if (boardId && allBoards.some(b => b.id === boardId)) { document.getElementById('selectBoard').value = boardId; handleBoardSelected(); }
                 else if (allBoards.length > 0) {
-                    const firstEditable = allBoards.find(b => !isBoardReadOnly(b));
-                    document.getElementById('selectBoard').value = firstEditable ? firstEditable.id : allBoards[0].id;
+                    // populateBoardDropdown already set the first filtered board; just render it
                     handleBoardSelected();
                 }
             });
@@ -512,7 +705,7 @@
             const data = await response.json();
             allBoards = Array.isArray(data.boards) ? data.boards : [];
             boardSettings = data.board_settings || {};
-            populateBoardDropdown();
+            populateBoardDropdown(currentBoardData ? currentBoardData.id : null);
         }
 
         function getBoardsSortedByLabel(boards) {
@@ -524,22 +717,38 @@
             });
         }
 
-        function populateBoardDropdown() {
+        function populateBoardDropdown(forceBoardIdToShow = null) {
             const select = document.getElementById('selectBoard');
-            const currentValue = select.value;
+            let currentValue = select.value || forceBoardIdToShow;
+            if (forceBoardIdToShow) currentValue = forceBoardIdToShow;
+
             select.innerHTML = '<option value="">-- Select Board --</option>';
-            const editableBoards = allBoards.filter(board => !isBoardReadOnly(board));
+
+            // Filter out special non-traditional pages (Spell, Games, Numbers)
+            const editableBoards = allBoards.filter(board => {
+                if (!board) return false;
+                const b_id = String(board.id || '').toLowerCase();
+                const b_lbl = String(board.label || '').toLowerCase();
+                const spec_fn = String(board.special_function || '').toLowerCase();
+                if (spec_fn === 'spell' || spec_fn === 'games' || spec_fn === 'numbers') return false;
+                if (b_id.includes('spell') || b_id.includes('games') || b_id.includes('numbers')) return false;
+                if (b_lbl === 'spell' || b_lbl === 'games' || b_lbl === 'numbers') return false;
+                return true;
+            });
+
             const migrationBoards = editableBoards.filter(board => board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0);
             const filterBtn = document.getElementById('showMigrationOnlyBtn');
             filterBtn.classList.toggle('hidden', migrationBoards.length === 0);
+
             const boardsToShow = getBoardsSortedByLabel(showMigrationBoardsOnly ? migrationBoards : editableBoards);
             boardsToShow.forEach(board => {
                 const option = document.createElement('option');
                 option.value = board.id;
                 const tags = [];
                 if (board.id === boardSettings.home_board_id) tags.push('home');
-                if (board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0) tags.push('migration - needs config');
-                option.textContent = `${board.label || board.id} (${board.board_type || 'ai'})${tags.length ? ' [' + tags.join(', ') + ']' : ''}`;
+                if (board.created_during_migration && Array.isArray(board.buttons) && board.buttons.length === 0) tags.push('needs config');
+                if (isBoardReadOnly(board)) tags.push('read-only');
+                option.textContent = `${board.label || board.id}${tags.length ? ' [' + tags.join(', ') + ']' : ''}`;
                 select.appendChild(option);
             });
             if (currentValue && boardsToShow.some(b => b.id === currentValue)) {
@@ -562,10 +771,7 @@
         }
 
         function isBoardReadOnly(board) {
-            if (!board) return false;
-            const source = String(board.source || '').toLowerCase();
-            const boardType = String(board.board_type || '').toLowerCase();
-            return source === 'legacy_category' || boardType === 'system';
+            return false;
         }
 
         function handleBoardSelected() {
@@ -573,6 +779,7 @@
             if (!boardId) { currentBoardData = null; clearBoardForm(); return; }
             const board = allBoards.find(b => b.id === boardId);
             if (!board) return;
+            adminPageIndex = 0; // Reset to page 1 when switching boards
             currentBoardData = JSON.parse(JSON.stringify(board));
             bindBoardToForm();
             renderButtonGrid();
@@ -583,20 +790,19 @@
         function clearBoardForm() {
             currentBoardData = null;
             document.getElementById('boardLabel').value = '';
-            document.getElementById('boardType').value = 'ai';
-            document.getElementById('llmPrompt').value = '';
-            document.getElementById('promptTopic').value = '';
-            document.getElementById('promptExamples').value = '';
-            document.getElementById('promptExclusions').value = '';
-            document.getElementById('setAsHomeBoard').checked = false;
             document.getElementById('buttonGrid').innerHTML = '';
             document.getElementById('readOnlyHint').classList.add('hidden');
             document.getElementById('gridReadOnlyOverlay').classList.add('hidden');
-            refreshHomeBoardAssignmentUI();
         }
 
-        function createNewBoardDraft() {
-            currentBoardData = { id: '', label: 'New Board', board_type: 'static', source: 'custom', owner_scope: 'user', hidden: false, llm_prompt: '', prompt_topic: '', prompt_examples: '', prompt_exclusions: '', static_options: null, buttons: [] };
+        function promptCreateNewBoard() {
+            const name = window.prompt('Enter a name for the new board:', '');
+            if (name === null) return; // cancelled
+            createNewBoardDraft(name.trim() || 'New Board');
+        }
+
+        function createNewBoardDraft(label = 'New Board') {
+            currentBoardData = { id: '', label, board_type: 'static', source: 'custom', owner_scope: 'user', hidden: false, llm_prompt: '', prompt_topic: '', prompt_examples: '', prompt_exclusions: '', static_options: null, buttons: [] };
             document.getElementById('selectBoard').value = '';
             bindBoardToForm();
             renderButtonGrid();
@@ -611,59 +817,55 @@
             return String(homeBoard?.label || homeBoardId).trim();
         }
 
-        function refreshHomeBoardAssignmentUI() {
-            const currentStatusEl = document.getElementById('homeBoardCurrentStatus');
-            const changeStatusEl = document.getElementById('homeBoardChangeStatus');
-            const setAsHomeEl = document.getElementById('setAsHomeBoard');
-            if (!currentStatusEl || !changeStatusEl || !setAsHomeEl) return;
-
-            const currentHomeId = String(boardSettings?.home_board_id || '').trim();
+        function openSetAsHomeBoardModal() {
+            if (!currentBoardData?.id) { showNotification('Save this board first before setting it as Home', 'error'); return; }
+            const boardLabel = String(document.getElementById('boardLabel')?.value || currentBoardData.label || 'this board').trim();
             const currentHomeLabel = getCurrentHomeBoardLabel();
-            const selectedBoardId = String(currentBoardData?.id || '').trim();
-            const selectedBoardLabel = String(document.getElementById('boardLabel')?.value || currentBoardData?.label || 'this board').trim() || 'this board';
+            const isAlreadyHome = currentBoardData.id === String(boardSettings?.home_board_id || '').trim();
+            if (isAlreadyHome) { showNotification(`"${boardLabel}" is already the Home board`, 'info'); return; }
+            const msg = currentHomeLabel
+                ? `Replace "${currentHomeLabel}" with "${boardLabel}" as the Home board?`
+                : `Set "${boardLabel}" as the Home board?`;
+            document.getElementById('setAsHomeBoardMsg').textContent = msg;
+            document.getElementById('setAsHomeBoardModal').classList.remove('hidden');
+        }
 
-            currentStatusEl.textContent = currentHomeLabel
-                ? `Current Home Board: ${currentHomeLabel}`
-                : 'Current Home Board: none selected';
+        function closeSetAsHomeBoardModal() {
+            document.getElementById('setAsHomeBoardModal').classList.add('hidden');
+        }
 
-            const isCurrentlyHome = !!selectedBoardId && selectedBoardId === currentHomeId;
-            if (setAsHomeEl.checked) {
-                if (isCurrentlyHome) {
-                    changeStatusEl.textContent = 'This board is already set as Home.';
-                } else if (currentHomeLabel) {
-                    changeStatusEl.textContent = `Saving will replace "${currentHomeLabel}" with "${selectedBoardLabel}" as Home.`;
-                } else {
-                    changeStatusEl.textContent = `Saving will set "${selectedBoardLabel}" as the Home board.`;
-                }
-                changeStatusEl.classList.remove('hidden');
-            } else {
-                changeStatusEl.classList.add('hidden');
-                changeStatusEl.textContent = '';
+        async function confirmSetAsHomeBoard() {
+            closeSetAsHomeBoardModal();
+            if (!currentBoardData?.id) return;
+            try {
+                const response = await fetch(`/api/tap-interface/boards/${encodeURIComponent(currentBoardData.id)}`, {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        label: document.getElementById('boardLabel').value.trim() || currentBoardData.label,
+                        set_as_home: true,
+                        board_type: currentBoardData.board_type || 'static',
+                        buttons: currentBoardData.buttons || [],
+                        dynamic_rows: currentBoardData.dynamic_rows !== undefined ? currentBoardData.dynamic_rows : null,
+                        is_customized: true,
+                    }),
+                });
+                if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${response.status}`); }
+                const data = await response.json();
+                if (data.board_settings) boardSettings = data.board_settings;
+                showNotification(`"${currentBoardData.label || 'Board'}" is now the Home board`, 'success');
+            } catch (err) {
+                showNotification('Failed to set Home board: ' + err.message, 'error');
             }
         }
 
         function bindBoardToForm() {
             if (!currentBoardData) return;
             document.getElementById('boardLabel').value = currentBoardData.label || '';
-            const bt = String(currentBoardData.board_type || 'ai').toLowerCase();
-            if (bt === 'static') document.getElementById('boardType').value = 'static';
-            else if (bt === 'system') document.getElementById('boardType').value = 'system';
-            else document.getElementById('boardType').value = 'ai';
-            document.getElementById('llmPrompt').value = currentBoardData.llm_prompt || '';
-            document.getElementById('promptTopic').value = currentBoardData.prompt_topic || '';
-            document.getElementById('promptExamples').value = currentBoardData.prompt_examples || '';
-            document.getElementById('promptExclusions').value = currentBoardData.prompt_exclusions || '';
-            document.getElementById('setAsHomeBoard').checked = (currentBoardData.id && currentBoardData.id === boardSettings.home_board_id);
-            refreshHomeBoardAssignmentUI();
         }
 
         function updateBoardModeUI() {
-            const boardType = document.getElementById('boardType').value;
-            const aiSection = document.getElementById('aiSettingsSection');
-            const gridSection = document.getElementById('gridSection');
-            if (boardType === 'ai') { aiSection.classList.remove('hidden'); gridSection.classList.add('hidden'); }
-            else { aiSection.classList.add('hidden'); gridSection.classList.remove('hidden'); }
-            // Re-render so click/drag listeners match the current board type.
+            document.getElementById('gridSection').classList.remove('hidden');
             if (currentBoardData) renderButtonGrid();
         }
 
@@ -673,35 +875,114 @@
             document.getElementById('gridReadOnlyOverlay').classList.toggle('hidden', !isReadOnly);
             document.getElementById('saveBoardBtn').disabled = !!isReadOnly;
             document.getElementById('deleteBoardBtn').disabled = !!isReadOnly;
-            ['boardLabel', 'boardType', 'llmPrompt', 'promptTopic', 'promptExamples', 'promptExclusions', 'setAsHomeBoard'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.disabled = !!isReadOnly;
-            });
-            refreshHomeBoardAssignmentUI();
+            const boardLabelEl = document.getElementById('boardLabel');
+            if (boardLabelEl) boardLabelEl.disabled = !!isReadOnly;
+            const setAsHomeBoardBtn = document.getElementById('setAsHomeBoardBtn');
+            if (setAsHomeBoardBtn) setAsHomeBoardBtn.disabled = !!isReadOnly;
         }
 
         function findButtonAtPosition(row, col) {
             if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return null;
-            return currentBoardData.buttons.find(btn => Number(btn.row) === row && Number(btn.col) === col);
+            // Exclude pool overflow buttons (row/col === null) — Number(null)=0 would make them
+            // falsely match position (0,0) and cause duplication during drag-and-drop or editing.
+            return currentBoardData.buttons.find(btn =>
+                btn.row !== null && btn.row !== undefined &&
+                btn.col !== null && btn.col !== undefined &&
+                Number(btn.row) === row && Number(btn.col) === col
+            );
         }
 
         function renderButtonGrid() {
             const grid = document.getElementById('buttonGrid');
             grid.innerHTML = '';
             if (!currentBoardData) return;
+
+            GRID_ROWS = tapWordsRows;
+            grid.style.gridTemplateColumns = `repeat(${GRID_COLS}, minmax(100px, 1fr))`;
+
+            const boardType = String(currentBoardData.board_type || '').toLowerCase();
+            const staticRowsCount = getStaticRowsCount();
+            const pageSize = staticRowsCount * GRID_COLS;
+
+            // Build a virtual position map for overflow pool buttons when viewing page > 0
+            currentOverflowPageMap = null; // Reset module-level map; drag handlers read it
+            const allButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            const totalPoolOptions = allButtons.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
+            const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(totalPoolOptions / pageSize)) : 1;
+
+            if (adminPageIndex > 0 && pageSize > 0) {
+                const startIdx = adminPageIndex * pageSize;
+                const endIdx = startIdx + pageSize;
+                const pageButtons = allButtons.filter(b =>
+                    b && b.pool_index !== null && b.pool_index !== undefined &&
+                    Number(b.pool_index) >= startIdx && Number(b.pool_index) < endIdx
+                ).sort((a, b) => Number(a.pool_index) - Number(b.pool_index));
+
+                currentOverflowPageMap = new Map();
+                pageButtons.forEach((btn, i) => {
+                    const r = Math.floor(i / GRID_COLS);
+                    const c = i % GRID_COLS;
+                    if (r < staticRowsCount) {
+                        currentOverflowPageMap.set(`${r}:${c}`, btn);
+                    }
+                });
+            }
+
+            // Update pagination controls
+            const paginationEl = document.getElementById('poolPaginationControls');
+            const pageIndicatorEl = document.getElementById('poolPageIndicator');
+            const prevBtn = document.getElementById('poolPrevPageBtn');
+            const nextBtn = document.getElementById('poolNextPageBtn');
+            if (totalPages > 1) {
+                paginationEl.style.display = 'flex';
+                pageIndicatorEl.textContent = `Page ${adminPageIndex + 1} of ${totalPages}`;
+                prevBtn.disabled = adminPageIndex === 0;
+                nextBtn.disabled = adminPageIndex >= totalPages - 1;
+            } else {
+                paginationEl.style.display = 'none';
+                adminPageIndex = 0;
+            }
+
             for (let row = 0; row < GRID_ROWS; row++) {
                 for (let col = 0; col < GRID_COLS; col++) {
                     const buttonDiv = document.createElement('div');
                     buttonDiv.className = 'visual-button';
                     buttonDiv.dataset.row = String(row);
                     buttonDiv.dataset.col = String(col);
-                    const buttonData = findButtonAtPosition(row, col);
-                    if (buttonData && buttonData.label) {
+
+                    let activeDynamicRows = 0;
+                    if (currentBoardData && currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                        activeDynamicRows = currentBoardData.dynamic_rows;
+                    } else if (useHybridPages) {
+                        activeDynamicRows = tapDynamicRows;
+                    }
+                    const isDynamicSlot = (boardType === 'ai') || ((activeDynamicRows > 0) && boardType === 'static' && row >= staticRowsCount);
+                    // On page > 0, use the overflow map for static rows; for dynamic rows use normal lookup
+                    const buttonData = (currentOverflowPageMap && row < staticRowsCount)
+                        ? (currentOverflowPageMap.get(`${row}:${col}`) || null)
+                        : findButtonAtPosition(row, col);
+                    
+                    if (isDynamicSlot) {
+                        buttonDiv.classList.add('has-content');
+                        buttonDiv.style.backgroundColor = '#f5f3ff'; // light purple bg
+                        buttonDiv.style.borderColor = '#7c3aed';     // purple border
+                        buttonDiv.style.color = '#7c3aed';           // purple text
+                        buttonDiv.style.cursor = 'not-allowed';
+                        
+                        let displayLabel = '✦ Dynamic AI Slot';
+                        buttonDiv.innerHTML = `<div style="padding:4px; font-style: italic; font-size:11px; text-align:center; font-weight:600; line-height:30px;">${displayLabel}</div>`;
+                    } else if (buttonData && (buttonData.label || buttonData.button_type === 'dynamic')) {
                         buttonDiv.classList.add('has-content');
                         if (buttonData.after_selection === 'navigate' || buttonData.action_type === 'navigate') buttonDiv.classList.add('has-navigation');
                         if (buttonData.background_color && buttonData.background_color !== '#FFFFFF') { buttonDiv.style.backgroundColor = buttonData.background_color; }
                         if (buttonData.text_color && buttonData.text_color !== '#000000') { buttonDiv.style.color = buttonData.text_color; }
-                        if (buttonData.image_url) {
+                        if (buttonData.button_type === 'dynamic') {
+                            buttonDiv.style.borderColor = '#7c3aed';
+                            buttonDiv.style.color = '#7c3aed';
+                            let displayLabel = buttonData.llm_prompt ? `✦ AI: ${buttonData.llm_prompt}` : '✦ Dynamic Option';
+                            if (displayLabel.length > 30) displayLabel = displayLabel.substring(0, 27) + '...';
+                            buttonDiv.innerHTML = `<div style="padding:4px; font-style: italic; font-size:11px;">${escapeHtml(displayLabel)}</div>`;
+                        } else if (buttonData.image_url) {
                             buttonDiv.style.backgroundImage = `url('${buttonData.image_url}')`;
                             buttonDiv.style.backgroundSize = 'cover';
                             buttonDiv.style.backgroundPosition = 'center';
@@ -730,10 +1011,14 @@
                         }
                         else if (buttonData.after_selection === 'use_ai') { const i = document.createElement('div'); i.className = 'button-indicator'; i.style.cssText = 'background:#7c3aed;color:white;'; i.textContent = '✦'; i.title = 'AI generates next options'; buttonDiv.appendChild(i); }
                         else if (buttonData.action_type === 'audio') { const i = document.createElement('div'); i.className = 'button-indicator indicator-audio'; i.textContent = '♪'; i.title = 'Plays custom audio'; buttonDiv.appendChild(i); }
-                        else if (buttonData.speech_text) { const i = document.createElement('div'); i.className = 'button-indicator indicator-speech'; i.textContent = 'S'; i.title = 'Has speech text'; buttonDiv.appendChild(i); }
-                    } else { buttonDiv.textContent = 'Undefined'; buttonDiv.classList.add('undefined'); }
-                    if (!isBoardReadOnly(currentBoardData) && document.getElementById('boardType').value !== 'ai') {
-                        buttonDiv.addEventListener('click', () => openButtonEditor(row, col));
+                    } else { buttonDiv.textContent = '+'; buttonDiv.classList.add('undefined'); }
+ 
+                    
+                    if (!isBoardReadOnly(currentBoardData) && !isDynamicSlot) {
+                        // On page > 0, overflow buttons are identified by their ID (pool_index-based),
+                        // not by visual row/col which maps to page-0 buttons.
+                        const overflowBtnId = (currentOverflowPageMap && row < staticRowsCount && buttonData) ? (buttonData.id || null) : null;
+                        buttonDiv.addEventListener('click', () => openButtonEditor(row, col, overflowBtnId));
                         buttonDiv.draggable = true;
                         buttonDiv.addEventListener('dragstart', handleDragStart);
                         buttonDiv.addEventListener('dragover', handleDragOver);
@@ -745,16 +1030,176 @@
             }
         }
 
-        function handleDragStart(e) { draggedButton = { row: parseInt(e.target.dataset.row, 10), col: parseInt(e.target.dataset.col, 10) }; e.target.classList.add('dragging'); }
-        function handleDragOver(e) { e.preventDefault(); e.target.classList.add('drop-target'); }
-        function handleDrop(e) { e.preventDefault(); e.target.classList.remove('drop-target'); if (!draggedButton) return; const targetRow = parseInt(e.target.dataset.row, 10); const targetCol = parseInt(e.target.dataset.col, 10); if (Number.isNaN(targetRow) || Number.isNaN(targetCol)) return; if (draggedButton.row === targetRow && draggedButton.col === targetCol) return; swapButtons(draggedButton.row, draggedButton.col, targetRow, targetCol); renderButtonGrid(); }
-        function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target')); draggedButton = null; }
+        function handleDragStart(e) {
+            const el = e.currentTarget;
+            const visualRow = parseInt(el.dataset.row, 10);
+            const visualCol = parseInt(el.dataset.col, 10);
+            let btn = null;
+            if (adminPageIndex > 0 && currentOverflowPageMap) {
+                btn = currentOverflowPageMap.get(`${visualRow}:${visualCol}`) || null;
+            } else {
+                btn = findButtonAtPosition(visualRow, visualCol);
+            }
+            draggedButton = {
+                row: visualRow,
+                col: visualCol,
+                pool_index: btn ? btn.pool_index : null,
+                pageIndex: adminPageIndex,
+                origRow: btn ? btn.row : null,
+                origCol: btn ? btn.col : null,
+            };
+            el.classList.add('dragging');
+            _showDragZones();
+        }
+        function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drop-target'); }
+        function handleDrop(e) {
+            e.preventDefault();
+            const el = e.currentTarget;
+            el.classList.remove('drop-target');
+            if (!draggedButton) return;
+            const targetRow = parseInt(el.dataset.row, 10);
+            const targetCol = parseInt(el.dataset.col, 10);
+            if (Number.isNaN(targetRow) || Number.isNaN(targetCol)) return;
+
+            // Find source button by pool_index (stable across page changes)
+            let fromBtn = null;
+            if (draggedButton.pool_index !== null && draggedButton.pool_index !== undefined) {
+                fromBtn = (currentBoardData?.buttons || []).find(b => Number(b.pool_index) === Number(draggedButton.pool_index)) || null;
+            }
+            if (!fromBtn) {
+                fromBtn = findButtonAtPosition(draggedButton.origRow ?? draggedButton.row, draggedButton.origCol ?? draggedButton.col);
+            }
+            if (!fromBtn) return;
+
+            // Find target button
+            let toBtn = null;
+            if (adminPageIndex > 0 && currentOverflowPageMap) {
+                toBtn = currentOverflowPageMap.get(`${targetRow}:${targetCol}`) || null;
+            } else {
+                toBtn = findButtonAtPosition(targetRow, targetCol);
+            }
+
+            if (fromBtn === toBtn) return;
+
+            // Full position swap: exchange pool_index AND row/col between both buttons.
+            // This correctly handles page-0 ↔ page-0, overflow ↔ overflow, and cross-page.
+            const savedPoolIndex = fromBtn.pool_index;
+            const savedRow      = fromBtn.row;
+            const savedCol      = fromBtn.col;
+
+            if (toBtn) {
+                fromBtn.pool_index = toBtn.pool_index;
+                fromBtn.row        = toBtn.row;
+                fromBtn.col        = toBtn.col;
+                toBtn.pool_index   = savedPoolIndex;
+                toBtn.row          = savedRow;
+                toBtn.col          = savedCol;
+            } else {
+                // Dropping onto an empty slot on the current page
+                if (adminPageIndex === 0) {
+                    // Empty page-0 slot: move there, keep pool_index
+                    fromBtn.row = targetRow;
+                    fromBtn.col = targetCol;
+                }
+                // Empty overflow slot: no-op (slots are virtual, not addressable)
+            }
+
+            _hideDragZones();
+            renderButtonGrid();
+        }
+        function handleDragEnd(e) {
+            e.currentTarget.classList.remove('dragging');
+            document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+            draggedButton = null;
+            _hideDragZones();
+        }
+
+        function _showDragZones() {
+            if (!currentBoardData) return;
+            const allBtns = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+            const totalPool = allBtns.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
+            const ps = getStaticRowsCount() * GRID_COLS;
+            const totalPages = ps > 0 ? Math.max(1, Math.ceil(totalPool / ps)) : 1;
+            if (totalPages <= 1) return;
+            document.getElementById('gridSection').classList.add('drag-zones-active');
+            document.getElementById('dragZoneLeft').classList.toggle('hidden-zone', adminPageIndex === 0);
+            document.getElementById('dragZoneRight').classList.toggle('hidden-zone', adminPageIndex >= totalPages - 1);
+            _bindDragZoneEvents();
+        }
+
+        function _hideDragZones() {
+            clearTimeout(dragPageTimer);
+            dragPageTimer = null;
+            document.getElementById('gridSection').classList.remove('drag-zones-active');
+            ['dragZoneLeft', 'dragZoneRight'].forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.remove('active', 'hidden-zone');
+            });
+        }
+
+        function _bindDragZoneEvents() {
+            ['dragZoneLeft', 'dragZoneRight'].forEach(id => {
+                const el = document.getElementById(id);
+                // Only bind once
+                if (el.dataset.zoneBound) return;
+                el.dataset.zoneBound = '1';
+                const isPrev = id === 'dragZoneLeft';
+
+                el.addEventListener('dragover', ev => { ev.preventDefault(); });
+                el.addEventListener('dragenter', () => {
+                    if (el.classList.contains('hidden-zone')) return;
+                    el.classList.add('active');
+                    clearTimeout(dragPageTimer);
+                    dragPageTimer = setTimeout(() => {
+                        const allBtns = Array.isArray(currentBoardData?.buttons) ? currentBoardData.buttons : [];
+                        const totalPool = allBtns.filter(b => b && b.pool_index !== null && b.pool_index !== undefined).length;
+                        const ps = getStaticRowsCount() * GRID_COLS;
+                        const totalPages = ps > 0 ? Math.max(1, Math.ceil(totalPool / ps)) : 1;
+                        if (isPrev && adminPageIndex > 0) {
+                            adminPageIndex--;
+                            renderButtonGrid();
+                            _updateDragZoneVisibility(totalPages);
+                        } else if (!isPrev && adminPageIndex < totalPages - 1) {
+                            adminPageIndex++;
+                            renderButtonGrid();
+                            _updateDragZoneVisibility(totalPages);
+                        }
+                    }, 600);
+                });
+                el.addEventListener('dragleave', () => {
+                    el.classList.remove('active');
+                    clearTimeout(dragPageTimer);
+                    dragPageTimer = null;
+                });
+                el.addEventListener('drop', ev => {
+                    ev.preventDefault();
+                    el.classList.remove('active');
+                    clearTimeout(dragPageTimer);
+                    dragPageTimer = null;
+                });
+            });
+        }
+
+        function _updateDragZoneVisibility(totalPages) {
+            const leftEl  = document.getElementById('dragZoneLeft');
+            const rightEl = document.getElementById('dragZoneRight');
+            leftEl.classList.toggle('hidden-zone',  adminPageIndex === 0);
+            rightEl.classList.toggle('hidden-zone', adminPageIndex >= totalPages - 1);
+            leftEl.classList.remove('active');
+            rightEl.classList.remove('active');
+        }
 
         function swapButtons(fromRow, fromCol, toRow, toCol) {
             if (!currentBoardData || !Array.isArray(currentBoardData.buttons)) return;
             const fromButton = findButtonAtPosition(fromRow, fromCol);
             const toButton = findButtonAtPosition(toRow, toCol);
-            currentBoardData.buttons = currentBoardData.buttons.filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === fromRow && c === fromCol) && !(r === toRow && c === toCol); });
+            // Skip overflow pool buttons (row/col === null) — Number(null)=0 would incorrectly match them
+            currentBoardData.buttons = currentBoardData.buttons.filter(btn => {
+                if (btn.row === null || btn.row === undefined || btn.col === null || btn.col === undefined) return true;
+                const r = Number(btn.row);
+                const c = Number(btn.col);
+                return !(r === fromRow && c === fromCol) && !(r === toRow && c === toCol);
+            });
             if (fromButton) { fromButton.row = toRow; fromButton.col = toCol; currentBoardData.buttons.push(fromButton); }
             if (toButton) { toButton.row = fromRow; toButton.col = fromCol; currentBoardData.buttons.push(toButton); }
         }
@@ -766,39 +1211,59 @@
             sortedBoards.forEach(board => { const option = document.createElement('option'); option.value = board.id; option.textContent = board.label || board.id; if (board.id === selectedValue) option.selected = true; select.appendChild(option); });
         }
 
-        function openButtonEditor(row, col) {
-            currentEditingButton = { row, col };
-            const buttonData = findButtonAtPosition(row, col) || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, temporary_navigation: false, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
-            document.getElementById('buttonText').value = buttonData.label || '';
-            document.getElementById('speechText').value = buttonData.speech_text || '';
-            document.getElementById('buttonHidden').checked = !!buttonData.hidden;
-            document.getElementById('assignedImageUrl').value = buttonData.image_url || '';
-            document.getElementById('customAudioFileUrl').value = buttonData.custom_audio_file || '';
-            document.getElementById('buttonBgColor').value = buttonData.background_color || '#FFFFFF';
-            // Derive after_selection from stored field or legacy action_type
-            let afterSel = buttonData.after_selection || (buttonData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
+        function updateButtonEditorVisibility(buttonType) {
+            const isDynamic = buttonType === 'dynamic';
+            document.getElementById('buttonTextWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('buttonImageWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('speechTextWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('customAudioFileWrapper').style.display = isDynamic ? 'none' : '';
+            document.getElementById('buttonLlmPromptWrapper').style.display = isDynamic ? '' : 'none';
+        }
+
+        function openButtonEditor(row, col, buttonId = null) {
+            currentEditingButton = { row, col, buttonId };
+            // For overflow pool buttons (page > 0), look up by ID; otherwise by visual position.
+            const buttonData = buttonId
+                ? (currentBoardData && Array.isArray(currentBoardData.buttons)
+                    ? currentBoardData.buttons.find(b => b.id === buttonId) : null) || null
+                : findButtonAtPosition(row, col);
+            const resolvedData = buttonData || { id: '', label: '', row, col, speech_text: null, after_selection: 'do_nothing', target_board_id: null, temporary_navigation: false, custom_audio_file: null, image_url: null, background_color: '#FFFFFF', text_color: '#000000', hidden: false };
+            const btnType = resolvedData.button_type || 'static';
+            document.getElementById('buttonType').value = btnType;
+            document.getElementById('buttonLlmPrompt').value = resolvedData.llm_prompt || '';
+            updateButtonEditorVisibility(btnType);
+
+            document.getElementById('buttonText').value = resolvedData.label || '';
+            document.getElementById('speechText').value = resolvedData.speech_text || '';
+            document.getElementById('pastTenseVariant').value = resolvedData.past_tense || '';
+            document.getElementById('pluralVariant').value = resolvedData.plural || '';
+            document.getElementById('buttonHidden').checked = !!resolvedData.hidden;
+            document.getElementById('assignedImageUrl').value = resolvedData.image_url || '';
+            document.getElementById('customAudioFileUrl').value = resolvedData.custom_audio_file || '';
+            document.getElementById('buttonBgColor').value = resolvedData.background_color || '#FFFFFF';
+            let afterSel = resolvedData.after_selection || (resolvedData.action_type === 'navigate' ? 'navigate' : 'do_nothing');
             if (!['do_nothing', 'navigate', 'navigate_home', 'use_ai'].includes(afterSel)) {
                 afterSel = 'do_nothing';
             }
             document.getElementById('afterSelection').value = afterSel;
             document.getElementById('targetBoardWrapper').style.display = afterSel === 'navigate' ? '' : 'none';
             document.getElementById('temporaryNavigationWrapper').classList.toggle('hidden', afterSel !== 'navigate');
-            document.getElementById('temporaryNavigation').checked = (afterSel === 'navigate') && !!buttonData.temporary_navigation;
-            populateTargetBoardDropdown(buttonData.target_board_id || '');
-            updateAssignedImagePreview(buttonData.image_url || '');
+            document.getElementById('temporaryNavigation').checked = (afterSel === 'navigate') && !!resolvedData.temporary_navigation;
+            populateTargetBoardDropdown(resolvedData.target_board_id || '');
+            updateAssignedImagePreview(resolvedData.image_url || '');
             const audioStatus = document.getElementById('audioUploadStatus');
-            if (buttonData.custom_audio_file) { audioStatus.className = 'text-xs mt-1 text-green-600'; audioStatus.textContent = 'Audio file assigned'; audioStatus.classList.remove('hidden'); }
+            if (resolvedData.custom_audio_file) { audioStatus.className = 'text-xs mt-1 text-green-600'; audioStatus.textContent = 'Audio file assigned'; audioStatus.classList.remove('hidden'); }
             else audioStatus.classList.add('hidden');
             document.getElementById('positionInfo').textContent = `Row ${row + 1}, Column ${col + 1}`;
             // Modifier state info (read-only, from TouchChat import)
             const modifierInfoRow = document.getElementById('modifierInfoRow');
-            const hasModifier = buttonData.modifier_trigger_id || (buttonData.modifier_variants && Object.keys(buttonData.modifier_variants).length > 0);
+            const hasModifier = resolvedData.modifier_trigger_id || (resolvedData.modifier_variants && Object.keys(resolvedData.modifier_variants).length > 0);
             if (hasModifier) {
                 modifierInfoRow.classList.remove('hidden');
-                document.getElementById('modifierTriggerInfo').textContent = buttonData.modifier_trigger_id ? `modifier ${buttonData.modifier_trigger_id}` : 'No';
+                document.getElementById('modifierTriggerInfo').textContent = resolvedData.modifier_trigger_id ? `modifier ${resolvedData.modifier_trigger_id}` : 'No';
                 const variantsList = document.getElementById('modifierVariantsList');
                 variantsList.innerHTML = '';
-                const variants = buttonData.modifier_variants || {};
+                const variants = resolvedData.modifier_variants || {};
                 Object.entries(variants).forEach(([modId, v]) => {
                     const li = document.createElement('li');
                     const triggerText = v.modifier_trigger_id ? ` → triggers modifier ${v.modifier_trigger_id}` : '';
@@ -816,25 +1281,62 @@
         function closeButtonEditor() { document.getElementById('buttonEditorModal').classList.add('hidden'); currentEditingButton = null; }
         function saveButtonEdit() {
             if (!currentEditingButton || !currentBoardData) return;
-            const label = document.getElementById('buttonText').value.trim();
-            const speechText = document.getElementById('speechText').value.trim();
+            const buttonType = document.getElementById('buttonType').value;
+            const llmPrompt = buttonType === 'dynamic' ? document.getElementById('buttonLlmPrompt').value.trim() : null;
+            const label = buttonType === 'dynamic' ? 'AI Dynamic Option' : document.getElementById('buttonText').value.trim();
+            const speechText = buttonType === 'dynamic' ? null : document.getElementById('speechText').value.trim();
+            const pastTenseVariant = buttonType !== 'dynamic' ? document.getElementById('pastTenseVariant').value.trim() : '';
+            const pluralVariant = buttonType !== 'dynamic' ? document.getElementById('pluralVariant').value.trim() : '';
             const afterSelection = document.getElementById('afterSelection').value;
             const targetBoard = afterSelection === 'navigate' ? document.getElementById('targetBoard').value.trim() : '';
             const temporaryNavigation = (afterSelection === 'navigate') && document.getElementById('temporaryNavigation').checked;
-            const customAudio = document.getElementById('customAudioFileUrl').value.trim();
-            const imageUrl = document.getElementById('assignedImageUrl').value.trim();
+            const customAudio = buttonType === 'dynamic' ? null : document.getElementById('customAudioFileUrl').value.trim();
+            const imageUrl = buttonType === 'dynamic' ? null : document.getElementById('assignedImageUrl').value.trim();
             const bgColor = document.getElementById('buttonBgColor').value.trim() || '#FFFFFF';
-            const existingButton = findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
+            // For overflow buttons, look up by ID; otherwise by visual position
+            const existingButton = currentEditingButton.buttonId
+                ? (currentBoardData.buttons || []).find(b => b.id === currentEditingButton.buttonId)
+                : findButtonAtPosition(currentEditingButton.row, currentEditingButton.col);
             const textColor = (existingButton && existingButton.text_color) ? existingButton.text_color : '#000000';
             const modifierTriggerId = existingButton ? (existingButton.modifier_trigger_id ?? null) : null;
             const modifierVariants = (existingButton && existingButton.modifier_variants && typeof existingButton.modifier_variants === 'object')
                 ? existingButton.modifier_variants
                 : {};
             const hidden = document.getElementById('buttonHidden').checked;
-            currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
-            if (label || speechText || targetBoard || customAudio || imageUrl) {
-                const actionType = customAudio ? 'audio' : 'announce';
-                currentBoardData.buttons.push({ id: `btn_${currentEditingButton.row}_${currentEditingButton.col}`, label: label || `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`, row: currentEditingButton.row, col: currentEditingButton.col, speech_text: speechText || null, modifier_trigger_id: modifierTriggerId, modifier_variants: modifierVariants, after_selection: afterSelection, action_type: actionType, target_board_id: targetBoard || null, temporary_navigation: temporaryNavigation, custom_audio_file: customAudio || null, special_function: null, image_url: imageUrl || null, background_color: bgColor, text_color: textColor, hidden });
+            // Remove the existing button (by ID for overflow buttons, by row/col for page-0 buttons)
+            if (currentEditingButton.buttonId) {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => btn.id !== currentEditingButton.buttonId);
+            } else {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            }
+            if (label || speechText || targetBoard || customAudio || imageUrl || (buttonType === 'dynamic' && llmPrompt) || ['navigate_home', 'use_ai'].includes(afterSelection)) {
+                const actionType = afterSelection === 'navigate' ? 'navigate' : (customAudio ? 'audio' : 'announce');
+                // Overflow buttons preserve their ID, pool_index, row=null, col=null
+                const isOverflow = !!currentEditingButton.buttonId && existingButton && (existingButton.row === null || existingButton.row === undefined);
+                currentBoardData.buttons.push({
+                    id: currentEditingButton.buttonId || `btn_${currentEditingButton.row}_${currentEditingButton.col}`,
+                    label: label || (buttonType === 'dynamic' ? 'AI Dynamic Option' : `Button ${currentEditingButton.row + 1}-${currentEditingButton.col + 1}`),
+                    row: isOverflow ? null : currentEditingButton.row,
+                    col: isOverflow ? null : currentEditingButton.col,
+                    pool_index: existingButton ? (existingButton.pool_index ?? null) : null,
+                    speech_text: speechText || null,
+                    past_tense: pastTenseVariant || null,
+                    plural: pluralVariant || null,
+                    button_type: buttonType,
+                    llm_prompt: llmPrompt,
+                    modifier_trigger_id: modifierTriggerId,
+                    modifier_variants: modifierVariants,
+                    after_selection: afterSelection,
+                    action_type: actionType,
+                    target_board_id: targetBoard || null,
+                    temporary_navigation: temporaryNavigation,
+                    custom_audio_file: customAudio || null,
+                    special_function: null,
+                    image_url: imageUrl || null,
+                    background_color: bgColor,
+                    text_color: textColor,
+                    hidden
+                });
             }
             renderButtonGrid();
             closeButtonEditor();
@@ -842,20 +1344,28 @@
 
         function clearCurrentButton() {
             if (!currentEditingButton || !currentBoardData) return;
-            currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            if (currentEditingButton.buttonId) {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => btn.id !== currentEditingButton.buttonId);
+            } else {
+                currentBoardData.buttons = (currentBoardData.buttons || []).filter(btn => { const r = Number(btn.row); const c = Number(btn.col); return !(r === currentEditingButton.row && c === currentEditingButton.col); });
+            }
             renderButtonGrid();
             closeButtonEditor();
         }
 
         function updateButtonPreview() {
             const preview = document.getElementById('buttonPreview');
+            const buttonType = document.getElementById('buttonType').value;
             const text = document.getElementById('buttonText').value.trim();
-            const speechText = document.getElementById('speechText').value.trim();
-            const targetBoard = document.getElementById('targetBoard').value.trim();
-            const customAudio = document.getElementById('customAudioFileUrl').value.trim();
+            const llmPrompt = document.getElementById('buttonLlmPrompt').value.trim();
             const imageUrl = document.getElementById('assignedImageUrl').value.trim();
             const bgColor = document.getElementById('buttonBgColor').value || '#FFFFFF';
-            if (text) {
+            
+            if (buttonType === 'dynamic') {
+                let label = llmPrompt ? `✦ AI: ${llmPrompt}` : '✦ Dynamic AI Button (No prompt yet)';
+                if (label.length > 50) label = label.substring(0, 47) + '...';
+                preview.innerHTML = `<div class="visual-button has-content" style="background-color:${bgColor}; font-style: italic; border-color: #7c3aed; color: #7c3aed;">${escapeHtml(label)}</div>`;
+            } else if (text) {
                 let html = `<div class="visual-button has-content" style="background-color:${bgColor};">`;
                 if (imageUrl) {
                     html += `<div style="position: relative; width: 100%; height: 80px; background-image: url('${imageUrl}'); background-size: cover; background-position: center; border-radius: 6px;">`;
@@ -864,7 +1374,9 @@
                 } else html += escapeHtml(text);
                 html += '</div>';
                 preview.innerHTML = html;
-            } else preview.innerHTML = '<div class="visual-button undefined">Undefined</div>';
+            } else preview.innerHTML = '<div class="visual-button undefined">Empty Slot</div>';
+
+            
             const afterSelection = document.getElementById('afterSelection').value;
             const temporaryNavigation = document.getElementById('temporaryNavigation').checked;
             const actionText = afterSelection === 'navigate'
@@ -874,14 +1386,15 @@
                 : afterSelection === 'use_ai'
                     ? 'Use AI to generate next options'
                     : 'Do nothing (stay on current board)';
-            document.getElementById('buttonTypeInfo').textContent = afterSelection;
+            
+            document.getElementById('buttonTypeInfo').textContent = buttonType === 'dynamic' ? 'Dynamic (AI)' : 'Static';
             document.getElementById('actionInfo').textContent = actionText;
         }
 
         function openSetAllAfterSelectionModal() {
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            if (document.getElementById('boardType').value !== 'static') { showNotification('Switch Board Mode to Static first', 'error'); return; }
+            if (String(currentBoardData?.board_type || 'ai') !== 'static') { showNotification('This board has no static rows to update', 'error'); return; }
             const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
             if (!buttons.some(b => String(b.label || '').trim())) { showNotification('No buttons on this board yet', 'error'); return; }
             // Pre-select the most common after_selection value currently on the board
@@ -929,14 +1442,186 @@
             await saveBoard();
         }
 
+        function openSetDynamicRowsModal(e) {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            
+            // Set Step 1 visible, Step 2 hidden
+            document.getElementById('setDynamicRowsStep1').classList.remove('hidden');
+            document.getElementById('setDynamicRowsStep2').classList.add('hidden');
+            
+            // Populate Step 1 Prompt + Examples/Exclusions
+            document.getElementById('dynamicRowsPromptInput').value = currentBoardData.llm_prompt || '';
+            document.getElementById('dynamicRowsExamplesInput').value = currentBoardData.prompt_examples || '';
+            document.getElementById('dynamicRowsExclusionsInput').value = currentBoardData.prompt_exclusions || '';
+            
+            const maxVal = GRID_ROWS;
+            document.getElementById('maxDynamicRowsVal').textContent = maxVal;
+            const input = document.getElementById('dynamicRowsCountInput');
+            input.max = maxVal;
+            
+            let val = 0;
+            const boardTypeForModal = String(currentBoardData.board_type || 'ai').toLowerCase();
+            if (currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                val = currentBoardData.dynamic_rows;
+            } else if (boardTypeForModal === 'ai') {
+                // Fully AI board: all rows are dynamic
+                val = GRID_ROWS;
+            } else if (useHybridPages) {
+                val = tapDynamicRows;
+            }
+            input.value = Math.min(val, maxVal);
+            
+            document.getElementById('setDynamicRowsModal').classList.remove('hidden');
+        }
+
+        function closeSetDynamicRowsModal() {
+            document.getElementById('setDynamicRowsModal').classList.add('hidden');
+        }
+
+        function askFillVacatedRows() {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmFillRowsModal');
+                const yesBtn = document.getElementById('confirmFillRowsYesBtn');
+                const noBtn = document.getElementById('confirmFillRowsNoBtn');
+                const closeBtn = document.getElementById('closeConfirmFillRowsModal');
+                
+                function cleanup(value) {
+                    modal.classList.add('hidden');
+                    yesBtn.removeEventListener('click', onYes);
+                    noBtn.removeEventListener('click', onNo);
+                    closeBtn.removeEventListener('click', onClose);
+                    resolve(value);
+                }
+                
+                function onYes(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(true); }
+                function onNo(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(false); }
+                function onClose(e) { if (e) { e.preventDefault(); e.stopPropagation(); } cleanup(false); }
+                
+                yesBtn.addEventListener('click', onYes);
+                noBtn.addEventListener('click', onNo);
+                closeBtn.addEventListener('click', onClose);
+                
+                modal.classList.remove('hidden');
+            });
+        }
+
+        async function applySetDynamicRows(e) {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
+            if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
+            
+            const maxVal = GRID_ROWS;
+            const dynamicRowsInput = document.getElementById('dynamicRowsCountInput');
+            const val = parseInt(dynamicRowsInput.value, 10);
+            
+            if (isNaN(val) || val < 0 || val > maxVal) {
+                showNotification(`Please enter a valid number of rows between 0 and ${maxVal}`, 'error');
+                return;
+            }
+            
+            let oldVal = 0;
+            if (currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                oldVal = currentBoardData.dynamic_rows;
+            } else if (useHybridPages) {
+                oldVal = tapDynamicRows;
+            }
+            
+            const newVal = val;
+            currentBoardData.dynamic_rows = newVal;
+            
+            const promptVal = document.getElementById('dynamicRowsPromptInput').value.trim();
+            currentBoardData.llm_prompt = promptVal || null;
+            currentBoardData.prompt_examples = document.getElementById('dynamicRowsExamplesInput').value.trim() || null;
+            currentBoardData.prompt_exclusions = document.getElementById('dynamicRowsExclusionsInput').value.trim() || null;
+            
+            let fillStatic = false;
+            if (newVal < oldVal) {
+                closeSetDynamicRowsModal();
+                fillStatic = await askFillVacatedRows();
+            } else {
+                closeSetDynamicRowsModal();
+            }
+            
+            try {
+                if (fillStatic) {
+                    const response = await fetch('/api/tap-interface/static-pool?label=' + encodeURIComponent(currentBoardData.label), { headers: getAuthHeaders() });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const data = await response.json();
+                    const pool = data.pool || [];
+                    
+                    if (pool.length > 0) {
+                        const existingLabels = new Set(
+                            (currentBoardData.buttons || [])
+                                .map(btn => (btn.label || '').trim().toLowerCase())
+                                .filter(l => l)
+                        );
+                        
+                        let poolIdx = 0;
+                        if (!currentBoardData.buttons) {
+                            currentBoardData.buttons = [];
+                        }
+                        
+                        for (let r = GRID_ROWS - oldVal; r < GRID_ROWS - newVal; r++) {
+                            for (let c = 0; c < GRID_COLS; c++) {
+                                const hasBtn = currentBoardData.buttons.some(btn => Number(btn.row) === r && Number(btn.col) === c);
+                                if (!hasBtn) {
+                                    let word = null;
+                                    while (poolIdx < pool.length) {
+                                        const candidate = pool[poolIdx].trim();
+                                        poolIdx++;
+                                        if (!existingLabels.has(candidate.toLowerCase())) {
+                                            word = candidate;
+                                            break;
+                                        }
+                                    }
+                                    if (word) {
+                                        const newBtn = {
+                                            id: `btn_${r}_${c}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                                            label: word,
+                                            row: r,
+                                            col: c,
+                                            speech_text: word,
+                                            after_selection: 'do_nothing',
+                                            action_type: 'announce',
+                                            target_board_id: null,
+                                            temporary_navigation: false,
+                                            custom_audio_file: null,
+                                            special_function: null,
+                                            image_url: null,
+                                            background_color: '#FFFFFF',
+                                            text_color: '#000000',
+                                            hidden: false
+                                        };
+                                        currentBoardData.buttons.push(newBtn);
+                                        existingLabels.add(word.toLowerCase());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                await saveBoard();
+                renderButtonGrid();
+            } catch (error) {
+                console.error('Error saving board dynamic rows:', error);
+                showNotification('Error saving board settings: ' + error.message, 'error');
+            }
+        }
+
         function openAIBulkBuilderModal() {
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            if (document.getElementById('boardType').value === 'ai') { showNotification('Switch Board Mode to Static to build button options', 'error'); return; }
+            if (String(currentBoardData?.board_type || 'ai') === 'ai') { showNotification('This board is fully AI-generated — add static rows first via Configure Dynamic Rows', 'error'); return; }
             aiBulkPreviewOptions = [];
             document.getElementById('aiBulkPreviewList').textContent = 'No preview generated yet.';
             document.getElementById('aiBulkPreviewMeta').textContent = '';
             document.getElementById('aiBulkApplyBtn').disabled = true;
+            // Pre-populate from the board's existing topic and optional fields
+            document.getElementById('aiBulkTopic').value = currentBoardData.prompt_topic || '';
+            document.getElementById('aiBulkExamples').value = currentBoardData.prompt_examples || '';
+            document.getElementById('aiBulkExclusions').value = currentBoardData.prompt_exclusions || '';
             populateAIBulkTargetBoardDropdown();
             handleAIBulkAfterSelectionChange();
             document.getElementById('aiBulkBuilderModal').classList.remove('hidden');
@@ -1023,19 +1708,53 @@
                     return;
                 }
                 seen.add(key);
-                normalized.push(text);
+                const pluralVal = typeof item === 'object' ? (String(item?.plural || '').trim() || null) : null;
+                const pastVal = typeof item === 'object' ? (String(item?.past_tense || item?.past || '').trim() || null) : null;
+                normalized.push({
+                    label: text,
+                    plural: (pluralVal && pluralVal.toLowerCase() !== key) ? pluralVal : null,
+                    past_tense: (pastVal && pastVal.toLowerCase() !== key) ? pastVal : null,
+                });
             });
-            
+
             console.log(`Normalized ${source.length} raw items → ${normalized.length} unique options (max: ${maxCount})`);
             return normalized.slice(0, maxCount);
         }
 
+        async function enrichOptionsWithVariants(options) {
+            const labels = options.map(o => o.label).filter(Boolean);
+            if (!labels.length) return;
+            try {
+                const [pluralRes, pastRes] = await Promise.all([
+                    fetch('/api/tap-interface/word-variants', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ words: labels, mode: 'plural' }) }),
+                    fetch('/api/tap-interface/word-variants', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ words: labels, mode: 'past' }) }),
+                ]);
+                const pluralMap = pluralRes.ok ? ((await pluralRes.json()).variants || {}) : {};
+                const pastMap = pastRes.ok ? ((await pastRes.json()).variants || {}) : {};
+                console.log('[VARIANTS] pluralMap:', pluralMap, '| pastMap:', pastMap);
+                for (const opt of options) {
+                    const lbl = opt.label;
+                    const lblLower = lbl.toLowerCase();
+                    const plu = pluralMap[lbl] || pluralMap[lblLower];
+                    const pas = pastMap[lbl] || pastMap[lblLower];
+                    if (plu && plu.toLowerCase() !== lblLower) opt.plural = plu;
+                    if (pas && pas.toLowerCase() !== lblLower) opt.past_tense = pas;
+                }
+            } catch (e) {
+                console.warn('[VARIANTS] enrichment failed:', e);
+            }
+        }
+
         async function previewAIBulkOptions() {
-            const prompt = document.getElementById('aiBulkPrompt').value.trim();
-            const totalOptions = Math.min(84, Math.max(1, Number(document.getElementById('aiBulkTotalOptions').value) || 0));
-            const perRow = Math.min(12, Math.max(1, Number(document.getElementById('aiBulkOptionsPerRow').value) || 0));
-            if (!prompt) { showNotification('Enter a prompt first', 'error'); return; }
-            if (!totalOptions || !perRow) { showNotification('Enter valid option counts', 'error'); return; }
+            const topic = document.getElementById('aiBulkTopic').value.trim();
+            if (!topic) { showNotification('Enter a topic first', 'error'); return; }
+            const examples = document.getElementById('aiBulkExamples').value.trim();
+            const exclusions = document.getElementById('aiBulkExclusions').value.trim();
+            const prompt = `Generate AAC word and phrase options for a board about: ${topic}. Include common words, actions, objects, and short phrases that are relevant to this topic and useful for AAC communication. Options should be short (1-3 words).`;
+            const staticRows = getStaticRowsCount();
+            const perRow = GRID_COLS;
+            const maxOnPage = staticRows * perRow;
+            const maxPool = 30;
 
             const previewList = document.getElementById('aiBulkPreviewList');
             const previewMeta = document.getElementById('aiBulkPreviewMeta');
@@ -1047,11 +1766,14 @@
             applyBtn.disabled = true;
 
             try {
-                const enhancedPrompt = `CRITICAL: Generate EXACTLY ${totalOptions} UNIQUE board button labels for AAC communication: ${prompt}\n\nREQUIREMENTS:\n1. Generate at least ${totalOptions} distinct, practical, usable options (NOT fewer)\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with an "option" key\n5. Each object MUST have at least an "option" key with the label text\n\nBE VERY EXPLICIT: If asked for ${totalOptions} options, return ${totalOptions} different options. Do not skimp on the count.\nReturn ONLY the JSON array - nothing else.`;
+                let enhancedPrompt = `Generate UP TO ${maxPool} UNIQUE board button labels for AAC communication: ${prompt}\n`;
+                if (examples) enhancedPrompt += `Examples of the type of options to generate: ${examples}\n`;
+                if (exclusions) enhancedPrompt += `Do NOT include any of these: ${exclusions}\n`;
+                enhancedPrompt += `\nREQUIREMENTS:\n1. Generate as many distinct, practical options as possible (up to ${maxPool})\n2. Each option should be unique - NO duplicates at all\n3. Each option under 5 words when possible, but prioritize clarity\n4. Return as JSON array of objects with these keys:\n   - "option": the label text\n   - "plural": plural form if it is a NOUN (e.g. "apple"->"apples", "cookie"->"cookies"), otherwise null\n   - "past_tense": past tense if it is an ACTION VERB (e.g. "run"->"ran", "eat"->"ate", "swing"->"swung"), otherwise null\n5. Set both "plural" and "past_tense" to null if neither applies (e.g. adjectives, prepositions)\n\nReturn ONLY the JSON array - nothing else.`;
                 const response = await fetch('/llm', {
                     method: 'POST',
                     headers: getAuthHeaders(),
-                    body: JSON.stringify({ count: totalOptions, prompt: enhancedPrompt, response_format: 'json' }),
+                    body: JSON.stringify({ count: maxPool, prompt: enhancedPrompt, response_format: 'json' }),
                 });
                 if (!response.ok) {
                     const errText = await response.text();
@@ -1059,15 +1781,24 @@
                 }
                 const data = await response.json();
                 console.log('Raw LLM response:', data, 'Type:', typeof data, 'Is Array:', Array.isArray(data));
-                aiBulkPreviewOptions = normalizeAIBulkGeneratedOptions(data, totalOptions);
+                aiBulkPreviewOptions = normalizeAIBulkGeneratedOptions(data, maxPool);
                 console.log('Normalized options:', aiBulkPreviewOptions, 'Count:', aiBulkPreviewOptions.length);
                 if (!aiBulkPreviewOptions.length) {
                     previewList.textContent = 'No options returned. Try a different prompt.';
                     showNotification('No preview options returned', 'error');
                     return;
                 }
-                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map(opt => `<li>${escapeHtml(opt)}</li>`).join('')}</ol>`;
-                previewMeta.textContent = `${aiBulkPreviewOptions.length} option(s), ${perRow} per row`;
+                // Enrich with plural/past_tense during preview so they're ready on apply
+                await enrichOptionsWithVariants(aiBulkPreviewOptions);
+                const onPage = Math.min(aiBulkPreviewOptions.length, maxOnPage);
+                const overflow = Math.max(0, aiBulkPreviewOptions.length - maxOnPage);
+                const metaParts = [`${aiBulkPreviewOptions.length} option(s) — ${onPage} on page 1`];
+                if (overflow > 0) metaParts.push(`${overflow} on next page (via Something Else)`);
+                previewList.innerHTML = `<ol class="list-decimal ml-5 space-y-1">${aiBulkPreviewOptions.map((opt, i) => {
+                    const pageTag = i >= maxOnPage ? ' <span class="text-gray-400 text-xs">(next page)</span>' : '';
+                    return `<li>${escapeHtml(opt.label)}${pageTag}</li>`;
+                }).join('')}</ol>`;
+                previewMeta.textContent = metaParts.join(' · ');
                 applyBtn.disabled = false;
             } catch (error) {
                 console.error(error);
@@ -1078,23 +1809,44 @@
             }
         }
 
+        function getStaticRowsCount() {
+            const boardType = String(currentBoardData?.board_type || 'ai').toLowerCase();
+            if (boardType === 'ai') {
+                return 0;
+            }
+            let activeDynamicRows = 0;
+            if (currentBoardData && currentBoardData.dynamic_rows !== undefined && currentBoardData.dynamic_rows !== null) {
+                activeDynamicRows = currentBoardData.dynamic_rows;
+            } else if (useHybridPages) {
+                activeDynamicRows = tapDynamicRows;
+            }
+            if (boardType === 'static') {
+                return Math.max(0, tapWordsRows - activeDynamicRows);
+            }
+            return tapWordsRows;
+        }
+
         function findFirstCompletelyEmptyRow(buttons) {
             const list = Array.isArray(buttons) ? buttons : [];
-            for (let row = 0; row < GRID_ROWS; row++) {
+            const maxStaticRow = getStaticRowsCount();
+            for (let row = 0; row < maxStaticRow; row++) {
                 const hasAny = list.some(btn => Number(btn.row) === row && !!String(btn.label || '').trim());
                 if (!hasAny) return row;
             }
             return -1;
         }
 
-        function buildGeneratedButtonPayload(label, row, col, config) {
+        function buildGeneratedButtonPayload(label, row, col, config, plural = null, past_tense = null, pool_index = null) {
             const actionType = config.afterSelection === 'navigate' ? 'navigate' : 'announce';
             return {
-                id: `btn_${row}_${col}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                id: `btn_pool_${pool_index !== null ? pool_index : (row + '_' + col)}_${Date.now()}`,
                 label,
                 row,
                 col,
+                pool_index,
                 speech_text: label,
+                plural: plural || null,
+                past_tense: past_tense || null,
                 after_selection: config.afterSelection,
                 action_type: actionType,
                 target_board_id: config.afterSelection === 'navigate' ? config.targetBoardId : null,
@@ -1105,6 +1857,7 @@
                 background_color: config.backgroundColor,
                 text_color: '#000000',
                 hidden: false,
+                button_type: 'static',
             };
         }
 
@@ -1112,7 +1865,7 @@
             if (!currentBoardData || isBoardReadOnly(currentBoardData)) return;
             if (!aiBulkPreviewOptions.length) { showNotification('Preview options first', 'error'); return; }
 
-            const perRow = Math.min(12, Math.max(1, Number(document.getElementById('aiBulkOptionsPerRow').value) || 1));
+            const perRow = GRID_COLS;
             const afterSelection = document.getElementById('aiBulkAfterSelection').value;
             const targetBoardId = document.getElementById('aiBulkTargetBoard').value.trim();
             const backgroundColor = document.getElementById('aiBulkBgColor').value.trim() || '#FFFFFF';
@@ -1140,76 +1893,156 @@
             }
 
             const workingButtons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
-            const startRow = mode === 'add' ? findFirstCompletelyEmptyRow(workingButtons) : 0;
-            if (startRow < 0) {
-                showNotification('No empty row available to add options', 'error');
-                return;
-            }
-
-            const slots = [];
-            for (let row = startRow; row < GRID_ROWS; row++) {
-                for (let col = 0; col < perRow; col++) {
-                    const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
-                    if (!occupied) slots.push({ row, col });
-                }
-            }
-            if (!slots.length) {
-                showNotification('No space available for generated options', 'error');
-                return;
-            }
-
-            const applyCount = Math.min(aiBulkPreviewOptions.length, slots.length);
+            // Compute static rows from global settings — getStaticRowsCount() returns 0 for 'ai'
+            // boards and can give wrong results for unsaved boards, so bypass it here.
+            const boardExplicitDynamic = (currentBoardData?.dynamic_rows !== null && currentBoardData?.dynamic_rows !== undefined)
+                ? Number(currentBoardData.dynamic_rows)
+                : (useHybridPages ? tapDynamicRows : 0);
+            const maxStaticRow = Math.max(0, tapWordsRows - boardExplicitDynamic);
+            const maxOnPage = maxStaticRow * perRow;
             const bulkConfig = { afterSelection, targetBoardId, backgroundColor };
-            for (let i = 0; i < applyCount; i++) {
-                const slot = slots[i];
-                const label = aiBulkPreviewOptions[i];
-                workingButtons.push(buildGeneratedButtonPayload(label, slot.row, slot.col, bulkConfig));
+
+            if (mode === 'replace') {
+                // Assign pool_index to all options; first page gets row/col, overflow gets null/null
+                for (let i = 0; i < aiBulkPreviewOptions.length; i++) {
+                    const opt = aiBulkPreviewOptions[i];
+                    const isOverflow = i >= maxOnPage;
+                    const row = isOverflow ? null : Math.floor(i / perRow);
+                    const col = isOverflow ? null : (i % perRow);
+                    workingButtons.push(buildGeneratedButtonPayload(opt.label, row, col, bulkConfig, opt.plural, opt.past_tense, i));
+                }
+            } else {
+                // Add mode: find available visible slots, fill them first; remaining go as overflow
+                const startRow = findFirstCompletelyEmptyRow(workingButtons);
+                if (startRow < 0) {
+                    showNotification('No empty row available to add options', 'error');
+                    return;
+                }
+                const slots = [];
+                for (let row = startRow; row < maxStaticRow; row++) {
+                    for (let col = 0; col < perRow; col++) {
+                        const occupied = workingButtons.some(btn => Number(btn.row) === row && Number(btn.col) === col && !!String(btn.label || '').trim());
+                        if (!occupied) slots.push({ row, col });
+                    }
+                }
+                // Determine next pool_index to continue from
+                const existingPoolIndices = workingButtons
+                    .map(b => b.pool_index)
+                    .filter(idx => idx !== null && idx !== undefined)
+                    .map(Number);
+                let nextPoolIndex = existingPoolIndices.length > 0 ? Math.max(...existingPoolIndices) + 1 : 0;
+                for (let i = 0; i < aiBulkPreviewOptions.length; i++) {
+                    const opt = aiBulkPreviewOptions[i];
+                    const slot = slots[i] || null;
+                    const row = slot ? slot.row : null;
+                    const col = slot ? slot.col : null;
+                    workingButtons.push(buildGeneratedButtonPayload(opt.label, row, col, bulkConfig, opt.plural, opt.past_tense, nextPoolIndex + i));
+                }
             }
 
             currentBoardData.buttons = workingButtons;
+
+            // Save topic, generated prompt, examples, and exclusions to the board
+            const appliedTopic = document.getElementById('aiBulkTopic').value.trim();
+            currentBoardData.prompt_topic = appliedTopic || null;
+            currentBoardData.llm_prompt = appliedTopic
+                ? `Generate AAC word and phrase options for a board about: ${appliedTopic}. Include common words, actions, objects, and short phrases that are relevant to this topic and useful for AAC communication. Options should be short (1-3 words).`
+                : null;
+            currentBoardData.prompt_examples = document.getElementById('aiBulkExamples').value.trim() || null;
+            currentBoardData.prompt_exclusions = document.getElementById('aiBulkExclusions').value.trim() || null;
+
+            const onPage = Math.min(aiBulkPreviewOptions.length, maxOnPage);
+            const overflow = Math.max(0, aiBulkPreviewOptions.length - maxOnPage);
+            pendingImageAssignmentAfterSave = true;
             renderButtonGrid();
             closeAIBulkBuilderModal();
-            if (applyCount < aiBulkPreviewOptions.length) {
-                showNotification(`Applied ${applyCount} options (grid full)`, 'success');
-            } else {
-                showNotification(`Applied ${applyCount} options`, 'success');
-            }
+            const msg = overflow > 0
+                ? `Applied ${aiBulkPreviewOptions.length} options (${onPage} visible, ${overflow} on next page)`
+                : `Applied ${aiBulkPreviewOptions.length} options`;
+            showNotification(msg, 'success');
         }
 
         async function saveBoard() {
             if (!currentBoardData) { showNotification('Select or create a board first', 'error'); return; }
             if (isBoardReadOnly(currentBoardData)) { showNotification('This board is read-only', 'error'); return; }
-            const boardType = document.getElementById('boardType').value;
-            const buttons = boardType === 'ai' ? [] : (currentBoardData.buttons || []);
+            const boardType = String(currentBoardData.board_type || 'ai').toLowerCase();
+            const staticRowsCount = getStaticRowsCount();
+            let buttons = currentBoardData.buttons || [];
+            if (boardType === 'ai') {
+                buttons = [];
+            } else {
+                buttons = buttons.filter(btn => Number(btn.row) < staticRowsCount);
+            }
+            console.log('[saveBoard] boardType:', boardType, 'staticRowsCount:', staticRowsCount, 'total buttons in memory:', (currentBoardData.buttons||[]).length, 'buttons to send:', buttons.length, 'pool buttons:', buttons.filter(b=>b.pool_index!=null).length);
             const payload = {
                 label: document.getElementById('boardLabel').value.trim() || 'Untitled Board',
                 board_type: boardType,
                 owner_scope: 'user',
                 hidden: false,
-                llm_prompt: boardType === 'ai' ? (document.getElementById('llmPrompt').value.trim() || null) : null,
-                prompt_category: null,
-                prompt_topic: boardType === 'ai' ? (document.getElementById('promptTopic').value.trim() || null) : null,
-                prompt_examples: boardType === 'ai' ? (document.getElementById('promptExamples').value.trim() || null) : null,
-                prompt_exclusions: boardType === 'ai' ? (document.getElementById('promptExclusions').value.trim() || null) : null,
+                llm_prompt: currentBoardData.llm_prompt || null,
+                prompt_category: currentBoardData.prompt_category || null,
+                prompt_topic: currentBoardData.prompt_topic || null,
+                prompt_examples: currentBoardData.prompt_examples || null,
+                prompt_exclusions: currentBoardData.prompt_exclusions || null,
                 static_options: null,
                 special_function: null,
                 default_columns: 12,
                 max_rows: 7,
                 buttons: buttons,
-                set_as_home: !!document.getElementById('setAsHomeBoard').checked,
+                set_as_home: false,
                 created_during_migration: (currentBoardData.created_during_migration && buttons.length === 0) ? true : false,
+                dynamic_rows: boardType === 'static' ? (currentBoardData.dynamic_rows !== undefined ? currentBoardData.dynamic_rows : null) : null,
+                is_customized: true,
             };
             try {
                 let response;
                 if (currentBoardData.id) response = await fetch('/api/tap-interface/boards/' + encodeURIComponent(currentBoardData.id), { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(payload) });
                 else response = await fetch('/api/tap-interface/boards', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) });
-                if (!response.ok) { const err = await response.json().catch(() => ({})); throw new Error(err.detail || `HTTP ${response.status}`); }
+                if (!response.ok) { const err = await response.json().catch(() => ({})); const detail = Array.isArray(err.detail) ? err.detail.map(e => e.msg || JSON.stringify(e)).join('; ') : (err.detail || `HTTP ${response.status}`); throw new Error(detail); }
                 const body = await response.json();
                 boardSettings = body.board_settings || boardSettings;
                 await loadBoards();
                 if (body.board && body.board.id) { document.getElementById('selectBoard').value = body.board.id; handleBoardSelected(); }
                 showNotification('Board saved', 'success');
+                if (pendingImageAssignmentAfterSave) {
+                    pendingImageAssignmentAfterSave = false;
+                    assignImagesInBackground();
+                }
             } catch (error) { console.error(error); showNotification('Save failed: ' + error.message, 'error'); }
+        }
+
+        async function assignImagesInBackground() {
+            showNotification('Assigning images to generated options…', 'info');
+            try {
+                const resp = await fetch('/api/tap-interface/boards/assign-all-images', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({})
+                });
+                const respBody = await resp.json().catch(() => ({}));
+                console.log('[assignImages] response', resp.status, respBody);
+                if (!resp.ok) {
+                    console.error('[assignImages] server error:', respBody);
+                    showNotification('Image assignment failed: ' + (respBody.detail || resp.status), 'error');
+                    return;
+                }
+                await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) {
+                        const withImgs = (refreshed.buttons || []).filter(b => b.image_url);
+                        console.log('[assignImages] refreshed board buttons with image_url:', withImgs.length, '/', (refreshed.buttons || []).length);
+                        currentBoardData = JSON.parse(JSON.stringify(refreshed));
+                        renderButtonGrid();
+                    } else {
+                        console.warn('[assignImages] refreshed board not found in allBoards');
+                    }
+                }
+                showNotification('Images assigned', 'success');
+            } catch (err) {
+                console.error('[assignImages] exception:', err);
+                showNotification('Image assignment error: ' + err.message, 'error');
+            }
         }
 
         async function deleteBoard() {
@@ -1230,6 +2063,7 @@
             if (!currentBoardData) { showNotification('Select a board first', 'error'); return; }
             document.getElementById('translateTargetLanguage').value = '';
             document.getElementById('performTranslationBtn').disabled = true;
+            document.getElementById('performTranslationAllBtn').disabled = true;
             document.getElementById('translateResultsContainer').classList.add('hidden');
             document.getElementById('translateLoadingSpinner').classList.add('hidden');
             document.getElementById('translateResults').innerHTML = '';
@@ -1262,231 +2096,210 @@
             const targetLanguage = getBoardTranslateTargetLocale();
             if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
             if (!currentBoardData) { showNotification('No board selected', 'error'); return; }
-            
-            document.getElementById('performTranslationBtn').disabled = true;
+
+            const btn = document.getElementById('performTranslationBtn');
+            btn.disabled = true;
             document.getElementById('translateLoadingSpinner').classList.remove('hidden');
             document.getElementById('translateResultsContainer').classList.add('hidden');
-            
+
             try {
-                // Collect all text that needs translation
+                // Deduplicated ordered list of texts to translate
                 const textsToTranslate = [];
-                const textMap = {}; // Map original text to metadata
-                
-                // Add board label
-                if (currentBoardData.label) {
-                    textsToTranslate.push(currentBoardData.label);
-                    textMap[currentBoardData.label] = { type: 'board_label', boardId: currentBoardData.id };
-                }
-                
-                // Add button labels and speech text
-                for (let row = 0; row < GRID_ROWS; row++) {
-                    for (let col = 0; col < GRID_COLS; col++) {
-                        const key = `${row},${col}`;
-                        const button = currentBoardData.buttons?.[key];
-                        if (button) {
-                            if (button.text) {
-                                const text = button.text;
-                                if (!textsToTranslate.includes(text)) textsToTranslate.push(text);
-                                if (!textMap[text]) textMap[text] = [];
-                                if (Array.isArray(textMap[text])) textMap[text].push({ type: 'button_text', position: key });
-                            }
-                            if (button.speech_text) {
-                                const text = button.speech_text;
-                                if (!textsToTranslate.includes(text)) textsToTranslate.push(text);
-                                if (!textMap[text]) textMap[text] = [];
-                                if (Array.isArray(textMap[text])) textMap[text].push({ type: 'speech_text', position: key });
-                            }
-                        }
-                    }
-                }
-                
+                const textIndex = {}; // text → index in textsToTranslate
+                const addText = (t) => {
+                    const s = String(t || '').trim();
+                    if (!s || s in textIndex) return;
+                    textIndex[s] = textsToTranslate.length;
+                    textsToTranslate.push(s);
+                };
+
+                // Board-level AI prompt
+                if (currentBoardData.llm_prompt) addText(currentBoardData.llm_prompt);
+
+                // Button fields: label, speech_text, plural, past_tense
+                const buttons = Array.isArray(currentBoardData.buttons) ? currentBoardData.buttons : [];
+                buttons.forEach(btn => {
+                    addText(btn.label);
+                    if (btn.speech_text && btn.speech_text !== btn.label) addText(btn.speech_text);
+                    if (btn.plural) addText(btn.plural);
+                    if (btn.past_tense) addText(btn.past_tense);
+                });
+
                 if (textsToTranslate.length === 0) {
                     showNotification('No text to translate', 'error');
                     document.getElementById('translateLoadingSpinner').classList.add('hidden');
-                    document.getElementById('performTranslationBtn').disabled = false;
+                    btn.disabled = false;
                     return;
                 }
-                
-                // Call translation API
+
                 const response = await fetch('/api/translate-lines', {
                     method: 'POST',
                     headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        lines: textsToTranslate,
-                        source_locale: null,
-                        target_locale: targetLanguage
-                    })
+                    body: JSON.stringify({ lines: textsToTranslate, source_locale: null, target_locale: targetLanguage })
                 });
-                
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const payload = await response.json();
-                const translations = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
-                
-                // Display results
-                displayTranslationResults(translations, textMap, targetLanguage);
-                document.getElementById('translateLoadingSpinner').classList.add('hidden');
+                const translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+
+                // Build lookup: original → translated
+                const tr = (original) => {
+                    const s = String(original || '').trim();
+                    if (!s || !(s in textIndex)) return original;
+                    return translated[textIndex[s]] || original;
+                };
+
+                // Apply to board
+                if (currentBoardData.llm_prompt) {
+                    currentBoardData.llm_prompt = tr(currentBoardData.llm_prompt);
+                }
+                let labelCount = 0;
+                buttons.forEach(b => {
+                    if (b.label) { b.label = tr(b.label); labelCount++; }
+                    if (b.speech_text) b.speech_text = tr(b.speech_text);
+                    if (b.plural) b.plural = tr(b.plural);
+                    if (b.past_tense) b.past_tense = tr(b.past_tense);
+                });
+
+                // Save the board
+                await saveBoard();
+
+                document.getElementById('translateResults').innerHTML = `
+                    <div class="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm">
+                        <p class="font-semibold text-green-900">Translation complete</p>
+                        <p class="text-gray-700 mt-1">${labelCount} button label${labelCount !== 1 ? 's' : ''} translated to <span class="font-medium">${escapeHtml(targetLanguage)}</span>. Board saved.</p>
+                    </div>`;
                 document.getElementById('translateResultsContainer').classList.remove('hidden');
+                showNotification(`Board translated and saved (${labelCount} buttons)`, 'success');
+                renderButtonGrid();
             } catch (error) {
                 console.error(error);
                 showNotification('Translation failed: ' + error.message, 'error');
-                document.getElementById('translateLoadingSpinner').classList.add('hidden');
             } finally {
-                document.getElementById('performTranslationBtn').disabled = false;
+                document.getElementById('translateLoadingSpinner').classList.add('hidden');
+                btn.disabled = false;
             }
         }
 
-        async function performAllAiBoardsTranslation() {
+        async function performAllBoardsTranslation() {
             const targetLanguage = getBoardTranslateTargetLocale();
             if (!targetLanguage) { showNotification('Please select a language', 'error'); return; }
+            if (!Array.isArray(allBoards) || allBoards.length === 0) { showNotification('No boards loaded', 'error'); return; }
 
-            const runAllBtn = document.getElementById('performTranslateAllAiBoardsBtn');
-            const runCurrentBtn = document.getElementById('performTranslationBtn');
-            const loadingSpinner = document.getElementById('translateLoadingSpinner');
-            const resultsContainer = document.getElementById('translateResultsContainer');
-            const resultsEl = document.getElementById('translateResults');
+            const allBtn = document.getElementById('performTranslationAllBtn');
+            const singleBtn = document.getElementById('performTranslationBtn');
+            allBtn.disabled = true;
+            singleBtn.disabled = true;
+            document.getElementById('translateLoadingSpinner').classList.remove('hidden');
+            document.getElementById('translateResultsContainer').classList.add('hidden');
 
-            runAllBtn.disabled = true;
-            runCurrentBtn.disabled = true;
-            loadingSpinner.classList.remove('hidden');
-            resultsContainer.classList.add('hidden');
+            const resultsLog = [];
+            let successCount = 0;
 
             try {
-                const response = await fetch('/api/admin/translate-pages', {
-                    method: 'POST',
-                    headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        source_locale: null,
-                        target_locale: targetLanguage,
-                        scope: 'tap_boards',
-                        page_name: null,
-                        include_display_name: false,
-                        include_button_text: false,
-                        include_speech_phrase: false,
-                        include_llm_query: true,
-                    }),
-                });
+                for (const boardMeta of allBoards) {
+                    // allBoards already contains full board data including buttons from the list endpoint
+                    const boardId = boardMeta.id;
+                    const boardLabel = boardMeta.label || boardId;
 
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(formatApiErrorDetail(payload, response.status));
+                    const textsToTranslate = [];
+                    const textIndex = {};
+                    const addText = (t) => {
+                        const s = String(t || '').trim();
+                        if (!s || s in textIndex) return;
+                        textIndex[s] = textsToTranslate.length;
+                        textsToTranslate.push(s);
+                    };
+
+                    if (boardMeta.llm_prompt) addText(boardMeta.llm_prompt);
+                    const buttons = Array.isArray(boardMeta.buttons) ? boardMeta.buttons.map(b => ({ ...b })) : [];
+                    buttons.forEach(b => {
+                        addText(b.label);
+                        if (b.speech_text && b.speech_text !== b.label) addText(b.speech_text);
+                        if (b.plural) addText(b.plural);
+                        if (b.past_tense) addText(b.past_tense);
+                    });
+
+                    if (textsToTranslate.length === 0) {
+                        resultsLog.push({ boardId, label: boardLabel, skipped: true });
+                        continue;
+                    }
+
+                    let translated;
+                    try {
+                        const resp = await fetch('/api/translate-lines', {
+                            method: 'POST',
+                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lines: textsToTranslate, source_locale: null, target_locale: targetLanguage })
+                        });
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        const payload = await resp.json();
+                        translated = Array.isArray(payload?.translated_lines) ? payload.translated_lines : [];
+                    } catch (e) {
+                        resultsLog.push({ boardId, label: boardLabel, error: `Translate failed: ${e.message}` });
+                        continue;
+                    }
+
+                    const tr = (original) => {
+                        const s = String(original || '').trim();
+                        if (!s || !(s in textIndex)) return original;
+                        return translated[textIndex[s]] || original;
+                    };
+
+                    const translatedLlmPrompt = boardMeta.llm_prompt ? tr(boardMeta.llm_prompt) : boardMeta.llm_prompt;
+                    let labelCount = 0;
+                    buttons.forEach(b => {
+                        if (b.label) { b.label = tr(b.label); labelCount++; }
+                        if (b.speech_text) b.speech_text = tr(b.speech_text);
+                        if (b.plural) b.plural = tr(b.plural);
+                        if (b.past_tense) b.past_tense = tr(b.past_tense);
+                    });
+
+                    try {
+                        const saveResp = await fetch(`/api/tap-interface/boards/${boardId}`, {
+                            method: 'PUT',
+                            headers: { ...getAuthHeaders(null), 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ label: boardMeta.label, buttons, llm_prompt: translatedLlmPrompt })
+                        });
+                        if (!saveResp.ok) throw new Error(`HTTP ${saveResp.status}`);
+                        resultsLog.push({ boardId, label: boardLabel, count: labelCount });
+                        successCount++;
+                    } catch (e) {
+                        resultsLog.push({ boardId, label: boardLabel, error: `Save failed: ${e.message}` });
+                    }
                 }
 
-                const changed = Number(payload?.tap_boards_prompts_changed || payload?.strings_changed || 0);
-                const unique = Number(payload?.unique_strings || 0);
-                resultsEl.innerHTML = `
-                    <div class="mb-3 p-3 bg-indigo-50 border-l-4 border-indigo-500 rounded">
-                        <p class="font-semibold text-indigo-900 text-sm">Tap AI Boards Translation Complete</p>
-                        <p class="text-sm text-gray-700 mt-1">Target locale: <span class="font-medium">${escapeHtml(targetLanguage)}</span></p>
-                        <p class="text-sm text-gray-700">Unique prompts found: <span class="font-medium">${unique}</span></p>
-                        <p class="text-sm text-gray-700">Prompts updated: <span class="font-medium">${changed}</span></p>
-                    </div>
-                `;
-                resultsContainer.classList.remove('hidden');
-                showNotification(`Translated ${changed} AI board prompt(s)`, 'success');
+                let html = `<div class="p-3 bg-green-50 border-l-4 border-green-500 rounded text-sm mb-3">
+                    <p class="font-semibold text-green-900">${successCount} of ${allBoards.length} boards translated and saved to <span>${escapeHtml(targetLanguage)}</span></p>
+                </div>`;
+                resultsLog.forEach(r => {
+                    if (r.error) {
+                        html += `<div class="text-xs text-red-600 mb-1"><b>${escapeHtml(r.label)}:</b> ${escapeHtml(r.error)}</div>`;
+                    } else if (r.skipped) {
+                        html += `<div class="text-xs text-gray-500 mb-1"><b>${escapeHtml(r.label)}:</b> skipped (no text)</div>`;
+                    } else {
+                        html += `<div class="text-xs text-green-700 mb-1"><b>${escapeHtml(r.label)}:</b> ${r.count} button${r.count !== 1 ? 's' : ''} translated</div>`;
+                    }
+                });
+                document.getElementById('translateResults').innerHTML = html;
+                document.getElementById('translateResultsContainer').classList.remove('hidden');
+                showNotification(`${successCount} board(s) translated and saved`, 'success');
+
+                // Reload boards so current board reflects any translations
                 await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) { currentBoardData = refreshed; renderButtonGrid(); }
+                }
             } catch (error) {
                 console.error(error);
-                showNotification('Translate All AI Boards failed: ' + error.message, 'error');
+                showNotification('Translation error: ' + error.message, 'error');
             } finally {
-                loadingSpinner.classList.add('hidden');
-                const hasLocale = !!document.getElementById('translateTargetLanguage').value;
-                runCurrentBtn.disabled = !hasLocale;
-                runAllBtn.disabled = !hasLocale;
+                document.getElementById('translateLoadingSpinner').classList.add('hidden');
+                allBtn.disabled = false;
+                singleBtn.disabled = false;
             }
         }
 
-        function formatApiErrorDetail(payload, status) {
-            const detail = payload?.detail;
-            if (Array.isArray(detail)) {
-                const first = detail[0] || {};
-                const loc = Array.isArray(first.loc) ? first.loc.join('.') : 'request';
-                const msg = first.msg || 'Validation error';
-                return `${msg} (${loc})`;
-            }
-            if (detail && typeof detail === 'object') {
-                try {
-                    return JSON.stringify(detail);
-                } catch (_) {
-                    return `HTTP ${status}`;
-                }
-            }
-            if (typeof detail === 'string' && detail.trim()) {
-                return detail;
-            }
-            return `HTTP ${status}`;
-        }
-
-        function displayTranslationResults(translations, textMap, targetLanguage) {
-            const container = document.getElementById('translateResults');
-            let html = '';
-            
-            // Group translations by type
-            const boardLabelTrans = [];
-            const buttonTexts = {};
-            const speechTexts = {};
-            
-            const originalTexts = Object.keys(textMap);
-            translations.forEach((translated, index) => {
-                const originalText = originalTexts[index];
-                const items = originalText ? textMap[originalText] : null;
-                if (Array.isArray(items)) {
-                    items.forEach(item => {
-                        if (item.type === 'board_label') {
-                            boardLabelTrans.push({ original: originalText, translated });
-                        } else if (item.type === 'button_text') {
-                            if (!buttonTexts[item.position]) buttonTexts[item.position] = [];
-                            buttonTexts[item.position].push({ original: originalText, translated });
-                        } else if (item.type === 'speech_text') {
-                            if (!speechTexts[item.position]) speechTexts[item.position] = [];
-                            speechTexts[item.position].push({ original: originalText, translated });
-                        }
-                    });
-                } else if (items && items.type === 'board_label') {
-                    boardLabelTrans.push({ original: originalText, translated });
-                }
-            });
-            
-            // Render board label
-            if (boardLabelTrans.length > 0) {
-                html += `<div class="mb-4 p-3 bg-blue-50 border-l-4 border-blue-500 rounded">
-                    <p class="font-semibold text-blue-900 text-sm mb-2">Board Label:</p>
-                    ${boardLabelTrans.map(t => `<div class="text-sm">
-                        <span class="text-gray-600">EN:</span> ${t.original}<br>
-                        <span class="text-blue-600 font-semibold">${targetLanguage.toUpperCase()}:</span> ${t.translated}
-                    </div>`).join('')}
-                </div>`;
-            }
-            
-            // Render button translations
-            let buttonCount = 0;
-            for (const [position, texts] of Object.entries(buttonTexts)) {
-                if (texts.length > 0) {
-                    if (buttonCount === 0) html += `<div class="mb-4"><p class="font-semibold text-gray-800 text-sm mb-2">Button Labels:</p>`;
-                    buttonCount++;
-                    html += `<div class="text-sm mb-2 p-2 bg-gray-100 rounded">
-                        <span class="text-gray-600 font-medium">${position}:</span><br>
-                        ${texts.map(t => `<span class="text-gray-600">EN:</span> ${t.original}<br><span class="text-green-600 font-semibold">${targetLanguage.toUpperCase()}:</span> ${t.translated}`).join('<br>')}
-                    </div>`;
-                }
-            }
-            if (buttonCount > 0) html += `</div>`;
-            
-            // Render speech text translations
-            let speechCount = 0;
-            for (const [position, texts] of Object.entries(speechTexts)) {
-                if (texts.length > 0) {
-                    if (speechCount === 0) html += `<div class="mb-4"><p class="font-semibold text-gray-800 text-sm mb-2">Speech Announcements:</p>`;
-                    speechCount++;
-                    html += `<div class="text-sm mb-2 p-2 bg-gray-100 rounded">
-                        <span class="text-gray-600 font-medium">${position}:</span><br>
-                        ${texts.map(t => `<span class="text-gray-600">EN:</span> ${t.original}<br><span class="text-purple-600 font-semibold">${targetLanguage.toUpperCase()}:</span> ${t.translated}`).join('<br>')}
-                    </div>`;
-                }
-            }
-            if (speechCount > 0) html += `</div>`;
-            
-            container.innerHTML = html;
-        }
         async function uploadButtonAudioFile(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -1590,6 +2403,202 @@
         }
 
         function escapeHtml(value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
+
+        // ── Reassign Images ────────────────────────────────────────────────────
+        function openReassignImagesModal() {
+            document.getElementById('reassignImagesModal').classList.remove('hidden');
+        }
+
+        function closeReassignImagesModal() {
+            document.getElementById('reassignImagesModal').classList.add('hidden');
+        }
+
+        async function reassignImages(scope) {
+            const isAll = scope === 'all';
+            const clickedBtn = document.getElementById(isAll ? 'reassignAllBoardsBtn' : 'reassignThisBoardBtn');
+            const originalText = clickedBtn.textContent;
+            clickedBtn.disabled = true;
+            clickedBtn.textContent = 'Assigning…';
+            closeReassignImagesModal();
+            showNotification('Reassigning images — this may take a moment…', 'info');
+
+            try {
+                const resp = await fetch('/api/tap-interface/boards/assign-all-images', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({})
+                });
+                const respData = await resp.json().catch(() => ({}));
+                console.log('[reassignImages] response', resp.status, respData);
+                if (!resp.ok) {
+                    throw new Error(respData.detail || `Server error ${resp.status}`);
+                }
+
+                // Reload the current board so the grid reflects the newly saved image_urls
+                await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) {
+                        currentBoardData = JSON.parse(JSON.stringify(refreshed));
+                        renderButtonGrid();
+                    }
+                }
+                showNotification('Images reassigned successfully', 'success');
+            } catch (err) {
+                console.error('Reassign images failed:', err);
+                showNotification('Failed to reassign images: ' + err.message, 'error');
+            } finally {
+                clickedBtn.disabled = false;
+                clickedBtn.textContent = originalText;
+            }
+        }
+        // ── Create Next Boards ──────────────────────────────────────────────
+        let _cnbButtonData = [];  // [{button_id, label, has_existing, existing_board_id, existing_board_label}]
+
+        async function openCreateNextBoardsModal() {
+            if (!currentBoardData?.id) {
+                showNotification('Select a board first', 'error');
+                return;
+            }
+            const modal = document.getElementById('createNextBoardsModal');
+            document.getElementById('cnbBoardLabel').textContent = currentBoardData.label || currentBoardData.id;
+            document.getElementById('cnbLoading').classList.remove('hidden');
+            document.getElementById('cnbContent').classList.add('hidden');
+            document.getElementById('cnbProgress').classList.add('hidden');
+            modal.classList.remove('hidden');
+
+            try {
+                const resp = await fetch(
+                    `/api/tap-interface/boards/${encodeURIComponent(currentBoardData.id)}/next-boards-status`,
+                    { headers: getAuthHeaders() }
+                );
+                if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+                const data = await resp.json();
+                _cnbButtonData = data.buttons || [];
+                _renderCnbRows();
+                document.getElementById('cnbLoading').classList.add('hidden');
+                document.getElementById('cnbContent').classList.remove('hidden');
+            } catch (err) {
+                modal.classList.add('hidden');
+                showNotification('Failed to load board status: ' + err.message, 'error');
+            }
+        }
+
+        function _renderCnbRows() {
+            const tbody = document.getElementById('cnbButtonRows');
+            tbody.innerHTML = '';
+            _cnbButtonData.forEach(btn => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50';
+
+                const statusHtml = btn.has_existing
+                    ? `<span class="text-amber-600 font-medium">Existing: "${btn.existing_board_label || btn.existing_board_id}"</span>`
+                    : `<span class="text-gray-400">No board</span>`;
+
+                const actionOptions = btn.has_existing
+                    ? `<option value="use_existing">Use existing</option>
+                       <option value="replace">Replace with new</option>
+                       <option value="skip">Skip</option>`
+                    : `<option value="generate">Generate new</option>
+                       <option value="skip">Skip</option>`;
+
+                tr.innerHTML = `
+                    <td class="px-3 py-2 font-medium text-gray-800">${btn.label}</td>
+                    <td class="px-3 py-2">${statusHtml}</td>
+                    <td class="px-3 py-2">
+                        <select data-button-id="${btn.button_id}" class="cnb-action-select border border-gray-300 rounded px-2 py-1 text-sm w-full">
+                            ${actionOptions}
+                        </select>
+                    </td>`;
+                tbody.appendChild(tr);
+            });
+            _updateCnbExecuteLabel();
+
+            // Update label when any select changes
+            tbody.querySelectorAll('.cnb-action-select').forEach(sel => {
+                sel.addEventListener('change', _updateCnbExecuteLabel);
+            });
+        }
+
+        function _updateCnbExecuteLabel() {
+            const selects = document.querySelectorAll('.cnb-action-select');
+            let toProcess = 0;
+            selects.forEach(s => { if (s.value !== 'skip') toProcess++; });
+            document.getElementById('cnbExecuteLabel').textContent =
+                toProcess === 0 ? 'Nothing selected' : `Process ${toProcess} button${toProcess === 1 ? '' : 's'}`;
+            document.getElementById('cnbExecuteBtn').disabled = toProcess === 0;
+        }
+
+        function closeCreateNextBoardsModal() {
+            document.getElementById('createNextBoardsModal').classList.add('hidden');
+        }
+
+        async function executeCreateNextBoards() {
+            const selects = document.querySelectorAll('.cnb-action-select');
+            const decisions = [];
+            selects.forEach(sel => {
+                if (sel.value === 'skip') return;
+                const buttonId = sel.dataset.buttonId;
+                const btnInfo = _cnbButtonData.find(b => b.button_id === buttonId);
+                if (!btnInfo) return;
+                decisions.push({
+                    button_id: buttonId,
+                    label: btnInfo.label,
+                    action: sel.value,
+                    existing_board_id: btnInfo.existing_board_id || null,
+                });
+            });
+
+            if (decisions.length === 0) {
+                showNotification('No buttons selected to process', 'error');
+                return;
+            }
+
+            const newBoardAfterSelection = document.getElementById('cnbNewBoardAction').value;
+            const generateCount = decisions.filter(d => d.action === 'generate' || d.action === 'replace').length;
+
+            document.getElementById('cnbContent').classList.add('hidden');
+            document.getElementById('cnbProgress').classList.remove('hidden');
+            document.getElementById('cnbProgressMsg').textContent =
+                generateCount > 0
+                    ? `Generating ${generateCount} board${generateCount === 1 ? '' : 's'} with AI… this may take a moment.`
+                    : 'Linking boards…';
+
+            try {
+                const resp = await fetch('/api/tap-interface/boards/create-next-boards', {
+                    method: 'POST',
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_board_id: currentBoardData.id,
+                        decisions,
+                        new_board_after_selection: newBoardAfterSelection,
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(data.detail || `Server error ${resp.status}`);
+
+                closeCreateNextBoardsModal();
+                await loadBoards();
+                if (currentBoardData) {
+                    const refreshed = allBoards.find(b => b.id === currentBoardData.id);
+                    if (refreshed) {
+                        currentBoardData = JSON.parse(JSON.stringify(refreshed));
+                        renderButtonGrid();
+                    }
+                }
+
+                const parts = [];
+                if (data.boards_created) parts.push(`${data.boards_created} created`);
+                if (data.boards_updated) parts.push(`${data.boards_updated} replaced`);
+                if (data.use_existing_linked) parts.push(`${data.use_existing_linked} linked`);
+                showNotification('Boards processed: ' + (parts.join(', ') || 'done'), 'success');
+            } catch (err) {
+                console.error('Create Next Boards failed:', err);
+                document.getElementById('cnbProgress').classList.add('hidden');
+                document.getElementById('cnbContent').classList.remove('hidden');
+                showNotification('Failed: ' + err.message, 'error');
+            }
+        }
     </script>
 
     <!-- Help Modal -->
@@ -1851,7 +2860,7 @@
             <div class="flex items-center justify-center gap-1 px-6 pt-4 pb-2" id="atbStepIndicators">
                 <div id="atbSI1" class="flex items-center gap-1 text-xs font-semibold text-violet-700"><span class="w-6 h-6 rounded-full bg-violet-600 text-white flex items-center justify-center">1</span><span class="hidden sm:inline">Options</span></div>
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
-                <div id="atbSI2" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">2</span><span class="hidden sm:inline">After Selection</span></div>
+                <div id="atbSI2" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">2</span><span class="hidden sm:inline">Action</span></div>
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
                 <div id="atbSI3" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">3</span><span class="hidden sm:inline">Confirm</span></div>
             </div>
@@ -1882,7 +2891,7 @@
                     </div>
                 </div>
 
-                <!-- Step 2: After Selection for generated buttons -->
+                <!-- Step 2: Action for generated buttons -->
                 <div id="atbStep2" class="hidden">
                     <p class="text-sm text-gray-600 mb-4">What should happen after the user taps an option on the new <strong id="atbBoardNameLabel2"></strong> board?</p>
                     <div class="space-y-3">
@@ -1921,10 +2930,10 @@
                         <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">New board name:</span><span id="atbSummaryName" class="font-medium text-gray-800"></span></div>
                         <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Options to generate:</span><span id="atbSummaryOptions" class="font-medium text-gray-800"></span></div>
                         <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Options per row:</span><span id="atbSummaryPerRow" class="font-medium text-gray-800"></span></div>
-                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">After selection:</span><span id="atbSummaryAfter" class="font-medium text-gray-800"></span></div>
+                        <div class="flex gap-2"><span class="text-gray-500 w-40 shrink-0">Action:</span><span id="atbSummaryAfter" class="font-medium text-gray-800"></span></div>
                     </div>
                     <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-                        <i class="fas fa-info-circle mr-1"></i> A new static board will be created and this button's After Selection will be set to Navigate to the new board. Images will be auto-fetched for each option.
+                        <i class="fas fa-info-circle mr-1"></i> A new static board will be created and this button's Action will be set to Navigate to the new board. Images will be auto-fetched for each option.
                     </div>
                     <div class="flex justify-between mt-5">
                         <button id="atbStep3Back" class="px-5 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"><i class="fas fa-arrow-left mr-1"></i> Back</button>
@@ -1947,7 +2956,7 @@
                                     <div id="atbResultDetail" class="text-xs text-green-700 mt-1"></div>
                                 </div>
                             </div>
-                            <p class="text-sm text-gray-600">The After Selection has been set to <strong>Navigate</strong> and the Target Board updated. Click Save Button to apply.</p>
+                            <p class="text-sm text-gray-600">The Action has been set to <strong>Navigate</strong> and the Target Board updated. Click Save Button to apply.</p>
                         </div>
                         <div id="atbResultError" class="hidden">
                             <div class="flex items-center gap-3 p-4 bg-red-50 border border-red-300 rounded-xl">
@@ -2145,6 +3154,23 @@
         document.addEventListener('DOMContentLoaded', function() {
             const btn = document.getElementById('aiGenerateTargetBtn');
             if (btn) btn.addEventListener('click', openAiTargetBoardModal);
+
+            // Style radio labels on change for AI Target Board modal
+            document.querySelectorAll('input[name="atbAfterSelection"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    document.querySelectorAll('input[name="atbAfterSelection"]').forEach(r => {
+                        const lbl = r.closest('label');
+                        if (!lbl) return;
+                        if (r.checked) {
+                            lbl.classList.add('border-violet-400', 'bg-violet-50');
+                            lbl.classList.remove('border-gray-200');
+                        } else {
+                            lbl.classList.remove('border-violet-400', 'bg-violet-50');
+                            lbl.classList.add('border-gray-200');
+                        }
+                    });
+                });
+            });
         });
 
     })();

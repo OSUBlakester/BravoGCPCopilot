@@ -17,7 +17,7 @@
         .btn-danger { background-color: #e74c3c; color: white; }
         .btn-danger:hover { background-color: #c0392b; }
         .main-container { display: flex; height: calc(100vh - 56px); }
-        .sidebar { width: 350px; background-color: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow-y: auto; }
+        .sidebar { width: 700px; background-color: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow-y: auto; }
         .tree-section { flex: 1; padding: 1rem; overflow-y: auto; }
         .tree-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; border-bottom: 2px solid #3498db; padding-bottom: 0.5rem; }
         .tree-section h3 { margin: 0; color: #2c3e50; }
@@ -41,7 +41,22 @@
         .tree-button.drag-over.child-mode::after { content: '➕ Add Child'; background: #4caf50; }
         .button-label { flex: 1; font-weight: 500; font-size: 0.86rem; min-width: 0; }
         .tree-item-meta { display: inline-flex; align-items: center; gap: 0.35rem; color: #6b7280; font-size: 0.75rem; }
-        .board-target-pill { background: #e5eefb; color: #375a8c; border-radius: 999px; padding: 0.1rem 0.45rem; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .board-target-pill { font-size: 0.72rem; border-radius: 999px; padding: 0.1rem 0.5rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; display: inline-flex; align-items: center; }
+        .board-target-pill.static-pill { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+        .board-target-pill.ai-pill { background: #faf5ff; color: #581c87; border: 1px solid #e9d5ff; }
+        .resizer {
+            width: 8px;
+            cursor: col-resize;
+            background-color: #f1f5f9;
+            border-left: 1px solid #e2e8f0;
+            border-right: 1px solid #e2e8f0;
+            position: relative;
+            z-index: 10;
+            transition: background-color 0.2s;
+        }
+        .resizer:hover, .resizer.dragging {
+            background-color: #3b82f6;
+        }
         .add-button { margin: 1rem 0; text-align: center; }
         .content-area { flex: 1; background-color: white; display: flex; flex-direction: column; overflow-y: auto; }
         .content-header { padding: 1.5rem 2rem 1rem; border-bottom: 1px solid #eee; background-color: #f8f9fa; }
@@ -101,18 +116,16 @@
         <button onclick="window.location.href='tap_board_builder.html'" class="h-10 px-4 flex items-center justify-center text-[#FB4F14] bg-white border border-[#FB4F14] rounded-full hover:bg-orange-100" title="Back to Board Builder">
             <i class="fas fa-table-cells-large mr-2"></i>Board Builder
         </button>
-        <button id="convertAIBoardsBtn" class="h-10 px-4 flex items-center justify-center text-white bg-violet-600 rounded-full text-sm hover:bg-violet-700" title="Convert AI boards to static boards with fixed options">
-            <i class="fas fa-wand-magic-sparkles mr-1"></i>Convert AI to Static
-        </button>
         <div id="changesIndicator" style="display:none;padding:0.5rem 1rem;background-color:#f39c12;color:white;border-radius:0.375rem;font-size:0.875rem;">⚠️ Unsaved Changes</div>
+        <button class="btn btn-primary h-10 px-4 flex items-center justify-center rounded-full text-sm" id="addMenuItemBtn">+ Add Root Menu Item</button>
         <button class="h-10 px-4 flex items-center justify-center text-white bg-green-600 rounded-full text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed" id="saveBtn" disabled>
             <i class="fas fa-save mr-1"></i>Save
         </button>
         <button class="h-10 px-4 flex items-center justify-center text-white bg-gray-500 rounded-full text-sm hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" id="cancelBtn" disabled>
             <i class="fas fa-times mr-1"></i>Cancel
-                <button class="h-10 px-4 flex items-center justify-center text-white bg-blue-600 rounded-full text-sm hover:bg-blue-700" id="translateMenuBtn" title="Translate all menu items">
-                    <i class="fas fa-language mr-1"></i>Translate
-                </button>
+        </button>
+        <button class="h-10 px-4 flex items-center justify-center text-white bg-blue-600 rounded-full text-sm hover:bg-blue-700" id="translateMenuBtn" title="Translate all menu items">
+            <i class="fas fa-language mr-1"></i>Translate
         </button>
     </div>
 
@@ -129,11 +142,9 @@
                 <div class="root-drop-zone" id="rootDropTopZone">Drop here to move to top of root menu</div>
                 <div id="treeContainer"></div>
                 <div class="root-drop-zone" id="rootDropBottomZone">Drop here to move to end of root menu</div>
-                <div class="add-button">
-                    <button class="btn btn-primary" id="addMenuItemBtn">+ Add Root Menu Item</button>
-                </div>
             </div>
         </div>
+        <div class="resizer" id="sidebarResizer"></div>
 
         <div class="content-area">
             <div class="content-header">
@@ -279,7 +290,7 @@
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
                 <div id="csi2" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">2</span><span class="hidden sm:inline">Settings</span></div>
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
-                <div id="csi3" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">3</span><span class="hidden sm:inline">After Selection</span></div>
+                <div id="csi3" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">3</span><span class="hidden sm:inline">Action</span></div>
                 <div class="flex-1 h-px bg-gray-300 mx-1 max-w-12"></div>
                 <div id="csi4" class="flex items-center gap-1 text-xs font-semibold text-gray-400"><span class="w-6 h-6 rounded-full bg-gray-300 text-white flex items-center justify-center">4</span><span class="hidden sm:inline">Confirm</span></div>
             </div>
@@ -323,7 +334,7 @@
                     </div>
                 </div>
 
-                <!-- Step 3: After Selection Action -->
+                <!-- Step 3: Action -->
                 <div id="convertStep3" class="hidden">
                     <p class="text-sm text-gray-600 mb-4">What should happen after the user taps an option on the converted board?</p>
                     <div class="space-y-3">
@@ -362,7 +373,7 @@
                         <div class="flex gap-2"><span class="text-gray-500 w-36 shrink-0">Boards to convert:</span><span id="convertSummaryBoards" class="font-medium text-gray-800"></span></div>
                         <div class="flex gap-2"><span class="text-gray-500 w-36 shrink-0">Options per board:</span><span id="convertSummaryOptions" class="font-medium text-gray-800"></span></div>
                         <div class="flex gap-2"><span class="text-gray-500 w-36 shrink-0">Options per row:</span><span id="convertSummaryPerRow" class="font-medium text-gray-800"></span></div>
-                        <div class="flex gap-2"><span class="text-gray-500 w-36 shrink-0">After selection:</span><span id="convertSummaryAfter" class="font-medium text-gray-800"></span></div>
+                        <div class="flex gap-2"><span class="text-gray-500 w-36 shrink-0">Action:</span><span id="convertSummaryAfter" class="font-medium text-gray-800"></span></div>
                     </div>
                     <div class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
                         <i class="fas fa-info-circle mr-1"></i> The original AI configuration (prompt, category) will be preserved on each board. Images will be auto-fetched for each generated option.
@@ -422,7 +433,7 @@
             document.getElementById('addMenuItemBtn').addEventListener('click', addMenuItem);
             document.getElementById('expandAllTreeBtn').addEventListener('click', expandAllTreeNodes);
             document.getElementById('collapseAllTreeBtn').addEventListener('click', collapseAllTreeNodes);
-                        document.getElementById('translateMenuBtn').addEventListener('click', openTranslateMenuModal);
+document.getElementById('translateMenuBtn').addEventListener('click', openTranslateMenuModal);
                         document.getElementById('closeTranslateMenuModal').addEventListener('click', closeTranslateMenuModal);
                         document.getElementById('cancelTranslateMenuModal').addEventListener('click', closeTranslateMenuModal);
                         document.getElementById('performMenuTranslationBtn').addEventListener('click', performMenuTranslation);
@@ -444,8 +455,38 @@
             setupColorInputs();
             setupFormListeners();
             setupDragAndDrop();
+            setupResizableSidebar();
             initAuth();
         });
+
+        function setupResizableSidebar() {
+            const resizer = document.getElementById('sidebarResizer');
+            const sidebar = document.querySelector('.sidebar');
+            if (!resizer || !sidebar) return;
+            let isResizing = false;
+
+            resizer.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                resizer.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+                const newWidth = Math.max(300, Math.min(1200, e.clientX));
+                sidebar.style.width = `${newWidth}px`;
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!isResizing) return;
+                isResizing = false;
+                resizer.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            });
+        }
 
         async function initAuth() {
             try {
@@ -541,21 +582,20 @@
             document.getElementById('translateMenuResultsContainer').classList.add('hidden');
             
             try {
-                // Collect all menu item labels that need translation
+                // Collect all menu item labels that need translation, keyed by node id
                 const textsToTranslate = [];
                 const translationEntries = [];
-                
-                const collectLabels = (nodes, parentPath = []) => {
-                    nodes.forEach((node, idx) => {
-                        const path = [...parentPath, idx];
-                        if (node.label) {
+
+                const collectLabels = (nodes) => {
+                    nodes.forEach((node) => {
+                        if (node.id && node.label) {
                             textsToTranslate.push(node.label);
-                            translationEntries.push({ type: 'label', path, original: node.label });
+                            translationEntries.push({ type: 'label', nodeId: node.id, original: node.label });
                         }
-                        if (Array.isArray(node.children)) collectLabels(node.children, path);
+                        if (Array.isArray(node.children)) collectLabels(node.children);
                     });
                 };
-                
+
                 collectLabels(menuTree);
                 
                 if (textsToTranslate.length === 0) {
@@ -611,31 +651,24 @@
             } else {
                 html = `<p class="text-sm text-gray-600 mb-3 pb-3 border-b">Total items: <span class="font-semibold">${entries.length}</span></p>`;
                 entries.forEach(entry => {
-                    const pathLabel = Array.isArray(entry.path) ? entry.path.join(' › ') : String(entry.path || '');
-                    html += `<div class="mb-3 p-3 bg-white border-l-4 border-gray-300 rounded">
-                        <div class="text-sm mb-1">
-                            <span class="text-gray-600">EN:</span> <span class="font-medium">${entry.original}</span><br>
-                            <span class="text-green-600 font-semibold">${targetLanguage.toUpperCase()}:</span> <span class="font-medium">${entry.translated}</span>
-                        </div>
-                        <div class="text-xs text-gray-600">Menu path: ${pathLabel}</div>
+                    html += `<div class="mb-2 p-2 bg-white border-l-4 border-gray-300 rounded text-sm">
+                        <span class="text-gray-500">EN:</span> <span class="font-medium">${escapeHtml(entry.original)}</span>
+                        &rarr; <span class="text-green-700 font-semibold">${escapeHtml(entry.translated)}</span>
                     </div>`;
                 });
             }
-            
+
             container.innerHTML = html;
         }
 
-        function applyTranslationsToMenuTree(nodes, entriesByPath, parentPath = []) {
+        function applyTranslationsToMenuTree(nodes, entriesByNodeId) {
             if (!Array.isArray(nodes)) return;
-            nodes.forEach((node, index) => {
-                const path = [...parentPath, index];
-                const pathKey = path.join('/');
-                const translatedLabel = entriesByPath[pathKey];
-                if (translatedLabel && node && typeof node === 'object') {
-                    node.label = formatMenuLabel(translatedLabel);
+            nodes.forEach((node) => {
+                if (node.id && entriesByNodeId[node.id]) {
+                    node.label = formatMenuLabel(entriesByNodeId[node.id]);
                 }
                 if (Array.isArray(node?.children)) {
-                    applyTranslationsToMenuTree(node.children, entriesByPath, path);
+                    applyTranslationsToMenuTree(node.children, entriesByNodeId);
                 }
             });
         }
@@ -646,10 +679,10 @@
                 return;
             }
 
-            const entriesByPath = {};
+            const entriesByNodeId = {};
             pendingMenuTranslationEntries.forEach(entry => {
-                if (entry.type === 'label') {
-                    entriesByPath[entry.path.join('/')] = formatMenuLabel(entry.translated || entry.original);
+                if (entry.type === 'label' && entry.nodeId) {
+                    entriesByNodeId[entry.nodeId] = formatMenuLabel(entry.translated || entry.original);
                 }
             });
 
@@ -657,7 +690,7 @@
                 flushFormToNode(selectedPath);
             }
 
-            applyTranslationsToMenuTree(menuTree, entriesByPath);
+            applyTranslationsToMenuTree(menuTree, entriesByNodeId);
 
             if (selectedPath) {
                 const selectedNode = getNodeByPath(selectedPath);
@@ -721,17 +754,45 @@
             row.setAttribute('draggable', 'true');
             row.dataset.path = JSON.stringify(path);
 
-            const folderIcon = hasChildren ? (isExpanded ? 'fa-folder-open' : 'fa-folder') : 'fa-file-alt';
+            const board = node.board_id ? boards.find((item) => item.id === node.board_id) : null;
+            const boardType = board ? String(board.board_type || '').toLowerCase() : '';
+            
+            let iconClass = 'fa-file-alt';
+            let iconStyle = 'color:#6b7280;font-size:0.85rem;';
+            if (hasChildren) {
+                iconClass = isExpanded ? 'fa-folder-open' : 'fa-folder';
+            } else if (boardType === 'static') {
+                iconClass = 'fa-table-cells';
+                iconStyle = 'color:#2563eb;font-size:0.85rem;';
+            } else if (boardType === 'ai') {
+                iconClass = 'fa-wand-magic-sparkles';
+                iconStyle = 'color:#7c3aed;font-size:0.85rem;';
+            }
+
             const boardLabel = getBoardLabel(node.board_id);
+            let boardLabelSpan = '';
+            if (boardLabel) {
+                let pillClass = 'board-target-pill';
+                let pillIcon = '';
+                if (boardType === 'static') {
+                    pillClass += ' static-pill';
+                    pillIcon = '<i class="fas fa-table-cells mr-1"></i>';
+                } else if (boardType === 'ai') {
+                    pillClass += ' ai-pill';
+                    pillIcon = '<i class="fas fa-wand-magic-sparkles mr-1"></i>';
+                }
+                boardLabelSpan = `<span class="${pillClass}" title="${escapeHtml(boardLabel)}">${pillIcon}${escapeHtml(boardLabel)}</span>`;
+            }
+
             row.innerHTML =
                 '<div class="tree-row-main">' +
                     '<button type="button" class="tree-toggle' + (hasChildren ? '' : ' placeholder') + '" data-action="toggle" title="' + (isExpanded ? 'Collapse' : 'Expand') + '">' +
                         '<i class="fas ' + (isExpanded ? 'fa-chevron-down' : 'fa-chevron-right') + '"></i>' +
                     '</button>' +
-                    '<i class="fas ' + folderIcon + '" style="color:#6b7280;font-size:0.85rem;"></i>' +
+                    '<i class="fas ' + iconClass + '" style="' + iconStyle + '"></i>' +
                     '<span class="button-label">' + escapeHtml(formatMenuLabel(node.label || '(unlabeled)')) + '</span>' +
                     '<span class="tree-item-meta">' +
-                        (boardLabel ? '<span class="board-target-pill" title="' + escapeHtml(boardLabel) + '">' + escapeHtml(boardLabel) + '</span>' : '') +
+                        boardLabelSpan +
                         (node.hidden ? '<span class="hidden-badge">HIDDEN</span>' : '') +
                     '</span>' +
                 '</div>';
@@ -816,7 +877,54 @@
         function getBoardLabel(boardId) {
             if (!boardId) return '';
             const board = boards.find((item) => item.id === boardId);
-            return board ? String(board.label || board.id || '') : String(boardId);
+            if (board) {
+                const typeSuffix = board.board_type ? ` (${board.board_type.toUpperCase()})` : '';
+                return String(board.label || board.id || '') + typeSuffix;
+            }
+            return String(boardId);
+        }
+
+        let activeTargetableNodes = [];
+
+        function collectTargetableMenuNodes() {
+            const list = [];
+            const seen = new Set();
+            const walk = (nodes) => {
+                nodes.forEach(node => {
+                    if (node.board_id) {
+                        const boardId = String(node.board_id).trim();
+                        // Only target default/standard boards that have _static or _ai versions, or home board
+                        const isDefault = boardId.endsWith('_static') || boardId.endsWith('_ai') || boardId === 'board_home' || boardId === 'board_home_static' || boardId === 'board_home_ai';
+                        if (isDefault) {
+                            let categoryKey = boardId;
+                            if (categoryKey.endsWith('_static')) {
+                                categoryKey = categoryKey.slice(0, -7);
+                            } else if (categoryKey.endsWith('_ai')) {
+                                categoryKey = categoryKey.slice(0, -3);
+                            } else if (categoryKey === 'board_home' || categoryKey === 'board_home_static' || categoryKey === 'board_home_ai') {
+                                categoryKey = 'board_home';
+                            }
+                            
+                            const label = formatMenuLabel(node.label) || categoryKey;
+                            
+                            if (!seen.has(node.id)) {
+                                seen.add(node.id);
+                                list.push({
+                                    id: node.id,
+                                    label: label,
+                                    board_id: boardId,
+                                    categoryKey: categoryKey
+                                });
+                            }
+                        }
+                    }
+                    if (Array.isArray(node.children)) {
+                        walk(node.children);
+                    }
+                });
+            };
+            walk(menuTree);
+            return list;
         }
 
         // ── Selection / form ──────────────────────────────────────────────────────
@@ -1583,7 +1691,10 @@
 
         // Wire up button events once DOM is ready
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('convertAIBoardsBtn').addEventListener('click', openConvertAIModal);
+            const convertAIBoardsBtn = document.getElementById('convertAIBoardsBtn');
+            if (convertAIBoardsBtn) {
+                convertAIBoardsBtn.addEventListener('click', openConvertAIModal);
+            }
             document.getElementById('closeConvertAIModal').addEventListener('click', closeConvertAIModal);
 
             document.getElementById('convertStep1Next').addEventListener('click', () => showConvertStep(2));

@@ -382,11 +382,14 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.6);
+            background-color: rgba(15, 23, 42, 0.4);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
             display: none;
             justify-content: center;
             align-items: center;
             z-index: 9000;
+            transition: all 0.3s ease;
         }
 
         .wizard-modal-overlay.active {
@@ -394,143 +397,244 @@
         }
 
         .wizard-modal-content {
-            background-color: white;
-            border-radius: 12px;
+            background-color: #ffffff;
+            border-radius: 16px;
             padding: 28px;
-            max-width: 520px;
+            max-width: 560px;
             width: 92%;
-            max-height: 85vh;
+            max-height: 90vh;
             overflow-y: auto;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 50px rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }
 
         .wizard-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 12px;
+            background: linear-gradient(135deg, #4f46e5, #6366f1, #3b82f6);
+            margin: -28px -28px 12px -28px;
+            padding: 24px 28px;
+            color: #ffffff;
         }
 
         .wizard-header h3 {
-            font-size: 1.25rem;
-            font-weight: 600;
+            font-size: 1.35rem;
+            font-weight: 700;
             margin: 0;
-            color: #111827;
+            color: #ffffff;
+            letter-spacing: -0.025em;
         }
 
         .wizard-step-indicator {
-            font-size: 0.875rem;
-            color: #6b7280;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #ffffff;
+            background-color: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 9999px;
             white-space: nowrap;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
         }
 
         .wizard-progress {
-            height: 4px;
-            background: #e5e7eb;
-            border-radius: 2px;
-            margin-bottom: 24px;
+            height: 6px;
+            background: #f1f5f9;
+            border-radius: 9999px;
+            margin-bottom: 16px;
             overflow: hidden;
         }
 
         .wizard-progress-bar {
             height: 100%;
-            background: #6366f1;
-            border-radius: 2px;
-            transition: width 0.3s ease;
+            background: linear-gradient(90deg, #6366f1, #3b82f6);
+            border-radius: 9999px;
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
         }
 
         .wizard-step-content {
             min-height: 220px;
+            color: #334155;
         }
 
         .wizard-status {
             min-height: 20px;
             font-size: 0.875rem;
             margin-top: 10px;
+            font-weight: 500;
         }
 
         .wizard-footer {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 20px;
+            margin-top: 12px;
+            padding-top: 16px;
+            border-t: 1px solid #e2e8f0;
             gap: 12px;
         }
 
         .wizard-btn {
             padding: 10px 20px;
-            border: none;
-            border-radius: 6px;
+            border: 1px solid transparent;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 15px;
-            font-weight: 500;
+            font-weight: 600;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        .wizard-btn-cancel { background-color: #f3f4f6; color: #374151; }
-        .wizard-btn-cancel:hover { background-color: #e5e7eb; }
-        .wizard-btn-back { background-color: #f3f4f6; color: #374151; }
-        .wizard-btn-back:hover { background-color: #e5e7eb; }
-        .wizard-btn-next { background-color: #6366f1; color: white; }
-        .wizard-btn-next:hover { background-color: #4f46e5; }
-        .wizard-btn-next:disabled { opacity: 0.5; cursor: not-allowed; }
+        .wizard-btn-cancel {
+            background-color: #f8fafc;
+            color: #475569;
+            border-color: #e2e8f0;
+        }
+        .wizard-btn-cancel:hover {
+            background-color: #f1f5f9;
+            color: #1e293b;
+            border-color: #cbd5e1;
+        }
+
+        .wizard-btn-back {
+            background-color: #f8fafc;
+            color: #475569;
+            border-color: #e2e8f0;
+        }
+        .wizard-btn-back:hover {
+            background-color: #f1f5f9;
+            color: #1e293b;
+            border-color: #cbd5e1;
+        }
+
+        .wizard-btn-next {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: #ffffff;
+            box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
+        }
+        .wizard-btn-next:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4f46e5, #4338ca);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 14px rgba(99, 102, 241, 0.4);
+        }
+        .wizard-btn-next:active:not(:disabled) {
+            transform: translateY(0);
+        }
+        .wizard-btn-next:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
 
         .wizard-option-card {
             display: flex;
             align-items: flex-start;
             gap: 12px;
             padding: 16px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
             cursor: pointer;
-            margin-bottom: 10px;
-            transition: border-color 0.15s, background-color 0.15s;
+            margin-bottom: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            background-color: #ffffff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+        }
+
+        .wizard-option-card:hover {
+            border-color: #cbd5e1;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         }
 
         .wizard-option-card.selected {
             border-color: #6366f1;
             background-color: #f5f3ff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.12);
         }
 
         .wizard-field-label {
             display: block;
             font-weight: 600;
-            color: #374151;
+            color: #334155;
             margin-bottom: 6px;
+            font-size: 0.95rem;
         }
 
         .wizard-input {
             width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
+            padding: 10px 14px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
             font-size: 1rem;
             box-sizing: border-box;
+            transition: all 0.15s ease-in-out;
+            color: #1e293b;
         }
 
         .wizard-input:focus {
             outline: none;
             border-color: #6366f1;
-            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
         }
 
-        .wizard-input-hint { font-size: 0.8rem; color: #6b7280; margin-top: 4px; }
-        .wizard-input-number { font-size: 1.5rem; text-align: center; }
+        .wizard-input-hint {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 4px;
+        }
+        
+        .wizard-input-number {
+            font-size: 1.5rem;
+            text-align: center;
+            font-weight: 700;
+            color: #4f46e5;
+        }
 
         .wizard-scan-opt {
             display: flex;
             align-items: flex-start;
             gap: 10px;
-            padding: 12px 14px;
-            border: 2px solid #e5e7eb;
-            border-radius: 6px;
+            padding: 14px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
             cursor: pointer;
             flex: 1;
-            transition: border-color 0.15s, background-color 0.15s;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            background-color: #ffffff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+        }
+
+        .wizard-scan-opt:hover {
+            border-color: #cbd5e1;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
         }
 
         .wizard-scan-opt.selected {
             border-color: #6366f1;
             background-color: #f5f3ff;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.12);
+        }
+
+        .wizard-menu-item-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .wizard-menu-item-row:hover {
+            background: #f5f3ff;
+            border-color: #a5b4fc;
         }
     </style>
 </head>
@@ -832,6 +936,11 @@
 
     <script>
 
+        // --- Pre-warm SpeechSynthesis Voices ---
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.getVoices();
+        }
+
         // Password visibility toggle function
         function togglePasswordVisibility(inputId, button) {
             const input = document.getElementById(inputId);
@@ -978,7 +1087,7 @@
         async function downloadImageLibrary(token, aacUserId) {
             try {
                 // Don't update loading status - parent shows "Loading user data..."
-                const LIBRARY_SCHEMA_VERSION = 3;
+                const LIBRARY_SCHEMA_VERSION = 7;
                 
                 // Check if library is already downloaded and fresh
                 const db = await initImageLibraryDB();
@@ -1143,6 +1252,10 @@
                     const aliases = Array.isArray(candidate.aliases) ? candidate.aliases.map(normalizeSearchText) : [];
                     const terms = Array.isArray(candidate.search_terms) ? candidate.search_terms.map(normalizeSearchText) : [];
                     let score = 0;
+                    // Exact label match bonus ensures generic-image "good" beats mascot-image "good day":
+                    // generic+exact (~16475) must exceed correct-mascot+partial (~11015).
+                    if (subconcept === normalizedQuery) score += 15000;
+                    if (concept === normalizedQuery) score += 15000;
                     if (subconcept === normalizedQuery) score += 240;
                     if (concept === normalizedQuery) score += 220;
                     if (tags.includes(normalizedQuery)) score += 200;
@@ -1158,6 +1271,14 @@
                     if (tags.some(t => t.includes(normalizedQuery))) score += 25;
                     if (aliases.some(t => t.includes(normalizedQuery))) score += 20;
                     if (terms.some(t => t.includes(normalizedQuery))) score += 15;
+                    // Mascot scoring: dominant over text score so wrong-mascot images never beat generic.
+                    // Matching mascot: +10000, wrong mascot: -10000, generic (no mascot): 0.
+                    const activeMascot = window.currentMascot || '';
+                    const imgMascot = candidate.mascot || '';
+                    if (activeMascot) {
+                        if (imgMascot === activeMascot) score += 10000;
+                        else if (imgMascot && imgMascot !== activeMascot) score -= 10000;
+                    }
                     return score;
                 };
 
@@ -1192,12 +1313,12 @@
                 for (const variation of searchVariations) {
                     const normalizedVariation = normalizeSearchText(variation);
                     if (!normalizedVariation) continue;
-                    const request = searchIndex.getAll(normalizedVariation, 20);
+                    const request = searchIndex.getAll(normalizedVariation);
                     const candidates = await new Promise((resolve, reject) => {
                         request.onsuccess = () => resolve(request.result);
                         request.onerror = () => reject(request.error);
                     });
-                    
+
                     const bestUrl = pickBestImageCandidate(candidates, searchText);
                     if (bestUrl) {
                         return bestUrl;
@@ -1221,44 +1342,78 @@
                 if (!imageLibraryDB) {
                     imageLibraryDB = await initImageLibraryDB();
                 }
-                
+
+                const normalizeText = (t) => String(t || '').toLowerCase().replace(/[.,!?;:\"'()\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
+
+                // Shared mascot-aware scorer (mirrors searchLocalImageLibrary above)
+                const scoreCandidate = (candidate, normalizedQuery) => {
+                    if (!candidate || !candidate.image_url) return -1;
+                    const concept    = normalizeText(candidate.concept || '');
+                    const subconcept = normalizeText(candidate.subconcept || '');
+                    const tags  = (candidate.tags || []).map(normalizeText);
+                    const terms = (candidate.search_terms || []).map(normalizeText);
+                    let score = 0;
+                    // Exact label match bonus ensures generic-image "good" beats mascot-image "good day":
+                    // generic+exact (~16475) must exceed correct-mascot+partial (~11015).
+                    if (subconcept === normalizedQuery) score += 15000;
+                    if (concept    === normalizedQuery) score += 15000;
+                    if (subconcept === normalizedQuery) score += 240;
+                    if (concept    === normalizedQuery) score += 220;
+                    if (tags.includes(normalizedQuery))  score += 200;
+                    if (terms.includes(normalizedQuery)) score += 160;
+                    if (subconcept.startsWith(normalizedQuery)) score += 90;
+                    if (concept.startsWith(normalizedQuery))    score += 80;
+                    if (subconcept.includes(normalizedQuery))   score += 35;
+                    if (concept.includes(normalizedQuery))      score += 30;
+                    // Mascot scoring: dominant over text score so wrong-mascot images never beat generic.
+                    // Matching mascot: +10000, wrong mascot: -10000, generic (no mascot): 0.
+                    const activeMascot = window.currentMascot || '';
+                    const imgMascot    = candidate.mascot || '';
+                    if (activeMascot) {
+                        if (imgMascot === activeMascot) score += 10000;
+                        else if (imgMascot && imgMascot !== activeMascot) score -= 10000;
+                    }
+                    return score;
+                };
+
                 const results = new Map();
                 const transaction = imageLibraryDB.transaction(['images'], 'readonly');
                 const store = transaction.objectStore('images');
                 const searchIndex = store.index('search_terms');
-                
-                // Search all texts in parallel
+
+                // Search all texts in parallel — fetch ALL candidates per term and pick best
                 const searchPromises = searchTexts.map(async (searchText) => {
-                    const normalizedText = searchText.trim().toLowerCase();
+                    const normalizedText = normalizeText(searchText);
                     const searchVariations = [
                         normalizedText,
-                        normalizedText.charAt(0).toUpperCase() + normalizedText.slice(1),
-                        searchText.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-                        searchText.toUpperCase()
-                    ];
-                    
+                        searchText.trim().toLowerCase(),
+                        searchText.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').toLowerCase(),
+                    ].filter((v, i, a) => v && a.indexOf(v) === i); // dedupe
+
+                    let bestCandidate = null;
+                    let bestScore = -1;
+
                     for (const variation of searchVariations) {
-                        const request = searchIndex.get(variation.toLowerCase());
-                        const result = await new Promise((resolve, reject) => {
+                        const request = searchIndex.getAll(normalizeText(variation));
+                        const candidates = await new Promise((resolve, reject) => {
                             request.onsuccess = () => resolve(request.result);
-                            request.onerror = () => reject(request.error);
+                            request.onerror  = () => reject(request.error);
                         });
-                        
-                        if (result && result.image_url) {
-                            results.set(searchText, result.image_url);
-                            return; // Found match, move to next search text
+                        for (const c of (candidates || [])) {
+                            const s = scoreCandidate(c, normalizedText);
+                            if (s > bestScore) { bestScore = s; bestCandidate = c; }
                         }
+                        if (bestCandidate) break; // stop at first variation that found candidates
                     }
-                    
-                    // No match found
-                    results.set(searchText, null);
+
+                    results.set(searchText, bestCandidate?.image_url || null);
                 });
-                
+
                 await Promise.all(searchPromises);
-                
+
                 console.log(`📦 Batch search complete: ${results.size} lookups, ${Array.from(results.values()).filter(v => v !== null).length} found`);
                 return results;
-                
+
             } catch (error) {
                 console.error('Error batch searching local library:', error);
                 return new Map();
@@ -1300,62 +1455,14 @@
             console.log('📚 Step 1: Downloading image library...');
             await downloadImageLibrary(token, aacUserId);
             
-            // Initialize cache if needed
-            if (!window.symbolImageCache) {
-                window.symbolImageCache = new Map();
-            }
+            // Bypassing slow sequential server batch queries to make login instant.
+            // All images will be resolved directly from IndexedDB during tap board initial load.
+            console.log('✅ Local IndexedDB library is ready. Bypassing server batch queries.');
             
-            // Load existing cache from localStorage
-            try {
-                const cached = localStorage.getItem('tap_pictogram_cache');
-                if (cached) {
-                    const cacheData = JSON.parse(cached);
-                    window.symbolImageCache = new Map(cacheData);
-                    console.log(`📚 Loaded ${window.symbolImageCache.size} cached images from localStorage`);
-                } else {
-                    console.log('📚 No existing cache found in localStorage');
-                }
-            } catch (error) {
-                console.error('Error loading cache from localStorage:', error);
-            }
-            
-            const currentCacheSize = window.symbolImageCache.size;
-            console.log(`🔥 Starting cache warm-up with ${currentCacheSize} existing images...`);
-            
-            // Always warm up cache to ensure we have fresh data
-            // (Remove MIN_CACHE_SIZE check for now to debug)
-            
-            // Phase 1: Common AAC words
-            if (splashText) splashText.textContent = 'Loading common words...';
-            updateLoadingProgress(20, 100); // Library done = 20%
-            await warmUpCommonWords(token, aacUserId);
-            console.log(`📦 Cache after common words: ${window.symbolImageCache.size} images`);
-            
-            // Phase 2: User's tap config words
-            if (splashText) splashText.textContent = 'Loading your configuration...';
-            updateLoadingProgress(60, 100); // Common words done = 60%
-            await warmUpTapConfig(token, aacUserId);
-            console.log(`📦 Cache after tap config: ${window.symbolImageCache.size} images`);
-            
-            // Phase 3: Cached phrase buttons
-            if (splashText) splashText.textContent = 'Loading saved phrases...';
-            updateLoadingProgress(80, 100); // Tap config done = 80%
-            await warmUpCachedPhrases(token, aacUserId);
-            console.log(`✅ Cache ready: ${window.symbolImageCache.size} images`);
-            
-            // Save to localStorage
-            if (splashText) splashText.textContent = 'Finalizing...';
             updateLoadingProgress(100, 100); // All done = 100%
-            try {
-                const cacheData = Array.from(window.symbolImageCache.entries());
-                localStorage.setItem('tap_pictogram_cache', JSON.stringify(cacheData));
-                console.log(`💾 Saved ${window.symbolImageCache.size} images to localStorage (tap_pictogram_cache)`);
-            } catch (error) {
-                console.error('Error saving cache:', error);
-            }
             
             // Brief delay to show 100% before hiding
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await new Promise(resolve => setTimeout(resolve, 150));
             
             // Hide loading overlay
             if (splashScreen) {
@@ -1663,6 +1770,51 @@
                     window.location.href = 'gridpage.html?page=home';
                     return;
                 }
+
+                // Check if user has logged in before / completed wizard
+                const initSettingsResponse = await fetch('/api/settings', {
+                    method: 'GET',
+                    headers: buildAuthHeadersWithAdminContext(token, aacUserId, true)
+                });
+                
+                let settings = null;
+                if (initSettingsResponse.ok) {
+                    settings = await initSettingsResponse.json();
+                    if (!settings.hasLoggedIn) {
+                        console.log("User has not configured/logged in yet. Redirecting to wizard.");
+                        loadingIndicator.style.display = 'none';
+                        
+                        // Ensure profiles are loaded and displayed so setup wizard can read selected profile
+                        if (!window.currentUserProfiles || window.currentUserProfiles.length === 0) {
+                            try {
+                                const profilesRes = await fetch(`/api/account/users`, {
+                                    method: 'GET',
+                                    headers: {
+                                        'Authorization': `Bearer ${token}`,
+                                        'Content-Type': 'application/json'
+                                    }
+                                });
+                                if (profilesRes.ok) {
+                                    window.currentUserProfiles = await profilesRes.json();
+                                }
+                            } catch (e) {
+                                console.error("Error loading profiles for wizard redirect:", e);
+                            }
+                        }
+                        
+                        if (window.currentUserProfiles && window.currentUserProfiles.length > 0) {
+                            showProfileSelection(window.currentUserProfiles, token);
+                            const dropdown = document.getElementById('userDropdown');
+                            if (dropdown) {
+                                dropdown.value = aacUserId;
+                            }
+                        }
+                        
+                        // Automatically open setup wizard!
+                        await openSetupWizard();
+                        return;
+                    }
+                }
                 
                 // Check interface preference FIRST to know if we need to warm cache
                 const interfaceResponse = await fetch('/api/interface-preference', {
@@ -1690,7 +1842,7 @@
                 });
                 
                 let shouldShowMood = false;
-                let settings = null;
+                settings = null;
                 if (settingsResponse.ok) {
                     settings = await settingsResponse.json();
                     shouldShowMood = settings.enableMoodSelection === true;
@@ -3039,6 +3191,7 @@ registerForm.addEventListener('submit', async (e) => {
                             sessionStorage.setItem('firebaseIdToken', idToken);
                             sessionStorage.setItem('currentAacUserId', defaultUserId);
                             sessionStorage.setItem('selectedDisplayName', defaultUser.display_name);
+                            showProfileSelection(userProfiles, idToken);
                             await redirectToPreferredInterface();
                             return;
                         }
@@ -3160,7 +3313,7 @@ registerForm.addEventListener('submit', async (e) => {
 
                 // Fetch favorites with timeout
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+                const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
                 
                 const response = await authFetch('/api/user-current-favorites', {
                     signal: controller.signal
@@ -3257,9 +3410,10 @@ registerForm.addEventListener('submit', async (e) => {
                     }
                 }
             } catch (error) {
-                console.error('Error checking scheduled favorites on auth:', error);
                 if (error.name === 'AbortError') {
-                    console.log('Favorites check timed out, proceeding with login...');
+                    console.log('⏱️ Favorites check timed out, proceeding with login...');
+                } else {
+                    console.error('Error checking scheduled favorites on auth:', error);
                 }
             }
             console.log('Scheduled favorites check complete, proceeding...');
@@ -3286,20 +3440,50 @@ registerForm.addEventListener('submit', async (e) => {
             displayName: null,
             ttsVoices: [],
             interfaceMode: 'tap',
+            mascot: 'buddy',
+            userLanguage: 'en-US',
             wakeWordInterjection: '',
             wakeWordName: '',
             llmOptions: 12,
             freestyleOptions: 4,
             partnerLanguage: 'en-US',
             partnerVoice: '',
+            voiceStyle: 'adult',
             gridColumns: 6,
             scanMode: 'auto',
             waitForSwitch: false,
-            scanDelay: 800
+            scanDelay: 800,
+            wordsRows: 3,
+            phrasesRows: 0,
+            useHybridPages: false,
+            tapDynamicRows: 1,
+            useBravoBuild: true,
+            defaultButtonAction: 'do_nothing',
+            // menuItemVisibility: { sourceButtonId: true/false } — true = visible
+            menuItemVisibility: null,   // null = not yet loaded; populated in openSetupWizard
+            menuItemsLoaded: []         // ordered list {id, label} for the step UI
         };
 
+        // Menu items the admin can show/hide (system items like Spell/Games are always visible)
+        const WIZARD_MENU_ITEMS = [
+            { id: 'greetings_btn', label: 'Greetings' },
+            { id: 'help_btn',      label: 'Help' },
+            { id: 'requests_btn',  label: 'Questions' },
+            { id: 'people_btn',    label: 'People' },
+            { id: 'places_btn',    label: 'Places' },
+            { id: 'things_btn',    label: 'Things' },
+            { id: 'actions_btn',   label: 'Actions' },
+            { id: 'describe_btn',  label: 'Describe' },
+            { id: 'animals_btn',   label: 'Animals' },
+            { id: 'weather_btn',   label: 'Weather' },
+            { id: 'numbers_btn',   label: 'Numbers' },
+            { id: 'dates_times_btn', label: 'Dates & Times' },
+            { id: 'ask_btn',       label: 'Ask' },
+        ];
+
         function wizardTotalSteps() {
-            return wizardState.interfaceMode === 'scan' ? 8 : 7;
+            // tap: 8 steps (mascot added as step 2); scan: 9 steps
+            return wizardState.interfaceMode === 'tap' ? 8 : 9;
         }
 
         async function openSetupWizard() {
@@ -3323,9 +3507,10 @@ registerForm.addEventListener('submit', async (e) => {
                 const headers = { 'Authorization': `Bearer ${window.currentIdToken}`, 'X-User-ID': wizardState.userId };
                 if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
 
-                const [settingsRes, voicesRes] = await Promise.all([
+                const [settingsRes, voicesRes, tapConfigRes] = await Promise.all([
                     fetch('/api/settings', { headers }),
-                    fetch('/api/tts-voices')
+                    fetch('/api/tts-voices'),
+                    fetch('/api/tap-interface/config', { headers })
                 ]);
 
                 if (settingsRes.ok) {
@@ -3337,14 +3522,56 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.freestyleOptions = s.FreestyleOptions !== undefined ? s.FreestyleOptions : 4;
                     wizardState.partnerLanguage = s.defaultPartnerLanguage || 'en-US';
                     wizardState.partnerVoice = s.defaultPartnerVoice || s.selected_tts_voice_name || '';
+                    wizardState.voiceStyle = s.voice_style || 'adult';
                     wizardState.gridColumns = s.gridColumns !== undefined ? s.gridColumns : 6;
                     wizardState.scanMode = s.scanMode || 'auto';
                     wizardState.waitForSwitch = s.waitForSwitchToScan || false;
                     wizardState.scanDelay = s.scanDelay || 800;
+                    wizardState.wordsRows = s.tapWordsRows !== undefined ? s.tapWordsRows : 3;
+                    wizardState.phrasesRows = s.tapPhrasesRows !== undefined ? s.tapPhrasesRows : 0;
+                    wizardState.useHybridPages = s.useHybridPages !== undefined ? s.useHybridPages : false;
+                    wizardState.tapDynamicRows = s.tapDynamicRows !== undefined ? s.tapDynamicRows : 1;
+                    wizardState.useBravoBuild = s.useBravoBuild !== undefined ? s.useBravoBuild : true;
+                    wizardState.defaultButtonAction = s.defaultButtonAction || (s.useBravoBuild ? 'use_ai' : 'do_nothing');
+                    wizardState.userLanguage = s.userLanguage || 'en-US';
                 }
 
                 if (voicesRes.ok) {
                     wizardState.ttsVoices = await voicesRes.json();
+                }
+
+                // Seed menu visibility and build tree from actual boards_menu in tap config
+                wizardState.menuItemVisibility = {};
+                wizardState.menuItemsTree = [];
+                if (tapConfigRes && tapConfigRes.ok) {
+                    try {
+                        const tapCfg = await tapConfigRes.json();
+                        function buildWizardMenuTree(items) {
+                            return (items || []).filter(item => !item.special_function).map(item => ({
+                                source_button_id: item.source_button_id || '',
+                                label: item.label || '',
+                                hidden: !!item.hidden,
+                                children: buildWizardMenuTree(item.children)
+                            }));
+                        }
+                        function seedVisibility(items) {
+                            items.forEach(item => {
+                                if (item.source_button_id) {
+                                    wizardState.menuItemVisibility[item.source_button_id] = !item.hidden;
+                                }
+                                if (item.children && item.children.length) seedVisibility(item.children);
+                            });
+                        }
+                        wizardState.menuItemsTree = buildWizardMenuTree(tapCfg.boards_menu || []);
+                        seedVisibility(wizardState.menuItemsTree);
+                    } catch (_) {}
+                }
+                // Fall back to WIZARD_MENU_ITEMS if tree could not be loaded
+                if (!wizardState.menuItemsTree.length) {
+                    WIZARD_MENU_ITEMS.forEach(item => {
+                        wizardState.menuItemVisibility[item.id] = true;
+                        wizardState.menuItemsTree.push({ source_button_id: item.id, label: item.label, hidden: false, children: [] });
+                    });
                 }
 
                 setWizardStatus('', false);
@@ -3419,6 +3646,37 @@ registerForm.addEventListener('submit', async (e) => {
                 });
 
             } else if (step === 2) {
+                titleEl.textContent = 'Choose a Mascot';
+                const mascots = [
+                    { value: 'bobby',  label: 'Bobby',  desc: 'Boy',  img: '/static/images/mascot_bobby.png' },
+                    { value: 'bonnie', label: 'Bonnie', desc: 'Girl', img: '/static/images/mascot_bonnie.png' },
+                    { value: 'buddy',  label: 'Buddy',  desc: 'Dog',  img: '/static/images/mascot_buddy.png' },
+                ];
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:20px;">Select the mascot character shown in button images throughout the app.</p>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
+                        ${mascots.map(m => `
+                        <div class="wizard-mascot-card" data-mascot="${m.value}" style="
+                            cursor:pointer;border-radius:14px;border:3px solid ${wizardState.mascot === m.value ? '#6366f1' : 'transparent'};
+                            background:${wizardState.mascot === m.value ? '#eef2ff' : '#f9fafb'};
+                            padding:12px;text-align:center;width:110px;transition:all .15s;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+                            <img src="${m.img}" alt="${m.label}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;margin-bottom:8px;">
+                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">${m.label}</div>
+                            <div style="font-size:0.78rem;color:#6b7280;">${m.desc}</div>
+                        </div>`).join('')}
+                    </div>`;
+                contentEl.querySelectorAll('.wizard-mascot-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        wizardState.mascot = card.dataset.mascot;
+                        contentEl.querySelectorAll('.wizard-mascot-card').forEach(c => {
+                            const active = c.dataset.mascot === wizardState.mascot;
+                            c.style.borderColor = active ? '#6366f1' : 'transparent';
+                            c.style.background = active ? '#eef2ff' : '#f9fafb';
+                        });
+                    });
+                });
+
+            } else if (step === 3) {
                 titleEl.textContent = 'Wake Word';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:16px;">Configure the wake word that activates the app.</p>
@@ -3433,89 +3691,297 @@ registerForm.addEventListener('submit', async (e) => {
                         <p class="wizard-input-hint">The name spoken to wake the app</p>
                     </div>`;
 
-            } else if (step === 3) {
-                titleEl.textContent = 'Button Size';
-                contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:16px;">Adjust how many columns are shown in the grid. Fewer columns = larger buttons.</p>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                        <label class="wizard-field-label" style="margin:0;">Grid Columns</label>
-                        <span id="wizardGridColumnsVal" style="font-size:1.5rem;font-weight:700;color:#6366f1;">${wizardState.gridColumns}</span>
-                    </div>
-                    <input id="wizardGridColumns" type="range" min="2" max="18" value="${wizardState.gridColumns}" style="width:100%;accent-color:#6366f1;">
-                    <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:#6b7280;margin-top:4px;">
-                        <span>2 (Large)</span><span>18 (Small)</span>
-                    </div>`;
-                document.getElementById('wizardGridColumns').addEventListener('input', function() {
-                    document.getElementById('wizardGridColumnsVal').textContent = this.value;
-                    wizardState.gridColumns = parseInt(this.value) || 6;
-                });
-
             } else if (step === 4) {
-                titleEl.textContent = 'Number of AI Options';
-                const aiIsTap = wizardState.interfaceMode === 'tap';
-                const aiCols = wizardState.gridColumns;
-                const aiRec = aiCols - 1;
-                const aiCallout = aiIsTap
-                    ? `<div style="background:#eff6ff;border-left:3px solid #6366f1;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#1e40af;">
-                           <strong>Tap interface</strong> — Full-phrase options shown at the top of each page.<br>
-                           The <strong>Something Else</strong> button occupies one slot, so with <strong>${aiCols} columns</strong> we recommend
-                           <strong>${aiRec} AI options</strong> (${aiRec} + Something Else = ${aiCols} buttons).
-                       </div>`
-                    : `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
-                           <strong>Scan interface</strong> — Defines how many options are shown on each Scan page.
-                       </div>`;
-                contentEl.innerHTML = `
-                    ${aiCallout}
-                    <label class="wizard-field-label">AI Options (0–50)</label>
-                    <input id="wizardLlmOptions" class="wizard-input wizard-input-number" type="number" min="0" max="50" value="${wizardState.llmOptions}">
-                    <p class="wizard-input-hint">Set to 0 to disable AI-generated options</p>`;
+                if (wizardState.interfaceMode === 'tap') {
+                    titleEl.textContent = 'Button Layout';
+                    contentEl.innerHTML = `
+                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Buttons per Row</h4>
+                            <div style="display:flex;gap:16px;align-items:center;">
+                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">How many buttons appear in each row. Fewer = larger buttons.</p>
+                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Columns (2–12)</label>
+                                    <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
+                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;line-height:1.4;">Split into Static (fixed) and Dynamic (AI-generated, optional). Set Dynamic to 0 for static-only.</p>
+                            <div style="display:flex;gap:12px;align-items:flex-end;">
+                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Total (1–7)</label>
+                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                </div>
+                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Static</label>
+                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;background:#f3f4f6;color:#374151;border-color:#d1d5db;cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
+                                </div>
+                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Dynamic</label>
+                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Phrases Rows</h4>
+                            <div style="display:flex;gap:16px;align-items:center;">
+                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">Rows for AI-generated, fully-formed phrases for faster communication. Set to 0 to disable.</p>
+                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
+                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Rows (0–10)</label>
+                                    <input id="wizardPhrasesRows" class="wizard-input wizard-input-number" type="number" min="0" max="10" value="${wizardState.phrasesRows !== undefined ? wizardState.phrasesRows : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                </div>
+                            </div>
+                        </div>`;
+
+                    document.getElementById('wizardGridColumns').addEventListener('change', function() {
+                        wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(this.value) || 6));
+                    });
+
+                    const wordsInput = document.getElementById('wizardWordsRows');
+                    const dynamicInput = document.getElementById('wizardTapDynamicRows');
+                    const staticDisplay = document.getElementById('wizardStaticRowsDisplay');
+                    function updateRows() {
+                        let total = parseInt(wordsInput.value, 10) || 3;
+                        if (total < 1) total = 1;
+                        if (total > 7) total = 7;
+                        wordsInput.value = total;
+                        let dynamic = parseInt(dynamicInput.value, 10) || 0;
+                        if (dynamic < 0) dynamic = 0;
+                        if (dynamic > total) dynamic = total;
+                        dynamicInput.value = dynamic;
+                        dynamicInput.max = total;
+                        staticDisplay.value = total - dynamic;
+                        wizardState.wordsRows = total;
+                        wizardState.tapDynamicRows = dynamic;
+                        wizardState.useHybridPages = dynamic > 0;
+                    }
+                    wordsInput.addEventListener('input', updateRows);
+                    dynamicInput.addEventListener('input', updateRows);
+                    wordsInput.addEventListener('change', updateRows);
+                    dynamicInput.addEventListener('change', updateRows);
+                    updateRows();
+                } else {
+                    titleEl.textContent = 'Button Size';
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Adjust how many buttons are shown per row. Fewer buttons = larger buttons.</p>
+                        <label class="wizard-field-label">Buttons per Row</label>
+                        <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}">`;
+                    document.getElementById('wizardGridColumns').addEventListener('change', function() {
+                        wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(this.value) || 6));
+                    });
+                }
 
             } else if (step === 5) {
-                titleEl.textContent = 'Number of Freestyle Options';
-                const fsIsTap = wizardState.interfaceMode === 'tap';
-                const fsCols = wizardState.gridColumns;
-                const fsRows = 3;
-                const fsRec = (fsCols * fsRows) - 1;
-                const fsCallout = fsIsTap
-                    ? `<div style="background:#eff6ff;border-left:3px solid #6366f1;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#1e40af;">
-                           <strong>Tap interface</strong> — Word options displayed on the Freestyle page.<br>
-                           The <strong>Something Else</strong> button occupies one slot. With <strong>${fsCols} columns × ${fsRows} rows</strong>,
-                           we recommend <strong>${fsRec} options</strong> (${fsCols} × ${fsRows} − 1 = ${fsRec}).
-                       </div>`
-                    : `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
-                           <strong>Scan interface</strong> — Defines how many options are shown on the Freestyle page.
-                       </div>`;
-                contentEl.innerHTML = `
-                    ${fsCallout}
-                    <label class="wizard-field-label">Freestyle Options (1–50)</label>
-                    <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 5 = Button Action (was step 4)
+                    titleEl.textContent = 'Button Action';
+                    const actionVal = wizardState.defaultButtonAction || 'do_nothing';
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:12px;font-weight:600;">Configure default action after a button is selected.</p>
+                        <p style="font-size:0.875rem;color:#4b5563;margin-bottom:16px;line-height:1.4;">
+                            The Action setting determines what happens immediately after a button in the dynamic rows (or generated options) is selected.
+                        </p>
+                        <div style="display:flex; flex-direction:column; gap:12px;">
+                            <label class="wizard-option-card${actionVal === 'do_nothing' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
+                                <input type="radio" name="wizardButtonAction" value="do_nothing" ${actionVal === 'do_nothing' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                                <div><div style="font-weight:600;color:#374151;">Do Nothing</div><div style="font-size:0.8rem;color:#6b7280;">Keep the screen as is. No screen changes occur after a selection.</div></div>
+                            </label>
+                            <label class="wizard-option-card${actionVal === 'navigate_home' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
+                                <input type="radio" name="wizardButtonAction" value="navigate_home" ${actionVal === 'navigate_home' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                                <div><div style="font-weight:600;color:#374151;">Return Home</div><div style="font-size:0.8rem;color:#6b7280;">Navigate back to the Home board after making a selection.</div></div>
+                            </label>
+                            <label class="wizard-option-card${actionVal === 'use_ai' ? ' selected' : ''}" style="display:flex; align-items:center; gap:10px; padding:12px; border:1px solid #d1d5db; border-radius:6px; cursor:pointer;">
+                                <input type="radio" name="wizardButtonAction" value="use_ai" ${actionVal === 'use_ai' ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                                <div><div style="font-weight:600;color:#374151;">Use AI to Generate next options</div><div style="font-size:0.8rem;color:#6b7280;">Use AI to dynamically generate and display contextually relevant follow-up options.</div></div>
+                            </label>
+                        </div>`;
+                    contentEl.querySelectorAll('.wizard-option-card').forEach(card => {
+                        card.addEventListener('click', () => {
+                            const radio = card.querySelector('input[type=radio]');
+                            if (radio) {
+                                radio.checked = true;
+                                wizardState.defaultButtonAction = radio.value;
+                                wizardState.useBravoBuild = radio.value === 'use_ai';
+                                contentEl.querySelectorAll('.wizard-option-card').forEach(c => {
+                                    c.classList.toggle('selected', c.querySelector('input[type=radio]')?.checked);
+                                });
+                            }
+                        });
+                    });
+                } else {
+                    titleEl.textContent = 'Number of AI Options';
+                    contentEl.innerHTML = `
+                        <div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
+                               <strong>Scan interface</strong> — Defines how many options are shown on each Scan page.
+                           </div>
+                        <label class="wizard-field-label">AI Options (0–50)</label>
+                        <input id="wizardLlmOptions" class="wizard-input wizard-input-number" type="number" min="0" max="50" value="${wizardState.llmOptions}">
+                        <p class="wizard-input-hint">Set to 0 to disable AI-generated options</p>`;
+                }
 
             } else if (step === 6) {
-                titleEl.textContent = 'Default Partner Language';
-                const langOpts = WIZARD_LANGUAGES.map(l =>
-                    `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
-                ).join('');
-                contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:16px;">Select the default language for communication partner responses.</p>
-                    <label class="wizard-field-label">Partner Language</label>
-                    <select id="wizardPartnerLanguage" class="wizard-input">${langOpts}</select>`;
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 6 = Menu Options
+                    titleEl.textContent = 'Menu Options';
+                    const vis = wizardState.menuItemVisibility || {};
+                    const tree = wizardState.menuItemsTree || [];
+
+                    function renderMenuRows(items, depth) {
+                        return items.map(item => {
+                            const sid = item.source_button_id;
+                            const checked = vis[sid] !== false;
+                            const pl = 14 + depth * 22;
+                            const childRows = item.children && item.children.length
+                                ? renderMenuRows(item.children, depth + 1) : '';
+                            return `<label class="wizard-menu-item-row" style="padding-left:${pl}px;${depth > 0 ? 'border-color:#f3f4f6;' : ''}">
+                                <input type="checkbox" class="wizard-menu-checkbox" data-id="${sid}" ${checked ? 'checked' : ''} style="width:17px;height:17px;accent-color:#6366f1;cursor:pointer;flex-shrink:0;">
+                                <span style="font-size:${depth === 0 ? '0.95' : '0.88'}rem;color:${depth === 0 ? '#111827' : '#374151'};font-weight:${depth === 0 ? 600 : 400};">${item.label}</span>
+                            </label>${childRows}`;
+                        }).join('');
+                    }
+
+                    const allSids = [];
+                    function collectSids(items) { items.forEach(i => { if (i.source_button_id) allSids.push(i.source_button_id); if (i.children) collectSids(i.children); }); }
+                    collectSids(tree);
+                    const allSelected = allSids.every(sid => vis[sid] !== false);
+
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:12px;">Choose which menu categories are available to the user. Deselected items will be hidden from the interface.</p>
+                        <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                            <button id="wizardMenuToggleAll" style="padding:6px 14px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:500;">${allSelected ? 'Deselect All' : 'Select All'}</button>
+                        </div>
+                        <div id="wizardMenuList" style="display:flex;flex-direction:column;gap:5px;max-height:52vh;overflow-y:auto;padding-right:4px;">
+                            ${renderMenuRows(tree, 0)}
+                        </div>`;
+
+                    document.getElementById('wizardMenuToggleAll').addEventListener('click', function() {
+                        const boxes = contentEl.querySelectorAll('.wizard-menu-checkbox');
+                        const anyUnchecked = [...boxes].some(cb => !cb.checked);
+                        boxes.forEach(cb => { cb.checked = anyUnchecked; });
+                        this.textContent = anyUnchecked ? 'Deselect All' : 'Select All';
+                    });
+                } else {
+                    titleEl.textContent = 'Freestyle Options';
+                    contentEl.innerHTML = `
+                        <div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:10px 12px;border-radius:4px;margin-bottom:14px;font-size:0.875rem;color:#166534;">
+                               <strong>Scan interface</strong> — Defines how many options are shown on the Freestyle page.
+                           </div>
+                        <label class="wizard-field-label">Freestyle Options (1–50)</label>
+                        <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
+                }
 
             } else if (step === 7) {
-                titleEl.textContent = 'Default Partner Voice';
-                contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:16px;">Select the voice for partner language text-to-speech.</p>
-                    <label class="wizard-field-label">Partner Voice</label>
-                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
-                        <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
-                            <option value="">-- Select a Voice --</option>
-                        </select>
-                        <button id="wizardTestVoiceBtn" style="padding:10px 16px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:0.9rem;font-weight:500;">&#9654; Test</button>
-                    </div>
-                    <div id="wizardVoiceTestStatus" style="min-height:18px;font-size:0.85rem;color:#6b7280;"></div>`;
-                wizardFillVoiceSelect();
-                document.getElementById('wizardTestVoiceBtn').addEventListener('click', wizardTestVoice);
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 7 = User Language
+                    titleEl.textContent = 'User Language';
+                    const langOpts6 = WIZARD_LANGUAGES.map(l =>
+                        `<option value="${l.value}"${wizardState.userLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                    ).join('');
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Select the primary language for the user. This is the language used for the buttons, interface labels, and the speech history bar.</p>
+                        <label class="wizard-field-label">User Language</label>
+                        <select id="wizardUserLanguage" class="wizard-input">${langOpts6}</select>`;
+                } else {
+                    titleEl.textContent = 'User Language';
+                    const langOpts = WIZARD_LANGUAGES.map(l =>
+                        `<option value="${l.value}"${wizardState.userLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                    ).join('');
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Select the primary language for the user. This is the language used for the buttons, interface labels, and the speech history bar.</p>
+                        <label class="wizard-field-label">User Language</label>
+                        <select id="wizardUserLanguage" class="wizard-input">${langOpts}</select>`;
+                }
 
             } else if (step === 8) {
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 8 = Partner Language & Voice — LAST TAP STEP
+                    titleEl.textContent = 'Default Partner Language & Voice';
+                    const langOpts7tap = WIZARD_LANGUAGES.map(l =>
+                        `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                    ).join('');
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Select the default language and text-to-speech voice for the communication partner responses.</p>
+                        <div style="margin-bottom:16px;">
+                            <label class="wizard-field-label">Partner Language</label>
+                            <select id="wizardPartnerLanguage" class="wizard-input">${langOpts7tap}</select>
+                        </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Age/Style</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="child" ${wizardState.voiceStyle === 'child' ? 'checked' : ''}> 👧 Child
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="adult" ${wizardState.voiceStyle !== 'child' ? 'checked' : ''}> 🧑 Adult
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="wizard-field-label">Voice</label>
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                                <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
+                                    <option value="">-- Select a Voice --</option>
+                                </select>
+                                <button id="wizardTestVoiceBtn" style="padding:10px 16px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:0.9rem;font-weight:500;">&#9654; Test</button>
+                            </div>
+                            <div id="wizardVoiceTestStatus" style="min-height:18px;font-size:0.85rem;color:#6b7280;"></div>
+                        </div>`;
+                    wizardFillVoiceSelect();
+                    document.getElementById('wizardTestVoiceBtn').addEventListener('click', wizardTestVoice);
+                    document.getElementById('wizardPartnerLanguage').addEventListener('change', function() {
+                        wizardState.partnerLanguage = this.value;
+                        wizardFillVoiceSelect();
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
+                } else {
+                    // scan step 7 = Partner Language & Voice
+                    titleEl.textContent = 'Default Partner Language & Voice';
+                    const langOpts7 = WIZARD_LANGUAGES.map(l =>
+                        `<option value="${l.value}"${wizardState.partnerLanguage === l.value ? ' selected' : ''}>${l.label}</option>`
+                    ).join('');
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:16px;">Select the default language and text-to-speech voice for the communication partner responses.</p>
+                        <div style="margin-bottom:16px;">
+                            <label class="wizard-field-label">Partner Language</label>
+                            <select id="wizardPartnerLanguage" class="wizard-input">${langOpts7}</select>
+                        </div>
+                        <div style="margin-bottom:12px;">
+                            <label class="wizard-field-label">Voice Age/Style</label>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="child" ${wizardState.voiceStyle === 'child' ? 'checked' : ''}> 👧 Child
+                                </label>
+                                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.9rem;">
+                                    <input type="radio" name="wizardVoiceStyle" value="adult" ${wizardState.voiceStyle !== 'child' ? 'checked' : ''}> 🧑 Adult
+                                </label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="wizard-field-label">Voice</label>
+                            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                                <select id="wizardPartnerVoice" class="wizard-input" style="flex:1;">
+                                    <option value="">-- Select a Voice --</option>
+                                </select>
+                                <button id="wizardTestVoiceBtn" style="padding:10px 16px;background:#6366f1;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;font-size:0.9rem;font-weight:500;">&#9654; Test</button>
+                            </div>
+                            <div id="wizardVoiceTestStatus" style="min-height:18px;font-size:0.85rem;color:#6b7280;"></div>
+                        </div>`;
+                    wizardFillVoiceSelect();
+                    document.getElementById('wizardTestVoiceBtn').addEventListener('click', wizardTestVoice);
+                    document.getElementById('wizardPartnerLanguage').addEventListener('change', function() {
+                        wizardState.partnerLanguage = this.value;
+                        wizardFillVoiceSelect();
+                    });
+                    document.querySelectorAll('input[name="wizardVoiceStyle"]').forEach(r => {
+                        r.addEventListener('change', function() { wizardState.voiceStyle = this.value; wizardFillVoiceSelect(); });
+                    });
+                }
+
+            } else if (step === 9) {
+                // scan only — tap mode ends at step 8
                 titleEl.textContent = 'Scanning Configuration';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:16px;">Configure scanning behavior for switch access.</p>
@@ -3575,16 +4041,32 @@ registerForm.addEventListener('submit', async (e) => {
             const voiceSelect = document.getElementById('wizardPartnerVoice');
             if (!voiceSelect) return;
             const langLower = wizardState.partnerLanguage.toLowerCase();
-            const filtered = wizardState.ttsVoices.filter(v =>
+            let voices = wizardState.ttsVoices.filter(v =>
                 (v.language_codes || []).some(c => c.toLowerCase() === langLower)
             );
+            // Apply child/adult filter — child = Azure curated voices, adult = Google voices
+            const style = wizardState.voiceStyle === 'child' ? 'child' : 'adult';
+            if (style === 'child') {
+                const childVoices = voices.filter(v => v.provider === 'azure');
+                if (childVoices.length > 0) voices = childVoices;
+            } else {
+                const adultVoices = voices.filter(v => v.provider === 'google');
+                if (adultVoices.length > 0) voices = adultVoices;
+            }
             voiceSelect.innerHTML = '<option value="">-- Select a Voice --</option>';
-            filtered.forEach(v => {
+            voices.forEach(v => {
                 const opt = document.createElement('option');
                 opt.value = v.name;
                 opt.textContent = `${v.name} (${(v.ssml_gender || 'unknown').toLowerCase()})`;
                 voiceSelect.appendChild(opt);
             });
+            // Preserve currently-saved voice even if filtered out
+            if (wizardState.partnerVoice && !voices.some(v => v.name === wizardState.partnerVoice)) {
+                const opt = document.createElement('option');
+                opt.value = wizardState.partnerVoice;
+                opt.textContent = `${wizardState.partnerVoice} (currently selected)`;
+                voiceSelect.appendChild(opt);
+            }
             if (wizardState.partnerVoice) voiceSelect.value = wizardState.partnerVoice;
         }
 
@@ -3596,6 +4078,16 @@ registerForm.addEventListener('submit', async (e) => {
             if (!voiceSelect || !voiceSelect.value) {
                 if (statusEl) { statusEl.textContent = 'Please select a voice first.'; statusEl.style.color = '#ef4444'; }
                 return;
+            }
+
+            // Synchronously unlock browser speech synthesis inside user gesture before the async fetch
+            if (window.speechSynthesis) {
+                try {
+                    const unlockUtterance = new SpeechSynthesisUtterance('');
+                    window.speechSynthesis.speak(unlockUtterance);
+                } catch (e) {
+                    console.warn('[Wizard TTS Fallback] Failed to play silent unlock utterance:', e);
+                }
             }
 
             const voice = voiceSelect.value;
@@ -3647,7 +4139,109 @@ registerForm.addEventListener('submit', async (e) => {
                 if (statusEl) { statusEl.textContent = 'Voice test complete.'; statusEl.style.color = '#22c55e'; }
 
             } catch (err) {
-                if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.style.color = '#ef4444'; }
+                console.error('[Wizard TTS Fallback] Error testing voice in wizard:', err);
+                const errStr = String(err?.message || err?.detail || err || '').toLowerCase();
+                const shouldFallback = (
+                    errStr.includes('google') ||
+                    errStr.includes('credential') ||
+                    errStr.includes('reauth') ||
+                    errStr.includes('login') ||
+                    errStr.includes('gcloud') ||
+                    errStr.includes('auth') ||
+                    errStr.includes('azure') ||
+                    errStr.includes('unavailable') ||
+                    errStr.includes('not configured') ||
+                    errStr.includes('tts') ||
+                    errStr.includes('503') ||
+                    errStr.includes('500') ||
+                    errStr.includes('failed')
+                );
+
+                if (shouldFallback && window.speechSynthesis) {
+                    if (statusEl) { statusEl.textContent = 'Playing browser fallback...'; statusEl.style.color = '#6b7280'; }
+                    try {
+                        const utterance = new SpeechSynthesisUtterance('This is a test of the selected voice.');
+                        window.activeUtterance = utterance; // Keep global reference to prevent GC
+                        
+                        // Infer locale from voice name
+                        const match = String(voice || '').match(/^([a-z]{2}-[A-Za-z]{2,4})/);
+                        const locale = match ? match[1].replace('_', '-') : 'en-US';
+                        utterance.lang = locale;
+                        const runSpeech = (useVoice) => {
+                            return new Promise((resolve, reject) => {
+                                const utterance = new SpeechSynthesisUtterance('This is a test of the selected voice.');
+                                window.activeUtterance = utterance; // Keep global reference to prevent GC
+
+                                // Infer locale from voice name
+                                const match = String(voice || '').match(/^([a-z]{2}-[A-Za-z]{2,4})/);
+                                const locale = match ? match[1].replace('_', '-') : 'en-US';
+                                utterance.lang = locale;
+
+                                if (useVoice) {
+                                    const voices = window.speechSynthesis.getVoices() || [];
+                                    const localeLower = locale.toLowerCase();
+                                    const matchingVoice = voices.find((v) => String(v.lang || '').toLowerCase() === localeLower)
+                                        || voices.find((v) => String(v.lang || '').toLowerCase().startsWith(localeLower.split('-')[0]))
+                                        || null;
+                                    if (matchingVoice) utterance.voice = matchingVoice;
+                                }
+
+                                const startTime = Date.now();
+                                
+                                utterance.onend = () => {
+                                    const duration = Date.now() - startTime;
+                                    console.log(`[Wizard TTS Fallback] onend fired. Duration: ${duration}ms`);
+                                    window.activeUtterance = null;
+                                    
+                                    if (duration < 75) {
+                                        reject(new Error(`Speech completed too quickly (${duration}ms) - silent abort.`));
+                                    } else {
+                                        resolve();
+                                    }
+                                };
+
+                                utterance.onerror = (e) => {
+                                    console.error('[Wizard TTS Fallback] onerror fired. Event:', e);
+                                    window.activeUtterance = null;
+                                    reject(new Error(e?.error || e?.message || 'Browser speech preview failed.'));
+                                };
+
+                                window.speechSynthesis.speak(utterance);
+                            });
+                        };
+
+                        const speaking = window.speechSynthesis.speaking;
+                        if (speaking) {
+                            window.speechSynthesis.cancel();
+                        }
+
+                        const startSpeak = async () => {
+                            try {
+                                await runSpeech(true);
+                            } catch (err) {
+                                console.warn('[Wizard TTS Fallback] Primary voice attempt failed or was silent:', err.message);
+                                console.log('[Wizard TTS Fallback] Trying secondary attempt using browser default voice...');
+                                try {
+                                    await runSpeech(false);
+                                } catch (err2) {
+                                    console.error('[Wizard TTS Fallback] Secondary fallback attempt also failed:', err2.message);
+                                    throw new Error('Browser speech preview failed to produce sound.');
+                                }
+                            }
+                        };
+
+                        if (speaking) {
+                            await new Promise((resolve) => setTimeout(resolve, 100));
+                        }
+                        await startSpeak();
+                        if (statusEl) { statusEl.textContent = 'Voice test complete (browser preview).'; statusEl.style.color = '#22c55e'; }
+                    } catch (fallbackErr) {
+                        console.error('[Wizard TTS Fallback] Fallback failed:', fallbackErr);
+                        if (statusEl) { statusEl.textContent = `Error: ${fallbackErr.message}`; statusEl.style.color = '#ef4444'; }
+                    }
+                } else {
+                    if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.style.color = '#ef4444'; }
+                }
             } finally {
                 if (testBtn) { testBtn.disabled = false; testBtn.textContent = '▶ Test'; }
             }
@@ -3656,26 +4250,68 @@ registerForm.addEventListener('submit', async (e) => {
         function wizardCollectCurrentStep() {
             const step = wizardState.currentStep;
             if (step === 2) {
+                // step 2 = Mascot (captured by click handler; read here as fallback)
+                const el = document.querySelector('input[name="wizardMascot"]:checked');
+                if (el) wizardState.mascot = el.value;
+            } else if (step === 3) {
+                // step 3 = Wake Word
                 const i = document.getElementById('wizardWakeInterjection');
                 const n = document.getElementById('wizardWakeName');
                 if (i) wizardState.wakeWordInterjection = i.value.trim();
                 if (n) wizardState.wakeWordName = n.value.trim();
-            } else if (step === 3) {
-                const el = document.getElementById('wizardGridColumns');
-                if (el) wizardState.gridColumns = parseInt(el.value) || 6;
             } else if (step === 4) {
-                const el = document.getElementById('wizardLlmOptions');
-                if (el) wizardState.llmOptions = Math.max(0, Math.min(50, parseInt(el.value) || 0));
+                // step 4 = Button Layout
+                const el = document.getElementById('wizardGridColumns');
+                if (el) wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(el.value) || 6));
+                if (wizardState.interfaceMode === 'tap') {
+                    const wRows = document.getElementById('wizardWordsRows');
+                    const pRows = document.getElementById('wizardPhrasesRows');
+                    const dRows = document.getElementById('wizardTapDynamicRows');
+                    if (wRows) wizardState.wordsRows = Math.max(1, Math.min(7, parseInt(wRows.value) || 3));
+                    if (pRows) wizardState.phrasesRows = Math.max(0, Math.min(10, parseInt(pRows.value) || 0));
+                    if (dRows) {
+                        const dVal = parseInt(dRows.value, 10) || 0;
+                        wizardState.useHybridPages = dVal > 0;
+                        wizardState.tapDynamicRows = Math.max(0, dVal);
+                    }
+                }
             } else if (step === 5) {
-                const el = document.getElementById('wizardFreestyleOptions');
-                if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 5 = Button Action
+                    const actionEl = document.querySelector('input[name="wizardButtonAction"]:checked');
+                    if (actionEl) {
+                        wizardState.defaultButtonAction = actionEl.value;
+                        wizardState.useBravoBuild = actionEl.value === 'use_ai';
+                    }
+                } else {
+                    const el = document.getElementById('wizardLlmOptions');
+                    if (el) wizardState.llmOptions = Math.max(0, Math.min(50, parseInt(el.value) || 0));
+                }
             } else if (step === 6) {
-                const el = document.getElementById('wizardPartnerLanguage');
-                if (el) wizardState.partnerLanguage = el.value;
+                if (wizardState.interfaceMode === 'tap') {
+                    // tap step 6 = Menu Options
+                    const boxes = document.querySelectorAll('.wizard-menu-checkbox');
+                    if (boxes.length) {
+                        boxes.forEach(cb => {
+                            wizardState.menuItemVisibility[cb.dataset.id] = cb.checked;
+                        });
+                    }
+                } else {
+                    const el = document.getElementById('wizardFreestyleOptions');
+                    if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
+                }
             } else if (step === 7) {
-                const el = document.getElementById('wizardPartnerVoice');
-                if (el) wizardState.partnerVoice = el.value;
+                // both modes: User Language
+                const el = document.getElementById('wizardUserLanguage');
+                if (el) wizardState.userLanguage = el.value;
             } else if (step === 8) {
+                // both modes: Partner Language & Voice (last tap step)
+                const langEl = document.getElementById('wizardPartnerLanguage');
+                const voiceEl = document.getElementById('wizardPartnerVoice');
+                if (langEl) wizardState.partnerLanguage = langEl.value;
+                if (voiceEl) wizardState.partnerVoice = voiceEl.value;
+            } else if (step === 9) {
+                // scan only: Scanning Configuration
                 const modeEl = document.querySelector('[name=wizardScanMode]:checked');
                 if (modeEl) wizardState.scanMode = modeEl.value;
                 const waitEl = document.getElementById('wizardWaitForSwitch');
@@ -3722,10 +4358,21 @@ registerForm.addEventListener('submit', async (e) => {
                     wakeWordName: wizardState.wakeWordName,
                     LLMOptions: wizardState.llmOptions,
                     FreestyleOptions: wizardState.freestyleOptions,
+                    userLanguage: wizardState.userLanguage,
                     defaultPartnerLanguage: wizardState.partnerLanguage,
                     defaultPartnerVoice: wizardState.partnerVoice,
                     selected_tts_voice_name: wizardState.partnerVoice,
-                    gridColumns: wizardState.gridColumns
+                    voice_style: wizardState.voiceStyle,
+                    gridColumns: wizardState.gridColumns,
+                    tapWordsRows: wizardState.wordsRows,
+                    tapPhrasesRows: wizardState.phrasesRows,
+                    useHybridPages: wizardState.useHybridPages,
+                    tapDynamicRows: wizardState.tapDynamicRows,
+                    useBravoBuild: wizardState.useBravoBuild,
+                    defaultButtonAction: wizardState.defaultButtonAction,
+                    mascot: wizardState.mascot,
+                    hasLoggedIn: true,
+                    regenerate_boards: true
                 };
 
                 if (wizardState.interfaceMode === 'scan') {
@@ -3753,6 +4400,62 @@ registerForm.addEventListener('submit', async (e) => {
                     const err = await res.json().catch(() => ({ detail: res.statusText }));
                     throw new Error(err.detail || 'Failed to save settings');
                 }
+
+                // Apply menu visibility if tap mode and any items were configured
+                if (wizardState.interfaceMode === 'tap' && wizardState.menuItemVisibility) {
+                    try {
+                        setWizardStatus('Applying menu settings…', false);
+                        // Fetch the tap config (just regenerated by regenerate_boards)
+                        const tapRes = await fetch('/api/tap-interface/config', { headers });
+                        if (tapRes.ok) {
+                            const tapCfg = await tapRes.json();
+                            const boardsMenu = tapCfg.boards_menu || [];
+                            // Apply hidden flags based on wizard selections
+                            const vis = wizardState.menuItemVisibility;
+                            function applyVisibility(items) {
+                                return items.map(item => {
+                                    const sid = item.source_button_id || '';
+                                    const updated = { ...item };
+                                    // Apply visibility to children first (so we can check them)
+                                    if (Array.isArray(item.children) && item.children.length) {
+                                        updated.children = applyVisibility(item.children);
+                                        // If any child is visible, parent must also be visible
+                                        const anyChildVisible = updated.children.some(c => !c.hidden);
+                                        if (anyChildVisible) {
+                                            updated.hidden = false;
+                                        } else if (sid && Object.prototype.hasOwnProperty.call(vis, sid)) {
+                                            updated.hidden = !vis[sid];
+                                        }
+                                    } else {
+                                        if (sid && Object.prototype.hasOwnProperty.call(vis, sid)) {
+                                            updated.hidden = !vis[sid];
+                                        }
+                                    }
+                                    return updated;
+                                });
+                            }
+                            const updatedMenu = applyVisibility(boardsMenu);
+                            const menuSaveHeaders = { ...headers };
+                            delete menuSaveHeaders['Content-Type'];
+                            menuSaveHeaders['Content-Type'] = 'application/json';
+                            await fetch('/api/tap-interface/boards-menu', {
+                                method: 'POST',
+                                headers: menuSaveHeaders,
+                                body: JSON.stringify({ boards_menu: updatedMenu })
+                            });
+                        }
+                    } catch (_) { /* non-fatal: menu visibility can be adjusted in admin settings */ }
+                }
+
+                // Assign images to all board buttons using the selected mascot
+                try {
+                    setWizardStatus('Assigning images to boards…', false);
+                    await fetch('/api/tap-interface/boards/assign-all-images', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ mascot: wizardState.mascot || '' })
+                    });
+                } catch (_) { /* non-fatal: images will be assigned on first use */ }
 
                 closeSetupWizard();
 
@@ -3808,7 +4511,7 @@ registerForm.addEventListener('submit', async (e) => {
         <div class="wizard-modal-content">
             <div class="wizard-header">
                 <h3 id="wizardTitle">Setup Wizard</h3>
-                <span id="wizardStepIndicator" class="wizard-step-indicator">Step 1 of 7</span>
+                <span id="wizardStepIndicator" class="wizard-step-indicator">Step 1 of 8</span>
             </div>
             <div class="wizard-progress">
                 <div id="wizardProgressBar" class="wizard-progress-bar" style="width:14%;"></div>

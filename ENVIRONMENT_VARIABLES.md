@@ -69,6 +69,21 @@ Store this in GCP Secret Manager and reference it in `cloudbuild.yaml`:
 GOOGLE_API_KEY=<your-gemini-api-key>
 ```
 
+### Azure AI Speech (optional — enables younger-sounding child/teen voices)
+
+When `AZURE_SPEECH_KEY` is set, the `child` and `teen` voice styles route to Azure AI Speech
+instead of Google TTS, using Microsoft's dedicated child neural voices (`en-US-AnaNeural`,
+`en-US-BrandonNeural`). If not set, these styles fall back to the Google TTS pitch/rate
+shaping path.
+
+```bash
+AZURE_SPEECH_KEY=<your-azure-speech-resource-key>
+AZURE_SPEECH_REGION=eastus      # Azure region for your Speech resource (default: eastus)
+```
+
+Get your key and region from: Azure portal → your Speech resource → **Keys and Endpoint**.
+The free tier (F0) allows 0.5 million TTS characters/month at no cost.
+
 ### Optional
 
 ```bash

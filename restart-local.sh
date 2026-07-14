@@ -69,6 +69,8 @@ GOOGLE_OAUTH_CLIENT_ID="${GOOGLE_OAUTH_CLIENT_ID:-}"
 GOOGLE_OAUTH_CLIENT_SECRET="${GOOGLE_OAUTH_CLIENT_SECRET:-}"
 EMAIL_OAUTH_STATE_SECRET="${EMAIL_OAUTH_STATE_SECRET:-}"
 EMAIL_TOKEN_ENCRYPTION_KEY="${EMAIL_TOKEN_ENCRYPTION_KEY:-}"
+AZURE_SPEECH_KEY="${AZURE_SPEECH_KEY:-}"
+AZURE_SPEECH_REGION="${AZURE_SPEECH_REGION:-westus2}"
 
 [ -z "$GOOGLE_OAUTH_CLIENT_ID" ] && GOOGLE_OAUTH_CLIENT_ID="$(get_secret_value "GOOGLE_OAUTH_CLIENT_ID")"
 [ -z "$GOOGLE_OAUTH_CLIENT_SECRET" ] && GOOGLE_OAUTH_CLIENT_SECRET="$(get_secret_value "GOOGLE_OAUTH_CLIENT_SECRET")"
@@ -84,9 +86,17 @@ else
   EMAIL_FEATURE_ENABLED_VAL=true
 fi
 
+if [ -n "$AZURE_SPEECH_KEY" ]; then
+  echo "✅ Azure Speech credentials detected for local container"
+else
+  echo "⚠️  Azure Speech credentials not set; Azure TTS voices will not be available in local container"
+fi
+
 echo "🚀 Starting container..."
 docker run -d --name bravo-dev -p 8000:8080 \
   -e ENVIRONMENT=development \
+  -e AZURE_SPEECH_KEY="$AZURE_SPEECH_KEY" \
+  -e AZURE_SPEECH_REGION="$AZURE_SPEECH_REGION" \
   -e EMAIL_FEATURE_ENABLED="$EMAIL_FEATURE_ENABLED_VAL" \
   -e EMAIL_OAUTH_REDIRECT_URI=http://localhost:8000/api/email/oauth/callback \
   -e GOOGLE_OAUTH_CLIENT_ID="$GOOGLE_OAUTH_CLIENT_ID" \
