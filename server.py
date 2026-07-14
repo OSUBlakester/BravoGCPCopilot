@@ -21573,6 +21573,7 @@ async def _lookup_images_for_labels(
         'a', 'an', 'the',
         # Prepositions / particles
         'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
+        'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though',
         # Possessive adjectives
         'my', 'your', 'his', 'her', 'its', 'our', 'their',
         # Quantifiers / demonstratives acting as articles
@@ -21738,6 +21739,12 @@ async def _lookup_images_for_labels(
         elif key_term and key_term != norm_label and key_term == cand["con"]:
             score += 7000
         elif norm_label in cand["all_terms"]:
+            # If we extracted a key term, a match on the full label (e.g. "with ice" matching
+            # the "with" image's tags) is misleading — the stop word is driving the match, not
+            # the content word. Reject it so the button stays unassigned rather than getting
+            # the wrong image. Only allow full-label tag matches when no key term was extracted.
+            if key_term and key_term != norm_label:
+                return -9999
             score += 5000
         elif key_term and key_term != norm_label and key_term in cand["all_terms"]:
             score += 3500

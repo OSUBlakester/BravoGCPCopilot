@@ -16884,6 +16884,7 @@ ${getTapLanguageDirective()}
             btn.dataset.buttonType = 'static';
             if (btn.dataset.optionIndex) delete btn.dataset.optionIndex;
             delete btn.dataset.variantOriginal; // Clear stale state copied by cloneNode
+            delete btn.dataset.actionInFlight;  // Clear in-flight guard inherited via cloneNode
 
             const option = rawOption ? applyActiveBoardModifierToOption(rawOption, currentBoardId) : null;
             
