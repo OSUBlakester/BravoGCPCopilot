@@ -203,7 +203,7 @@ def _extract_json_object(raw_text: str) -> Dict[str, Any]:
 
 
 class AacGeminiTranslator:
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, model_name: str = None):
         api_key = (
             os.getenv("GEMINI_API_KEY")
             or os.getenv("GOOGLE_API_KEY")
@@ -212,7 +212,7 @@ class AacGeminiTranslator:
         if not api_key:
             raise RuntimeError("Set GEMINI_API_KEY or GOOGLE_API_KEY before running translation scripts.")
         self._client = genai.Client(api_key=api_key)
-        self._model_name = model_name
+        self._model_name = model_name or os.getenv("GEMINI_PRIMARY_MODEL") or "gemini-2.5-flash-lite"
 
     def translate_lines(
         self,
