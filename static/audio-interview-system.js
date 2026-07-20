@@ -93,7 +93,7 @@ class AudioInterviewSystem {
                     text: questionObj.question,
                     type: questionObj.category,
                     required: questionObj.required || false,
-                    followUp: !!questionObj.followUp,
+                    followUp: false,
                     followUpQuestion: questionObj.followUp
                 });
             });
@@ -112,8 +112,8 @@ class AudioInterviewSystem {
         // Interview control elements
         this.startInterviewBtn = document.getElementById('startInterviewBtn');
         this.pauseResumeBtn = document.getElementById('pauseResumeBtn');
-        this.skipQuestionBtn = document.getElementById('skipQuestionBtn');
         this.repeatQuestionBtn = document.getElementById('repeatQuestionBtn');
+        this.prevQuestionBtn = document.getElementById('prevQuestionBtn');
         
         // Status and progress elements
         this.interviewStatus = document.getElementById('interviewStatus');
@@ -121,52 +121,71 @@ class AudioInterviewSystem {
         this.currentQuestion = document.getElementById('currentQuestion');
         this.interviewLog = document.getElementById('interviewLog');
         
-        // Voice recognition elements
+        // Answer input elements
+        this.answerInputArea = document.getElementById('answerInputArea');
+        this.answerTextarea = document.getElementById('interviewAnswerText');
+        this.birthdayDateInput = document.getElementById('birthdayDateInput');
+        this.dictateBtn = document.getElementById('dictateBtn');
+        this.dictateStatus = document.getElementById('dictateStatus');
+        this.submitAnswerBtn = document.getElementById('submitAnswerBtn');
+        this.clearAnswerBtn = document.getElementById('clearAnswerBtn');
+
+        // Legacy voice recognition elements (kept for backward-compat with user_info_admin)
         this.voiceRecognitionFeedback = document.getElementById('voiceRecognitionFeedback');
         this.recognizedText = document.getElementById('recognizedText');
         this.confirmResponseBtn = document.getElementById('confirmResponseBtn');
         this.retryResponseBtn = document.getElementById('retryResponseBtn');
         
         // Action buttons
-        this.saveInterviewProgressBtn = document.getElementById('saveInterviewProgressBtn');
         this.restartInterviewBtn = document.getElementById('restartInterviewBtn');
         this.generateNarrativeBtn = document.getElementById('generateNarrativeBtn');
         this.closeInterviewModalBtn = document.getElementById('closeInterviewModal');
     }
 
     setupEventListeners() {
+        // Helper: removes any handler a previous instance registered on this element,
+        // then attaches the new one. Stores the handler on the element so it can be
+        // cleaned up if another instance is created later.
+        const on = (el, event, handler, key) => {
+            if (!el) return;
+            const prop = `_ais_${key || event}`;
+            if (el[prop]) el.removeEventListener(event, el[prop]);
+            el[prop] = handler;
+            el.addEventListener(event, handler);
+        };
+
         // Modal controls
-        this.startInterviewButton?.addEventListener('click', () => this.openInterviewModal());
-        this.closeInterviewModalBtn?.addEventListener('click', () => {
-            console.log('Close modal button clicked');
-            this.handleCloseModal();
-        });
-        this.closeInterviewBtn?.addEventListener('click', () => {
-            console.log('Close interview button clicked');
-            this.handleCloseModal();
-        });
-        
+        on(this.startInterviewButton, 'click', () => this.openInterviewModal(), 'openModal');
+        on(this.closeInterviewModalBtn, 'click', () => this.handleCloseModal(), 'closeModal');
+        on(this.closeInterviewBtn, 'click', () => this.handleCloseModal(), 'closeInterview');
+
         // Interview controls
-        this.startInterviewBtn?.addEventListener('click', () => this.startInterview());
-        this.pauseResumeBtn?.addEventListener('click', () => this.togglePauseResume());
-        this.skipQuestionBtn?.addEventListener('click', () => this.skipCurrentQuestion());
-        this.repeatQuestionBtn?.addEventListener('click', () => this.repeatCurrentQuestion());
-        
-        // Voice recognition controls
-        this.confirmResponseBtn?.addEventListener('click', () => this.confirmCurrentResponse());
-        this.retryResponseBtn?.addEventListener('click', () => this.retryVoiceRecognition());
-        
+        on(this.startInterviewBtn, 'click', () => this.startInterview(), 'start');
+        on(this.pauseResumeBtn, 'click', () => this.togglePauseResume(), 'pause');
+        on(this.repeatQuestionBtn, 'click', () => this.repeatCurrentQuestion(), 'repeat');
+        on(this.prevQuestionBtn, 'click', () => this.previousQuestion(), 'prev');
+
+        // Answer input controls
+        on(this.submitAnswerBtn, 'click', () => this.confirmCurrentResponse(), 'submit');
+        on(this.dictateBtn, 'click', () => this.toggleDictation(), 'dictate');
+        on(this.clearAnswerBtn, 'click', () => this.clearCurrentAnswer(), 'clear');
+
+        // Legacy voice recognition controls
+        on(this.confirmResponseBtn, 'click', () => this.confirmCurrentResponse(), 'confirmResp');
+        on(this.retryResponseBtn, 'click', () => this.retryVoiceRecognition(), 'retry');
+
         // Action buttons
-        this.saveInterviewProgressBtn?.addEventListener('click', () => this.saveProgress());
-        this.restartInterviewBtn?.addEventListener('click', () => this.restartInterview());
-        this.generateNarrativeBtn?.addEventListener('click', () => this.generateAndSaveNarrative());
-        
-        // Close modal on escape key
-        document.addEventListener('keydown', (e) => {
+        on(this.restartInterviewBtn, 'click', () => this.restartInterview(), 'restart');
+        on(this.generateNarrativeBtn, 'click', () => this.generateAndSaveNarrative(), 'generate');
+
+        // Escape key — remove any prior keydown handler this class registered
+        if (document._ais_keydown) document.removeEventListener('keydown', document._ais_keydown);
+        document._ais_keydown = (e) => {
             if (e.key === 'Escape' && this.modal && !this.modal.classList.contains('hidden')) {
                 this.closeInterviewModal();
             }
-        });
+        };
+        document.addEventListener('keydown', document._ais_keydown);
     }
 
     initializeSpeechRecognition() {
@@ -178,183 +197,167 @@ class AudioInterviewSystem {
 
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         this.recognition = new SpeechRecognition();
-        
+
+        // continuous=true keeps the session alive as long as possible.
+        // We do NOT auto-restart in onend — when the browser ends the session the
+        // button simply reverts to "Dictate" so the user can click again if needed.
         this.recognition.continuous = true;
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
-        
+
         this.recognition.onstart = () => {
             this.isListening = true;
-            this.updateStatus('Listening for your response...', 'listening');
-            this.showVoiceRecognitionFeedback(true);
+            this._dictateSessionStart = Date.now();
+            if (this.dictateStatus) {
+                this.dictateStatus.textContent = 'Listening…';
+                this.dictateStatus.classList.remove('hidden');
+            }
+            this.updateStatus('Listening — speak your answer…', 'listening');
         };
-        
+
         this.recognition.onresult = (event) => {
             let interimTranscript = '';
             let finalTranscript = '';
-            
-            console.log('[INTERVIEW DEBUG] onresult fired. resultIndex:', event.resultIndex, 'total results:', event.results.length);
-            console.log('[INTERVIEW DEBUG] Accumulated text before processing:', this.accumulatedText);
-            
+
             for (let i = event.resultIndex; i < event.results.length; i++) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
                     finalTranscript += transcript;
-                    console.log('[INTERVIEW DEBUG] Final transcript chunk:', transcript);
                 } else {
                     interimTranscript += transcript;
-                    console.log('[INTERVIEW DEBUG] Interim transcript chunk:', transcript);
                 }
             }
-            
-            // If we have final results, permanently add them to accumulated text
-            if (finalTranscript.trim()) {
-                const separator = (this.accumulatedText && this.accumulatedText.trim()) ? ' ' : '';
-                this.accumulatedText = (this.accumulatedText || '') + separator + finalTranscript.trim();
-                console.log('[INTERVIEW DEBUG] Final transcript added. New accumulated text:', this.accumulatedText);
-            }
-            
-            // Current recognized text includes accumulated (final) text + interim (in-progress) text
-            if (interimTranscript.trim()) {
-                const separator = (this.accumulatedText && this.accumulatedText.trim()) ? ' ' : '';
-                this.currentRecognizedText = (this.accumulatedText || '') + separator + interimTranscript.trim();
-            } else {
-                this.currentRecognizedText = this.accumulatedText || '';
-            }
-            
-            console.log('[INTERVIEW DEBUG] Current recognized text:', this.currentRecognizedText);
-            this.recognizedText.textContent = this.currentRecognizedText || '(Listening...)';
-            
-            // Show confirm button if we have any text
-            if (finalTranscript.length > 0 || interimTranscript.length > 0) {
-                this.confirmResponseBtn.classList.remove('hidden');
-                this.retryResponseBtn.classList.remove('hidden');
-            }
-            
 
+            if (finalTranscript.trim()) {
+                const sep = (this.accumulatedText && this.accumulatedText.trim()) ? ' ' : '';
+                this.accumulatedText = (this.accumulatedText || '') + sep + finalTranscript.trim();
+            }
+
+            const displayText = this.accumulatedText
+                ? this.accumulatedText + (interimTranscript.trim() ? ' ' + interimTranscript.trim() : '')
+                : interimTranscript.trim();
+
+            this.currentRecognizedText = displayText;
+
+            if (this.answerTextarea) {
+                this.answerTextarea.value = displayText;
+            } else if (this.recognizedText) {
+                this.recognizedText.textContent = displayText || '(Listening…)';
+                if (finalTranscript.length > 0 || interimTranscript.length > 0) {
+                    this.confirmResponseBtn?.classList.remove('hidden');
+                    this.retryResponseBtn?.classList.remove('hidden');
+                }
+            }
         };
-        
+
         this.recognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
             this.isListening = false;
-            
-            // Don't show error for aborted recognition (happens during normal operation)
-            if (event.error === 'aborted') {
-                console.log('Speech recognition was aborted (normal during restart/stop)');
+            if (event.error === 'aborted') return;
+            if (event.error === 'not-allowed') {
+                this.updateStatus('Microphone access denied. Please allow microphone access and try again.', 'error');
+                this._stopDictation();
                 return;
             }
-            
-            // Only show error for actual problems
-            if (event.error === 'no-speech' || event.error === 'not-allowed') {
-                this.updateStatus('Speech recognition error. Click "Try Again" to retry.', 'error');
+            if (event.error !== 'no-speech') {
+                console.warn('[DICTATION] Recognition error:', event.error);
             }
+            // For no-speech or other errors, onend will follow and stop cleanly
         };
-        
+
         this.recognition.onend = () => {
             this.isListening = false;
-            
-            console.log('[INTERVIEW DEBUG] Recognition ended. Current accumulated text:', this.accumulatedText);
-            console.log('[INTERVIEW DEBUG] Recognition ended. Current recognized text:', this.currentRecognizedText);
-            
-            // Don't override accumulatedText here - it's already updated in onresult
-            // Just ensure currentRecognizedText matches accumulated text
-            this.currentRecognizedText = this.accumulatedText || '';
-            
-            if (!this.accumulatedText || this.accumulatedText.length < 1) {
-                // No speech detected yet - keep trying to listen
-                this.updateStatus('Listening for your response...', 'listening');
-                
-                // Auto-restart listening to wait for user to start speaking
-                if (this.isActive && !this.isPaused && !this.shouldStopListening) {
-                    setTimeout(() => {
-                        if (!this.isListening && this.isActive && !this.isPaused && !this.shouldStopListening) {
-                            this.continueListening();
-                        }
-                    }, 500);
-                }
+            // Session ended — stop dictation mode. Text already captured stays in the textarea.
+            // If it ended unusually fast (< 400ms) and we were still actively trying to
+            // dictate, show a hint so the user knows to try again.
+            const sessionMs = Date.now() - (this._dictateSessionStart || 0);
+            if (this.isDictating && sessionMs < 400) {
+                this._stopDictation();
+                this.updateStatus('Microphone stopped early — click Dictate to try again.', 'warning');
             } else {
-                // We have some text - show buttons and keep listening for more
-                this.updateStatus('Speaking detected. Keep talking or click "Confirm" when done, "Try Again" to restart.', 'info');
-                this.confirmResponseBtn.classList.remove('hidden');
-                this.retryResponseBtn.classList.remove('hidden');
-                
-                // Keep listening continuously until user clicks a button
-                if (this.isActive && !this.isPaused && !this.shouldStopListening) {
-                    setTimeout(() => {
-                        if (!this.isListening && this.isActive && !this.isPaused && !this.shouldStopListening) {
-                            this.continueListening();
-                        }
-                    }, 500);
-                }
+                this._stopDictation();
             }
         };
     }
 
-    openInterviewModal() {
+    async openInterviewModal() {
+        // When launched from the setup wizard always start completely fresh
+        if (sessionStorage.getItem('wizardInterviewMode') === '1') {
+            this._resetState();
+        }
+
         this.modal.classList.remove('hidden');
         this.updateProgress();
-        
-        // Check if we have saved progress
+
+        // Load responses from Firestore (authoritative source) unless this is a fresh wizard run
+        if (sessionStorage.getItem('wizardInterviewMode') !== '1') {
+            await this._loadResponsesFromFirestore();
+        }
+
         if (this.interviewData.responses.length > 0) {
-            this.currentQuestion.textContent = `Welcome back! You have ${this.interviewData.responses.length} responses saved. Click "Start Interview" to continue or "Restart" to begin fresh.`;
-            this.generateNarrativeBtn.classList.remove('hidden');
+            this.currentQuestion.textContent = `Welcome back! You have ${this.interviewData.responses.length} responses saved. Click "Start Interview" to review and edit answers, or "Restart Interview" to start fresh.`;
+            this.generateNarrativeBtn?.classList.remove('hidden');
         }
     }
 
-    handleCloseModal() {
-        console.log('handleCloseModal called, checking method availability...');
-        console.log('this.closeInterviewModal type:', typeof this.closeInterviewModal);
-        console.log('this object:', this);
-        
+    _resetState() {
+        this.isActive = false;
+        this.isPaused = false;
+        this.currentQuestionIndex = 0;
+        this._submitting = false;
+        this.interviewData = { userName: '', responses: [], friendsFamily: [], startTime: null, lastSaveTime: null };
+        this.currentQuestions = [...this.baseQuestions];
+        this.accumulatedText = '';
+        this.currentRecognizedText = '';
+        this.isDictating = false;
+        this.shouldStopListening = false;
+        this.clearSavedProgress();
+
+        // Reset UI
+        if (this.interviewLog) this.clearInterviewLog();
+        if (this.currentQuestion) this.currentQuestion.textContent = 'Welcome! I\'ll ask you some questions to learn about this user. Click "Start Interview" when you\'re ready.';
+        this.startInterviewBtn?.classList.remove('hidden');
+        this.pauseResumeBtn?.classList.add('hidden');
+        this.prevQuestionBtn?.classList.add('hidden');
+        this.generateNarrativeBtn?.classList.add('hidden');
+        if (this.answerInputArea) this.answerInputArea.classList.add('hidden');
+        if (this.submitAnswerBtn) {
+            this.submitAnswerBtn.disabled = false;
+            this.submitAnswerBtn.innerHTML = 'Next Question <i class="fas fa-arrow-right ml-1"></i>';
+        }
+        if (this.birthdayDateInput) {
+            this.birthdayDateInput.value = '';
+            this.birthdayDateInput.classList.add('hidden');
+        }
+        if (this.answerTextarea) this.answerTextarea.classList.remove('hidden');
+    }
+
+    async handleCloseModal() {
+        const fromWizard = sessionStorage.getItem('wizardInterviewMode') === '1';
+
         try {
-            // Method 1: Try direct call
-            if (typeof this.closeInterviewModal === 'function') {
-                console.log('Calling closeInterviewModal directly...');
-                this.closeInterviewModal();
-                return;
-            }
-            
-            // Method 2: Try manual cleanup if method doesn't exist
-            console.log('closeInterviewModal method not found, performing manual cleanup...');
-            this.isActive = false;
-            this.isPaused = false;
-            
-            // Stop listening
-            if (this.recognition && this.isListening) {
-                this.recognition.stop();
-            }
-            
-            // Close modal
-            if (this.modal) {
-                this.modal.style.display = 'none';
-                this.modal.classList.add('hidden');
-                console.log('Modal closed manually');
-            }
-            
-            // Save progress
-            if (typeof this.saveProgress === 'function') {
-                this.saveProgress();
-            }
-            
-            // Clean up speech synthesis
-            if (window.speechSynthesis) {
-                window.speechSynthesis.cancel();
-            }
-            
+            this.closeInterviewModal();
         } catch (error) {
             console.error('Error in handleCloseModal:', error);
-            // Method 3: Force close by finding modal in DOM
-            const modal = document.getElementById('interviewModal');
-            if (modal) {
-                modal.style.display = 'none';
-                modal.classList.add('hidden');
-                console.log('Modal force closed via DOM');
+            const modal = document.getElementById('audioInterviewModal');
+            if (modal) { modal.style.display = 'none'; modal.classList.add('hidden'); }
+        }
+
+        // If launched from the setup wizard, save answers and go to the selected interface
+        if (fromWizard) {
+            sessionStorage.removeItem('wizardInterviewMode');
+            await this._saveResponsesToFirestore();
+            try {
+                const prefResp = await window.authenticatedFetch('/api/interface-preference', { method: 'GET' });
+                const prefData = prefResp.ok ? await prefResp.json() : {};
+                const target = prefData.useTapInterface ? 'tap_interface.html' : 'gridpage.html';
+                window.location.href = `${target}?page=home`;
+            } catch (e) {
+                window.location.href = 'gridpage.html?page=home';
             }
         }
     }
 
     closeInterviewModal() {
-        console.log('closeInterviewModal called');
         this.isActive = false;
         this.isPaused = false;
         this.stopListening();
@@ -364,8 +367,9 @@ class AudioInterviewSystem {
             this.modal.classList.add('hidden');
         }
         
-        // Save progress
+        // Save progress locally and to Firestore
         this.saveProgress();
+        this._saveResponsesToFirestore();
         
         // Clean up speech synthesis
         if (window.speechSynthesis) {
@@ -380,14 +384,13 @@ class AudioInterviewSystem {
             this.updateStatus('Interview started', 'success');
             
             // Show interview controls
-            this.startInterviewBtn.classList.add('hidden');
-            this.pauseResumeBtn.classList.remove('hidden');
-            this.skipQuestionBtn.classList.remove('hidden');
-            this.repeatQuestionBtn.classList.remove('hidden');
+            this.startInterviewBtn?.classList.add('hidden');
+            this.pauseResumeBtn?.classList.remove('hidden');
+            this.repeatQuestionBtn?.classList.remove('hidden');
         }
-        
+
         this.isPaused = false;
-        this.pauseResumeBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
+        if (this.pauseResumeBtn) this.pauseResumeBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
         
         await this.askCurrentQuestion();
     }
@@ -408,49 +411,63 @@ class AudioInterviewSystem {
         }
         
         this.isAskingQuestion = true;
-        
+
         try {
-            // Replace placeholders in question text
             const questionText = this.processQuestionText(question.text);
-            
             this.currentQuestion.textContent = questionText;
             this.updateProgress();
-            
-            // Add question to log
             this.addToInterviewLog(`Q${this.currentQuestionIndex + 1}: ${questionText}`, 'question');
-            
-            // Hide listening UI during question announcement
-            if (this.recognizedText) {
-                this.recognizedText.textContent = 'Question being announced...';
-            }
-            
-            // Speak the question and wait for it to complete
-            await this.speakText(questionText);
-            
-            // Ensure TTS is completely finished with a longer pause
-            // This prevents the microphone from picking up the tail end of TTS
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Double-check TTS is not speaking before starting to listen
-            if (speechSynthesis.speaking) {
-                console.log('TTS still speaking, waiting...');
-                await new Promise(resolve => {
-                    const checkTTS = () => {
-                        if (!speechSynthesis.speaking) {
-                            setTimeout(resolve, 500); // Extra buffer
-                        } else {
-                            setTimeout(checkTTS, 100);
-                        }
-                    };
-                    checkTTS();
-                });
-            }
-            
-            // Reset the stop flag for new question
+
+            // Reset answer state
+            this.accumulatedText = '';
+            this.currentRecognizedText = '';
             this.shouldStopListening = false;
-            
-            // Now start listening for response
-            this.startListening();
+            this.isDictating = false;
+
+            // Show answer input area and re-enable submit button
+            if (this.answerInputArea) this.answerInputArea.classList.remove('hidden');
+
+            // Pre-populate with previously saved answer if this question was already answered
+            const existingResponse = this.interviewData.responses[this.currentQuestionIndex];
+            if (this.answerTextarea) {
+                this.answerTextarea.value = existingResponse ? existingResponse.answer : '';
+            }
+            if (this.submitAnswerBtn) {
+                this.submitAnswerBtn.disabled = false;
+                const isLastQuestion = this.currentQuestionIndex === this.currentQuestions.length - 1;
+                this.submitAnswerBtn.innerHTML = isLastQuestion
+                    ? 'Generate Profile <i class="fas fa-check ml-1"></i>'
+                    : 'Next Question <i class="fas fa-arrow-right ml-1"></i>';
+            }
+            this._submitting = false;
+
+            // Show date picker for birthday question, textarea for everything else
+            const isBirthdayQuestion = question && question.id === 'user_birthday';
+            if (this.answerTextarea) {
+                this.answerTextarea.classList.toggle('hidden', isBirthdayQuestion);
+                if (!isBirthdayQuestion) this.answerTextarea.focus();
+            }
+            if (this.birthdayDateInput) {
+                this.birthdayDateInput.classList.toggle('hidden', !isBirthdayQuestion);
+                if (isBirthdayQuestion) {
+                    const savedBday = existingResponse ? existingResponse.answer : '';
+                    this.birthdayDateInput.value = /^\d{4}-\d{2}-\d{2}$/.test(savedBday) ? savedBday : '';
+                    this.birthdayDateInput.focus();
+                }
+            }
+            if (isBirthdayQuestion && this.dictateBtn) this.dictateBtn.classList.add('hidden');
+            if (!isBirthdayQuestion && this.dictateBtn) this.dictateBtn.classList.remove('hidden');
+
+            if (this.dictateBtn) {
+                this.dictateBtn.innerHTML = '<i class="fas fa-microphone mr-1"></i> Dictate';
+                this.dictateBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+                this.dictateBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
+            }
+            if (this.dictateStatus) {
+                this.dictateStatus.textContent = '';
+                this.dictateStatus.classList.add('hidden');
+            }
+            this.updateStatus('Read the question above and type or dictate your answer.', 'info');
         } finally {
             this.isAskingQuestion = false;
         }
@@ -561,6 +578,7 @@ class AudioInterviewSystem {
     }
 
     showVoiceRecognitionFeedback(show) {
+        if (!this.voiceRecognitionFeedback) return;
         if (show) {
             this.voiceRecognitionFeedback.classList.remove('hidden');
         } else {
@@ -569,58 +587,93 @@ class AudioInterviewSystem {
     }
 
     async confirmCurrentResponse() {
-        if (!this.currentRecognizedText || this.currentRecognizedText.length < 1) {
-            this.updateStatus('Please provide a response or skip this question', 'warning');
-            return;
+        // Guard against double-submit
+        if (this._submitting) return;
+        this._submitting = true;
+        if (this.submitAnswerBtn) this.submitAnswerBtn.disabled = true;
+
+        // Read from date input (birthday question) or textarea, fall back to speech-recognized text
+        const currentQ = this.getCurrentQuestion();
+        const isBirthdayQ = currentQ && currentQ.id === 'user_birthday';
+        let answerText;
+        if (isBirthdayQ && this.birthdayDateInput && this.birthdayDateInput.value) {
+            answerText = this.birthdayDateInput.value.trim();
+        } else {
+            answerText = this.answerTextarea
+                ? this.answerTextarea.value.trim()
+                : (this.currentRecognizedText || '').trim();
         }
-        
-        // Stop the continuous listening cycle
+
+
+        // Stop any active dictation
+        if (this.isDictating) {
+            this.shouldStopListening = true;
+            this.isDictating = false;
+            if (this.recognition && this.isListening) this.recognition.stop();
+            this._stopDictation();
+        }
         this.shouldStopListening = true;
-        
-        // Clean up UI
-        this.confirmResponseBtn.classList.add('hidden');
-        this.retryResponseBtn.classList.add('hidden');
-        
-        this.updateStatus('Processing your response...', 'processing');
-        
+
+        // Clean up legacy UI if present
+        this.confirmResponseBtn?.classList.add('hidden');
+        this.retryResponseBtn?.classList.add('hidden');
+
+        // Hide answer area while moving to next question
+        if (this.answerInputArea) this.answerInputArea.classList.add('hidden');
+
+        this.updateStatus('Saving response…', 'processing');
+
         const currentQuestion = this.getCurrentQuestion();
         if (!currentQuestion) {
             console.error('No current question available');
             this.updateStatus('Error: No question available', 'error');
             return;
         }
-        
+
         const response = {
             questionId: currentQuestion.id,
             question: this.processQuestionText(currentQuestion.text),
-            answer: this.currentRecognizedText.trim(),
+            answer: answerText,
             timestamp: new Date().toISOString(),
             type: currentQuestion.type
         };
         
         // Special handling for user name
         if (currentQuestion.id === 'user_name') {
-            this.interviewData.userName = this.currentRecognizedText.trim();
+            this.interviewData.userName = answerText;
         }
-        
-        this.interviewData.responses.push(response);
+
+        // Update in place if re-answering, otherwise append
+        if (this.currentQuestionIndex < this.interviewData.responses.length) {
+            this.interviewData.responses[this.currentQuestionIndex] = response;
+        } else {
+            this.interviewData.responses.push(response);
+        }
         this.addToInterviewLog(`A${this.currentQuestionIndex + 1}: ${response.answer}`, 'answer');
-        
+
         this.stopListening();
-        
+
         // Check if we need follow-up questions
         if (currentQuestion.followUp) {
             await this.generateFollowUpQuestions(response);
         }
-        
+
         this.currentQuestionIndex++;
-        
-        // Brief pause before next question
-        setTimeout(async () => {
-            if (this.isActive && !this.isPaused) {
-                await this.askCurrentQuestion();
-            }
-        }, 1500);
+        this._submitting = false;
+
+        // Update Previous button visibility
+        this._updatePrevBtn();
+
+        const hasMoreQuestions = this.currentQuestionIndex < this.currentQuestions.length;
+        if (!hasMoreQuestions) {
+            await this.generateAndSaveNarrative();
+        } else {
+            setTimeout(async () => {
+                if (this.isActive && !this.isPaused) {
+                    await this.askCurrentQuestion();
+                }
+            }, 800);
+        }
     }
 
     async generateFollowUpQuestions(response) {
@@ -661,6 +714,7 @@ Return only the follow-up questions, one per line, without numbering or bullet p
     }
 
     async callLLM(prompt) {
+        if (typeof window.authenticatedFetch !== 'function') return '';
         try {
             const response = await window.authenticatedFetch('/llm', {
                 method: 'POST',
@@ -687,22 +741,98 @@ Return only the follow-up questions, one per line, without numbering or bullet p
         return '';
     }
 
+    toggleDictation() {
+        if (this.isDictating) {
+            // User clicked "Stop Dictating" — stop the session and revert the button
+            this.isDictating = false;
+            if (this.recognition && this.isListening) {
+                this.recognition.stop(); // triggers onend → _stopDictation()
+            } else {
+                this._stopDictation(); // recognition already ended, clean up button
+            }
+        } else {
+            if (!this.recognition) {
+                this.updateStatus('Speech recognition is not available in this browser.', 'error');
+                return;
+            }
+            // Preserve any text already typed; dictation appends to it
+            const existing = this.answerTextarea ? this.answerTextarea.value.trim() : '';
+            this.accumulatedText = existing;
+            this.isDictating = true;
+            if (this.dictateBtn) {
+                this.dictateBtn.innerHTML = '<i class="fas fa-stop mr-1"></i> Stop Dictating';
+                this.dictateBtn.classList.remove('bg-gray-600', 'hover:bg-gray-700');
+                this.dictateBtn.classList.add('bg-red-600', 'hover:bg-red-700');
+            }
+            if (this.dictateStatus) {
+                this.dictateStatus.textContent = 'Starting…';
+                this.dictateStatus.classList.remove('hidden');
+            }
+            try {
+                this.recognition.start();
+            } catch (e) {
+                console.warn('[DICTATION] Could not start recognition:', e);
+                this._stopDictation();
+            }
+        }
+    }
+
+    _stopDictation() {
+        this.isDictating = false;
+        if (this.dictateBtn) {
+            this.dictateBtn.innerHTML = '<i class="fas fa-microphone mr-1"></i> Dictate';
+            this.dictateBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+            this.dictateBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
+        }
+        if (this.dictateStatus) {
+            this.dictateStatus.textContent = '';
+            this.dictateStatus.classList.add('hidden');
+        }
+        this.updateStatus('Read the question above and type or dictate your answer.', 'info');
+    }
+
     retryVoiceRecognition() {
         this.stopListening();
-        // Reset the stop flag to allow listening again
         this.shouldStopListening = false;
-        // Clear both current and accumulated text for fresh start
         this.accumulatedText = '';
         this.currentRecognizedText = '';
-        this.confirmResponseBtn.classList.add('hidden');
-        this.retryResponseBtn.classList.add('hidden');
-        setTimeout(() => {
-            this.startListening();
-        }, 500);
+        this.confirmResponseBtn?.classList.add('hidden');
+        this.retryResponseBtn?.classList.add('hidden');
+        setTimeout(() => { this.startListening(); }, 500);
+    }
+
+    clearCurrentAnswer() {
+        if (this.answerTextarea) this.answerTextarea.value = '';
+        if (this.birthdayDateInput) this.birthdayDateInput.value = '';
+        if (this.answerTextarea && !this.answerTextarea.classList.contains('hidden')) {
+            this.answerTextarea.focus();
+        }
+    }
+
+    async previousQuestion() {
+        if (this.currentQuestionIndex <= 0) return;
+        this.stopListening();
+        if (this.isDictating) { this.isDictating = false; this._stopDictation(); }
+
+        this.currentQuestionIndex--;
+        this._updatePrevBtn();
+        // askCurrentQuestion() will pre-populate from responses[currentQuestionIndex]
+        await this.askCurrentQuestion();
+    }
+
+    _updatePrevBtn() {
+        if (!this.prevQuestionBtn) return;
+        if (this.currentQuestionIndex > 0) {
+            this.prevQuestionBtn.classList.remove('hidden');
+        } else {
+            this.prevQuestionBtn.classList.add('hidden');
+        }
     }
 
     skipCurrentQuestion() {
         this.stopListening();
+        if (this.isDictating) { this.isDictating = false; this._stopDictation(); }
+        if (this.answerInputArea) this.answerInputArea.classList.add('hidden');
         this.addToInterviewLog(`Q${this.currentQuestionIndex + 1}: Skipped`, 'skipped');
         this.currentQuestionIndex++;
         
@@ -724,10 +854,10 @@ Return only the follow-up questions, one per line, without numbering or bullet p
         if (this.isPaused) {
             this.stopListening();
             this.stopTTS();
-            this.pauseResumeBtn.innerHTML = '<i class="fas fa-play"></i> Resume';
+            if (this.pauseResumeBtn) this.pauseResumeBtn.innerHTML = '<i class="fas fa-play"></i> Resume';
             this.updateStatus('Interview paused', 'warning');
         } else {
-            this.pauseResumeBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
+            if (this.pauseResumeBtn) this.pauseResumeBtn.innerHTML = '<i class="fas fa-pause"></i> Pause';
             this.updateStatus('Interview resumed', 'success');
             setTimeout(async () => {
                 await this.askCurrentQuestion();
@@ -739,15 +869,16 @@ Return only the follow-up questions, one per line, without numbering or bullet p
         this.isActive = false;
         this.stopListening();
         this.stopTTS();
-        
+
         this.updateStatus('Interview completed!', 'success');
         this.currentQuestion.textContent = 'Interview completed! You can now generate the user profile or review your responses.';
-        
-        // Hide interview controls and show generate button
-        this.pauseResumeBtn.classList.add('hidden');
-        this.skipQuestionBtn.classList.add('hidden');
-        this.repeatQuestionBtn.classList.add('hidden');
-        this.generateNarrativeBtn.classList.remove('hidden');
+
+        // Hide answer input and interview controls, show generate button
+        if (this.answerInputArea) this.answerInputArea.classList.add('hidden');
+        this.pauseResumeBtn?.classList.add('hidden');
+        this.repeatQuestionBtn?.classList.add('hidden');
+        this.prevQuestionBtn?.classList.add('hidden');
+        this.generateNarrativeBtn?.classList.remove('hidden');
         
         // Auto-save progress
         await this.saveProgress();
@@ -772,11 +903,11 @@ Return only the follow-up questions, one per line, without numbering or bullet p
             this.updateProgress();
             
             // Reset UI
-            this.startInterviewBtn.classList.remove('hidden');
-            this.pauseResumeBtn.classList.add('hidden');
-            this.skipQuestionBtn.classList.add('hidden');
-            this.repeatQuestionBtn.classList.add('hidden');
-            this.generateNarrativeBtn.classList.add('hidden');
+            this.startInterviewBtn?.classList.remove('hidden');
+            this.pauseResumeBtn?.classList.add('hidden');
+            this.repeatQuestionBtn?.classList.add('hidden');
+            this.generateNarrativeBtn?.classList.add('hidden');
+            if (this.answerInputArea) this.answerInputArea.classList.add('hidden');
             this.showVoiceRecognitionFeedback(false);
             
             this.currentQuestion.textContent = "Interview restarted. Click 'Start Interview' when you're ready to begin.";
@@ -797,8 +928,26 @@ Return only the follow-up questions, one per line, without numbering or bullet p
             await this.populateUserInfoFields(narrative);
             
             this.updateStatus('User profile generated and saved successfully!', 'success');
+
+            // If launched from the setup wizard, go straight to the home page
+            if (sessionStorage.getItem('wizardInterviewMode') === '1') {
+                sessionStorage.removeItem('wizardInterviewMode');
+                this.updateStatus('Profile saved! Taking you to the app…', 'success');
+                setTimeout(async () => {
+                    try {
+                        const prefResp = await window.authenticatedFetch('/api/interface-preference', { method: 'GET' });
+                        const prefData = prefResp.ok ? await prefResp.json() : {};
+                        const target = prefData.useTapInterface ? 'tap_interface.html' : 'gridpage.html';
+                        window.location.href = `${target}?page=home`;
+                    } catch (e) {
+                        window.location.href = 'gridpage.html?page=home';
+                    }
+                }, 1500);
+                return;
+            }
+
             alert('User profile has been generated and populated in the form. You can now review and make any adjustments before saving.');
-            
+
             // Close the interview modal
             setTimeout(() => {
                 this.handleCloseModal();
@@ -870,23 +1019,12 @@ Write in third person as a cohesive, professional profile that caregivers and th
         
         let narrative = `This profile is for ${userName}.\n\n`;
         
-        // Group responses by category
-        const categories = {
-            identity: [],
-            communication: [],
-            interests: [],
-            relationships: [],
-            daily_life: [],
-            values: [],
-            challenges: [],
-            technology: []
-        };
-        
+        // Group responses by category — build dynamically so new categories aren't dropped
+        const categories = {};
         responses.forEach(response => {
             const category = response.type || 'general';
-            if (categories[category]) {
-                categories[category].push(response);
-            }
+            if (!categories[category]) categories[category] = [];
+            categories[category].push(response);
         });
         
         // Build narrative sections
@@ -909,24 +1047,79 @@ Write in third person as a cohesive, professional profile that caregivers and th
         // Extract user name and birthday from responses
         const nameResponse = this.interviewData.responses.find(r => r.questionId === 'user_name');
         const birthdayResponse = this.interviewData.responses.find(r => r.questionId === 'user_birthday');
-        
-        // Populate the user info textarea
+
+        console.log('[Interview] populateUserInfoFields: all responses:', this.interviewData.responses.map(r => ({ id: r.questionId, answer: r.answer?.substring(0, 50) })));
+        console.log('[Interview] birthdayResponse:', birthdayResponse);
+
+        // Populate the user info textarea (user_info_admin.html)
         const userInfoTextarea = document.getElementById('user-info');
         if (userInfoTextarea) {
             userInfoTextarea.value = narrative;
         }
-        
-        // Populate birthday if we can parse it
+
+        // Populate name DOM field if present (user_info_admin.html)
+        if (nameResponse) {
+            const nameField = document.getElementById('userName');
+            if (nameField) nameField.value = nameResponse.answer.trim();
+        }
+
+        // Parse birthday — either from date picker (YYYY-MM-DD) or free text
+        let parsedDate = null;
         if (birthdayResponse) {
+            const raw = birthdayResponse.answer.trim();
+            console.log('[Interview] birthday raw answer:', JSON.stringify(raw));
+            if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+                parsedDate = raw;
+            } else {
+                parsedDate = await this.parseBirthdayFromResponse(raw);
+            }
+            console.log('[Interview] parsedDate:', parsedDate);
+            // Populate birthday DOM field if present (user_info_admin.html)
             const birthdayField = document.getElementById('userBirthdate');
-            if (birthdayField) {
-                const parsedDate = await this.parseBirthdayFromResponse(birthdayResponse.answer);
-                if (parsedDate) {
-                    birthdayField.value = parsedDate;
+            if (birthdayField && parsedDate) {
+                birthdayField.value = parsedDate;
+            }
+        } else {
+            console.warn('[Interview] No birthday response found in interviewData.responses');
+        }
+
+        // Save name and birthday to backend so they persist regardless of which page we're on
+        console.log('[Interview] window.authenticatedFetch defined:', typeof window.authenticatedFetch === 'function');
+        if (typeof window.authenticatedFetch === 'function') {
+            if (nameResponse) {
+                try {
+                    await window.authenticatedFetch('/api/user-info', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: nameResponse.answer.trim() })
+                    });
+                } catch (e) {
+                    console.error('Failed to save user name to backend:', e);
                 }
             }
+            if (parsedDate) {
+                try {
+                    // Load existing birthday data to preserve friendsFamily
+                    let existingFriendsFamily = [];
+                    const bdResp = await window.authenticatedFetch('/api/birthdays');
+                    if (bdResp.ok) {
+                        const bdData = await bdResp.json();
+                        existingFriendsFamily = bdData.friendsFamily || [];
+                    }
+                    const saveResp = await window.authenticatedFetch('/api/birthdays', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userBirthdate: parsedDate, friendsFamily: existingFriendsFamily })
+                    });
+                    console.log('[Interview] Birthday save response status:', saveResp.status);
+                } catch (e) {
+                    console.error('Failed to save birthday to backend:', e);
+                }
+            } else {
+                console.warn('[Interview] parsedDate is null — birthday not saved to backend');
+            }
         }
-        
+
         // Extract and populate friends/family information
         await this.populateFriendsFamily();
     }
@@ -1051,22 +1244,16 @@ Return only the JSON array or empty array [] if no clear people are mentioned.`;
     }
 
     addToInterviewLog(message, type) {
+        if (!this.interviewLog) return;
         const logEntry = document.createElement('div');
         logEntry.className = `interview-log-entry ${type}`;
-        
-        const timestamp = new Date().toLocaleTimeString();
         logEntry.innerHTML = `
-            <div class="flex justify-between items-start">
-                <div class="flex-1">
-                    <span class="text-sm text-gray-500">[${timestamp}]</span>
-                    <div class="mt-1 ${this.getLogEntryClass(type)}">${message}</div>
-                </div>
+            <div class="flex-1">
+                <div class="${this.getLogEntryClass(type)}">${message}</div>
             </div>
         `;
-        
         this.interviewLog.appendChild(logEntry);
-        
-        // Scroll to bottom
+        this.interviewLog.classList.remove('hidden');
         this.interviewLog.scrollTop = this.interviewLog.scrollHeight;
     }
 
@@ -1080,7 +1267,9 @@ Return only the JSON array or empty array [] if no clear people are mentioned.`;
     }
 
     clearInterviewLog() {
-        this.interviewLog.innerHTML = '<p class="text-gray-600 italic">Questions and answers will appear here as we progress through the interview.</p>';
+        if (!this.interviewLog) return;
+        this.interviewLog.innerHTML = '';
+        this.interviewLog.classList.add('hidden');
     }
 
     getUserStorageKey() {
@@ -1122,13 +1311,27 @@ Return only the JSON array or empty array [] if no clear people are mentioned.`;
     loadSavedProgress() {
         try {
             const storageKey = this.getUserStorageKey();
-            const savedProgress = localStorage.getItem(storageKey);
+            let savedProgress = localStorage.getItem(storageKey);
+
+            // If no data under the user-specific key, check the generic fallback key
+            // (wizard interviews save under the generic key before the user ID is known)
+            if (!savedProgress && storageKey !== 'audioInterviewProgress') {
+                const genericData = localStorage.getItem('audioInterviewProgress');
+                if (genericData) {
+                    savedProgress = genericData;
+                    localStorage.setItem(storageKey, genericData);
+                    localStorage.removeItem('audioInterviewProgress');
+                    console.log('Migrated interview progress from generic key to user-specific key');
+                }
+            }
+
             if (savedProgress) {
                 const progressData = JSON.parse(savedProgress);
-                
+
                 this.interviewData = progressData.interviewData || this.interviewData;
-                this.currentQuestionIndex = progressData.currentQuestionIndex || 0;
                 this.currentQuestions = progressData.currentQuestions || [...this.baseQuestions];
+                // Always start review from Q1 so saved answers are visible from the beginning
+                this.currentQuestionIndex = 0;
                 
                 // Restore interview log
                 if (this.interviewData.responses.length > 0) {
@@ -1147,8 +1350,39 @@ Return only the JSON array or empty array [] if no clear people are mentioned.`;
     }
 
     clearSavedProgress() {
-        const storageKey = this.getUserStorageKey();
-        localStorage.removeItem(storageKey);
+        localStorage.removeItem(this.getUserStorageKey());
+        localStorage.removeItem('audioInterviewProgress');
+    }
+
+    async _loadResponsesFromFirestore() {
+        if (typeof window.authenticatedFetch !== 'function') return;
+        try {
+            const resp = await window.authenticatedFetch('/api/interview/responses', { method: 'GET' });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (Array.isArray(data.responses) && data.responses.length > 0) {
+                this.interviewData.responses = data.responses;
+                this.currentQuestionIndex = 0;
+                this.updateProgress();
+                console.log('[Interview] Loaded', data.responses.length, 'responses from Firestore');
+            }
+        } catch (e) {
+            console.warn('[Interview] Could not load responses from Firestore:', e);
+        }
+    }
+
+    async _saveResponsesToFirestore() {
+        if (typeof window.authenticatedFetch !== 'function') return;
+        if (this.interviewData.responses.length === 0) return;
+        try {
+            await window.authenticatedFetch('/api/interview/responses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ responses: this.interviewData.responses })
+            });
+        } catch (e) {
+            console.warn('[Interview] Could not save responses to Firestore:', e);
+        }
     }
 
     // Method to reset interview data when user changes (called during logout/profile switch)

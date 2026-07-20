@@ -1,5 +1,12 @@
 import os
 import sys
+import warnings
+# Suppress the google-generativeai end-of-support notice (package still functional; migration is a larger project)
+warnings.filterwarnings("ignore", message=".*google.generativeai.*")
+warnings.filterwarnings("ignore", message=".*google-generativeai.*")
+warnings.filterwarnings("ignore", message=".*generativeai.*deprecated.*")
+warnings.filterwarnings("ignore", message=".*no longer receiving.*")
+warnings.filterwarnings("ignore", message=".*All support.*ended.*")
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (if present)
@@ -1458,28 +1465,31 @@ async def generate_interview_narrative(payload: GenerateNarrativeRequest, curren
             for response in payload.responses
         ])
         
-        # Enhanced prompt for generating a comprehensive narrative story about the user
-        narrative_prompt = f"""Based on these interview questions and answers, write a comprehensive narrative story about this person - like a detailed essay or profile that captures who they are as a complete individual.
+        # Narrative prompt focused on enabling accurate, authentic AAC option generation
+        narrative_prompt = f"""Based on these interview questions and answers, write a comprehensive narrative profile about this person that will be used as context by an AI system to generate communication options for them.
 
 INTERVIEW DATA:
 {interview_summary}
 
-IMPORTANT: Write ONLY a flowing narrative story in paragraph form. Do NOT include any JSON, lists, bullet points, or structured data at the end.
+IMPORTANT: Write ONLY a flowing narrative in paragraph form. Do NOT include JSON, lists, bullet points, or structured data.
 
-Write a flowing, engaging narrative in third person that tells the story of this person. Organize it like an essay with clear paragraphs that naturally flow from one topic to the next. Include:
+This narrative will be read by an AI every time it generates communication options, so it must capture two things equally:
 
-• Their basic identity, personality, and what makes them unique
-• Their interests, hobbies, and what they're passionate about  
-• How they communicate and express themselves
-• Their relationships with family and friends
-• Their daily life, routines, and preferences
-• Any challenges they face and how they handle them
-• Their entertainment preferences and favorite activities
-• What's important to them and what brings them joy
+1. AUTHENTIC VOICE — who this person is, their personality, tone, interests, humor, and the way they naturally express themselves. The AI needs to generate options that sound genuinely like them.
 
-Make this narrative feel like a complete portrait of who they are - something that would help anyone understand their personality, needs, and authentic voice. Write it as a cohesive story, not just a list of facts. Use connecting words and transitions to make it flow naturally from paragraph to paragraph.
+2. PHYSICAL AND FACTUAL ACCURACY — what this person can and cannot do physically. Include their mobility situation (walking, wheelchair, etc.), whether they eat by mouth or have a feeding tube, any significant health conditions or physical limitations, and sensory needs. This is critical so the AI does not suggest physically impossible or inappropriate options.
 
-RESPONSE FORMAT: Return only the narrative text - no JSON, no lists, no additional formatting. Just the story about this person."""
+Write in third person. Cover:
+• Who they are — name, age, personality, and what makes them unique
+• Their physical reality — how they move, eat, and what they can/cannot do physically
+• How they communicate — their style, tone, catchphrases, and authentic voice
+• What they love — interests, activities, entertainment, favorite topics
+• Their daily life — routines, favorite places, sensory preferences
+• What they most want to communicate — goals, important messages, topics that matter to them
+
+Write it as a cohesive portrait, not a list of facts. Use natural transitions between paragraphs.
+
+RESPONSE FORMAT: Return only the narrative text — no JSON, no lists, no additional formatting."""
 
         # Generate the narrative using the same infrastructure as the /llm endpoint
         full_prompt = await build_full_prompt_for_non_cached_llm(current_ids["account_id"], current_ids["aac_user_id"], narrative_prompt)
@@ -1527,14 +1537,14 @@ RESPONSE FORMAT: Return only the narrative text - no JSON, no lists, no addition
             )
             # Merge with new narrative data
             existing_data.update({
-                "narrative": narrative, 
-                "generated_at": dt.now().isoformat(), 
+                "narrative": narrative,
+                "generated_at": dt.now().isoformat(),
                 "source": "comprehensive_interview"
             })
-            
+
             await save_firestore_document(
                 account_id=current_ids["account_id"],
-                aac_user_id=current_ids["aac_user_id"], 
+                aac_user_id=current_ids["aac_user_id"],
                 doc_subpath="info/user_narrative",
                 data_to_save=existing_data
             )
@@ -1542,9 +1552,55 @@ RESPONSE FORMAT: Return only the narrative text - no JSON, no lists, no addition
         except Exception as save_error:
             logging.error(f"Failed to save narrative to Firestore: {save_error}")
             # Don't fail the whole request if save fails
+
+        # Save name and birthday extracted from responses so they're persisted immediately
+        try:
+            name_response = next((r for r in payload.responses if r.questionId == 'user_name'), None)
+            birthday_response = next((r for r in payload.responses if r.questionId == 'user_birthday'), None)
+
+            if name_response and name_response.answer.strip():
+                # Name lives in the same info/user_narrative doc — update it there
+                existing_data["name"] = name_response.answer.strip()
+                await save_firestore_document(
+                    account_id=current_ids["account_id"],
+                    aac_user_id=current_ids["aac_user_id"],
+                    doc_subpath="info/user_narrative",
+                    data_to_save=existing_data
+                )
+                logging.info(f"Saved user name from interview: {name_response.answer.strip()}")
+
+            if birthday_response and birthday_response.answer.strip():
+                raw_bday = birthday_response.answer.strip()
+                parsed_bday = None
+                if re.match(r'^\d{4}-\d{2}-\d{2}$', raw_bday):
+                    try:
+                        date.fromisoformat(raw_bday)
+                        parsed_bday = raw_bday
+                    except ValueError:
+                        pass
+                if parsed_bday:
+                    existing_bdays = await load_birthdays_from_file(current_ids["account_id"], current_ids["aac_user_id"])
+                    existing_bdays["userBirthdate"] = parsed_bday
+                    await save_birthdays_to_file(current_ids["account_id"], current_ids["aac_user_id"], existing_bdays)
+                    logging.info(f"Saved user birthday from interview: {parsed_bday}")
+                else:
+                    logging.warning(f"Interview birthday answer '{raw_bday}' is not YYYY-MM-DD — skipping birthday save")
+        except Exception as meta_save_error:
+            logging.error(f"Failed to save name/birthday from interview: {meta_save_error}")
         
+        # Persist raw responses to Firestore so they can be reviewed/edited later
+        try:
+            await save_firestore_document(
+                account_id=current_ids["account_id"],
+                aac_user_id=current_ids["aac_user_id"],
+                doc_subpath="info/interview_responses",
+                data_to_save={"responses": [r.dict() for r in payload.responses]}
+            )
+        except Exception as resp_save_error:
+            logging.error(f"Failed to save interview responses: {resp_save_error}")
+
         return JSONResponse(content={"narrative": narrative})
-            
+
     except Exception as e:
         logging.error(f"Error generating interview narrative: {e}", exc_info=True)
         return JSONResponse(content={"error": "Failed to generate narrative"}, status_code=500)
@@ -1573,6 +1629,40 @@ async def get_user_narrative(current_ids: Annotated[Dict[str, str], Depends(get_
     except Exception as e:
         logging.error(f"Error retrieving user narrative: {e}", exc_info=True)
         return JSONResponse(content={"error": "Failed to retrieve narrative"}, status_code=500)
+
+class SaveInterviewResponsesRequest(BaseModel):
+    responses: List[InterviewResponse]
+
+@app.post("/api/interview/responses")
+async def save_interview_responses(payload: SaveInterviewResponsesRequest, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Persist raw interview responses to Firestore so they can be reviewed/edited later."""
+    try:
+        data = {"responses": [r.dict() for r in payload.responses]}
+        await save_firestore_document(
+            account_id=current_ids["account_id"],
+            aac_user_id=current_ids["aac_user_id"],
+            doc_subpath="info/interview_responses",
+            data_to_save=data
+        )
+        return {"success": True}
+    except Exception as e:
+        logging.error(f"Error saving interview responses: {e}", exc_info=True)
+        return JSONResponse(content={"error": "Failed to save responses"}, status_code=500)
+
+@app.get("/api/interview/responses")
+async def get_interview_responses(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Retrieve previously saved interview responses from Firestore."""
+    try:
+        data = await load_firestore_document(
+            account_id=current_ids["account_id"],
+            aac_user_id=current_ids["aac_user_id"],
+            doc_subpath="info/interview_responses",
+            default_data={}
+        )
+        return {"responses": data.get("responses", []) if data else []}
+    except Exception as e:
+        logging.error(f"Error loading interview responses: {e}", exc_info=True)
+        return JSONResponse(content={"error": "Failed to load responses"}, status_code=500)
 
 def _create_basic_narrative_from_responses(responses: List[InterviewResponse]) -> str:
     """Create a basic narrative when LLM generation fails"""
@@ -18426,8 +18516,8 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
     """Use Gemini to generate subconcepts from a main concept"""
     api_key = await get_gemini_api_key()
     genai.configure(api_key=api_key)
-    
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+    model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
     
     prompt = f"""
     Generate {count} specific subconcepts related to "{concept}" that would be useful for AAC (Augmentative and Alternative Communication) purposes.
@@ -18700,8 +18790,8 @@ async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> 
     try:
         api_key = await get_gemini_api_key()
         genai.configure(api_key=api_key)
-        
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+        model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
         
         prompt = f"""
         Analyze this image that represents the concept "{subconcept}" from the category "{concept}".
@@ -21571,6 +21661,8 @@ async def _lookup_images_for_labels(
     _LEAD_STOPS = frozenset({
         # Articles
         'a', 'an', 'the',
+        # Conjunctions
+        'and', 'or', 'but',
         # Prepositions / particles
         'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
         'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though',
@@ -21590,6 +21682,10 @@ async def _lookup_images_for_labels(
         'will', 'would', 'shall', 'should',
         'can', 'could', 'may', 'might', 'must',
         'have', 'has', 'had', 'do', 'does', 'did',
+        # Degree / intensifier adverbs — "so mad"→"mad", "very upset"→"upset",
+        # "really frustrated"→"frustrated", "kind of sad"→"of sad"→"sad"
+        'so', 'very', 'really', 'quite', 'pretty', 'too',
+        'extremely', 'super', 'totally', 'just', 'kind', 'sort',
     })
 
     # Temporal/aspectual adverbs that appear at the END of a label and modify
@@ -21610,14 +21706,189 @@ async def _lookup_images_for_labels(
             words = words[:-1]
         return ' '.join(words)
 
+    # Inflected verb form → base (infinitive) for lemma-based image matching.
+    # Lets "telling" / "told" find an image whose subconcept is "tell".
+    # Irregular verbs are listed explicitly; regular -ing / -ed / -s handled below.
+    _VERB_BASES: Dict[str, str] = {
+        # be
+        'am':'be','is':'be','are':'be','was':'be','were':'be','been':'be','being':'be',
+        # eat / drink / cook
+        'ate':'eat','eaten':'eat','eating':'eat','eats':'eat',
+        'drank':'drink','drunk':'drink','drinking':'drink','drinks':'drink',
+        # go / come / run
+        'went':'go','gone':'go','going':'go','goes':'go',
+        'came':'come','coming':'come','comes':'come',
+        'ran':'run','running':'run','runs':'run',
+        # say / tell / speak / ask
+        'said':'say','saying':'say','says':'say',
+        'told':'tell','telling':'tell','tells':'tell',
+        'spoke':'speak','spoken':'speak','speaking':'speak','speaks':'speak',
+        'asked':'ask','asking':'ask','asks':'ask',
+        # see / look / watch / hear / feel
+        'saw':'see','seen':'see','seeing':'see','sees':'see',
+        'looked':'look','looking':'look','looks':'look',
+        'watched':'watch','watching':'watch','watches':'watch',
+        'heard':'hear','hearing':'hear','hears':'hear',
+        'felt':'feel','feeling':'feel','feels':'feel',
+        # give / take / make / get / put / set / let / cut / hit / put
+        'gave':'give','given':'give','giving':'give','gives':'give',
+        'took':'take','taken':'take','taking':'take','takes':'take',
+        'made':'make','making':'make','makes':'make',
+        'got':'get','gotten':'get','getting':'get','gets':'get',
+        'put':'put','putting':'put','puts':'put',
+        'set':'set','setting':'set','sets':'set',
+        'let':'let','letting':'let','lets':'let',
+        'cut':'cut','cutting':'cut','cuts':'cut',
+        'hit':'hit','hitting':'hit','hits':'hit',
+        'hurt':'hurt','hurting':'hurt','hurts':'hurt',
+        'read':'read','reading':'read','reads':'read',
+        # know / think / mean / find / lose / keep / leave / bring / buy
+        'knew':'know','known':'know','knowing':'know','knows':'know',
+        'thought':'think','thinking':'think','thinks':'think',
+        'meant':'mean','meaning':'mean','means':'mean',
+        'found':'find','finding':'find','finds':'find',
+        'lost':'lose','losing':'lose','loses':'lose',
+        'kept':'keep','keeping':'keep','keeps':'keep',
+        'left':'leave','leaving':'leave','leaves':'leave',
+        'brought':'bring','bringing':'bring','brings':'bring',
+        'bought':'buy','buying':'buy','buys':'buy',
+        # write / draw / sing / play / swim / throw / fly / ride / drive
+        'wrote':'write','written':'write','writing':'write','writes':'write',
+        'drew':'draw','drawn':'draw','drawing':'draw','draws':'draw',
+        'sang':'sing','sung':'sing','singing':'sing','sings':'sing',
+        'swam':'swim','swum':'swim','swimming':'swim','swims':'swim',
+        'threw':'throw','thrown':'throw','throwing':'throw','throws':'throw',
+        'flew':'fly','flown':'fly','flying':'fly','flies':'fly',
+        'rode':'ride','ridden':'ride','riding':'ride','rides':'ride',
+        'drove':'drive','driven':'drive','driving':'drive','drives':'drive',
+        # fall / stand / sit / sleep / wake / hold / send / meet / pay
+        'fell':'fall','fallen':'fall','falling':'fall','falls':'fall',
+        'stood':'stand','standing':'stand','stands':'stand',
+        'sat':'sit','sitting':'sit','sits':'sit',
+        'slept':'sleep','sleeping':'sleep','sleeps':'sleep',
+        'woke':'wake','woken':'wake','waking':'wake','wakes':'wake',
+        'held':'hold','holding':'hold','holds':'hold',
+        'sent':'send','sending':'send','sends':'send',
+        'met':'meet','meeting':'meet','meets':'meet',
+        'paid':'pay','paying':'pay','pays':'pay',
+        # teach / catch / build / fight / win / wear / break / choose / lead / feed
+        'taught':'teach','teaching':'teach','teaches':'teach',
+        'caught':'catch','catching':'catch','catches':'catch',
+        'built':'build','building':'build','builds':'build',
+        'fought':'fight','fighting':'fight','fights':'fight',
+        'won':'win','winning':'win','wins':'win',
+        'wore':'wear','worn':'wear','wearing':'wear','wears':'wear',
+        'broke':'break','broken':'break','breaking':'break','breaks':'break',
+        'chose':'choose','chosen':'choose','choosing':'choose','chooses':'choose',
+        'led':'lead','leading':'lead','leads':'lead',
+        'fed':'feed','feeding':'feed','feeds':'feed',
+        # misc common AAC verbs
+        'spent':'spend','spending':'spend','spends':'spend',
+        'grew':'grow','grown':'grow','growing':'grow','grows':'grow',
+        'blew':'blow','blown':'blow','blowing':'blow','blows':'blow',
+        'began':'begin','begun':'begin','beginning':'begin','begins':'begin',
+        'rang':'ring','rung':'ring','ringing':'ring','rings':'ring',
+        'forgot':'forget','forgotten':'forget','forgetting':'forget','forgets':'forget',
+        'froze':'freeze','frozen':'freeze','freezing':'freeze','freezes':'freeze',
+        'bit':'bite','bitten':'bite','biting':'bite','bites':'bite',
+        'hid':'hide','hidden':'hide','hiding':'hide','hides':'hide',
+        'laid':'lay','laying':'lay','lays':'lay',
+        'lit':'light','lighting':'light','lights':'light',
+        'shook':'shake','shaken':'shake','shaking':'shake','shakes':'shake',
+        'slid':'slide','sliding':'slide','slides':'slide',
+        'spun':'spin','spinning':'spin','spins':'spin',
+        'stuck':'stick','sticking':'stick','sticks':'stick',
+        'swore':'swear','sworn':'swear','swearing':'swear','swears':'swear',
+        'swung':'swing','swinging':'swing','swings':'swing',
+        'tore':'tear','torn':'tear','tearing':'tear','tears':'tear',
+        'understood':'understand','understanding':'understand','understands':'understand',
+        'wept':'weep','weeping':'weep','weeps':'weep',
+        'swept':'sweep','sweeping':'sweep','sweeps':'sweep',
+        'stole':'steal','stolen':'steal','stealing':'steal','steals':'steal',
+        'dug':'dig','digging':'dig','digs':'dig',
+        'bent':'bend','bending':'bend','bends':'bend',
+        'bled':'bleed','bleeding':'bleed','bleeds':'bleed',
+        'rode':'ride','ridden':'ride','riding':'ride','rides':'ride',
+        'rose':'rise','risen':'rise','rising':'rise','rises':'rise',
+        # regular verbs with irregular spelling that suffix rules would get wrong
+        'cried':'cry','crying':'cry','cries':'cry',
+        'tried':'try','trying':'try','tries':'try',
+        'played':'play','playing':'play','plays':'play',
+        'walked':'walk','walking':'walk','walks':'walk',
+        'talked':'talk','talking':'talk','talks':'talk',
+        'jumped':'jump','jumping':'jump','jumps':'jump',
+        'laughed':'laugh','laughing':'laugh','laughs':'laugh',
+        'helped':'help','helping':'help','helps':'help',
+        'wanted':'want','wanting':'want','wants':'want',
+        'needed':'need','needing':'need','needs':'need',
+        'liked':'like','liking':'like','likes':'like',
+        'loved':'love','loving':'love','loves':'love',
+        'hugged':'hug','hugging':'hug','hugs':'hug',
+        'kissed':'kiss','kissing':'kiss','kisses':'kiss',
+        'smiled':'smile','smiling':'smile','smiles':'smile',
+        'waved':'wave','waving':'wave','waves':'wave',
+        'danced':'dance','dancing':'dance','dances':'dance',
+        'painted':'paint','painting':'paint','paints':'paint',
+        'opened':'open','opening':'open','opens':'open',
+        'closed':'close','closing':'close','closes':'close',
+        'stopped':'stop','stopping':'stop','stops':'stop',
+        'started':'start','starting':'start','starts':'start',
+        'finished':'finish','finishing':'finish','finishes':'finish',
+        'cleaned':'clean','cleaning':'clean','cleans':'clean',
+        'cooked':'cook','cooking':'cook','cooks':'cook',
+        'pushed':'push','pushing':'push','pushes':'push',
+        'pulled':'pull','pulling':'pull','pulls':'pull',
+        'worked':'work','working':'work','works':'work',
+        'waited':'wait','waiting':'wait','waits':'wait',
+        'shared':'share','sharing':'share','shares':'share',
+        'turned':'turn','turning':'turn','turns':'turn',
+        'moved':'move','moving':'move','moves':'move',
+        'kicked':'kick','kicking':'kick','kicks':'kick',
+        'climbed':'climb','climbing':'climb','climbs':'climb',
+        'called':'call','calling':'call','calls':'call',
+        'visited':'visit','visiting':'visit','visits':'visit',
+        'learned':'learn','learning':'learn','learns':'learn',
+        'showed':'show','showing':'show','shows':'show','shown':'show',
+        'spelled':'spell','spelling':'spell','spells':'spell',
+    }
+
+    def _verb_base(word: str) -> str:
+        """Return base (infinitive) form of a single word, or '' if not applicable."""
+        if not word or ' ' in word:   # only single words
+            return ''
+        base = _VERB_BASES.get(word)
+        if base and base != word:
+            return base
+        # Conservative suffix rules for regular verbs not in the table.
+        # -ies → -y  (cries→cry, already in table but safe)
+        if word.endswith('ies') and len(word) > 4:
+            return word[:-3] + 'y'
+        # -s (but not -ss, -ies already handled)
+        if word.endswith('s') and not word.endswith('ss') and len(word) > 3:
+            return word[:-1]
+        return ''
+
     mascot_clean = str(mascot or '').strip().lower()
     unique_labels = list(dict.fromkeys(labels))  # preserve order, dedupe
     norm_map = {lbl: _norm(lbl) for lbl in unique_labels}  # label → normalized
     key_term_map = {lbl: _key_term(norm_map[lbl]) for lbl in unique_labels if norm_map.get(lbl)}
 
+    # Verb-base map: for each label, the base form of the key term (or norm label).
+    # e.g. "telling" → "tell", "told" → "tell", "is telling" → (key_term "telling") → "tell"
+    def _label_verb_base(lbl: str) -> str:
+        kt = key_term_map.get(lbl, '')
+        norm = norm_map.get(lbl, '')
+        # Prefer base of key_term; fall back to base of full norm label
+        candidate = kt if (kt and kt != norm) else norm
+        # Only apply to single-word candidates
+        return _verb_base(candidate) if candidate and ' ' not in candidate else ''
+
+    verb_base_map = {lbl: _label_verb_base(lbl) for lbl in unique_labels}
+
     # Include key terms in the query set so images keyed by the stripped term are fetched.
     all_norm = set(v for v in norm_map.values() if v)
     all_norm |= {kt for kt in key_term_map.values() if kt}
+    all_norm |= {vb for vb in verb_base_map.values() if vb}
 
     if not all_norm:
         return {}
@@ -21727,7 +21998,7 @@ async def _lookup_images_for_labels(
             "mascot": cc.get("mascot") or "",
         })
 
-    def _score(norm_label: str, cand: dict, key_term: str = '') -> int:
+    def _score(norm_label: str, cand: dict, key_term: str = '', verb_base: str = '') -> int:
         # Negation mismatch guard: a positive label must not match a negative image and vice versa.
         label_neg = norm_label.startswith('not ')
         cand_neg = (
@@ -21767,6 +22038,14 @@ async def _lookup_images_for_labels(
             score += 5000
         elif key_term and key_term != norm_label and key_term in cand["all_terms"]:
             score += 3500
+        elif verb_base and verb_base != norm_label and verb_base != key_term and verb_base == cand["sub"]:
+            # Tier 2500: inflected verb form matches image subconcept via lemma
+            # e.g. "telling" / "told" → base "tell" == subconcept "tell"
+            score += 2500
+        elif verb_base and verb_base != norm_label and verb_base != key_term and verb_base == cand["con"]:
+            score += 2000
+        elif verb_base and verb_base != norm_label and verb_base != key_term and verb_base in cand["all_terms"]:
+            score += 1500
         else:
             return -9999  # no textual match at all
 
@@ -21786,11 +22065,13 @@ async def _lookup_images_for_labels(
             continue
         kt = key_term_map.get(lbl, '')
         key_term = kt if kt != norm_lbl else ''  # only pass if stripping actually changed it
+        vb = verb_base_map.get(lbl, '')
+        verb_base = vb if vb and vb != norm_lbl and vb != key_term else ''
         best_score = 0  # require a genuine textual match (score > 0)
         best_url = None
 
         for cand in processed:
-            s = _score(norm_lbl, cand, key_term)
+            s = _score(norm_lbl, cand, key_term, verb_base)
             if s > best_score:
                 best_score = s
                 best_url = cand["url"]
@@ -22596,9 +22877,9 @@ async def analyze_image_tags(request: Request, token_info: Annotated[Dict[str, s
         # Use Gemini to analyze the image and generate tags
         try:
             import google.generativeai as genai
-            
+
             genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
             
             # Analyze the image
             analysis_prompt = f"""
@@ -26637,7 +26918,12 @@ async def convert_ai_boards_to_static(
                     f"Return ONLY the JSON array — no explanation, no markdown."
                 )
 
-                raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+                raw_response = await _generate_gemini_content_with_fallback(
+                    gen_prompt,
+                    {"temperature": 0.5, "max_output_tokens": min(600, max(200, payload.num_options * 12))},
+                    account_id,
+                    aac_user_id,
+                )
                 generated_options = _extract_options_from_llm_response(raw_response, board_id)
 
                 if not generated_options:
@@ -26859,7 +27145,12 @@ async def create_ai_target_board(
             f"Return ONLY the JSON array — no explanation, no markdown."
         )
 
-        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        raw_response = await _generate_gemini_content_with_fallback(
+            gen_prompt,
+            {"temperature": 0.5, "max_output_tokens": min(600, max(200, max_pool * 12))},
+            account_id,
+            aac_user_id,
+        )
         generated_options = _extract_options(raw_response)
 
         if not generated_options:
@@ -27112,7 +27403,12 @@ async def bravo_build(
             f"Return ONLY the JSON array — no explanation, no markdown."
         )
 
-        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        raw_response = await _generate_gemini_content_with_fallback(
+            gen_prompt,
+            {"temperature": 0.5, "max_output_tokens": min(600, max(200, max_pool * 12))},
+            account_id,
+            aac_user_id,
+        )
         generated_options = _extract_options(raw_response)
 
         if not generated_options:
@@ -27164,7 +27460,7 @@ async def bravo_build(
             )
             variants_raw = await _generate_gemini_content_with_fallback(
                 variants_prompt,
-                {"response_mime_type": "application/json", "temperature": 0.1},
+                {"response_mime_type": "application/json", "temperature": 0.1, "max_output_tokens": min(2000, max(200, len(generated_options) * 20))},
                 account_id,
                 aac_user_id,
             )
@@ -27394,6 +27690,10 @@ async def create_next_boards(
             btn['target_board_id'] = dec.existing_board_id
 
     # Parallel option generation for all generate/replace decisions
+    # Token budget: max_pool labels × ~8 tokens each × 1.5 JSON overhead ≈ max_pool * 12
+    _gen_opts_max_tokens = min(600, max(200, max_pool * 12))
+    _gen_opts_config = {"temperature": 0.5, "max_output_tokens": _gen_opts_max_tokens}
+
     async def _gen_options(label: str) -> List[str]:
         gen_prompt = (
             f"You are helping build an AAC (Augmentative and Alternative Communication) device board.\n"
@@ -27411,7 +27711,7 @@ async def create_next_boards(
             f"3. Each label 1-4 words, clear and concise\n"
             f"4. Return ONLY a JSON array of strings — no explanation, no markdown."
         )
-        raw = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        raw = await _generate_gemini_content_with_fallback(gen_prompt, _gen_opts_config, account_id, aac_user_id)
         opts: List[str] = []
         try:
             text = (raw or '').strip()
@@ -27465,8 +27765,11 @@ async def create_next_boards(
                 f"Never map a label to itself. Every label must appear as a key. "
                 f"Return ONLY valid JSON. Labels: {opts_json}"
             )
+            # Budget: each label needs ~20 output tokens for {key: {past_tense, plural}}
+            _variants_max_tokens = min(2000, max(200, len(all_unique) * 20))
             v_raw = await _generate_gemini_content_with_fallback(
-                variants_prompt, {"response_mime_type": "application/json", "temperature": 0.1},
+                variants_prompt,
+                {"response_mime_type": "application/json", "temperature": 0.1, "max_output_tokens": _variants_max_tokens},
                 account_id, aac_user_id
             )
             if v_raw:
@@ -27639,7 +27942,12 @@ async def bravo_suggest(
             f"Return ONLY the JSON array — no explanation, no markdown."
         )
 
-        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        raw_response = await _generate_gemini_content_with_fallback(
+            gen_prompt,
+            {"temperature": 0.5, "max_output_tokens": min(600, max(200, count * 12))},
+            account_id,
+            aac_user_id,
+        )
 
         text = str(raw_response or "").strip()
         text = re.sub(r'```(?:json)?\s*', '', text).strip()
@@ -27776,7 +28084,10 @@ async def regenerate_board(
             f"Return ONLY the JSON array — no explanation, no markdown."
         )
 
-        raw_response = await _generate_gemini_content_with_fallback(gen_prompt, None, account_id, aac_user_id)
+        _regen_max_tokens = min(600, max(200, num_options * 12))
+        raw_response = await _generate_gemini_content_with_fallback(
+            gen_prompt, {"temperature": 0.5, "max_output_tokens": _regen_max_tokens}, account_id, aac_user_id
+        )
         generated_options = _extract_options(raw_response)
 
         if not generated_options:

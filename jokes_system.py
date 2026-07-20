@@ -427,7 +427,7 @@ RULES:
             def _generate_tags():
                 logging.info(f"🤖 In thread: Calling Gemini API to generate tags...")
                 try:
-                    model = genai.GenerativeModel("gemini-2.0-flash")
+                    model = genai.GenerativeModel(os.getenv("GEMINI_PRIMARY_MODEL") or "gemini-2.5-flash-lite")
                     response = model.generate_content(prompt)
                     logging.info(f"🤖 In thread: Got response from Gemini")
                     
@@ -493,7 +493,7 @@ RULES:
             def _generate_summary():
                 logging.info(f"🤖 In thread: Calling Gemini API to generate summary...")
                 try:
-                    model = genai.GenerativeModel("gemini-2.0-flash")
+                    model = genai.GenerativeModel(os.getenv("GEMINI_PRIMARY_MODEL") or "gemini-2.5-flash-lite")
                     response = model.generate_content(prompt)
                     logging.info(f"🤖 In thread: Got response from Gemini")
                     

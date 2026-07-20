@@ -470,6 +470,37 @@
             font-weight: 500;
         }
 
+        .wizard-loading-overlay {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 48px 24px;
+            gap: 20px;
+        }
+        .wizard-loading-overlay.active {
+            display: flex;
+        }
+        .wizard-loading-spinner {
+            width: 52px;
+            height: 52px;
+            border: 5px solid #e5e7eb;
+            border-top-color: #4f46e5;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+        .wizard-loading-label {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #374151;
+            text-align: center;
+        }
+        .wizard-loading-sub {
+            font-size: 0.85rem;
+            color: #6b7280;
+            text-align: center;
+        }
+
         .wizard-footer {
             display: flex;
             justify-content: space-between;
@@ -928,6 +959,7 @@
                 -1px 1px 0 white,
                 1px 1px 0 white;
         }
+
     </style>
 
     <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
@@ -3453,6 +3485,8 @@ registerForm.addEventListener('submit', async (e) => {
             scanMode: 'auto',
             waitForSwitch: false,
             scanDelay: 800,
+            playWaitForSwitchChime: false,
+            scanLoopLimit: 0,
             wordsRows: 3,
             phrasesRows: 0,
             useHybridPages: false,
@@ -3461,7 +3495,8 @@ registerForm.addEventListener('submit', async (e) => {
             defaultButtonAction: 'do_nothing',
             // menuItemVisibility: { sourceButtonId: true/false } — true = visible
             menuItemVisibility: null,   // null = not yet loaded; populated in openSetupWizard
-            menuItemsLoaded: []         // ordered list {id, label} for the step UI
+            menuItemsLoaded: [],        // ordered list {id, label} for the step UI
+            runInterviewAfter: false
         };
 
         // Menu items the admin can show/hide (system items like Spell/Games are always visible)
@@ -3482,8 +3517,9 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // tap: 8 steps (mascot added as step 2); scan: 9 steps
-            return wizardState.interfaceMode === 'tap' ? 8 : 9;
+            // Both modes: 9 steps (step 9 = optional User Profile Interview)
+            // tap: includes mascot at step 2; scan: skips mascot, scan config at display 8
+            return 9;
         }
 
         async function openSetupWizard() {
@@ -3527,6 +3563,8 @@ registerForm.addEventListener('submit', async (e) => {
                     wizardState.scanMode = s.scanMode || 'auto';
                     wizardState.waitForSwitch = s.waitForSwitchToScan || false;
                     wizardState.scanDelay = s.scanDelay || 800;
+                    wizardState.playWaitForSwitchChime = s.playWaitForSwitchChime || false;
+                    wizardState.scanLoopLimit = s.scanLoopLimit !== undefined ? s.scanLoopLimit : 0;
                     wizardState.wordsRows = s.tapWordsRows !== undefined ? s.tapWordsRows : 3;
                     wizardState.phrasesRows = s.tapPhrasesRows !== undefined ? s.tapPhrasesRows : 0;
                     wizardState.useHybridPages = s.useHybridPages !== undefined ? s.useHybridPages : false;
@@ -3591,6 +3629,24 @@ registerForm.addEventListener('submit', async (e) => {
             if (!el) return;
             el.textContent = msg;
             el.style.color = isError ? '#ef4444' : '#6b7280';
+            // Also update the loading overlay label if it's active
+            const label = document.getElementById('wizardLoadingLabel');
+            if (label && document.getElementById('wizardLoadingOverlay')?.classList.contains('active')) {
+                label.textContent = msg;
+            }
+        }
+
+        function showWizardLoading(show) {
+            const overlay = document.getElementById('wizardLoadingOverlay');
+            const content = document.getElementById('wizardStepContent');
+            if (!overlay || !content) return;
+            if (show) {
+                overlay.classList.add('active');
+                content.style.display = 'none';
+            } else {
+                overlay.classList.remove('active');
+                content.style.display = '';
+            }
         }
 
         function showWizardStep(step) {
@@ -3612,8 +3668,52 @@ registerForm.addEventListener('submit', async (e) => {
         function renderWizardStep(step) {
             const contentEl = document.getElementById('wizardStepContent');
             const titleEl = document.getElementById('wizardTitle');
+            // Scan mode skips the mascot step (content step 2), so display step 2 maps to content step 3, etc.
+            const s = (wizardState.interfaceMode === 'scan' && step >= 2) ? step + 1 : step;
 
-            if (step === 1) {
+            if (step === 9) {
+                // Last step for both tap and scan — optional User Profile Interview
+                titleEl.textContent = 'User Profile Interview';
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
+                        The User Profile Interview asks a caregiver or family member 15 short questions
+                        about the user's personality, interests, and communication style. The answers
+                        help the AI generate more personal and relevant communication options.
+                    </p>
+                    <p style="color:#6b7280;margin-bottom:16px;font-size:0.85rem;">
+                        The interview takes about 5–10 minutes and can be run at any time from the
+                        User Information page. You can skip it now and run it later.
+                    </p>
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid ${wizardState.runInterviewAfter ? '#6366f1' : '#c7d2fe'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardInterviewChoice" value="run" ${wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">After saving the profile, go directly to the interview</div>
+                            </div>
+                        </label>
+                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid ${!wizardState.runInterviewAfter ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardInterviewChoice" value="skip" ${!wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go to the app — the interview can be run later from User Information</div>
+                            </div>
+                        </label>
+                    </div>`;
+                contentEl.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
+                    radio.addEventListener('change', () => {
+                        wizardState.runInterviewAfter = radio.value === 'run';
+                        contentEl.querySelectorAll('label').forEach(lbl => {
+                            const input = lbl.querySelector('input[type=radio]');
+                            lbl.style.borderColor = input && input.checked ? '#6366f1' : '#e5e7eb';
+                            if (input && input.value === 'run') {
+                                lbl.style.background = input.checked ? '#eef2ff' : '#f9fafb';
+                            }
+                        });
+                    });
+                });
+
+            } else if (s === 1) {
                 titleEl.textContent = 'Interface Mode';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:16px;">Choose how the user will interact with the app.</p>
@@ -3645,7 +3745,7 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 });
 
-            } else if (step === 2) {
+            } else if (s === 2) {
                 titleEl.textContent = 'Choose a Mascot';
                 const mascots = [
                     { value: 'bobby',  label: 'Bobby',  desc: 'Boy',  img: '/static/images/mascot_bobby.png' },
@@ -3676,7 +3776,7 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 });
 
-            } else if (step === 3) {
+            } else if (s === 3) {
                 titleEl.textContent = 'Wake Word';
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:16px;">Configure the wake word that activates the app.</p>
@@ -3691,7 +3791,7 @@ registerForm.addEventListener('submit', async (e) => {
                         <p class="wizard-input-hint">The name spoken to wake the app</p>
                     </div>`;
 
-            } else if (step === 4) {
+            } else if (s === 4) {
                 if (wizardState.interfaceMode === 'tap') {
                     titleEl.textContent = 'Button Layout';
                     contentEl.innerHTML = `
@@ -3772,7 +3872,7 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 }
 
-            } else if (step === 5) {
+            } else if (s === 5) {
                 if (wizardState.interfaceMode === 'tap') {
                     // tap step 5 = Button Action (was step 4)
                     titleEl.textContent = 'Button Action';
@@ -3820,7 +3920,7 @@ registerForm.addEventListener('submit', async (e) => {
                         <p class="wizard-input-hint">Set to 0 to disable AI-generated options</p>`;
                 }
 
-            } else if (step === 6) {
+            } else if (s === 6) {
                 if (wizardState.interfaceMode === 'tap') {
                     // tap step 6 = Menu Options
                     titleEl.textContent = 'Menu Options';
@@ -3871,7 +3971,7 @@ registerForm.addEventListener('submit', async (e) => {
                         <input id="wizardFreestyleOptions" class="wizard-input wizard-input-number" type="number" min="1" max="50" value="${wizardState.freestyleOptions}">`;
                 }
 
-            } else if (step === 7) {
+            } else if (s === 7) {
                 if (wizardState.interfaceMode === 'tap') {
                     // tap step 7 = User Language
                     titleEl.textContent = 'User Language';
@@ -3893,7 +3993,7 @@ registerForm.addEventListener('submit', async (e) => {
                         <select id="wizardUserLanguage" class="wizard-input">${langOpts}</select>`;
                 }
 
-            } else if (step === 8) {
+            } else if (s === 8) {
                 if (wizardState.interfaceMode === 'tap') {
                     // tap step 8 = Partner Language & Voice — LAST TAP STEP
                     titleEl.textContent = 'Default Partner Language & Voice';
@@ -3980,46 +4080,63 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 }
 
-            } else if (step === 9) {
-                // scan only — tap mode ends at step 8
+            } else if (s === 9) {
+                // scan only — content step 9 = display step 8 in scan mode
                 titleEl.textContent = 'Scanning Configuration';
                 contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:16px;">Configure scanning behavior for switch access.</p>
-                    <div style="margin-bottom:20px;">
-                        <label class="wizard-field-label">Scan Mode</label>
-                        <div style="display:flex;gap:10px;">
-                            <div class="wizard-scan-opt${wizardState.scanMode === 'auto' ? ' selected' : ''}" data-scan-mode="auto">
-                                <input type="radio" name="wizardScanMode" value="auto" ${wizardState.scanMode === 'auto' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                    <p style="color:#374151;margin-bottom:12px;font-size:0.9rem;">Configure scanning behavior for switch access.</p>
+                    <div style="margin-bottom:12px;">
+                        <label class="wizard-field-label" style="margin-bottom:6px;">Scan Mode</label>
+                        <div style="display:flex;gap:8px;">
+                            <div class="wizard-scan-opt${wizardState.scanMode === 'auto' ? ' selected' : ''}" data-scan-mode="auto" style="flex:1;padding:8px 10px;">
+                                <input type="radio" name="wizardScanMode" value="auto" ${wizardState.scanMode === 'auto' ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
                                 <div>
-                                    <div style="font-weight:600;">Auto</div>
-                                    <div style="font-size:0.8rem;color:#6b7280;">Scans automatically at set speed</div>
+                                    <div style="font-weight:600;font-size:0.875rem;">Auto</div>
+                                    <div style="font-size:0.75rem;color:#6b7280;">Scans automatically at set speed</div>
                                 </div>
                             </div>
-                            <div class="wizard-scan-opt${wizardState.scanMode === 'step' ? ' selected' : ''}" data-scan-mode="step">
-                                <input type="radio" name="wizardScanMode" value="step" ${wizardState.scanMode === 'step' ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;">
+                            <div class="wizard-scan-opt${wizardState.scanMode === 'step' ? ' selected' : ''}" data-scan-mode="step" style="flex:1;padding:8px 10px;">
+                                <input type="radio" name="wizardScanMode" value="step" ${wizardState.scanMode === 'step' ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
                                 <div>
-                                    <div style="font-weight:600;">Step</div>
-                                    <div style="font-size:0.8rem;color:#6b7280;">Advances on each switch press</div>
+                                    <div style="font-weight:600;font-size:0.875rem;">Step</div>
+                                    <div style="font-size:0.75rem;color:#6b7280;">Advances on each switch press</div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div style="margin-bottom:20px;">
-                        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-                            <input type="checkbox" id="wizardWaitForSwitch" ${wizardState.waitForSwitch ? 'checked' : ''} style="width:18px;height:18px;accent-color:#6366f1;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+                        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                            <input type="checkbox" id="wizardWaitForSwitch" ${wizardState.waitForSwitch ? 'checked' : ''} style="width:16px;height:16px;accent-color:#6366f1;margin-top:2px;flex-shrink:0;">
                             <div>
-                                <div style="font-weight:600;color:#374151;">Wait for Switch</div>
-                                <div style="font-size:0.8rem;color:#6b7280;">Scanning waits for a switch press before starting</div>
+                                <div style="font-weight:600;color:#374151;font-size:0.85rem;">Wait for Switch</div>
+                                <div style="font-size:0.75rem;color:#6b7280;margin-top:2px;">Scanning waits for a switch press before starting</div>
+                            </div>
+                        </label>
+                        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+                            <input type="checkbox" id="wizardScanChime" ${wizardState.playWaitForSwitchChime ? 'checked' : ''} style="width:16px;height:16px;accent-color:#6366f1;margin-top:2px;flex-shrink:0;">
+                            <div>
+                                <div style="font-weight:600;color:#374151;font-size:0.85rem;">Play Chime on Page Load</div>
+                                <div style="font-size:0.75rem;color:#6b7280;margin-top:2px;">Plays a chime when the page loads, before scanning begins</div>
                             </div>
                         </label>
                     </div>
-                    <div>
-                        <label class="wizard-field-label">Scan Speed</label>
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <input id="wizardScanDelay" type="number" min="100" max="5000" step="100" value="${wizardState.scanDelay}" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:1rem;width:110px;">
-                            <span style="color:#6b7280;">milliseconds between scans</span>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                        <div>
+                            <label class="wizard-field-label" style="margin-bottom:6px;">Scan Speed</label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <input id="wizardScanDelay" type="number" min="100" max="5000" step="100" value="${wizardState.scanDelay}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.9rem;width:85px;">
+                                <span style="color:#6b7280;font-size:0.8rem;">ms</span>
+                            </div>
+                            <p class="wizard-input-hint" style="margin-top:4px;">Lower = faster (100–5000 ms)</p>
                         </div>
-                        <p class="wizard-input-hint">Lower = faster scanning (100–5000 ms)</p>
+                        <div>
+                            <label class="wizard-field-label" style="margin-bottom:6px;">Scan Loop Limit</label>
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <input id="wizardScanLoopLimit" type="number" min="0" max="10" step="1" value="${wizardState.scanLoopLimit}" style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.9rem;width:65px;">
+                                <span style="color:#6b7280;font-size:0.8rem;">loops (0 = unlimited)</span>
+                            </div>
+                            <p class="wizard-input-hint" style="margin-top:4px;">Stops after N full loops (0–10)</p>
+                        </div>
                     </div>`;
                 contentEl.querySelectorAll('.wizard-scan-opt').forEach(opt => {
                     opt.addEventListener('click', () => {
@@ -4249,17 +4366,23 @@ registerForm.addEventListener('submit', async (e) => {
 
         function wizardCollectCurrentStep() {
             const step = wizardState.currentStep;
-            if (step === 2) {
+            // Scan mode skips mascot (content step 2), so display step 2 = content step 3, etc.
+            const s = (wizardState.interfaceMode === 'scan' && step >= 2) ? step + 1 : step;
+            if (step === 9) {
+                // Last step (both modes) — optional interview
+                const runEl = document.querySelector('input[name="wizardInterviewChoice"]:checked');
+                if (runEl) wizardState.runInterviewAfter = runEl.value === 'run';
+            } else if (s === 2) {
                 // step 2 = Mascot (captured by click handler; read here as fallback)
                 const el = document.querySelector('input[name="wizardMascot"]:checked');
                 if (el) wizardState.mascot = el.value;
-            } else if (step === 3) {
+            } else if (s === 3) {
                 // step 3 = Wake Word
                 const i = document.getElementById('wizardWakeInterjection');
                 const n = document.getElementById('wizardWakeName');
                 if (i) wizardState.wakeWordInterjection = i.value.trim();
                 if (n) wizardState.wakeWordName = n.value.trim();
-            } else if (step === 4) {
+            } else if (s === 4) {
                 // step 4 = Button Layout
                 const el = document.getElementById('wizardGridColumns');
                 if (el) wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(el.value) || 6));
@@ -4275,7 +4398,7 @@ registerForm.addEventListener('submit', async (e) => {
                         wizardState.tapDynamicRows = Math.max(0, dVal);
                     }
                 }
-            } else if (step === 5) {
+            } else if (s === 5) {
                 if (wizardState.interfaceMode === 'tap') {
                     // tap step 5 = Button Action
                     const actionEl = document.querySelector('input[name="wizardButtonAction"]:checked');
@@ -4287,7 +4410,7 @@ registerForm.addEventListener('submit', async (e) => {
                     const el = document.getElementById('wizardLlmOptions');
                     if (el) wizardState.llmOptions = Math.max(0, Math.min(50, parseInt(el.value) || 0));
                 }
-            } else if (step === 6) {
+            } else if (s === 6) {
                 if (wizardState.interfaceMode === 'tap') {
                     // tap step 6 = Menu Options
                     const boxes = document.querySelectorAll('.wizard-menu-checkbox');
@@ -4300,17 +4423,17 @@ registerForm.addEventListener('submit', async (e) => {
                     const el = document.getElementById('wizardFreestyleOptions');
                     if (el) wizardState.freestyleOptions = Math.max(1, Math.min(50, parseInt(el.value) || 1));
                 }
-            } else if (step === 7) {
+            } else if (s === 7) {
                 // both modes: User Language
                 const el = document.getElementById('wizardUserLanguage');
                 if (el) wizardState.userLanguage = el.value;
-            } else if (step === 8) {
+            } else if (s === 8) {
                 // both modes: Partner Language & Voice (last tap step)
                 const langEl = document.getElementById('wizardPartnerLanguage');
                 const voiceEl = document.getElementById('wizardPartnerVoice');
                 if (langEl) wizardState.partnerLanguage = langEl.value;
                 if (voiceEl) wizardState.partnerVoice = voiceEl.value;
-            } else if (step === 9) {
+            } else if (s === 9) {
                 // scan only: Scanning Configuration
                 const modeEl = document.querySelector('[name=wizardScanMode]:checked');
                 if (modeEl) wizardState.scanMode = modeEl.value;
@@ -4318,6 +4441,10 @@ registerForm.addEventListener('submit', async (e) => {
                 if (waitEl) wizardState.waitForSwitch = waitEl.checked;
                 const delayEl = document.getElementById('wizardScanDelay');
                 if (delayEl) wizardState.scanDelay = Math.max(100, parseInt(delayEl.value) || 800);
+                const chimeEl = document.getElementById('wizardScanChime');
+                if (chimeEl) wizardState.playWaitForSwitchChime = chimeEl.checked;
+                const loopEl = document.getElementById('wizardScanLoopLimit');
+                if (loopEl) wizardState.scanLoopLimit = Math.max(0, Math.min(10, parseInt(loopEl.value) || 0));
             }
         }
 
@@ -4348,6 +4475,7 @@ registerForm.addEventListener('submit', async (e) => {
             const backBtn = document.getElementById('wizardBackBtn');
             if (nextBtn) nextBtn.disabled = true;
             if (backBtn) backBtn.disabled = true;
+            showWizardLoading(true);
             setWizardStatus('Saving settings…', false);
 
             try {
@@ -4380,6 +4508,8 @@ registerForm.addEventListener('submit', async (e) => {
                     payload.scanMode = wizardState.scanMode;
                     payload.waitForSwitchToScan = wizardState.waitForSwitch;
                     payload.scanDelay = wizardState.scanDelay;
+                    payload.playWaitForSwitchChime = wizardState.playWaitForSwitchChime;
+                    payload.scanLoopLimit = wizardState.scanLoopLimit;
                 }
 
                 const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
@@ -4447,15 +4577,17 @@ registerForm.addEventListener('submit', async (e) => {
                     } catch (_) { /* non-fatal: menu visibility can be adjusted in admin settings */ }
                 }
 
-                // Assign images to all board buttons using the selected mascot
-                try {
-                    setWizardStatus('Assigning images to boards…', false);
-                    await fetch('/api/tap-interface/boards/assign-all-images', {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({ mascot: wizardState.mascot || '' })
-                    });
-                } catch (_) { /* non-fatal: images will be assigned on first use */ }
+                // Assign images to tap interface boards (not needed for scan interface)
+                if (wizardState.interfaceMode === 'tap') {
+                    try {
+                        setWizardStatus('Assigning images to boards…', false);
+                        await fetch('/api/tap-interface/boards/assign-all-images', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ mascot: wizardState.mascot || '' })
+                        });
+                    } catch (_) { /* non-fatal: images will be assigned on first use */ }
+                }
 
                 closeSetupWizard();
 
@@ -4471,10 +4603,35 @@ registerForm.addEventListener('submit', async (e) => {
 
                 setTimeout(async () => {
                     await checkScheduledFavoritesOnAuth();
-                    await redirectToPreferredInterface();
+                    if (wizardState.runInterviewAfter) {
+                        closeSetupWizard();
+                        sessionStorage.setItem('wizardInterviewMode', '1');
+
+                        // Expose authenticatedFetch so the interview system can call the API
+                        const _iToken = sessionStorage.getItem('firebaseIdToken');
+                        const _iUserId = sessionStorage.getItem('currentAacUserId');
+                        window.authenticatedFetch = async (url, options = {}) => {
+                            const headers = options.headers || {};
+                            headers['Authorization'] = `Bearer ${_iToken}`;
+                            headers['X-User-ID'] = _iUserId;
+                            const adminTarget = sessionStorage.getItem('adminTargetAccountId');
+                            if (adminTarget) headers['X-Admin-Target-Account'] = adminTarget;
+                            options.headers = headers;
+                            return fetch(url, options);
+                        };
+
+                        if (typeof AudioInterviewSystem !== 'undefined') {
+                            // Always create a fresh instance for each new profile
+                            window.interviewSystem = new AudioInterviewSystem();
+                            window.interviewSystem.openInterviewModal();
+                        }
+                    } else {
+                        await redirectToPreferredInterface();
+                    }
                 }, 100);
 
             } catch (err) {
+                showWizardLoading(false);
                 setWizardStatus(`Error: ${err.message}`, true);
                 if (nextBtn) nextBtn.disabled = false;
                 if (backBtn) backBtn.disabled = false;
@@ -4485,6 +4642,8 @@ registerForm.addEventListener('submit', async (e) => {
     </script>
     <script src="/static/avatar-selector.js"></script>
     <script src="/static/mood-selection.js"></script>
+    <script src="/static/interview-questions.js"></script>
+    <script src="/static/audio-interview-system.js"></script>
 
     <!-- Scheduled Favorite Prompt Modal (Added to Auth Page) -->
     <div id="scheduledFavoriteModal" class="modal-overlay" style="display: none;">
@@ -4517,12 +4676,84 @@ registerForm.addEventListener('submit', async (e) => {
                 <div id="wizardProgressBar" class="wizard-progress-bar" style="width:14%;"></div>
             </div>
             <div id="wizardStepContent" class="wizard-step-content"></div>
+            <div id="wizardLoadingOverlay" class="wizard-loading-overlay">
+                <div class="wizard-loading-spinner"></div>
+                <div class="wizard-loading-label" id="wizardLoadingLabel">Setting up your profile…</div>
+                <div class="wizard-loading-sub" id="wizardLoadingSub">This may take a minute. Please don't close this window.</div>
+            </div>
             <div id="wizardStatus" class="wizard-status"></div>
             <div class="wizard-footer">
                 <button id="wizardCancelBtn" class="wizard-btn wizard-btn-cancel">Cancel</button>
                 <div style="display:flex;gap:8px;">
                     <button id="wizardBackBtn" class="wizard-btn wizard-btn-back" style="display:none;">Back</button>
                     <button id="wizardNextBtn" class="wizard-btn wizard-btn-next">Next</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio Interview Modal (launched from wizard step 9) -->
+    <div id="audioInterviewModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-4xl max-h-[90vh] mx-2 relative flex flex-col">
+            <button id="closeInterviewModal" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Interview">&times;</button>
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">User Profile Interview</h2>
+                <span id="interviewProgress" class="text-sm text-gray-600">Question 0 of 0</span>
+            </div>
+            <div class="bg-gray-100 p-4 rounded-lg mb-6">
+                <div class="flex items-center space-x-3 mb-2">
+                    <div id="interviewStatus" class="flex items-center space-x-2">
+                        <i class="fas fa-microphone text-blue-600"></i>
+                        <span class="text-sm font-medium text-gray-700">Ready to start interview</span>
+                    </div>
+                </div>
+                <div id="currentQuestion" class="text-lg font-medium text-gray-800 mb-3">
+                    Welcome! I'll ask you some questions to learn about this user. Click "Start Interview" when you're ready.
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="startInterviewBtn" class="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700">
+                        <i class="fas fa-play mr-2"></i> Start Interview
+                    </button>
+                </div>
+            </div>
+            <!-- Answer input area — shown when a question is active -->
+            <div id="answerInputArea" class="mb-6 hidden">
+                <textarea id="interviewAnswerText" rows="4"
+                    placeholder="Type your answer here, or click Dictate to speak it…"
+                    class="w-full p-3 border border-gray-300 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-vertical text-sm"></textarea>
+                <input type="date" id="birthdayDateInput"
+                    class="hidden w-full p-3 border border-gray-300 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 text-sm">
+                <div class="mt-2 flex items-center gap-2 flex-wrap">
+                    <button id="dictateBtn" class="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gray-600 hover:bg-gray-700">
+                        <i class="fas fa-microphone mr-1"></i> Dictate
+                    </button>
+                    <span id="dictateStatus" class="text-sm text-blue-600 font-medium hidden"></span>
+                    <button id="clearAnswerBtn" class="inline-flex items-center justify-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50">
+                        <i class="fas fa-times mr-1"></i> Clear
+                    </button>
+                    <div class="ml-auto flex items-center gap-2">
+                        <button id="prevQuestionBtn" class="hidden inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gray-500 hover:bg-gray-600">
+                            <i class="fas fa-arrow-left mr-1"></i> Previous
+                        </button>
+                        <button id="submitAnswerBtn" class="inline-flex items-center justify-center px-5 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700">
+                            Next Question <i class="fas fa-arrow-right ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 flex justify-between items-center">
+                <div class="flex space-x-3">
+                    <button id="restartInterviewBtn" class="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700">
+                        <i class="fas fa-redo mr-2"></i> Restart Interview
+                    </button>
+                </div>
+                <div class="flex space-x-3">
+                    <button id="generateNarrativeBtn" class="hidden inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700">
+                        <i class="fas fa-file-alt mr-2"></i> Generate User Profile
+                    </button>
+                    <button id="closeInterviewBtn" class="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-gray-600 hover:bg-gray-700">
+                        Close Interview
+                    </button>
                 </div>
             </div>
         </div>
