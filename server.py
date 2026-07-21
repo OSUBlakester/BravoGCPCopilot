@@ -21688,11 +21688,15 @@ async def _lookup_images_for_labels(
         'extremely', 'super', 'totally', 'just', 'kind', 'sort',
     })
 
-    # Temporal/aspectual adverbs that appear at the END of a label and modify
-    # *when* something happens rather than *what* the action is.
-    # Stripping these lets "playing now" → key_term "playing", matching the
-    # "playing" image at tier-7000 instead of falling through with no match.
+    # Words that appear at the END of a label but don't contribute to the image key term.
+    # Stripped iteratively from the tail so "ball is this" → "ball is" → "ball",
+    # "book is that" → "book is" → "book", "playing now" → "playing".
     _TRAIL_STOPS = frozenset({
+        # Demonstrative pronouns used as sentence-final deictic ("ball is this", "want that")
+        'this', 'that', 'these', 'those',
+        # "To be" forms at the tail ("ball is this" → after "this" stripped → "ball is")
+        'is', 'are', 'was', 'were',
+        # Temporal/aspectual adverbs
         'now', 'later', 'soon',
         'today', 'tomorrow', 'tonight', 'yesterday',
         'already', 'again', 'still', 'yet', 'then', 'next',
