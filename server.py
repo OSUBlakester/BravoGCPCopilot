@@ -18795,18 +18795,20 @@ async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> 
         
         prompt = f"""
         Analyze this image that represents the concept "{subconcept}" from the category "{concept}".
-        
+
         Generate 8-12 relevant tags for AAC (Augmentative and Alternative Communication) purposes.
-        
+
         Requirements:
         - Include the main concept and subconcept
         - Add descriptive words about appearance, function, context
         - Use simple, common words that AAC users might search for
         - Include both specific and general terms
         - Focus on communication-relevant aspects
-        
+        - Do NOT include character names, mascot names, or descriptions of cartoon characters in the image (e.g. do not tag "bobby", "bonnie", "buddy", "no mascot", or any character name)
+        - Do NOT include "no" or "no mascot" as tags
+
         Return only the tags, separated by commas, no other text.
-        
+
         Example format: dog, animal, pet, furry, four legs, companion, brown, sitting
         """
         
@@ -21640,10 +21642,12 @@ async def _lookup_images_for_labels(
     mascot: str = '',
     account_id: str = '',
     aac_user_id: str = '',
+    source: str = '',
 ) -> Dict[str, str]:
     """
     Batch-look up the best symbol image for each label string.
     Returns {original_label: image_url}. Missing results are omitted.
+    Logs unresolved labels to the missing_images collection with the given source.
     Shared by board generation, assign-all-images endpoint, and board builder.
     """
     import re as _re
@@ -22083,7 +22087,19 @@ async def _lookup_images_for_labels(
         if best_url:
             label_to_url[lbl] = best_url
 
-    logging.info(f"_lookup_images_for_labels: {len(label_to_url)}/{len(unique_labels)} labels resolved (mascot={mascot_clean!r})")
+    logging.info(f"_lookup_images_for_labels: {len(label_to_url)}/{len(unique_labels)} labels resolved (mascot={mascot_clean!r}, source={source!r})")
+
+    # Log any labels that had no matching image so admins can track gaps.
+    # Skip pure numbers — they display as text and are not expected to have images.
+    missing_labels = [
+        lbl for lbl in unique_labels
+        if lbl not in label_to_url and not _norm(lbl).replace(' ', '').isdigit()
+    ]
+    if missing_labels:
+        context = {"source": source, "mascot": mascot_clean, "account_id": account_id, "aac_user_id": aac_user_id}
+        for lbl in missing_labels:
+            asyncio.create_task(log_missing_image(lbl, context))
+
     return label_to_url
 
 
@@ -22162,7 +22178,7 @@ async def _assign_images_to_tap_config(
 
         label_to_url: Dict[str, str] = {}
         if all_labels:
-            label_to_url = await _lookup_images_for_labels(all_labels, mascot, account_id, aac_user_id)
+            label_to_url = await _lookup_images_for_labels(all_labels, mascot, account_id, aac_user_id, source="tap_config")
 
         stats["images_resolved"] = len(label_to_url)
 
@@ -27439,7 +27455,7 @@ async def bravo_build(
         # Batch-resolve images for all options using the shared scored lookup
         # (handles key-term stripping, negation guard, and mascot priority in one pass).
         selected_mascot = str(settings.get("mascot") or "").strip().lower()
-        label_to_url = await _lookup_images_for_labels(generated_options, selected_mascot, account_id, aac_user_id)
+        label_to_url = await _lookup_images_for_labels(generated_options, selected_mascot, account_id, aac_user_id, source="bravo_build")
 
         # Batch-generate past_tense and plural for all options in a single LLM call
         variants_map: Dict[str, Dict[str, Optional[str]]] = {}
@@ -27755,7 +27771,7 @@ async def create_next_boards(
 
     label_to_url: Dict[str, Any] = {}
     if all_unique:
-        label_to_url = await _lookup_images_for_labels(all_unique, selected_mascot, account_id, aac_user_id)
+        label_to_url = await _lookup_images_for_labels(all_unique, selected_mascot, account_id, aac_user_id, source="create_next_boards")
 
     variants_map: Dict[str, Dict[str, Any]] = {}
     if all_unique:
