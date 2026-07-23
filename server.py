@@ -21696,6 +21696,12 @@ async def _lookup_images_for_labels(
     # Stripped iteratively from the tail so "ball is this" → "ball is" → "ball",
     # "book is that" → "book is" → "book", "playing now" → "playing".
     _TRAIL_STOPS = frozenset({
+        # Articles dangling at the end: "open the" → "open", "eat a" → "eat"
+        'a', 'an', 'the',
+        # Prepositions that trail without adding meaning to the key concept.
+        # "on", "in", "out", "up" are intentionally excluded — they form phrasal
+        # verbs ("turn on", "log in", "go out", "wake up") and must be preserved.
+        'at', 'of', 'to', 'for', 'with', 'by',
         # Demonstrative pronouns used as sentence-final deictic ("ball is this", "want that")
         'this', 'that', 'these', 'those',
         # "To be" forms at the tail ("ball is this" → after "this" stripped → "ball is")
