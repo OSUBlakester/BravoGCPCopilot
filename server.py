@@ -22090,7 +22090,11 @@ async def _lookup_images_for_labels(
     logging.info(f"_lookup_images_for_labels: {len(label_to_url)}/{len(unique_labels)} labels resolved (mascot={mascot_clean!r}, source={source!r})")
 
     # Log any labels that had no matching image so admins can track gaps.
-    missing_labels = [lbl for lbl in unique_labels if lbl not in label_to_url]
+    # Skip pure numbers — they display as text and are not expected to have images.
+    missing_labels = [
+        lbl for lbl in unique_labels
+        if lbl not in label_to_url and not _norm(lbl).replace(' ', '').isdigit()
+    ]
     if missing_labels:
         context = {"source": source, "mascot": mascot_clean, "account_id": account_id, "aac_user_id": aac_user_id}
         for lbl in missing_labels:
