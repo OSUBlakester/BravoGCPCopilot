@@ -1908,8 +1908,8 @@ def _sanitize_translated_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
-    text = re.sub(r'^[\s"“”‘’`]+', '', text)
-    text = re.sub(r'[\s"“”‘’`]+$', '', text)
+    text = re.sub(r'^[\s"“”''`]+', '', text)
+    text = re.sub(r'[\s"“”''`]+$', '', text)
     text = text.rstrip(",")
     return text.strip()
 
@@ -7787,7 +7787,7 @@ async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int, 
 
     # Normalize smart quotes for SSML compatibility
     if text:
-        text = text.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+        text = text.replace("“", '"').replace("”", '"').replace("'", "'").replace("'", "'")
 
     async def _synthesize_segment(segment_text: str) -> tuple[bytes, int]:
         # Use SSML when break markers are present
@@ -9825,7 +9825,7 @@ async def _synthesize_azure_speech(text: str, voice_name: str, wpm_rate: int, la
         prosody_rate = "+0%"
 
     if text:
-        text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+        text = text.replace("“", '"').replace("”", '"').replace("'", "'").replace("'", "'")
         text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     ssml = (
@@ -21688,14 +21688,23 @@ async def _lookup_images_for_labels(
         'have', 'has', 'had', 'do', 'does', 'did',
         # Degree / intensifier adverbs — "so mad"→"mad", "very upset"→"upset",
         # "really frustrated"→"frustrated", "kind of sad"→"of sad"→"sad"
+        # "easy" included so "it easy boss"→"boss", "it easy dad"→"dad"
         'so', 'very', 'really', 'quite', 'pretty', 'too',
-        'extremely', 'super', 'totally', 'just', 'kind', 'sort',
+        'extremely', 'super', 'totally', 'just', 'kind', 'sort', 'easy',
+        # Greeting/address prefix — "there, boss"→norm→"there boss"→"boss"
+        'there',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
     # Stripped iteratively from the tail so "ball is this" → "ball is" → "ball",
     # "book is that" → "book is" → "book", "playing now" → "playing".
     _TRAIL_STOPS = frozenset({
+        # Articles dangling at the end: "open the" → "open", "eat a" → "eat"
+        'a', 'an', 'the',
+        # Prepositions that trail without adding meaning to the key concept.
+        # "on", "in", "out", "up" are intentionally excluded — they form phrasal
+        # verbs ("turn on", "log in", "go out", "wake up") and must be preserved.
+        'at', 'of', 'to', 'for', 'with', 'by',
         # Demonstrative pronouns used as sentence-final deictic ("ball is this", "want that")
         'this', 'that', 'these', 'those',
         # "To be" forms at the tail ("ball is this" → after "this" stripped → "ball is")
@@ -21706,9 +21715,29 @@ async def _lookup_images_for_labels(
         'already', 'again', 'still', 'yet', 'then', 'next',
     })
 
+    # Multi-word leading phrases stripped as a unit before single-word stop processing.
+    # Each entry is a tuple of normalized words to match at the start of a phrase.
+    # Only stripped when content words remain after removal.
+    # e.g. "it easy boss" → strip ('it','easy') → "boss"
+    _LEAD_PHRASES = [
+        ('it', 'easy'),
+    ]
+
     def _key_term(norm: str) -> str:
         words = norm.split()
+        # Strip known multi-word leading phrases first
+        for ph in _LEAD_PHRASES:
+            n = len(ph)
+            while len(words) > n and words[:n] == list(ph):
+                words = words[n:]
+        # Strip single-word lead stops, but never strip an auxiliary/modal that is
+        # immediately followed by "t" — that is the negation residual left by _norm
+        # stripping the apostrophe from "can't", "couldn't", etc.
+        # "can t stop" → keep "can t" intact so negation is preserved.
+        # "can I have water" → "can" is followed by "i", not "t", so it strips normally.
         while len(words) > 1 and words[0] in _LEAD_STOPS:
+            if len(words) >= 2 and words[1] == 't':
+                break
             words = words[1:]
         while len(words) > 1 and words[-1] in _TRAIL_STOPS:
             words = words[:-1]
@@ -21897,6 +21926,20 @@ async def _lookup_images_for_labels(
     all_norm = set(v for v in norm_map.values() if v)
     all_norm |= {kt for kt in key_term_map.values() if kt}
     all_norm |= {vb for vb in verb_base_map.values() if vb}
+
+    # For labels containing an apostrophe, also search the normalized spaced form
+    # (apostrophe → space, then _norm rules) so images whose subconcept is stored
+    # with an apostrophe (e.g. "ma'am", "don't want") are found.
+    # norm_map already produces the spaced form, so this is already in all_norm —
+    # the block below is a no-op for most cases but ensures multi-word apostrophe
+    # labels (e.g. "don't want to") produce the right intermediate forms too.
+    import re as _re2
+    for lbl in unique_labels:
+        if "'" in lbl or "'" in lbl:  # straight and curly apostrophe
+            spaced = _re2.sub(r"[''']", ' ', lbl.lower())
+            spaced_norm = ' '.join(_re2.sub(r'[^a-z0-9]+', ' ', spaced).split())
+            if spaced_norm:
+                all_norm.add(spaced_norm)
 
     if not all_norm:
         return {}
@@ -22276,8 +22319,8 @@ async def batch_symbol_search(
             if not text:
                 return ''
             text = (
-                text.replace('’', "'")
-                .replace('‘', "'")
+                text.replace(''', "'")
+                .replace(''', "'")
                 .replace('`', "'")
                 .replace('“', '"')
                 .replace('”', '"')
