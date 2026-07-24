@@ -480,6 +480,9 @@ def compute_tags(concept: str, subconcept: str) -> list[str]:
     """
     sub_lower = subconcept.lower()
     sub_spaced = sub_lower.replace("_", " ")
+    # Normalized form matching server._norm(): all non-alphanumeric → space.
+    # Ensures "t-rex" image is found when option text "t-rex" normalizes to "t rex".
+    sub_norm = " ".join(re.sub(r"[^a-z0-9]+", " ", sub_spaced).split())
 
     concept_lower = concept.lower()
     concept_tokens = {t for t in re.split(r"[\s_]+", concept_lower) if t}
@@ -488,6 +491,7 @@ def compute_tags(concept: str, subconcept: str) -> list[str]:
     tag_set: set[str] = {
         sub_lower,
         sub_spaced,
+        sub_norm,
         *_tokenize(concept),
     }
     if not concept_is_mascot_label:

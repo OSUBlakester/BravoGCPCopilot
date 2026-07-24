@@ -21691,8 +21691,8 @@ async def _lookup_images_for_labels(
         # "easy" included so "it easy boss"→"boss", "it easy dad"→"dad"
         'so', 'very', 'really', 'quite', 'pretty', 'too',
         'extremely', 'super', 'totally', 'just', 'kind', 'sort', 'easy',
-        # Greeting/address prefix — "there, boss"→norm→"there boss"→"boss"
-        'there',
+        # Greeting/address prefixes — "there, boss"→"boss", "doing, dad"→"dad"
+        'there', 'doing',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
@@ -27216,6 +27216,14 @@ async def create_ai_target_board(
         )
         generated_options = _extract_options(raw_response)
 
+        # Strip trailing punctuation and filter AI generation artifacts
+        generated_options = [
+            opt.rstrip('?').strip()
+            for opt in generated_options
+            if '[' not in opt and ']' not in opt
+        ]
+        generated_options = [opt for opt in generated_options if opt]
+
         if not generated_options:
             raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
 
@@ -27473,6 +27481,16 @@ async def bravo_build(
             aac_user_id,
         )
         generated_options = _extract_options(raw_response)
+
+        # Strip trailing punctuation and filter AI generation artifacts:
+        # - Remove options with placeholder text like [boss name], [child name]
+        # - Strip trailing question marks (the AI sometimes adds "?")
+        generated_options = [
+            opt.rstrip('?').strip()
+            for opt in generated_options
+            if '[' not in opt and ']' not in opt
+        ]
+        generated_options = [opt for opt in generated_options if opt]
 
         if not generated_options:
             raise HTTPException(status_code=500, detail="No options could be parsed from LLM response")
