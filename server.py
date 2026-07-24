@@ -1908,8 +1908,8 @@ def _sanitize_translated_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
-    text = re.sub(r'^[\s"“”‘’`]+', '', text)
-    text = re.sub(r'[\s"“”‘’`]+$', '', text)
+    text = re.sub(r'^[\s"“”''`]+', '', text)
+    text = re.sub(r'[\s"“”''`]+$', '', text)
     text = text.rstrip(",")
     return text.strip()
 
@@ -7787,7 +7787,7 @@ async def synthesize_speech_to_bytes(text: str, voice_name: str, wpm_rate: int, 
 
     # Normalize smart quotes for SSML compatibility
     if text:
-        text = text.replace("“", '"').replace("”", '"').replace("’", "'").replace("‘", "'")
+        text = text.replace("“", '"').replace("”", '"').replace("'", "'").replace("'", "'")
 
     async def _synthesize_segment(segment_text: str) -> tuple[bytes, int]:
         # Use SSML when break markers are present
@@ -9825,7 +9825,7 @@ async def _synthesize_azure_speech(text: str, voice_name: str, wpm_rate: int, la
         prosody_rate = "+0%"
 
     if text:
-        text = text.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+        text = text.replace("“", '"').replace("”", '"').replace("'", "'").replace("'", "'")
         text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     ssml = (
@@ -21929,15 +21929,15 @@ async def _lookup_images_for_labels(
 
     # For labels containing an apostrophe, also search the normalized spaced form
     # (apostrophe → space, then _norm rules) so images whose subconcept is stored
-    # with an apostrophe (e.g. "ma’am", "don’t want") are found.
+    # with an apostrophe (e.g. "ma'am", "don't want") are found.
     # norm_map already produces the spaced form, so this is already in all_norm —
     # the block below is a no-op for most cases but ensures multi-word apostrophe
-    # labels (e.g. "don’t want to") produce the right intermediate forms too.
+    # labels (e.g. "don't want to") produce the right intermediate forms too.
     import re as _re2
     for lbl in unique_labels:
-        if "’" in lbl or "’" in lbl:  # straight and curly apostrophe
-            spaced = _re2.sub(r"[‘’’]", ‘ ‘, lbl.lower())
-            spaced_norm = ‘ ‘.join(_re2.sub(r’[^a-z0-9]+’, ‘ ‘, spaced).split())
+        if "'" in lbl or "'" in lbl:  # straight and curly apostrophe
+            spaced = _re2.sub(r"[''']", ' ', lbl.lower())
+            spaced_norm = ' '.join(_re2.sub(r'[^a-z0-9]+', ' ', spaced).split())
             if spaced_norm:
                 all_norm.add(spaced_norm)
 
@@ -22319,8 +22319,8 @@ async def batch_symbol_search(
             if not text:
                 return ''
             text = (
-                text.replace('’', "'")
-                .replace('‘', "'")
+                text.replace(''', "'")
+                .replace(''', "'")
                 .replace('`', "'")
                 .replace('“', '"')
                 .replace('”', '"')
