@@ -258,9 +258,13 @@ for _base, _forms in _BASE_TO_FORMS.items():
         _FORM_TO_BASE[_form] = _base
 
 
+_MASCOT_TOKENS = {"bobby", "bonnie", "buddy", "mascot", "no"}
+
+
 def _tokenize(text: str) -> list[str]:
-    """Split on whitespace and underscores (for concept/category names only)."""
-    return [t for t in re.split(r"[\s_]+", text.lower()) if t]
+    """Split on whitespace and underscores (for concept/category names only).
+    Excludes mascot-related tokens so they are never added to searchable tags."""
+    return [t for t in re.split(r"[\s_]+", text.lower()) if t and t not in _MASCOT_TOKENS]
 
 
 def _verb_forms_for(word: str) -> set[str]:
@@ -318,6 +322,61 @@ _NOUNS_INVARIANT: frozenset = frozenset({
     "sand", "snow", "rain", "sunshine", "darkness", "silence",
 })
 
+# Map from expanded auxiliary forms to their _norm-equivalent contracted forms.
+# Apostrophes become spaces under _norm, so "that's" → "that s", "you're" → "you re".
+# Used to add contracted tags to images stored with expanded subconcepts.
+_AUXILIARY_TO_CONTRACTION: dict[str, str] = {
+    "is":    "s",
+    "are":   "re",
+    "am":    "m",
+    "will":  "ll",
+    "have":  "ve",
+    "has":   "s",
+    "had":   "d",
+    "would": "d",
+}
+
+# Map from no-apostrophe contraction spellings to their _norm-equivalent spaced form.
+# Used to add spaced tags to images uploaded from folder names without apostrophes.
+_CONTRACTION_EXPAND: dict[str, str] = {
+    "wont":    "won t",
+    "cant":    "can t",
+    "dont":    "don t",
+    "shouldnt": "shouldn t",
+    "wouldnt": "wouldn t",
+    "couldnt": "couldn t",
+    "mustnt":  "mustn t",
+    "isnt":    "isn t",
+    "arent":   "aren t",
+    "wasnt":   "wasn t",
+    "werent":  "weren t",
+    "hasnt":   "hasn t",
+    "havent":  "haven t",
+    "hadnt":   "hadn t",
+    "didnt":   "didn t",
+    "doesnt":  "doesn t",
+    "neednt":  "needn t",
+    "shant":   "shan t",
+}
+
+
+def _contracted_forms(phrase: str) -> list[str]:
+    """Return normalized contracted variants for a phrase with expandable auxiliaries.
+
+    Each contractable auxiliary word is independently replaced to generate one
+    variant per auxiliary found.  Examples:
+      "that is wrong"   → ["that s wrong"]
+      "you are right"   → ["you re right"]
+      "i will be there" → ["i ll be there"]
+    """
+    words = phrase.split()
+    forms = []
+    for i, w in enumerate(words):
+        if w in _AUXILIARY_TO_CONTRACTION:
+            new_words = words[:i] + [_AUXILIARY_TO_CONTRACTION[w]] + words[i + 1:]
+            forms.append(" ".join(new_words))
+    return forms
+
 
 def _is_noun_wordnet(word: str) -> bool | None:
     """
@@ -352,7 +411,8 @@ def _is_noun_heuristic(word: str) -> bool:
     if w.endswith('ed'):
         return False
     if w.endswith(('ful', 'less', 'ous', 'ive', 'ible', 'able',
-                   'ary', 'ory', 'ly', 'ent', 'ant')):
+                   'ary', 'ory', 'ly', 'ent', 'ant',
+                   'ward', 'ish', 'some')):
         return False
     return True
 
@@ -421,27 +481,48 @@ def compute_tags(concept: str, subconcept: str) -> list[str]:
     sub_lower = subconcept.lower()
     sub_spaced = sub_lower.replace("_", " ")
 
+    concept_lower = concept.lower()
+    concept_tokens = {t for t in re.split(r"[\s_]+", concept_lower) if t}
+    concept_is_mascot_label = bool(concept_tokens) and concept_tokens.issubset(_MASCOT_TOKENS)
+
     tag_set: set[str] = {
-        concept.lower(),
         sub_lower,
         sub_spaced,
         *_tokenize(concept),
     }
+    if not concept_is_mascot_label:
+        tag_set.add(concept_lower)
 
     if " " not in sub_spaced:
         tag_set.update(_verb_forms_for(sub_spaced))
-        plural = _noun_plural(sub_spaced)
-        if plural and plural != sub_spaced:
-            tag_set.add(plural)
+        # Use suffix heuristic (not WordNet) for plural gating — WordNet was too aggressive,
+        # excluding real nouns like "foster", "visual", "firm". The heuristic filters
+        # clear non-nouns (-ing, -ed, -ward, -ish, -ful, -less, etc.) without over-excluding.
+        if sub_spaced not in _NOUNS_INVARIANT and _is_noun_heuristic(sub_spaced):
+            plural = _apply_plural_rules(sub_spaced)
+            if plural and plural != sub_spaced:
+                tag_set.add(plural)
 
     # For subconcepts containing apostrophes (e.g. "ma'am", "don't want"), also add
     # the normalized form with apostrophes replaced by spaces so the server's _norm-based
     # lookup ("ma am", "don t want") finds this image.
-    if "'" in sub_spaced or "'" in sub_spaced:
-        spaced = re.sub(r"[''']", " ", sub_spaced)
+    if "'" in sub_spaced or "’" in sub_spaced:
+        spaced = re.sub(r"['‘’]", " ", sub_spaced)
         spaced_norm = " ".join(re.sub(r"[^a-z0-9]+", " ", spaced).split())
         if spaced_norm and spaced_norm != sub_spaced:
             tag_set.add(spaced_norm)
+
+    # For subconcepts uploaded without apostrophes (e.g. folder "i_wont" → subconcept "i wont"),
+    # add the spaced contraction form that server._norm() produces from the apostrophe version.
+    words = sub_spaced.split()
+    expanded = [_CONTRACTION_EXPAND.get(w, w) for w in words]
+    if expanded != words:
+        tag_set.add(" ".join(expanded))
+
+    # For subconcepts with expanded auxiliaries (e.g. "you are wrong"), add contracted
+    # normalized forms ("you re wrong") so options using contractions ("you're wrong") match.
+    for form in _contracted_forms(sub_spaced):
+        tag_set.add(form)
 
     return sorted(tag_set)
 
@@ -516,12 +597,14 @@ def main() -> None:
         old_tags = sorted(set(data.get("tags", []) or []))
         new_tags = compute_tags(concept, subconcept)
 
-        added   = sorted(set(new_tags) - set(old_tags))
-        removed = sorted(set(old_tags) - set(new_tags))
+        # Merge computed tags into existing ones — never remove manually-added tags
+        # (e.g. "bye I'll call you" added via add_bye_tags.py).
+        merged_tags = sorted(set(old_tags) | set(new_tags))
+        added = sorted(set(new_tags) - set(old_tags))
 
         label = f"concept={concept!r}  sub={subconcept!r}  mascot={data.get('mascot') or '(none)'!r}"
 
-        if not added and not removed:
+        if not added:
             unchanged += 1
             if args.show_unchanged:
                 print(f"  [OK]   {doc.id}  {label}")
@@ -529,16 +612,13 @@ def main() -> None:
 
         changed += 1
         print(f"  [DIFF] {doc.id}  {label}")
-        if added:
-            print(f"         + {added}")
-        if removed:
-            print(f"         - {removed}")
+        print(f"         + {added}")
 
         if args.write:
             try:
                 doc.reference.update({
-                    "tags":         new_tags,
-                    "search_terms": new_tags,
+                    "tags":         merged_tags,
+                    "search_terms": merged_tags,
                 })
                 print(f"         ✓ updated")
             except Exception as exc:
@@ -546,9 +626,10 @@ def main() -> None:
                 errors += 1
 
     print()
-    print(f"Summary: {changed} changed, {unchanged} unchanged, {errors} errors")
+    print(f"Summary: {changed} tags added, {unchanged} unchanged, {errors} errors")
     if not args.write and changed:
         print("Run with --write to apply changes.")
+    print("Note: existing manually-added tags are always preserved (never removed).")
 
 
 if __name__ == "__main__":
