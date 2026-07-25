@@ -21958,13 +21958,18 @@ async def _lookup_images_for_labels(
     def _stream(q):
         return list(q.stream())
 
-    # Build parallel queries mirroring batch-search: subconcept/concept (exact), search_terms, tags
+    # Build parallel queries mirroring batch-search: subconcept/concept (exact), search_terms, tags.
+    # "global" source is queried separately — mascot-specific assets (bobby/bonnie/buddy) live there.
+    _ACCEPTED_SOURCES = {"bravo_images", "global"}
     queries = []
     for chunk in _chunked(all_norm, 10):
-        queries.append(("subconcept",   images_ref.where("source", "==", "bravo_images").where("subconcept", "in", chunk).limit(100)))
-        queries.append(("concept",      images_ref.where("source", "==", "bravo_images").where("concept",    "in", chunk).limit(100)))
-        queries.append(("search_terms", images_ref.where("search_terms", "array_contains_any", chunk).limit(300)))
-        queries.append(("tags_legacy",  images_ref.where("source", "==", "bravo_images").where("tags", "array_contains_any", chunk).limit(250)))
+        queries.append(("subconcept",        images_ref.where("source", "==", "bravo_images").where("subconcept", "in", chunk).limit(100)))
+        queries.append(("subconcept_global", images_ref.where("source", "==", "global").where("subconcept", "in", chunk).limit(100)))
+        queries.append(("concept",           images_ref.where("source", "==", "bravo_images").where("concept", "in", chunk).limit(100)))
+        queries.append(("concept_global",    images_ref.where("source", "==", "global").where("concept", "in", chunk).limit(100)))
+        queries.append(("search_terms",      images_ref.where("search_terms", "array_contains_any", chunk).limit(300)))
+        queries.append(("tags_legacy",       images_ref.where("source", "==", "bravo_images").where("tags", "array_contains_any", chunk).limit(250)))
+        queries.append(("tags_global",       images_ref.where("source", "==", "global").where("tags", "array_contains_any", chunk).limit(250)))
 
     # Run in small batches to avoid saturating the shared ThreadPoolExecutor and
     # blocking unrelated Firestore operations on other in-flight requests.
@@ -21983,8 +21988,7 @@ async def _lookup_images_for_labels(
         streams = [_stream(q) for _, q in queries]
 
     # Index candidates by doc id.
-    # search_terms query has no source filter — mirror batch-search's path1 rule:
-    # only accept docs where source == "bravo_images".
+    # search_terms query has no source filter — only keep accepted sources in code.
     candidate_docs: Dict[str, dict] = {}
     for (qtype, _), result in zip(queries, streams):
         if isinstance(result, Exception):
@@ -21993,7 +21997,7 @@ async def _lookup_images_for_labels(
             data = doc.to_dict() or {}
             if not data.get("image_url"):
                 continue
-            if qtype == "search_terms" and data.get("source") != "bravo_images":
+            if qtype == "search_terms" and data.get("source") not in _ACCEPTED_SOURCES:
                 continue
             candidate_docs[doc.id] = data
 
