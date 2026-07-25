@@ -21693,6 +21693,8 @@ async def _lookup_images_for_labels(
         'extremely', 'super', 'totally', 'just', 'kind', 'sort', 'easy',
         # Greeting/address prefixes — "there, boss"→"boss", "doing, dad"→"dad"
         'there', 'doing',
+        # Question words — "what you are watching"→"watching", "what's wrong"→"wrong"
+        'what',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
