@@ -197,10 +197,17 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="imageUrl">Image URL (Optional)</label>
-                            <input type="url" id="imageUrl" placeholder="https://example.com/icon.png">
-                            <img id="imageUrlPreview" src="" alt="Image preview"
-                                 style="display:none;margin-top:0.5rem;max-width:80px;max-height:80px;border-radius:6px;border:1px solid #ddd;object-fit:contain;">
+                            <label>Image (Optional)</label>
+                            <div style="display:flex;align-items:center;gap:0.75rem;">
+                                <div id="assignedImagePreview" style="display:none;width:64px;height:64px;border:2px dashed #ccc;border-radius:6px;overflow:hidden;flex-shrink:0;">
+                                    <img id="assignedImageThumb" src="" alt="Selected image" style="width:100%;height:100%;object-fit:cover;">
+                                </div>
+                                <div style="flex:1;">
+                                    <button type="button" id="browseImagesBtn" style="width:100%;padding:0.4rem 0.75rem;background:#16a34a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;">Browse Images</button>
+                                    <button type="button" id="clearImageBtn" style="display:none;width:100%;padding:0.4rem 0.75rem;background:#6b7280;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;margin-top:0.4rem;">Clear Image</button>
+                                </div>
+                            </div>
+                            <input type="hidden" id="assignedImageUrl" value="">
                         </div>
 
                         <div class="form-group">
@@ -943,8 +950,8 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             document.getElementById('itemLabel').value = node.label || '';
             populateBoardSelect(node.board_id);
             document.getElementById('speechText').value = node.speech_text || '';
-            document.getElementById('imageUrl').value = node.image_url || '';
-            updateImagePreview(node.image_url || '');
+            document.getElementById('assignedImageUrl').value = node.image_url || '';
+            updateAssignedImagePreview(node.image_url || '');
             document.getElementById('customAudioFile').value = node.custom_audio_file || '';
             setColorField('backgroundColor', 'backgroundColorPicker', node.background_color || '#FFFFFF');
             setColorField('textColor', 'textColorPicker', node.text_color || '#000000');
@@ -973,7 +980,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             node.label = formatMenuLabel(document.getElementById('itemLabel').value);
             node.board_id = document.getElementById('boardTarget').value || null;
             node.speech_text = formatMenuLabel(document.getElementById('speechText').value) || null;
-            node.image_url = document.getElementById('imageUrl').value || null;
+            node.image_url = document.getElementById('assignedImageUrl').value || null;
             node.custom_audio_file = document.getElementById('customAudioFile').value || null;
             node.background_color = document.getElementById('backgroundColor').value || '#FFFFFF';
             node.text_color = document.getElementById('textColor').value || '#000000';
@@ -981,7 +988,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
         }
 
         function setupFormListeners() {
-            ['itemLabel','boardTarget','speechText','imageUrl','customAudioFile','backgroundColor','textColor','hiddenCheck'].forEach(id => {
+            ['itemLabel','boardTarget','speechText','customAudioFile','backgroundColor','textColor','hiddenCheck'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) { el.addEventListener('change', markAsChanged); el.addEventListener('input', markAsChanged); }
             });
@@ -1035,17 +1042,111 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             updateOpenBoardBtnState();
         }
 
-        function updateImagePreview(url) {
-            const img = document.getElementById('imageUrlPreview');
-            if (url && url.trim()) {
-                img.src = url.trim();
-                img.style.display = 'block';
-                img.onerror = () => { img.style.display = 'none'; };
+        // ── Image picker state ────────────────────────────────────────────────────
+        let selectedImageUrl = null, currentImageSearch = '', currentImagePage = 0, totalImagePages = 0, allImages = [];
+
+        function updateAssignedImagePreview(url) {
+            const preview = document.getElementById('assignedImagePreview');
+            const thumb = document.getElementById('assignedImageThumb');
+            const clearBtn = document.getElementById('clearImageBtn');
+            if (url) {
+                thumb.src = url;
+                preview.style.display = 'block';
+                clearBtn.style.display = 'block';
             } else {
-                img.src = '';
-                img.style.display = 'none';
+                thumb.src = '';
+                preview.style.display = 'none';
+                clearBtn.style.display = 'none';
             }
         }
+
+        function clearAssignedImage() {
+            document.getElementById('assignedImageUrl').value = '';
+            updateAssignedImagePreview('');
+            markAsChanged();
+        }
+
+        function openImagePicker() {
+            selectedImageUrl = null;
+            document.getElementById('selectImageBtn').disabled = true;
+            document.getElementById('imagePickerModal').style.display = 'block';
+            loadImages();
+        }
+
+        function closeImagePicker() {
+            document.getElementById('imagePickerModal').style.display = 'none';
+            document.getElementById('imageSearchInput').value = '';
+            currentImageSearch = '';
+            currentImagePage = 0;
+            selectedImageUrl = null;
+        }
+
+        async function loadImages(searchTerm = '', page = 0) {
+            const loadingIndicator = document.getElementById('imageLoadingIndicator');
+            const imageGrid = document.getElementById('imageGrid');
+            const resultsInfo = document.getElementById('imageResultsInfo');
+            const pageInfo = document.getElementById('imagePageInfo');
+            const prevBtn = document.getElementById('imagePrevPage');
+            const nextBtn = document.getElementById('imageNextPage');
+            try {
+                loadingIndicator.style.display = 'block';
+                imageGrid.innerHTML = '';
+                const params = new URLSearchParams({ page: String(page), limit: '48' });
+                if (searchTerm) params.append('search', searchTerm);
+                const response = await fetch('/api/admin/images/browse?' + params.toString(), { method: 'GET', headers: getAuthHeaders() });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                allImages = data.images || [];
+                currentImagePage = data.page || 0;
+                totalImagePages = data.total_pages || 0;
+                resultsInfo.textContent = `Showing ${allImages.length} of ${data.total_count || 0} images`;
+                pageInfo.textContent = `Page ${currentImagePage + 1} of ${Math.max(totalImagePages, 1)}`;
+                prevBtn.disabled = currentImagePage <= 0;
+                nextBtn.disabled = currentImagePage >= totalImagePages - 1;
+                renderImageGrid();
+            } catch (error) {
+                console.error(error);
+                resultsInfo.textContent = 'Error loading images';
+                imageGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#dc2626;padding:2rem;">Failed to load images.</div>';
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+
+        function renderImageGrid() {
+            const imageGrid = document.getElementById('imageGrid');
+            imageGrid.innerHTML = '';
+            allImages.forEach(image => {
+                const card = document.createElement('div');
+                card.style.cssText = 'position:relative;cursor:pointer;border:2px solid transparent;border-radius:6px;overflow:hidden;background:#f3f4f6;';
+                card.onmouseenter = () => { if (card.dataset.selected !== 'true') card.style.borderColor = '#93c5fd'; };
+                card.onmouseleave = () => { if (card.dataset.selected !== 'true') card.style.borderColor = 'transparent'; };
+                card.onclick = () => selectImageInGrid(image.image_url, card);
+                const displayName = image.subconcept || image.concept || 'Image';
+                card.innerHTML = `<img src="${image.image_url}" alt="${escapeHtml(displayName)}" style="width:100%;height:80px;object-fit:cover;" loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);color:#fff;font-size:0.65rem;padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(displayName)}</div>`;
+                imageGrid.appendChild(card);
+            });
+        }
+
+        function selectImageInGrid(imageUrl, cardElement) {
+            document.querySelectorAll('#imageGrid > div').forEach(c => { c.style.borderColor = 'transparent'; c.dataset.selected = 'false'; });
+            cardElement.style.borderColor = '#3b82f6';
+            cardElement.dataset.selected = 'true';
+            selectedImageUrl = imageUrl;
+            document.getElementById('selectImageBtn').disabled = false;
+        }
+
+        function selectAssignedImage() {
+            if (!selectedImageUrl) return;
+            document.getElementById('assignedImageUrl').value = selectedImageUrl;
+            updateAssignedImagePreview(selectedImageUrl);
+            markAsChanged();
+            closeImagePicker();
+        }
+
+        function searchImages() { currentImageSearch = document.getElementById('imageSearchInput').value.trim(); currentImagePage = 0; loadImages(currentImageSearch, 0); }
+        function clearImageSearch() { document.getElementById('imageSearchInput').value = ''; currentImageSearch = ''; currentImagePage = 0; loadImages('', 0); }
+        function navigateImagePage(direction) { const newPage = currentImagePage + direction; if (newPage >= 0 && newPage < totalImagePages) { currentImagePage = newPage; loadImages(currentImageSearch, newPage); } }
 
         function setColorField(textId, pickerId, value) {
             const hex = /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#FFFFFF';
@@ -1058,7 +1159,16 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             document.getElementById('backgroundColor').addEventListener('input', (e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('backgroundColorPicker').value = e.target.value; markAsChanged(); });
             document.getElementById('textColorPicker').addEventListener('input', (e) => { document.getElementById('textColor').value = e.target.value; markAsChanged(); });
             document.getElementById('textColor').addEventListener('input', (e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('textColorPicker').value = e.target.value; markAsChanged(); });
-            document.getElementById('imageUrl').addEventListener('input', (e) => { updateImagePreview(e.target.value); });
+            document.getElementById('browseImagesBtn').addEventListener('click', openImagePicker);
+            document.getElementById('clearImageBtn').addEventListener('click', clearAssignedImage);
+            document.getElementById('closeImagePicker').addEventListener('click', closeImagePicker);
+            document.getElementById('cancelImageSelection').addEventListener('click', closeImagePicker);
+            document.getElementById('selectImageBtn').addEventListener('click', selectAssignedImage);
+            document.getElementById('imageSearchBtn').addEventListener('click', searchImages);
+            document.getElementById('clearImageSearch').addEventListener('click', clearImageSearch);
+            document.getElementById('imagePrevPage').addEventListener('click', () => navigateImagePage(-1));
+            document.getElementById('imageNextPage').addEventListener('click', () => navigateImagePage(1));
+            document.getElementById('imageSearchInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') searchImages(); });
         }
 
         // ── Add / Delete ──────────────────────────────────────────────────────────
@@ -1751,5 +1861,34 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
     })();
 
     </script>
+
+    <!-- Image Picker Modal -->
+    <div id="imagePickerModal" style="display:none;position:fixed;inset:0;background:rgba(75,85,99,0.5);overflow-y:auto;z-index:9000;">
+        <div style="position:relative;top:2rem;margin:0 auto;padding:1.25rem;border:1px solid #e5e7eb;width:92%;max-width:900px;box-shadow:0 4px 24px rgba(0,0,0,0.15);border-radius:8px;background:#fff;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                <h3 style="font-size:1.1rem;font-weight:700;color:#111827;margin:0;">Browse Images</h3>
+                <button id="closeImagePicker" style="background:none;border:none;font-size:1.25rem;cursor:pointer;color:#9ca3af;">&times;</button>
+            </div>
+            <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+                <input id="imageSearchInput" type="text" style="flex:1;padding:0.4rem 0.6rem;border:1px solid #d1d5db;border-radius:6px;" placeholder="Search images...">
+                <button id="imageSearchBtn" style="padding:0.4rem 0.8rem;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Search</button>
+                <button id="clearImageSearch" style="padding:0.4rem 0.8rem;background:#6b7280;color:#fff;border:none;border-radius:6px;cursor:pointer;">Clear</button>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;color:#6b7280;margin-bottom:0.5rem;">
+                <div id="imageResultsInfo">Loading...</div>
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <button id="imagePrevPage" style="padding:0.2rem 0.6rem;background:#e5e7eb;border:none;border-radius:4px;cursor:pointer;">Prev</button>
+                    <span id="imagePageInfo">Page 1 of 1</span>
+                    <button id="imageNextPage" style="padding:0.2rem 0.6rem;background:#e5e7eb;border:none;border-radius:4px;cursor:pointer;">Next</button>
+                </div>
+            </div>
+            <div id="imageLoadingIndicator" style="display:none;text-align:center;padding:1rem;color:#6b7280;">Loading...</div>
+            <div id="imageGrid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.75rem;max-height:420px;overflow-y:auto;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:1rem;">
+                <button id="cancelImageSelection" style="padding:0.4rem 1rem;background:#d1d5db;border:none;border-radius:6px;cursor:pointer;">Cancel</button>
+                <button id="selectImageBtn" style="padding:0.4rem 1rem;background:#16a34a;color:#fff;border:none;border-radius:6px;cursor:pointer;" disabled>Select Image</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
