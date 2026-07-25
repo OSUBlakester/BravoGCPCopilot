@@ -199,6 +199,8 @@
                         <div class="form-group">
                             <label for="imageUrl">Image URL (Optional)</label>
                             <input type="url" id="imageUrl" placeholder="https://example.com/icon.png">
+                            <img id="imageUrlPreview" src="" alt="Image preview"
+                                 style="display:none;margin-top:0.5rem;max-width:80px;max-height:80px;border-radius:6px;border:1px solid #ddd;object-fit:contain;">
                         </div>
 
                         <div class="form-group">
@@ -942,6 +944,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             populateBoardSelect(node.board_id);
             document.getElementById('speechText').value = node.speech_text || '';
             document.getElementById('imageUrl').value = node.image_url || '';
+            updateImagePreview(node.image_url || '');
             document.getElementById('customAudioFile').value = node.custom_audio_file || '';
             setColorField('backgroundColor', 'backgroundColorPicker', node.background_color || '#FFFFFF');
             setColorField('textColor', 'textColorPicker', node.text_color || '#000000');
@@ -1032,6 +1035,18 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             updateOpenBoardBtnState();
         }
 
+        function updateImagePreview(url) {
+            const img = document.getElementById('imageUrlPreview');
+            if (url && url.trim()) {
+                img.src = url.trim();
+                img.style.display = 'block';
+                img.onerror = () => { img.style.display = 'none'; };
+            } else {
+                img.src = '';
+                img.style.display = 'none';
+            }
+        }
+
         function setColorField(textId, pickerId, value) {
             const hex = /^#[0-9A-Fa-f]{6}$/.test(value) ? value : '#FFFFFF';
             document.getElementById(textId).value = hex;
@@ -1043,6 +1058,7 @@ document.getElementById('translateMenuBtn').addEventListener('click', openTransl
             document.getElementById('backgroundColor').addEventListener('input', (e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('backgroundColorPicker').value = e.target.value; markAsChanged(); });
             document.getElementById('textColorPicker').addEventListener('input', (e) => { document.getElementById('textColor').value = e.target.value; markAsChanged(); });
             document.getElementById('textColor').addEventListener('input', (e) => { if (/^#[0-9A-Fa-f]{6}$/.test(e.target.value)) document.getElementById('textColorPicker').value = e.target.value; markAsChanged(); });
+            document.getElementById('imageUrl').addEventListener('input', (e) => { updateImagePreview(e.target.value); });
         }
 
         // ── Add / Delete ──────────────────────────────────────────────────────────
