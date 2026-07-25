@@ -21695,6 +21695,8 @@ async def _lookup_images_for_labels(
         'there', 'doing',
         # Question words — "what you are watching"→"watching", "what's wrong"→"wrong"
         'what',
+        # Temporal connectives — "then, at home"→norm→"then at home"→"home"
+        'then',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
