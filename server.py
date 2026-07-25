@@ -22283,6 +22283,11 @@ async def _assign_images_to_tap_config(
 
         _assign_menu_images(fresh_config.get('boards_menu') or [])
 
+        # Rebuild the legacy buttons array from the updated boards_menu so the
+        # tap interface (which reads tapConfig.buttons) gets the new image_urls.
+        if menu_changed[0]:
+            fresh_config['buttons'] = compose_legacy_buttons_from_boards_menu(fresh_config)
+
         if backfill_changed or img_changed or menu_changed[0]:
             save_ok = await save_tap_nav_config(account_id, aac_user_id, fresh_config)
             stats["save_ok"] = bool(save_ok)
