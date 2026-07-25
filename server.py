@@ -22217,6 +22217,18 @@ async def _assign_images_to_tap_config(
                 if lbl:
                     all_labels.append(lbl)
 
+        # Also collect labels from boards_menu items (recursive tree structure)
+        def _walk_menu_labels(items: list) -> None:
+            for item in (items or []):
+                if not isinstance(item, dict):
+                    continue
+                lbl = str(item.get('label') or '').strip()
+                if lbl:
+                    all_labels.append(lbl)
+                _walk_menu_labels(item.get('children') or [])
+
+        _walk_menu_labels(fresh_config.get('boards_menu') or [])
+
         stats["labels_found"] = len(all_labels)
         stats["backfill_changed"] = backfill_changed
 
@@ -22250,7 +22262,24 @@ async def _assign_images_to_tap_config(
                         btn['after_selection'] = 'use_ai'
                         img_changed = True
 
-        if backfill_changed or img_changed:
+        # Write image_url onto boards_menu items using the same lookup results
+        menu_changed = [False]
+
+        def _assign_menu_images(items: list) -> None:
+            for item in (items or []):
+                if not isinstance(item, dict):
+                    continue
+                lbl = str(item.get('label') or '').strip()
+                if lbl:
+                    url = label_to_url.get(lbl)
+                    if url and item.get('image_url') != url:
+                        item['image_url'] = url
+                        menu_changed[0] = True
+                _assign_menu_images(item.get('children') or [])
+
+        _assign_menu_images(fresh_config.get('boards_menu') or [])
+
+        if backfill_changed or img_changed or menu_changed[0]:
             save_ok = await save_tap_nav_config(account_id, aac_user_id, fresh_config)
             stats["save_ok"] = bool(save_ok)
             logging.info(

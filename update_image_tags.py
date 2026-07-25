@@ -506,6 +506,17 @@ def compute_tags(concept: str, subconcept: str) -> list[str]:
             plural = _apply_plural_rules(sub_spaced)
             if plural and plural != sub_spaced:
                 tag_set.add(plural)
+    else:
+        # For multi-word subconcepts, pluralize the last word (head noun).
+        # "next step"→"next steps", "good morning"→"good mornings", "throughout the land"→"throughout the lands"
+        # Skip the verb/adjective heuristic here — in phrase-final position the word is
+        # almost always a noun (e.g. "morning" ends in -ing but is a noun, not a gerund).
+        _words = sub_spaced.split()
+        _last = _words[-1]
+        if _last not in _NOUNS_INVARIANT:
+            _plural_last = _apply_plural_rules(_last)
+            if _plural_last and _plural_last != _last:
+                tag_set.add(" ".join(_words[:-1] + [_plural_last]))
 
     # For subconcepts containing apostrophes (e.g. "ma'am", "don't want"), also add
     # the normalized form with apostrophes replaced by spaces so the server's _norm-based
