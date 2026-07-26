@@ -21697,6 +21697,8 @@ async def _lookup_images_for_labels(
         'what',
         # Temporal connectives — "then, at home"→norm→"then at home"→"home"
         'then',
+        # Directional preposition — "towards the park"→"park"
+        'towards',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
