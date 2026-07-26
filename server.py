@@ -21699,6 +21699,8 @@ async def _lookup_images_for_labels(
         'then',
         # Directional preposition — "towards the park"→"park"
         'towards',
+        # Conditional conjunction — "if you want"→"want"
+        'if',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
