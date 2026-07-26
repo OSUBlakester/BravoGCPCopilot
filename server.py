@@ -22068,16 +22068,18 @@ async def _lookup_images_for_labels(
         if label_neg != cand_neg:
             return -9999
 
-        # Tier-based scoring: tiers are spaced 1000+ apart so the mascot adjustment
-        # (+200 / -400) can never push a lower-quality text match above a higher one.
-        # Priority (high→low):
+        # Tier-based scoring for text quality (high→low):
         #   1. Exact subconcept match  (10000)
         #   2. Exact concept match     (9000)
         #   3. Key-term subconcept     (8000)  — leading stops stripped, e.g. "to go" → "go"
         #   4. Key-term concept        (7000)
         #   5. Full-label tag match    (5000)
         #   6. Key-term tag match      (3500)
-        # Mascot tiebreaker within each tier: +200 (correct), 0 (none), -400 (wrong).
+        #
+        # Mascot adjustment is large (+5000 correct / -1000 no mascot / -5000 wrong) so that
+        # a correct-mascot image at any text tier beats a no-mascot or wrong-mascot image at
+        # the next text tier up. E.g. Bobby "action" tag match (5000+5000=10000) beats a
+        # generic "hug" image whose concept is "actions" (9000-1000=8000).
         score = 0
         if norm_label == cand["sub"]:
             score += 10000
@@ -22111,9 +22113,11 @@ async def _lookup_images_for_labels(
         if mascot_clean:
             img_m = cand["mascot"]
             if img_m == mascot_clean:
-                score += 200
+                score += 5000   # correct mascot: strong preference, can cross text tiers
             elif img_m and img_m != mascot_clean:
-                score -= 400
+                score -= 5000   # wrong mascot: strongly penalized
+            else:
+                score -= 1000   # no mascot when user has one: mild penalty vs correct-mascot image
         return score
 
     # Score all pre-processed candidates for each label.
