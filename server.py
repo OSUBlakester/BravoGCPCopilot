@@ -21670,8 +21670,8 @@ async def _lookup_images_for_labels(
         # Prepositions / particles
         'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
         'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though',
-        # Possessive adjectives
-        'my', 'your', 'his', 'her', 'its', 'our', 'their',
+        # Possessive adjectives / intensifiers
+        'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own',
         # Quantifiers / demonstratives acting as articles
         'some', 'any', 'this', 'that', 'these', 'those',
         # Subject pronouns — e.g. "I want", "we can", "you need"
@@ -21694,9 +21694,13 @@ async def _lookup_images_for_labels(
         # Greeting/address prefixes — "there, boss"→"boss", "doing, dad"→"dad"
         'there', 'doing',
         # Question words — "what you are watching"→"watching", "what's wrong"→"wrong"
-        'what',
+        'what', 'how',
         # Temporal connectives — "then, at home"→norm→"then at home"→"home"
         'then',
+        # Directional preposition — "towards the park"→"park"
+        'towards',
+        # Conditional conjunction — "if you want"→"want"
+        'if',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
