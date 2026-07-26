@@ -13921,7 +13921,11 @@ VARIETY RULES:
                     if (!text) continue;
                     // Skip buttons that have a pre-assigned image (profile/custom image takes priority)
                     if (typeof option === 'object' && option.image_url) continue;
-                    const cacheKey = `tap_${String(text).trim().toLowerCase()}`;
+                    const normalizedText = String(text).trim().toLowerCase();
+                    // Skip if a custom/profile image is already resolved — don't let server overwrite it
+                    if (window.customImageMatches && window.customImageMatches.has(normalizedText)) continue;
+                    if (window.customImageTermIndex && window.customImageTermIndex.has(normalizedText)) continue;
+                    const cacheKey = `tap_${normalizedText}`;
                     const cached = window.symbolImageCache.get(cacheKey);
                     if (!cached || !cached.imageUrl || !cached.verified) {
                         missingEntries.push({ text, keywords });
@@ -13943,7 +13947,11 @@ VARIETY RULES:
                             // Don't overwrite pre-assigned image_url buttons
                             if (typeof opt === 'object' && opt.image_url) return false;
                             const t = typeof opt === 'object' ? (opt.text || opt.option) : opt;
-                            return String(t).toLowerCase().trim() === String(resultText).toLowerCase().trim();
+                            const nt = String(t).toLowerCase().trim();
+                            // Don't overwrite buttons that have a custom/profile image resolved
+                            if (window.customImageMatches && window.customImageMatches.has(nt)) return false;
+                            if (window.customImageTermIndex && window.customImageTermIndex.has(nt)) return false;
+                            return nt === String(resultText).toLowerCase().trim();
                         });
                         if (targetBtn) applyImageToButton(targetBtn, imageUrl, resultText);
                     }
