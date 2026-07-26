@@ -21694,7 +21694,7 @@ async def _lookup_images_for_labels(
         # Greeting/address prefixes — "there, boss"→"boss", "doing, dad"→"dad"
         'there', 'doing',
         # Question words — "what you are watching"→"watching", "what's wrong"→"wrong"
-        'what',
+        'what', 'how',
         # Temporal connectives — "then, at home"→norm→"then at home"→"home"
         'then',
         # Directional preposition — "towards the park"→"park"
