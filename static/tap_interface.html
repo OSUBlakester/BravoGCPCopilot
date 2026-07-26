@@ -14172,8 +14172,8 @@ VARIETY RULES:
                     categoryBtn.style.color = button.text_color || '#000000';
                 }
                 
-                // Add Firestore image support for categories (like gridpage) - skip for sight words
-                if (!isSightWord) {
+                // Add Firestore image support for categories (like gridpage) - skip for sight words and text-only mode
+                if (!isSightWord && enablePictograms) {
                     const imagePromise = button.image_url
                         ? Promise.resolve(button.image_url)
                         : getSymbolImageForText(rawLabel || displayLabel);
@@ -14590,6 +14590,8 @@ VARIETY RULES:
 
                     if (!isSightWord) {
                         modalBtn.style.color = button.text_color || '#000000';
+                    }
+                    if (!isSightWord && enablePictograms) {
                         getSymbolImageForText(rawLabel || displayLabel).then(imageUrl => {
                             if (!imageUrl) {
                                 return;
@@ -14993,6 +14995,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 categoryBtn.style.color = child.text_color || '#000000';
                 
                 // Add image support for child categories (same as main categories)
+                if (enablePictograms) {
                 console.log(`🔍 Attempting image load for child category: "${displayChildLabel}"`);
                 getSymbolImageForText(rawChildLabel || displayChildLabel).then(imageUrl => {
                     console.log(`🎯 Image result for "${displayChildLabel}": ${imageUrl ? 'Found' : 'Not found'}`);
@@ -15056,7 +15059,8 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 }).catch(error => {
                     console.error('Error loading image for child category button:', error);
                 });
-                
+                } // end enablePictograms
+
                 // Set initial text (will be replaced by image if found)
                 categoryBtn.textContent = displayChildLabel;
                 
