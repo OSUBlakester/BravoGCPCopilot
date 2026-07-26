@@ -21670,8 +21670,8 @@ async def _lookup_images_for_labels(
         # Prepositions / particles
         'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
         'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though',
-        # Possessive adjectives
-        'my', 'your', 'his', 'her', 'its', 'our', 'their',
+        # Possessive adjectives / intensifiers
+        'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own',
         # Quantifiers / demonstratives acting as articles
         'some', 'any', 'this', 'that', 'these', 'those',
         # Subject pronouns — e.g. "I want", "we can", "you need"
