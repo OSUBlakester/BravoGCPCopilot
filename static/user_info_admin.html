@@ -629,29 +629,25 @@
                 For example, use a person's name from your Family & Friends list, or descriptive terms like "home", "school", or "favorite toy".
             </p>
             
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <!-- Left Column: Upload -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <!-- Left Column: File picker -->
                 <div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Image File</label>
-                        <input type="file" id="customImageFile" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md">
-                        <p class="text-xs text-gray-500 mt-1">Supported: JPG, PNG, WebP (max 5MB)</p>
-                    </div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Select Image File</label>
+                    <input type="file" id="customImageFile" accept="image/*" class="w-full p-2 border border-gray-300 rounded-md">
+                    <p class="text-xs text-gray-500 mt-1">Supported: JPG, PNG, WebP (max 5MB)</p>
                 </div>
 
-                <!-- Right Column: Tag and Upload -->
+                <!-- Right Column: Tags -->
                 <div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Primary Tag</label>
-                        <input type="text" id="customImagePrimaryTag" placeholder="e.g., mom, dad, home, school" class="w-full p-2 border border-gray-300 rounded-md">
-                        <p class="text-xs text-gray-500 mt-1">Tag for matching to buttons (e.g., family member name)</p>
-                    </div>
-                    
-                    <button type="button" id="uploadCustomImageBtn" class="button-success w-full">
-                        <i class="fas fa-cloud-upload-alt mr-2"></i>Upload Image
-                    </button>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Tags <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                    <input type="text" id="customImagePrimaryTag" placeholder="e.g., dad, daddy, father" class="w-full p-2 border border-gray-300 rounded-md">
+                    <p class="text-xs text-gray-500 mt-1">Each tag matches a button with that label</p>
                 </div>
             </div>
+
+            <button type="button" id="uploadCustomImageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-4 rounded-lg shadow-lg transition-colors duration-200 text-lg flex items-center justify-center w-full">
+                <i class="fas fa-cloud-upload-alt mr-3 text-xl"></i> Upload Image
+            </button>
 
             <!-- Upload Progress -->
             <div id="uploadProgress" class="hidden mt-4">
@@ -859,9 +855,9 @@
 
                 <!-- Edit Form -->
                 <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Primary Tag</label>
-                    <input type="text" id="modalPrimaryTag" placeholder="e.g., mom, dad, home, school" class="w-full p-2 border border-gray-300 rounded-md">
-                    <p class="text-xs text-gray-500 mt-1">Tag used for matching to buttons</p>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Tags <span class="text-gray-400 font-normal">(comma-separated)</span></label>
+                    <input type="text" id="modalPrimaryTag" placeholder="e.g., dad, daddy, father" class="w-full p-2 border border-gray-300 rounded-md">
+                    <p class="text-xs text-gray-500 mt-1">Each tag matches a button with that label</p>
                 </div>
 
                 <!-- Modal buttons -->

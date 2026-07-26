@@ -1259,11 +1259,12 @@ async function uploadCustomImage() {
     try {
         showStatus(customImagesStatus, "Uploading...", false, 0);
         
+        const rawTags = customImagePrimaryTag.value.split(',').map(t => t.trim()).filter(Boolean);
         const formData = new FormData();
         formData.append('image', customImageFile.files[0]);
-        formData.append('concept', 'custom'); // Simple concept for custom images
-        formData.append('subconcept', customImagePrimaryTag.value.trim());
-        formData.append('tags', ''); // No additional tags in simplified version
+        formData.append('concept', 'custom');
+        formData.append('subconcept', rawTags[0] || '');
+        formData.append('tags', rawTags.join(','));
         
         const response = await window.authenticatedFetch('/api/upload_custom_image', {
             method: 'POST',
@@ -1331,26 +1332,39 @@ function displayCustomImages(images) {
         return;
     }
     
-    customImagesList.innerHTML = images.map(image => `
-        <div class="relative group cursor-pointer" onclick="editCustomImage('${image.id}', '${image.image_url}', '${image.subconcept}')">
-            <img src="${image.image_url}" alt="${image.subconcept}" class="w-full h-24 object-cover rounded border hover:shadow-lg transition-shadow">
+    const fragment = document.createDocumentFragment();
+    for (const image of images) {
+        const displayTags = (image.tags && image.tags.length > 0) ? image.tags.join(', ') : (image.subconcept || '');
+        const div = document.createElement('div');
+        div.className = 'relative group cursor-pointer';
+        div.dataset.imageId = image.id;
+        div.dataset.imageUrl = image.image_url;
+        div.dataset.subconcept = image.subconcept || '';
+        div.dataset.tags = JSON.stringify(image.tags || []);
+        div.innerHTML = `
+            <img src="${image.image_url}" alt="${image.subconcept || ''}" class="w-full h-24 object-cover rounded border hover:shadow-lg transition-shadow">
             <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 rounded flex items-center justify-center transition-all">
                 <i class="fas fa-edit text-white opacity-0 group-hover:opacity-100 transition-opacity"></i>
             </div>
-            <p class="text-xs text-center mt-1 truncate">${image.subconcept}</p>
-        </div>
-    `).join('');
+            <p class="text-xs text-center mt-1 truncate">${displayTags}</p>`;
+        div.addEventListener('click', () => {
+            const tags = JSON.parse(div.dataset.tags || '[]');
+            editCustomImage(div.dataset.imageId, div.dataset.imageUrl, div.dataset.subconcept, tags);
+        });
+        fragment.appendChild(div);
+    }
+    customImagesList.innerHTML = '';
+    customImagesList.appendChild(fragment);
 }
 
-function editCustomImage(imageId, imageUrl, primaryTag) {
+function editCustomImage(imageId, imageUrl, subconcept, tags = []) {
     if (!customImageModal) return;
-    
-    // Store current image id for saving/deleting
+
     customImageModal.dataset.imageId = imageId;
-    
-    // Set modal content
     modalImagePreview.src = imageUrl;
-    modalPrimaryTag.value = primaryTag;
+    // Show all tags if available; fall back to subconcept for old records
+    const displayTags = (Array.isArray(tags) && tags.length > 0) ? tags.join(', ') : subconcept;
+    modalPrimaryTag.value = displayTags;
     
     // Show modal
     customImageModal.classList.remove('hidden');
@@ -1374,8 +1388,8 @@ async function saveCustomImageChanges() {
             body: JSON.stringify({
                 image_id: imageId,
                 concept: 'custom',
-                subconcept: primaryTag,
-                tags: []
+                subconcept: primaryTag.split(',').map(t => t.trim()).filter(Boolean)[0] || primaryTag,
+                tags: primaryTag.split(',').map(t => t.trim()).filter(Boolean)
             })
         });
         
