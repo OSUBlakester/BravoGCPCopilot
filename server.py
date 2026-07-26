@@ -21697,8 +21697,8 @@ async def _lookup_images_for_labels(
         'what', 'how',
         # Temporal connectives — "then, at home"→norm→"then at home"→"home"
         'then',
-        # Directional preposition — "towards the park"→"park"
-        'towards',
+        # Directional prepositions — "towards the park"→"park", "down, the street"→"street"
+        'towards', 'down',
         # Conditional conjunction — "if you want"→"want"
         'if',
     })
