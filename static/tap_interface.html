@@ -150,19 +150,23 @@
         .build-space-textarea {
             flex: 1;
             padding: 6px 8px;
-            border: 1px solid #ddd;
+            border-top: 3px solid #16a34a;
+            border-bottom: 3px solid #16a34a;
+            border-left: 8px solid #16a34a;
+            border-right: 8px solid #16a34a;
             border-radius: 6px;
-            font-size: 0.75em;
+            font-size: 1.1em;
             resize: none;
             background-color: #f9f9f9;
             transition: border-color 0.3s ease;
             min-height: 68px;
             height: 68px;
+            cursor: pointer;
+            user-select: none;
         }
 
         .build-space-textarea:focus {
             outline: none;
-            border-color: #4CAF50;
             background-color: white;
         }
 
@@ -437,11 +441,9 @@
             flex-direction: column;
             gap: 8px;
             grid-row: 1 / -1;
-            overflow-y: auto;
-            overflow-x: hidden;
+            overflow: hidden;
             max-height: 100%;
             padding: 8px;
-            padding-bottom: 60px;
             background-color: #cbd5e1; /* Darker gray background to separate from others */
             border-radius: 12px; /* Rounded corners */
         }
@@ -452,11 +454,15 @@
             align-items: center;
             gap: 6px;
             width: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-bottom: 52px;
         }
 
         .category-button {
             flex: 0 0 auto; /* Fixed size, don't grow/shrink */
-            height: 78px;
+            aspect-ratio: 1 / 1;
+            height: auto;
             width: 100%;
             
             background: linear-gradient(145deg, #ffffff, #f0f0f0); /* Light button face */
@@ -583,6 +589,7 @@
             width: 75%;
             min-width: 0;
             align-self: center;
+            flex-shrink: 0; /* Pinned at top — never scrolls away */
         }
 
         .categories-toolbar-btn:hover {
@@ -1508,12 +1515,6 @@
                 </button>
                 <textarea id="build-space" class="build-space-textarea" rows="1" placeholder="Your speech will appear here as you select options..."></textarea>
                 <div class="control-buttons">
-                    <button id="speak-build-btn" class="control-btn speak-btn" title="Speak exactly as written" aria-label="Speak exactly as written">
-                        <div class="control-btn-icon">
-                            <i class="fas fa-volume-up"></i>
-                        </div>
-                        <div class="control-btn-label">Speak</div>
-                    </button>
                     <button id="speak-build-autoclean-btn" class="control-btn wizard-speak-btn" title="Auto Clean and speak" aria-label="Auto Clean and speak">
                         <div class="control-btn-icon">
                             <i class="fas fa-wand-magic-sparkles"></i>
@@ -4048,7 +4049,7 @@
         const llmStaticOptions = document.getElementById('llmStaticOptions');
         const freestyleOptions = document.getElementById('freestyleOptions');
         const buildSpace = document.getElementById('build-space');
-        const speakBuildBtn = document.getElementById('speak-build-btn');
+        const speakBuildBtn = null; // removed — textarea tap now triggers speak
         const speakBuildAutoCleanBtn = document.getElementById('speak-build-autoclean-btn');
         const previewToggleBtn = document.getElementById('preview-toggle-btn');
         const backspaceBuildBtn = document.getElementById('backspace-build-btn');
@@ -6286,12 +6287,15 @@
         }
 
         function setupEventListeners() {
-            // Build space controls
-            speakBuildBtn.addEventListener('click', () => {
-                enableSpeechSynthesis(); // Enable on first user gesture
-                clearPreviewSelection();
-                speakBuildSpace(false);
-            });
+            // Build space controls — tapping the textarea speaks its contents
+            if (buildSpace) {
+                buildSpace.readOnly = true;
+                buildSpace.addEventListener('click', () => {
+                    enableSpeechSynthesis();
+                    clearPreviewSelection();
+                    speakBuildSpace(false);
+                });
+            }
             if (speakBuildAutoCleanBtn) {
                 speakBuildAutoCleanBtn.addEventListener('click', () => {
                     enableSpeechSynthesis(); // Enable on first user gesture
