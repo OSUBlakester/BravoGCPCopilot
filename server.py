@@ -12036,9 +12036,15 @@ async def upload_custom_image(
         
         logging.info(f"Custom image uploaded successfully: {doc_ref.id}")
 
+        # Update static tap buttons that match this custom image's tags
+        try:
+            await _apply_custom_images_to_tap_config(account_id, aac_user_id)
+        except Exception as _e_ci:
+            logging.warning(f"Custom image tap config update failed after custom upload: {_e_ci}")
+
         if doc_data.get("image_url"):
             doc_data["image_url"] = _display_image_url(doc_data["image_url"], doc_data.get("storage_path"))
-        
+
         return JSONResponse(content={
             "success": True,
             "image_data": doc_data,
@@ -12160,7 +12166,13 @@ async def update_custom_image(
             updated_doc["updated_at"] = updated_doc["updated_at"].isoformat()
         
         logging.info(f"Custom image {image_id} updated successfully")
-        
+
+        # Re-run custom image assignment so tag changes are reflected in static buttons
+        try:
+            await _apply_custom_images_to_tap_config(account_id, aac_user_id)
+        except Exception as _e_ci:
+            logging.warning(f"Custom image tap config update failed after tag update: {_e_ci}")
+
         return JSONResponse(content={
             "success": True,
             "image_data": updated_doc,
@@ -12209,7 +12221,13 @@ async def delete_custom_image(
         })
         
         logging.info(f"Custom image {image_id} deleted successfully")
-        
+
+        # Re-run custom image assignment so deleted image is removed from static buttons
+        try:
+            await _apply_custom_images_to_tap_config(account_id, aac_user_id)
+        except Exception as _e_ci:
+            logging.warning(f"Custom image tap config update failed after delete: {_e_ci}")
+
         return JSONResponse(content={
             "success": True,
             "message": "Image deleted successfully"
@@ -12294,7 +12312,7 @@ async def upload_user_profile_image(
         
         # Automatically tag with user name and personal pronouns
         # Include both proper case and lowercase for better matching
-        personal_pronouns = ["I", "me", "myself", "my", "mine"]
+        personal_pronouns = ["I", "me", "myself"]
         tags = [user_name, user_name.lower()] + personal_pronouns + ["profile picture"]
         # Remove duplicates while preserving order
         tags = list(dict.fromkeys(tags))
@@ -12379,9 +12397,15 @@ async def upload_user_profile_image(
         
         logging.info(f"User profile image uploaded successfully: {custom_image_ref.id} for user {user_name}")
 
+        # Update static tap buttons that match profile tags (I, me, myself, user name, etc.)
+        try:
+            await _apply_custom_images_to_tap_config(account_id, aac_user_id)
+        except Exception as _e_ci:
+            logging.warning(f"Custom image tap config update failed after profile upload: {_e_ci}")
+
         if doc_data.get("image_url"):
             doc_data["image_url"] = _display_image_url(doc_data["image_url"], doc_data.get("storage_path"))
-        
+
         return JSONResponse(content={
             "success": True,
             "image_data": doc_data,
@@ -12493,7 +12517,13 @@ async def remove_profile_image(
         for custom_doc in custom_docs:
             custom_doc.reference.update({"active": False, "updated_at": datetime.now(timezone.utc)})
             logging.info(f"Marked custom image profile entry as inactive: {custom_doc.id}")
-        
+
+        # Update static tap buttons — revert profile-tagged buttons to bravo_images
+        try:
+            await _apply_custom_images_to_tap_config(account_id, aac_user_id)
+        except Exception as _e_ci:
+            logging.warning(f"Custom image tap config update failed after profile remove: {_e_ci}")
+
         # Also remove the profile image URL from user info
         user_info_dict = await load_firestore_document(
             account_id=account_id,
@@ -22162,6 +22192,135 @@ async def _lookup_images_for_labels(
     return label_to_url
 
 
+async def _build_custom_image_term_map(account_id: str, aac_user_id: str) -> Dict[str, str]:
+    """
+    Loads all active custom images (including profile image) for a user and returns
+    a dict of normalized_term → image_url. Newest custom image wins per term.
+    """
+    import re as _re
+    def _norm(s: str) -> str:
+        return ' '.join(_re.sub(r'[^a-z0-9]+', ' ', str(s or '').strip().lower()).split())
+
+    if not firestore_db:
+        return {}
+    try:
+        custom_ref = (firestore_db.collection("accounts").document(account_id)
+                                  .collection("profiles").document(aac_user_id)
+                                  .collection("custom_images"))
+        docs = list(custom_ref.where("active", "==", True).stream())
+    except Exception as e:
+        logging.warning(f"_build_custom_image_term_map Firestore error for {account_id}/{aac_user_id}: {e}")
+        return {}
+
+    # Sort oldest → newest so the newest URL wins when terms overlap
+    docs.sort(key=lambda d: (d.to_dict().get('created_at') or 0))
+
+    term_map: Dict[str, str] = {}
+    for doc in docs:
+        data = doc.to_dict()
+        url = str(data.get('image_url') or '').strip()
+        if not url:
+            continue
+        for field in ('subconcept', 'concept'):
+            val = _norm(data.get(field) or '')
+            if val:
+                term_map[val] = url
+        for tag in (data.get('tags') or []):
+            t = _norm(tag)
+            if t:
+                term_map[t] = url
+    return term_map
+
+
+async def _apply_custom_images_to_tap_config(account_id: str, aac_user_id: str) -> None:
+    """
+    Applies custom images (profile + uploaded) to matching static buttons in the tap config.
+    Called after any custom image save, update, or delete. Custom images take priority
+    over bravo_images assignments. Buttons that had a custom image URL but no longer
+    match any active custom image are re-queried from bravo_images.
+    """
+    import re as _re
+    def _norm(s: str) -> str:
+        return ' '.join(_re.sub(r'[^a-z0-9]+', ' ', str(s or '').strip().lower()).split())
+    def _is_custom_url(url: str) -> bool:
+        return bool(url and '/custom_images/' in url)
+
+    term_map = await _build_custom_image_term_map(account_id, aac_user_id)
+    config = await load_tap_nav_config(account_id, aac_user_id)
+    if not config:
+        return
+
+    changed = False
+    fallback_labels: List[str] = []
+
+    def _process(item: dict) -> None:
+        nonlocal changed
+        label = str(item.get('label') or '').strip()
+        if not label:
+            return
+        lbl_norm = _norm(label)
+        if lbl_norm in term_map:
+            new_url = term_map[lbl_norm]
+            if item.get('image_url') != new_url:
+                item['image_url'] = new_url
+                changed = True
+        elif _is_custom_url(item.get('image_url') or ''):
+            # Had a custom image that no longer matches — clear and re-query bravo_images
+            item['image_url'] = None
+            fallback_labels.append(label)
+            changed = True
+
+    for board in (config.get('boards') or []):
+        if isinstance(board, dict):
+            for btn in (board.get('buttons') or []):
+                if isinstance(btn, dict):
+                    _process(btn)
+
+    def _walk_menu(items: list) -> None:
+        for item in (items or []):
+            if isinstance(item, dict):
+                _process(item)
+                _walk_menu(item.get('children') or [])
+    _walk_menu(config.get('boards_menu') or [])
+
+    if not changed:
+        return
+
+    # Re-query bravo_images for buttons that lost their custom image assignment
+    if fallback_labels:
+        try:
+            settings = await load_settings_from_file(account_id, aac_user_id)
+            mascot = str(settings.get('mascot') or '').strip().lower()
+            fallback_map = await _lookup_images_for_labels(
+                fallback_labels, mascot, account_id, aac_user_id, source="custom_img_fallback"
+            )
+            def _apply_fb(item: dict) -> None:
+                if item.get('image_url') is None:
+                    url = fallback_map.get(str(item.get('label') or '').strip())
+                    if url:
+                        item['image_url'] = url
+            for board in (config.get('boards') or []):
+                if isinstance(board, dict):
+                    for btn in (board.get('buttons') or []):
+                        if isinstance(btn, dict):
+                            _apply_fb(btn)
+            def _walk_fb(items: list) -> None:
+                for item in (items or []):
+                    if isinstance(item, dict):
+                        _apply_fb(item)
+                        _walk_fb(item.get('children') or [])
+            _walk_fb(config.get('boards_menu') or [])
+        except Exception as e:
+            logging.warning(f"Bravo fallback lookup failed for {account_id}/{aac_user_id}: {e}")
+
+    config['buttons'] = compose_legacy_buttons_from_boards_menu(config)
+    await save_tap_nav_config(account_id, aac_user_id, config)
+    logging.info(
+        f"✅ Custom images applied to tap config {account_id}/{aac_user_id}: "
+        f"{len(term_map)} terms, {len(fallback_labels)} bravo fallbacks"
+    )
+
+
 async def _assign_images_to_tap_config(
     config_data: Dict[str, Any],
     mascot: str,
@@ -22290,6 +22449,40 @@ async def _assign_images_to_tap_config(
                 _assign_menu_images(item.get('children') or [])
 
         _assign_menu_images(fresh_config.get('boards_menu') or [])
+
+        # Custom images (profile + user uploads) take highest priority — override bravo_images.
+        try:
+            import re as _re_ci
+            def _ci_norm(s: str) -> str:
+                return ' '.join(_re_ci.sub(r'[^a-z0-9]+', ' ', str(s or '').strip().lower()).split())
+            custom_term_map = await _build_custom_image_term_map(account_id, aac_user_id)
+            if custom_term_map:
+                for _board in (fresh_config.get('boards') or []):
+                    if not isinstance(_board, dict):
+                        continue
+                    for _btn in (_board.get('buttons') or []):
+                        if not isinstance(_btn, dict):
+                            continue
+                        _lbl_n = _ci_norm(_btn.get('label') or '')
+                        if _lbl_n in custom_term_map:
+                            _cu = custom_term_map[_lbl_n]
+                            if _btn.get('image_url') != _cu:
+                                _btn['image_url'] = _cu
+                                img_changed = True
+                def _apply_custom_menu(items: list) -> None:
+                    for _item in (items or []):
+                        if not isinstance(_item, dict):
+                            continue
+                        _lbl_n = _ci_norm(_item.get('label') or '')
+                        if _lbl_n in custom_term_map:
+                            _cu = custom_term_map[_lbl_n]
+                            if _item.get('image_url') != _cu:
+                                _item['image_url'] = _cu
+                                menu_changed[0] = True
+                        _apply_custom_menu(_item.get('children') or [])
+                _apply_custom_menu(fresh_config.get('boards_menu') or [])
+        except Exception as _e_ci:
+            logging.warning(f"Custom image override in _assign_images_to_tap_config failed: {_e_ci}")
 
         # Rebuild the legacy buttons array from the updated boards_menu so the
         # tap interface (which reads tapConfig.buttons) gets the new image_urls.
