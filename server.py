@@ -22357,17 +22357,16 @@ async def _assign_images_to_tap_config(
             if not isinstance(board, dict) or board.get('board_type') != 'static':
                 continue
             existing = board.get('buttons') or []
-            has_pool = any(
-                isinstance(b, dict) and b.get('pool_index') is not None
-                for b in existing
-            )
-            if has_pool:
-                continue  # already populated
+            pool_btns = [b for b in existing if isinstance(b, dict) and b.get('pool_index') is not None]
             pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
             if not pool:
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
                 continue
+            # Skip only if pool buttons already exist AND the count matches the current pool definition.
+            # Stale boards created before a pool was resized (e.g. 84-item padded → 36-item) must be replaced.
+            if pool_btns and len(pool_btns) == len(pool):
+                continue  # already correctly populated
             max_on_page = static_rows * grid_cols
             board['buttons'] = [
                 _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
@@ -27073,12 +27072,15 @@ async def list_tap_boards(
             if not isinstance(board, dict) or board.get('board_type') != 'static':
                 continue
             existing_btns = board.get('buttons') or []
-            if any(isinstance(b, dict) and b.get('pool_index') is not None for b in existing_btns):
-                continue  # already has pool buttons
+            pool_btns = [b for b in existing_btns if isinstance(b, dict) and b.get('pool_index') is not None]
             pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
             if not pool:
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
+                continue
+            # Skip only when pool buttons already exist AND the count matches the current pool.
+            # Stale boards (e.g. created with the old 84-item padded pool) must be replaced.
+            if pool_btns and len(pool_btns) == len(pool):
                 continue
             max_on_page = static_rows * grid_cols
             board['buttons'] = [
