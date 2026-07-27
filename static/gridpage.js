@@ -4788,6 +4788,13 @@ async function getLLMResponse(prompt, options = {}) {
             requestBody.compose_mode = true;
             requestBody.compose_body = String(composeSession.text || '').trim();
         }
+        // Include current mood so the server cache key changes on mood switches,
+        // preventing stale mood-specific responses from being returned.
+        const _mood = (typeof window.getCurrentMood === 'function' ? (window.getCurrentMood() || '') : '')
+            || sessionStorage.getItem('currentSessionMood') || '';
+        if (_mood && _mood.toLowerCase() !== 'none') {
+            requestBody.current_mood = _mood.trim();
+        }
 
         const response = await authenticatedFetch('/llm', { // Use authenticatedFetch
             method: 'POST',
