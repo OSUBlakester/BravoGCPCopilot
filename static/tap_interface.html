@@ -6617,6 +6617,31 @@
                 .sort((a, b) => Number(a.pool_index) - Number(b.pool_index));
             const hasPoolOverflow = allPoolBtns.length > 0 && allPoolBtns.some(b => b.row === null || b.row === undefined);
 
+            // Suppress dynamic rows for pure static pool boards (no LLM prompt).
+            // Pool boards are fully defined by their pool — dynamic rows would add generic
+            // fallback words ("I, want, need, yes") when the category-words API can't match.
+            // Also suppresses for static boards not yet backfilled (pool buttons not loaded yet).
+            const boardHasNoPrompt = !categoryContext?.llm_prompt && !categoryContext?.words_prompt;
+            const isStaticNoPromptBoard = (
+                targetBoardObj
+                && String(targetBoardObj.board_type || '').toLowerCase() === 'static'
+                && !targetBoardObj.llm_prompt
+                && !targetBoardObj.words_prompt
+            );
+            // Also treat as a static pool board if the category prompt_category has a known pool,
+            // even if the board object hasn't loaded yet (prevents generic backfill during board init).
+            const catPromptCategory = categoryContext?.prompt_category || '';
+            // A category has a pool if it resolves to a non-home pool AND has no LLM/words prompt
+            // (AI-prompt boards that happen to share a pool key should still show fallback on failure).
+            const categoryHasPool = catPromptCategory
+                && boardHasNoPrompt
+                && catPromptCategory !== 'home'
+                && _get_static_pool_for_category(catPromptCategory).length > 0;
+            const isNoBackfillBoard = isStaticNoPromptBoard || categoryHasPool;
+            if (boardHasNoPrompt && (allPoolBtns.length > 0 || isNoBackfillBoard)) {
+                numDynamic = 0;
+            }
+
             // 1. Build static (upper) row buttons
             let upperRowButtons;
 
@@ -6636,9 +6661,10 @@
                     row: Math.floor(idx / cols),
                     col: idx % cols,
                 }));
-            } else if (!isCustomized && staticOffset > 0 && categoryContext) {
+            } else if (!isCustomized && staticOffset > 0 && categoryContext && !isNoBackfillBoard && allPoolBtns.length === 0) {
                 // Something Else cycling: skip page-0 configured buttons entirely;
                 // pull the next page of pool words starting at staticOffset.
+                // Skipped for static pool boards — they have no extra pages to cycle through.
                 const categoryLabel = categoryContext.label || 'general';
                 const poolSlice = getCategoryFallbackWords(categoryLabel, totalUpperSlots, staticOffset);
                 upperRowButtons = [];
@@ -6673,8 +6699,10 @@
                 // Build a set of occupied cell coordinates in the upper rows
                 const occupiedCoords = new Set(upperRowButtons.map(btn => `${btn.row}:${btn.col}`));
 
-                // Fill any unoccupied slots with category fallback words (only for non-customized boards)
-                if (!isCustomized && occupiedCoords.size < totalUpperSlots && categoryContext) {
+                // Fill any unoccupied slots with category fallback words only for AI/dynamic boards.
+                // Static pool boards or boards with a known pool never backfill —
+                // show only what is defined, even if fewer than the grid size.
+                if (!isCustomized && occupiedCoords.size < totalUpperSlots && categoryContext && allPoolBtns.length === 0 && !isNoBackfillBoard) {
                     const categoryLabel = categoryContext.label || 'general';
                     // Fetch a generous pool of fallback words (double the total slots) to ensure unique suggestions
                     const fallbackWords = getCategoryFallbackWords(categoryLabel, totalUpperSlots * 2);
@@ -13320,7 +13348,8 @@ VARIETY RULES:
     ]
 };
 
-        // Self-normalize the static pools to exactly 84 words on startup/load
+        // Deduplicate each pool — do NOT pad to 84 or add generic words.
+        // Boards should only show the words explicitly defined in the pool.
         for (const [key, words] of Object.entries(CATEGORY_STATIC_POOLS)) {
             const seen = new Set();
             const deduped = [];
@@ -13331,34 +13360,7 @@ VARIETY RULES:
                     deduped.push(w_clean);
                 }
             }
-
-            if (deduped.length > 84) {
-                CATEGORY_STATIC_POOLS[key] = deduped.slice(0, 84);
-            } else if (deduped.length < 84) {
-                const homeWords = CATEGORY_STATIC_POOLS["home"] || [];
-                for (const hw of homeWords) {
-                    const hw_clean = String(hw).trim();
-                    if (hw_clean && !seen.has(hw_clean.toLowerCase())) {
-                        seen.add(hw_clean.toLowerCase());
-                        deduped.push(hw_clean);
-                        if (deduped.length === 84) {
-                            break;
-                        }
-                    }
-                }
-                let num = 1;
-                while (deduped.length < 84) {
-                    const dummy = `item_${num}`;
-                    if (!seen.has(dummy.toLowerCase())) {
-                        seen.add(dummy.toLowerCase());
-                        deduped.push(dummy);
-                    }
-                    num++;
-                }
-                CATEGORY_STATIC_POOLS[key] = deduped;
-            } else {
-                CATEGORY_STATIC_POOLS[key] = deduped;
-            }
+            CATEGORY_STATIC_POOLS[key] = deduped;
         }
 
         function _get_static_pool_for_category(categoryName) {
@@ -14172,8 +14174,8 @@ VARIETY RULES:
                     categoryBtn.style.color = button.text_color || '#000000';
                 }
                 
-                // Add Firestore image support for categories (like gridpage) - skip for sight words
-                if (!isSightWord) {
+                // Add Firestore image support for categories (like gridpage) - skip for sight words and text-only mode
+                if (!isSightWord && enablePictograms) {
                     const imagePromise = button.image_url
                         ? Promise.resolve(button.image_url)
                         : getSymbolImageForText(rawLabel || displayLabel);
@@ -14590,6 +14592,8 @@ VARIETY RULES:
 
                     if (!isSightWord) {
                         modalBtn.style.color = button.text_color || '#000000';
+                    }
+                    if (!isSightWord && enablePictograms) {
                         getSymbolImageForText(rawLabel || displayLabel).then(imageUrl => {
                             if (!imageUrl) {
                                 return;
@@ -14993,6 +14997,7 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 categoryBtn.style.color = child.text_color || '#000000';
                 
                 // Add image support for child categories (same as main categories)
+                if (enablePictograms) {
                 console.log(`🔍 Attempting image load for child category: "${displayChildLabel}"`);
                 getSymbolImageForText(rawChildLabel || displayChildLabel).then(imageUrl => {
                     console.log(`🎯 Image result for "${displayChildLabel}": ${imageUrl ? 'Found' : 'Not found'}`);
@@ -15056,7 +15061,8 @@ Avoid phrases that are literally about the home as a building or location. Keep 
                 }).catch(error => {
                     console.error('Error loading image for child category button:', error);
                 });
-                
+                } // end enablePictograms
+
                 // Set initial text (will be replaced by image if found)
                 categoryBtn.textContent = displayChildLabel;
                 

@@ -5057,6 +5057,7 @@ class LLMRequest(BaseModel):
     button_text: Optional[str] = None    # Source button label from UI when available
     page_name: Optional[str] = None      # Source page name from UI when available
     click_timestamp: Optional[str] = None  # UI click timestamp for correlation
+    current_mood: Optional[str] = None   # Current user mood (sent by client to bust cache on mood change)
 
 # --- Vocabulary Level Helper Function ---
 def get_vocabulary_level_instruction(level: str) -> str:
@@ -5291,9 +5292,12 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
 
     compose_body_hash = hashlib.sha1((request_data.compose_body or "").encode("utf-8")).hexdigest()[:10]
     prompt_hash = hashlib.sha1(user_prompt_content.encode("utf-8")).hexdigest()[:16]
+    # Normalise mood to a lowercase slug so "Happy", "happy", " happy " all share one cache entry.
+    # An empty/None mood normalises to "none" so no-mood requests also share a single slot.
+    mood_slug = (str(request_data.current_mood or "").strip().lower() or "none")
     quick_cache_key = (
         f"{account_id}|{aac_user_id}|{llm_provider}|{requested_options_count}|"
-        f"{int(include_rich_delta_context)}|{int(request_data.compose_mode)}|{prompt_hash}|{compose_body_hash}"
+        f"{int(include_rich_delta_context)}|{int(request_data.compose_mode)}|{prompt_hash}|{compose_body_hash}|{mood_slug}"
     )
 
     now_ts = time.time()
@@ -22357,17 +22361,16 @@ async def _assign_images_to_tap_config(
             if not isinstance(board, dict) or board.get('board_type') != 'static':
                 continue
             existing = board.get('buttons') or []
-            has_pool = any(
-                isinstance(b, dict) and b.get('pool_index') is not None
-                for b in existing
-            )
-            if has_pool:
-                continue  # already populated
+            pool_btns = [b for b in existing if isinstance(b, dict) and b.get('pool_index') is not None]
             pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
             if not pool:
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
                 continue
+            # Skip only if pool buttons already exist AND the count matches the current pool definition.
+            # Stale boards created before a pool was resized (e.g. 84-item padded → 36-item) must be replaced.
+            if pool_btns and len(pool_btns) == len(pool):
+                continue  # already correctly populated
             max_on_page = static_rows * grid_cols
             board['buttons'] = [
                 _make_pool_button_entry(idx, word, board['id'], idx >= max_on_page, grid_cols, default_action)
@@ -25559,25 +25562,6 @@ def create_default_tap_config(account_id: str, aac_user_id: str, use_hybrid_page
                     "special_function": None,
                     "custom_audio_file": None,
                     "text_color": "#000000",
-                    "id": "button_1769549393144",
-                    "prompt_exclusions": None,
-                    "llm_prompt": "Generate a list of nouns related to food and drinks",
-                    "prompt_category": "food_and_drink",
-                    "speech_text": None,
-                    "static_options": None,
-                    "label": "Food and Drink",
-                    "image_url": None,
-                    "prompt_examples": None,
-                    "children": [],
-                    "hidden": False,
-                    "background_color": "#ffffff",
-                    "prompt_topic": None
-                },
-                {
-                    "words_prompt": None,
-                    "special_function": None,
-                    "custom_audio_file": None,
-                    "text_color": "#000000",
                     "id": "button_1769549418765",
                     "prompt_exclusions": None,
                     "llm_prompt": "Generate a list of nouns for body parts",
@@ -26106,6 +26090,289 @@ def create_default_tap_config(account_id: str, aac_user_id: str, use_hybrid_page
                     "background_color": "#ffffff",
                     "prompt_topic": None
                 }
+            ],
+            "prompt_topic": None,
+            "background_color": "#FFFFFF"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": None,
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "food_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": "food",
+            "llm_prompt": "Generate a list of food item names only. Include actual foods the user might eat or request. Exclude utensils, appliances, kitchen equipment, and cooking techniques.",
+            "static_options": None,
+            "label": "Food",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "food_breakfast_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of breakfast food items only — things you eat, not utensils or kitchen equipment",
+                    "prompt_category": "food_breakfast",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Breakfast",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "food_lunch_dinner_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of lunch and dinner food items only — things you eat, not utensils, dishes, or kitchen equipment",
+                    "prompt_category": "food_lunch_dinner",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Lunch and Dinner",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "food_snacks_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of snack food items and treats only — things you eat between meals, not utensils or packaging",
+                    "prompt_category": "food_snacks",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Snacks",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "food_fruits_veggies_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of fruits and vegetables only — specific produce items by name, not utensils or equipment",
+                    "prompt_category": "food_fruits_veggies",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Fruits and Vegetables",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "food_desserts_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of dessert and sweet food items only — cakes, cookies, ice cream, candy, and other treats by name, not utensils or equipment",
+                    "prompt_category": "food_desserts",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Desserts",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "food_restaurant_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": None,
+                    "prompt_category": "food_restaurant",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Restaurant and Fast Food",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None,
+                    "children": [
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_mcdonalds_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_mcdonalds", "speech_text": None,
+                            "static_options": None, "label": "McDonald's", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_chickfila_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_chickfila", "speech_text": None,
+                            "static_options": None, "label": "Chick-fil-A", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_tacobell_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_tacobell", "speech_text": None,
+                            "static_options": None, "label": "Taco Bell", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_subway_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_subway", "speech_text": None,
+                            "static_options": None, "label": "Subway", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_pizza_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_pizza", "speech_text": None,
+                            "static_options": None, "label": "Pizza", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_italian_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_italian", "speech_text": None,
+                            "static_options": None, "label": "Italian", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_chinese_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_chinese", "speech_text": None,
+                            "static_options": None, "label": "Chinese", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_mexican_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_mexican", "speech_text": None,
+                            "static_options": None, "label": "Mexican", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_japanese_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_japanese", "speech_text": None,
+                            "static_options": None, "label": "Japanese", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        },
+                        {
+                            "words_prompt": None, "special_function": None, "custom_audio_file": None,
+                            "text_color": "#000000", "id": "food_restaurant_american_btn",
+                            "prompt_exclusions": None, "llm_prompt": None,
+                            "prompt_category": "food_restaurant_american", "speech_text": None,
+                            "static_options": None, "label": "American", "image_url": None,
+                            "prompt_examples": None, "children": [], "hidden": False,
+                            "background_color": "#ffffff", "prompt_topic": None
+                        }
+                    ]
+                }
+            ],
+            "prompt_topic": None,
+            "background_color": "#FFFFFF"
+        },
+        {
+            "text_color": "#000000",
+            "special_function": None,
+            "custom_audio_file": None,
+            "words_prompt": None,
+            "id": "drink_btn",
+            "prompt_exclusions": None,
+            "speech_text": None,
+            "prompt_category": "drink",
+            "llm_prompt": "Generate a list of beverage names only — things you drink. Exclude cups, glasses, straws, bottles, and other containers or utensils.",
+            "static_options": None,
+            "label": "Drink",
+            "image_url": None,
+            "prompt_examples": None,
+            "hidden": False,
+            "children": [
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "drink_hot_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of hot beverage names only — coffee, tea, hot chocolate, and similar drinks, not cups or equipment",
+                    "prompt_category": "drink_hot",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Hot Drinks",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
+                {
+                    "words_prompt": None,
+                    "special_function": None,
+                    "custom_audio_file": None,
+                    "text_color": "#000000",
+                    "id": "drink_cold_btn",
+                    "prompt_exclusions": None,
+                    "llm_prompt": "Generate a list of cold beverage names only — sodas, iced drinks, lemonade, and similar cold drinks, not cups or containers",
+                    "prompt_category": "drink_cold",
+                    "speech_text": None,
+                    "static_options": None,
+                    "label": "Cold Drinks",
+                    "image_url": None,
+                    "prompt_examples": None,
+                    "children": [],
+                    "hidden": False,
+                    "background_color": "#ffffff",
+                    "prompt_topic": None
+                },
             ],
             "prompt_topic": None,
             "background_color": "#FFFFFF"
@@ -26809,12 +27076,15 @@ async def list_tap_boards(
             if not isinstance(board, dict) or board.get('board_type') != 'static':
                 continue
             existing_btns = board.get('buttons') or []
-            if any(isinstance(b, dict) and b.get('pool_index') is not None for b in existing_btns):
-                continue  # already has pool buttons
+            pool_btns = [b for b in existing_btns if isinstance(b, dict) and b.get('pool_index') is not None]
             pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
             if not pool:
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
+                continue
+            # Skip only when pool buttons already exist AND the count matches the current pool.
+            # Stale boards (e.g. created with the old 84-item padded pool) must be replaced.
+            if pool_btns and len(pool_btns) == len(pool):
                 continue
             max_on_page = static_rows * grid_cols
             board['buttons'] = [
