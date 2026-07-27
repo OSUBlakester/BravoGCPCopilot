@@ -5057,6 +5057,7 @@ class LLMRequest(BaseModel):
     button_text: Optional[str] = None    # Source button label from UI when available
     page_name: Optional[str] = None      # Source page name from UI when available
     click_timestamp: Optional[str] = None  # UI click timestamp for correlation
+    current_mood: Optional[str] = None   # Current user mood (sent by client to bust cache on mood change)
 
 # --- Vocabulary Level Helper Function ---
 def get_vocabulary_level_instruction(level: str) -> str:
@@ -5291,9 +5292,12 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
 
     compose_body_hash = hashlib.sha1((request_data.compose_body or "").encode("utf-8")).hexdigest()[:10]
     prompt_hash = hashlib.sha1(user_prompt_content.encode("utf-8")).hexdigest()[:16]
+    # Normalise mood to a lowercase slug so "Happy", "happy", " happy " all share one cache entry.
+    # An empty/None mood normalises to "none" so no-mood requests also share a single slot.
+    mood_slug = (str(request_data.current_mood or "").strip().lower() or "none")
     quick_cache_key = (
         f"{account_id}|{aac_user_id}|{llm_provider}|{requested_options_count}|"
-        f"{int(include_rich_delta_context)}|{int(request_data.compose_mode)}|{prompt_hash}|{compose_body_hash}"
+        f"{int(include_rich_delta_context)}|{int(request_data.compose_mode)}|{prompt_hash}|{compose_body_hash}|{mood_slug}"
     )
 
     now_ts = time.time()
