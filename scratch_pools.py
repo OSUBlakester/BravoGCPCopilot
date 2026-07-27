@@ -2822,14 +2822,9 @@ CATEGORY_STATIC_POOLS = {
     ],
 }
 
-# Run normalization and validation checks
-print("--- RUNNING NORMALIZATION AND VALIDATION ---")
-all_valid = True
-
-home_pool = CATEGORY_STATIC_POOLS["home"]
-
+# Deduplicate each pool — do NOT pad to any fixed size or add generic words.
+# Boards should only show the words explicitly defined in the pool.
 for key, words in CATEGORY_STATIC_POOLS.items():
-    # 1. Deduplicate while preserving order
     seen = set()
     deduped_words = []
     for w in words:
@@ -2837,34 +2832,4 @@ for key, words in CATEGORY_STATIC_POOLS.items():
         if w_clean and w_clean.lower() not in seen:
             seen.add(w_clean.lower())
             deduped_words.append(w_clean)
-
-    # 2. Slice or Pad using home_pool
-    if len(deduped_words) > 84:
-        deduped_words = deduped_words[:84]
-    elif len(deduped_words) < 84:
-        for w in home_pool:
-            w_clean = str(w).strip()
-            if w_clean and w_clean.lower() not in seen:
-                seen.add(w_clean.lower())
-                deduped_words.append(w_clean)
-                if len(deduped_words) == 84:
-                    break
-        # If still less than 84 (highly unlikely), fill with dummy count numbers
-        num = 1
-        while len(deduped_words) < 84:
-            dummy = f"item_{num}"
-            if dummy not in seen:
-                deduped_words.append(dummy)
-            num += 1
-
     CATEGORY_STATIC_POOLS[key] = deduped_words
-
-    length = len(deduped_words)
-    if length != 84:
-        print(f"ERROR: Key '{key}' has {length} items (expected exactly 84)")
-        all_valid = False
-
-if all_valid:
-    print("SUCCESS: All static fallback pools normalized to exactly 84 valid items!")
-else:
-    print("FAILED: Validation checks failed.")
