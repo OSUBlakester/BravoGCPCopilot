@@ -15693,6 +15693,23 @@ class GuessWhoGenerateGuessesRequest(BaseModel):
     previous_guesses: Optional[List[str]] = Field(default_factory=list, description="Previously guessed people to exclude")
 
 
+# --- Picnic Game Models ---
+class PicnicGenerateItemsRequest(BaseModel):
+    option: str = Field(..., description="Game option (e.g. 'Rhyming', 'Same Color', 'Alphabet Next Letter')")
+    anchor_item: Optional[str] = Field(None, description="First item selected by either player; defines the specific pattern. None on very first user turn for non-alphabet options.")
+    current_letter: Optional[str] = Field(None, description="Required starting letter for Alphabet Next Letter mode")
+    previous_items: Optional[List[str]] = Field(default_factory=list, description="Previously shown items to exclude")
+
+class PicnicExtractItemRequest(BaseModel):
+    speech_text: str = Field(..., description="Raw speech text to extract picnic item from")
+
+class PicnicCheckItemRequest(BaseModel):
+    option: str = Field(..., description="Game option")
+    item: str = Field(..., description="The item to check")
+    anchor_item: Optional[str] = Field(None, description="Anchor item that defines the specific pattern")
+    current_letter: Optional[str] = Field(None, description="Required starting letter for Alphabet Next Letter mode")
+
+
 # --- Jokes Database Models ---
 class JokeQueryRequest(BaseModel):
     location: Optional[str] = Field(None, description="Location tag filter (e.g., 'home', 'beach')")
@@ -21726,7 +21743,7 @@ async def _lookup_images_for_labels(
         'so', 'very', 'really', 'quite', 'pretty', 'too',
         'extremely', 'super', 'totally', 'just', 'kind', 'sort', 'easy',
         # Greeting/address prefixes — "there, boss"→"boss", "doing, dad"→"dad"
-        'there', 'doing',
+        'there', 'doing', 'go', 'something','somewhere'
         # Question words — "what you are watching"→"watching", "what's wrong"→"wrong"
         'what', 'how',
         # Temporal connectives — "then, at home"→norm→"then at home"→"home"
@@ -31255,6 +31272,332 @@ Generate UP TO {total_guesses_needed} unique guesses now:"""
     except Exception as e:
         logging.error(f"Error generating guesses: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to generate guesses: {str(e)}")
+
+
+# --- Picnic Game Endpoints ---
+
+DEFAULT_PICNIC_OPTIONS = [
+    "Rhyming",
+    "Same Color",
+    "Same First Letter",
+    "Alphabet Next Letter",
+    "Same Vowel Sound",
+    "Same Last Letter",
+    "Same Number of Syllables",
+]
+
+
+@app.get("/api/games/picnic/categories")
+async def get_picnic_categories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Get picnic game options (default + per-account custom)"""
+    return await _get_categories(current_ids, DEFAULT_PICNIC_OPTIONS, "picnic_options")
+
+
+@app.post("/api/games/picnic/custom-categories")
+async def save_custom_picnic_categories(
+    request: Request,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Save custom picnic game options to user profile"""
+    return await _save_custom_categories(request, current_ids, "picnic_options")
+
+
+@app.delete("/api/games/picnic/custom-categories")
+async def delete_custom_picnic_categories(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Reset picnic game options to defaults"""
+    return await _delete_custom_categories(current_ids, "picnic_options")
+
+
+@app.post("/api/games/picnic/generate-items")
+async def generate_picnic_items(
+    request: PicnicGenerateItemsRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Generate picnic item options for the user to select from"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        import random as _random
+        settings = await load_settings_from_file(account_id, aac_user_id)
+        raw_llm_options = settings.get("LLMOptions", 6)
+        llm_options = int(raw_llm_options) if isinstance(raw_llm_options, (int, float)) else 6
+        if llm_options <= 0:
+            llm_options = 4
+        total_count = max(4, llm_options)
+
+        # Vocabulary level → wrong item percentage
+        vocab_wrong_pct = {
+            "emergent": 0.10,
+            "functional": 0.20,
+            "developing": 0.50,
+            "proficient": 0.75,
+        }
+        vocab_level = str(settings.get("vocabularyLevel", "functional")).lower()
+        wrong_pct = vocab_wrong_pct.get(vocab_level, 0.20)
+
+        exclusion_instruction = ""
+        if request.previous_items:
+            excluded_list = ", ".join(f'"{it}"' for it in request.previous_items)
+            exclusion_instruction = f"\n\nDo NOT include any of these previously shown items: {excluded_list}."
+
+        base_rule = (
+            "All items must be physical, tangible things (nouns: food, objects, toys, animals, clothing) "
+            "you could bring to a picnic. No verbs, actions, or abstract concepts. "
+            "Each item: a single noun or short noun phrase."
+        )
+
+        is_alphabet = request.option == "Alphabet Next Letter"
+
+        # Alphabet Next Letter: constraint is always current_letter, mixed from turn 1
+        if is_alphabet and request.current_letter:
+            letter = request.current_letter.upper()
+            wrong_count = max(0, round(total_count * wrong_pct))
+            correct_count = total_count - wrong_count
+
+            llm_query = f"""You are generating item options for the "I'm Going on a Picnic" word game.
+
+Game option: Alphabet Next Letter
+Required starting letter this turn: "{letter}"
+
+Generate exactly {correct_count} CORRECT items (must start with the letter "{letter}") and exactly {wrong_count} WRONG items (must NOT start with "{letter}").
+{base_rule}{exclusion_instruction}
+
+Return a JSON object with two lists:
+{{"correct": [...], "wrong": [...]}}
+
+Return ONLY the JSON:"""
+
+        elif not request.anchor_item:
+            # First user turn for non-alphabet options: all correct, diverse, seeds the anchor
+            llm_query = f"""You are generating item options for the "I'm Going on a Picnic" word game.
+
+Game option: "{request.option}"
+
+This is the opening turn. The player's choice will define the specific pattern for the rest of the game.
+Generate exactly {total_count} varied items that each represent a DIFFERENT possible sub-pattern within "{request.option}".
+
+Examples for "Rhyming": cat, dog, sun, ball (items from different rhyme groups)
+Examples for "Same Color": red apple, yellow banana, blue kite (items of different colors)
+Examples for "Same First Letter": apple, banana, kite, dog (different starting letters)
+Examples for "Same Vowel Sound": cat, fish, hop, fun (different vowel sounds)
+
+{base_rule}{exclusion_instruction}
+
+Return ONLY a JSON array of strings: ["item1", "item2", ...]
+
+Generate {total_count} items now:"""
+            wrong_count = 0
+
+        else:
+            # Subsequent turns: anchor established, mix correct + wrong
+            wrong_count = max(0, round(total_count * wrong_pct))
+            correct_count = total_count - wrong_count
+            anchor = request.anchor_item
+
+            # Build option-specific constraint description
+            constraint_desc = {
+                "Rhyming": f'items must RHYME with "{anchor}"',
+                "Same Color": f'items must be the SAME COLOR as "{anchor}"',
+                "Same First Letter": f'items must start with the letter "{anchor.strip()[0].upper()}" (same as "{anchor}")',
+                "Same Vowel Sound": f'items must have the SAME VOWEL SOUND as "{anchor}"',
+                "Same Last Letter": f'items must end with the same letter as "{anchor}"',
+                "Same Number of Syllables": f'items must have the SAME NUMBER OF SYLLABLES as "{anchor}"',
+            }.get(request.option, f'items must fit the pattern "{request.option}" established by "{anchor}"')
+
+            llm_query = f"""You are generating item options for the "I'm Going on a Picnic" word game.
+
+Game option: "{request.option}"
+Anchor item: "{anchor}" — {constraint_desc}
+
+Generate exactly {correct_count} CORRECT items ({constraint_desc}) and exactly {wrong_count} WRONG items (clearly do NOT fit the pattern).
+{base_rule}{exclusion_instruction}
+
+Return a JSON object with two lists:
+{{"correct": [...], "wrong": [...]}}
+
+Return ONLY the JSON:"""
+
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+
+        import json as json_module
+        json_str = response.strip()
+        if json_str.startswith("```"):
+            json_str = json_str.split("```")[1]
+            if json_str.startswith("json"):
+                json_str = json_str[4:]
+
+        items = []
+        try:
+            parsed = json_module.loads(json_str)
+            if isinstance(parsed, list):
+                # First-turn response: flat list
+                items = [str(i) for i in parsed]
+            elif isinstance(parsed, dict):
+                # Mixed-turn response: {correct: [...], wrong: [...]}
+                correct = [str(i) for i in parsed.get("correct", [])]
+                wrong = [str(i) for i in parsed.get("wrong", [])]
+                combined = correct + wrong
+                _random.shuffle(combined)
+                items = combined
+        except Exception:
+            items = [line.strip().strip('"- ') for line in response.split('\n') if line.strip()]
+
+        if not items:
+            items = []
+
+        return JSONResponse(content={"items": items[:total_count], "option": request.option})
+
+    except Exception as e:
+        logging.error(f"Error generating picnic items: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate picnic items: {str(e)}")
+
+
+@app.post("/api/games/picnic/extract-item")
+async def extract_picnic_item(
+    request: PicnicExtractItemRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Extract the specific item from a partner's spoken picnic sentence"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        llm_query = f"""Extract only the item being brought to the picnic from this spoken sentence. The sentence is typically a variation of "I'm going on a picnic and I'm bringing [item]".
+
+Spoken text: "{request.speech_text}"
+
+Return ONLY a JSON object: {{"item": "the item name"}}
+
+Rules:
+- Item should be a short noun or noun phrase, no leading articles (a/an/the)
+- If you cannot find an item, return {{"item": ""}}
+
+Examples:
+- "I'm going on a picnic and I'm bringing an apple" → {{"item": "apple"}}
+- "I'm taking a red balloon to the picnic" → {{"item": "red balloon"}}
+- "bringing sandwich" → {{"item": "sandwich"}}
+
+Return ONLY the JSON:"""
+
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+
+        item = ""
+        try:
+            import json as json_module
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            parsed = json_module.loads(json_str)
+            item = str(parsed.get("item", "")).strip()
+        except Exception:
+            text = request.speech_text.lower()
+            for keyword in ["bringing", "taking", "packing", "bring", "take"]:
+                idx = text.find(keyword)
+                if idx != -1:
+                    remainder = text[idx + len(keyword):].strip()
+                    for article in ["a ", "an ", "the "]:
+                        if remainder.startswith(article):
+                            remainder = remainder[len(article):]
+                    words = remainder.split()
+                    item = words[0] if words else ""
+                    break
+
+        return JSONResponse(content={"item": item, "original_text": request.speech_text})
+
+    except Exception as e:
+        logging.error(f"Error extracting picnic item: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to extract item: {str(e)}")
+
+
+@app.post("/api/games/picnic/check-item")
+async def check_picnic_item(
+    request: PicnicCheckItemRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+):
+    """Check if a partner's spoken item fits the current picnic game option"""
+    aac_user_id = current_ids["aac_user_id"]
+    account_id = current_ids["account_id"]
+
+    try:
+        import re as _re
+
+        # Fast path: letter-based options that don't need LLM
+        item_clean = request.item.strip()
+        if request.option == "Alphabet Next Letter" and request.current_letter:
+            letter = request.current_letter.upper()
+            first = item_clean[0].upper() if item_clean else ''
+            fits = first == letter
+            explanation = f'"{item_clean}" {"starts" if fits else "does not start"} with "{letter}".'
+            return JSONResponse(content={"item": item_clean, "fits": fits, "explanation": explanation})
+
+        if request.option == "Same First Letter" and request.anchor_item:
+            anchor_letter = request.anchor_item.strip()[0].upper()
+            item_letter = item_clean[0].upper() if item_clean else ''
+            fits = anchor_letter == item_letter
+            explanation = f'"{item_clean}" {"starts" if fits else "does not start"} with "{anchor_letter}".'
+            return JSONResponse(content={"item": item_clean, "fits": fits, "explanation": explanation})
+
+        if request.option == "Same Last Letter" and request.anchor_item:
+            anchor_alpha = _re.sub(r'[^a-zA-Z]', '', request.anchor_item)
+            item_alpha = _re.sub(r'[^a-zA-Z]', '', item_clean)
+            anchor_last = anchor_alpha[-1].upper() if anchor_alpha else ''
+            item_last = item_alpha[-1].upper() if item_alpha else ''
+            fits = bool(anchor_last and anchor_last == item_last)
+            explanation = f'"{item_clean}" {"ends" if fits else "does not end"} with "{anchor_last}".'
+            return JSONResponse(content={"item": item_clean, "fits": fits, "explanation": explanation})
+
+        # LLM path for rhyming, vowel sound, color, syllables
+        anchor = request.anchor_item or ""
+        option_prompts = {
+            "Rhyming": f'Does "{item_clean}" RHYME with "{anchor}"? Two words rhyme if their ending sounds match (e.g., cat/bat, sun/fun).',
+            "Same Color": f'Is "{item_clean}" the SAME COLOR as "{anchor}"? Determine the primary color of each.',
+            "Same Vowel Sound": f'Does "{item_clean}" have the SAME PRIMARY VOWEL SOUND as "{anchor}"?',
+            "Same Number of Syllables": f'Does "{item_clean}" have the SAME NUMBER OF SYLLABLES as "{anchor}"?',
+        }
+        check_instruction = option_prompts.get(
+            request.option,
+            f'Does "{item_clean}" fit the game option "{request.option}" as established by the anchor item "{anchor}"?'
+        )
+
+        llm_query = f"""You are the judge for the "I'm Going on a Picnic" word game.
+
+{check_instruction}
+
+Be strict and accurate. Return ONLY a JSON object:
+{{"fits": true_or_false, "explanation": "one brief sentence"}}
+
+Return ONLY the JSON:"""
+
+        response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
+
+        fits = False
+        explanation = ""
+        try:
+            import json as json_module
+            json_str = response.strip()
+            if json_str.startswith("```"):
+                json_str = json_str.split("```")[1]
+                if json_str.startswith("json"):
+                    json_str = json_str[4:]
+            parsed = json_module.loads(json_str)
+            fits = bool(parsed.get("fits", False))
+            explanation = str(parsed.get("explanation", "")).strip()
+        except Exception:
+            fits = "true" in response.lower()
+            explanation = response.strip()[:200]
+
+        return JSONResponse(content={"item": item_clean, "fits": fits, "explanation": explanation})
+
+    except Exception as e:
+        logging.error(f"Error checking picnic item: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to check item: {str(e)}")
 
 
 if __name__ == "__main__":
