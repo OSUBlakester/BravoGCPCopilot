@@ -532,11 +532,14 @@ function initSpeechRecognition() {
     recognition.onerror = e => {
         console.error('[SR error]', e.error);
         hideListening(); isRecognitionActive = false;
-        if (shouldAutoRestart()) setTimeout(() => { if (shouldAutoRestart()) startListening(); }, 1500);
+        // 'aborted' means we called stop() ourselves — onend will handle the restart
+        if (e.error !== 'aborted' && shouldAutoRestart()) {
+            setTimeout(() => { if (shouldAutoRestart()) startListening(); }, 1500);
+        }
     };
     recognition.onend = () => {
         isRecognitionActive = false; hideListening();
-        if (shouldAutoRestart()) setTimeout(() => { if (shouldAutoRestart()) startListening(); }, 300);
+        if (shouldAutoRestart()) setTimeout(() => { if (shouldAutoRestart()) startListening(); }, 500);
     };
 }
 
