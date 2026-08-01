@@ -659,6 +659,16 @@ function getPatternSubtitle() {
     }
 }
 
+// ─── Sound Effects ────────────────────────────────────────────────────────────
+function playSound(filename) {
+    return new Promise(resolve => {
+        const audio = new Audio(`/static/${filename}`);
+        audio.onended = resolve;
+        audio.onerror = resolve;
+        audio.play().catch(resolve);
+    });
+}
+
 // ─── Article Helper ───────────────────────────────────────────────────────────
 function withArticle(item) {
     const s = item.trim();
@@ -845,13 +855,16 @@ async function onUserItemSelected(item) {
 
         // Alphabet always checks via current_letter; other options bypass check on first turn
         const alwaysCheck = gameState.option === 'Alphabet Next Letter';
-        if (fits || (!alwaysCheck && !gameState.anchorItem)) {
+        const isAnchorTurn = !alwaysCheck && !gameState.anchorItem;
+        if (fits || isAnchorTurn) {
             addLogEntry('me', item, true);
             await announce(`I'm going on a picnic and I am bringing ${withArticle(item)}.`);
+            if (!isAnchorTurn) await playSound('right_answer.mp3');
             afterValidTurn(item);
         } else {
             addLogEntry('me', item, false);
-            await announce(`I'm going on a picnic and I am bringing ${withArticle(item)}... Oops! ${explanation || "That doesn't quite fit the pattern."} Let's try again!`);
+            await announce(`I'm going on a picnic and I am bringing ${withArticle(item)}.`);
+            await playSound('wrong_answer.mp3');
             showWrongAnswer(item, explanation);
         }
     } catch(err) {
@@ -937,11 +950,11 @@ async function processPartnerSpeech(transcript) {
 
         if (fits || !gameState.anchorItem) {
             addLogEntry('partner', partnerItem, true);
-            await announce(`${partnerItem} fits!`);
+            await playSound('right_answer.mp3');
             afterValidTurn(partnerItem);
         } else {
             addLogEntry('partner', partnerItem, false);
-            await announce(`${partnerItem}... Hmm, ${explanation || "that doesn't quite fit."} Let's try again!`);
+            await playSound('wrong_answer.mp3');
             showWrongAnswer(partnerItem, explanation);
         }
     } catch(err) {
@@ -972,7 +985,8 @@ async function tryAgain() {
     if (gameState.currentPlayer === 'me') {
         await announce("Give me a moment to make another choice.");
     } else {
-        await announce(`Let's try again. Say "${getWakeWord()}" when you are ready.`);
+        await announce("Let's try again.");
+        // showPartnerTurn() will announce the wake word instruction
     }
     startTurn();
 }
@@ -1119,7 +1133,7 @@ async function init() {
             waitForSwitchToScan = s.waitForSwitchToScan === true;
             if (s.scanDelay && !isNaN(parseInt(s.scanDelay))) defaultDelay = Math.max(100, parseInt(s.scanDelay));
             if (s.gridColumns) gridColumns = Math.max(2, Math.min(12, parseInt(s.gridColumns)));
-            enablePictograms = s.enablePictograms !== false && s.disablePictograms !== true;
+            // enablePictograms stays true — guessing games always show images regardless of settings
             if (s.LLMOptions && !isNaN(parseInt(s.LLMOptions))) llmOptions = Math.max(2, parseInt(s.LLMOptions));
             if (s.defaultPartnerLanguage) partnerLocale = s.defaultPartnerLanguage;
         }
