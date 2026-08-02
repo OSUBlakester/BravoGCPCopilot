@@ -30967,43 +30967,68 @@ async def _get_categories(current_ids, default_categories, field_name):
         except Exception as e:
             logging.warning(f"Could not load custom categories for {aac_user_id}: {e}")
         
-        if custom_categories and len(custom_categories) > 0:
-            all_categories = custom_categories
+        # Normalize to {label, imageUrl} — handles both legacy plain strings and new dicts
+        def _norm_list(lst):
+            out = []
+            for item in (lst or []):
+                e = _normalize_category_entry(item)
+                if e and e["label"]:
+                    out.append(e)
+            return out
+
+        custom_normalized = _norm_list(custom_categories)
+        default_normalized = _norm_list(default_categories)
+
+        if custom_normalized:
+            all_categories = custom_normalized
         else:
-            all_categories = default_categories.copy()
-        
+            all_categories = default_normalized
+
         return JSONResponse(content={
-            "default_categories": default_categories,
-            "custom_categories": custom_categories,
+            "default_categories": default_normalized,
+            "custom_categories": custom_normalized,
             "all_categories": all_categories
         })
     except Exception as e:
         logging.error(f"Error getting categories: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get categories: {str(e)}")
 
+def _normalize_category_entry(cat):
+    """Normalize a category entry to {label, imageUrl} dict. Accepts plain string (legacy)."""
+    if isinstance(cat, str):
+        return {"label": cat.strip(), "imageUrl": None}
+    if isinstance(cat, dict):
+        label = str(cat.get("label", "")).strip()
+        image_url = cat.get("imageUrl") or None
+        return {"label": label, "imageUrl": image_url}
+    return None
+
 async def _save_custom_categories(request: Request, current_ids, field_name):
-    """Shared function to save custom categories"""
+    """Shared function to save custom categories (supports plain strings and {label,imageUrl} dicts)."""
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
-    
+
     try:
         body = await request.json()
-        categories = body.get("categories", [])
-        
-        if not isinstance(categories, list):
+        raw_categories = body.get("categories", [])
+
+        if not isinstance(raw_categories, list):
             raise HTTPException(status_code=400, detail="Categories must be a list")
-        
-        if len(categories) == 0:
+
+        if len(raw_categories) == 0:
             raise HTTPException(status_code=400, detail="At least one category is required")
-        
-        for cat in categories:
-            if not isinstance(cat, str) or len(cat.strip()) == 0:
-                raise HTTPException(status_code=400, detail="All categories must be non-empty strings")
-        
+
+        categories = []
+        for raw in raw_categories:
+            entry = _normalize_category_entry(raw)
+            if not entry or not entry["label"]:
+                raise HTTPException(status_code=400, detail="All categories must have a non-empty label")
+            categories.append(entry)
+
         user_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(
             account_id
         ).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
-        
+
         user_ref.update({field_name: categories})
         
         logging.info(f"Saved {len(categories)} custom categories to {field_name} for user {aac_user_id}")
@@ -31570,10 +31595,21 @@ async def check_picnic_item(
             "Same Vowel Sound": f'Do "{item_clean}" and "{anchor}" share the SAME PRIMARY VOWEL SOUND?',
             "Same Number of Syllables": f'Count the syllables in "{item_clean}" and in "{anchor}" separately, then decide if the counts are equal. State each count in your explanation (e.g., "cucumber = 3, banana = 3"). Return fits=true only if both counts match exactly.',
         }
-        check_instruction = option_prompts.get(
-            request.option,
-            f'Does "{item_clean}" fit the game option "{request.option}" as established by the anchor item "{anchor}"?'
-        )
+        if request.option in option_prompts:
+            check_instruction = option_prompts[request.option]
+        elif anchor:
+            # Custom category — a previous valid item exists for context
+            check_instruction = (
+                f'Is "{item_clean}" an example of "{request.option}"? '
+                f'A previously accepted item was "{anchor}". '
+                f'Return fits=true only if "{item_clean}" clearly belongs to this category.'
+            )
+        else:
+            # Custom category — first item, no anchor yet
+            check_instruction = (
+                f'Is "{item_clean}" an example of "{request.option}"? '
+                f'Return fits=true only if "{item_clean}" clearly belongs to this category.'
+            )
 
         llm_query = f"""You are the judge for the "I'm Going on a Picnic" word game.
 
