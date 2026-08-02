@@ -31425,30 +31425,39 @@ Return ONLY the JSON:"""
         response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
 
         import json as json_module
+        import re as _re2
         json_str = response.strip()
         if json_str.startswith("```"):
             json_str = json_str.split("```")[1]
             if json_str.startswith("json"):
                 json_str = json_str[4:]
 
+        def clean_item(s):
+            # Strip parenthetical descriptions e.g. "clan (toy figures)" → "clan"
+            s = _re2.sub(r'\s*\([^)]*\)', '', str(s)).strip()
+            # Strip leading/trailing punctuation artifacts
+            s = s.strip('"\'- ')
+            return s
+
         items = []
         try:
             parsed = json_module.loads(json_str)
             if isinstance(parsed, list):
                 # First-turn response: flat list
-                items = [str(i) for i in parsed]
+                items = [clean_item(i) for i in parsed]
             elif isinstance(parsed, dict):
                 # Mixed-turn response: {correct: [...], wrong: [...]}
-                correct = [str(i) for i in parsed.get("correct", [])]
-                wrong = [str(i) for i in parsed.get("wrong", [])]
+                correct = [clean_item(i) for i in parsed.get("correct", [])]
+                wrong = [clean_item(i) for i in parsed.get("wrong", [])]
                 combined = correct + wrong
                 _random.shuffle(combined)
                 items = combined
         except Exception:
-            items = [line.strip().strip('"- ') for line in response.split('\n') if line.strip()]
+            items = [clean_item(line) for line in response.split('\n') if line.strip()]
 
-        if not items:
-            items = []
+        # Remove empties and enforce exclusion regardless of LLM compliance
+        excluded_lower = {it.strip().lower() for it in (request.previous_items or []) if it.strip()}
+        items = [it for it in items if it and it.lower() not in excluded_lower]
 
         return JSONResponse(content={"items": items[:total_count], "option": request.option})
 
@@ -31556,10 +31565,10 @@ async def check_picnic_item(
         # LLM path for rhyming, vowel sound, color, syllables
         anchor = request.anchor_item or ""
         option_prompts = {
-            "Rhyming": f'Does "{item_clean}" RHYME with "{anchor}"? Two words rhyme if their ending sounds match (e.g., cat/bat, sun/fun).',
-            "Same Color": f'Is "{item_clean}" the SAME COLOR as "{anchor}"? Determine the primary color of each.',
-            "Same Vowel Sound": f'Does "{item_clean}" have the SAME PRIMARY VOWEL SOUND as "{anchor}"?',
-            "Same Number of Syllables": f'Does "{item_clean}" have the SAME NUMBER OF SYLLABLES as "{anchor}"?',
+            "Rhyming": f'Do "{item_clean}" and "{anchor}" RHYME? Rhyming is about SOUND, not spelling. Words rhyme if their ending vowel+consonant sounds match, regardless of how they are spelled. Examples that rhyme despite different spellings: sled/bread, bear/stare, eight/wait, blue/shoe, night/kite. Do "{item_clean}" and "{anchor}" end with the same sound?',
+            "Same Color": f'Are "{item_clean}" and "{anchor}" the SAME COLOR? Compare their most common/primary color.',
+            "Same Vowel Sound": f'Do "{item_clean}" and "{anchor}" share the SAME PRIMARY VOWEL SOUND?',
+            "Same Number of Syllables": f'Count the syllables in "{item_clean}" and in "{anchor}" separately, then decide if the counts are equal. State each count in your explanation (e.g., "cucumber = 3, banana = 3"). Return fits=true only if both counts match exactly.',
         }
         check_instruction = option_prompts.get(
             request.option,
@@ -31570,10 +31579,11 @@ async def check_picnic_item(
 
 {check_instruction}
 
-Be strict and accurate. Return ONLY a JSON object:
-{{"fits": true_or_false, "explanation": "one brief sentence"}}
+Return ONLY valid JSON in exactly one of these two formats:
+{{"fits": true, "explanation": "brief one-sentence reason"}}
+{{"fits": false, "explanation": "brief one-sentence reason"}}
 
-Return ONLY the JSON:"""
+JSON response:"""
 
         response = await _generate_gemini_content_with_fallback(llm_query, account_id=account_id, aac_user_id=aac_user_id)
 
@@ -31589,6 +31599,28 @@ Return ONLY the JSON:"""
             parsed = json_module.loads(json_str)
             fits = bool(parsed.get("fits", False))
             explanation = str(parsed.get("explanation", "")).strip()
+
+            # Sanity check: if fits=false but explanation clearly states they match,
+            # the LLM contradicted itself — trust the explanation
+            if not fits and explanation:
+                import re as _re_sanity
+                exp_lower = explanation.lower()
+                negation = any(p in exp_lower for p in ["don't", "doesn't", "do not", "does not", "not the same", "different", "no match", "don't rhyme", "doesn't rhyme"])
+                affirmation = any(p in exp_lower for p in ["match", "so they rhyme", "they rhyme", "they do rhyme", "same ending", "same sound", "same color", "same number", "same vowel", "both have", "both are"])
+
+                # Specific syllable-count check: detect when the same number appears
+                # twice in syllable context (e.g. "cucumber has 3 syllables, banana has 3 syllables")
+                if not affirmation and request.option == "Same Number of Syllables":
+                    syllable_counts = _re_sanity.findall(
+                        r'\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b',
+                        exp_lower
+                    )
+                    if len(syllable_counts) >= 2 and syllable_counts[0] == syllable_counts[-1]:
+                        affirmation = True
+
+                if affirmation and not negation:
+                    logging.warning(f"[Picnic] LLM fits=false contradicted by explanation; flipping to true. explanation={explanation!r}")
+                    fits = True
         except Exception:
             fits = "true" in response.lower()
             explanation = response.strip()[:200]
