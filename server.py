@@ -21772,7 +21772,20 @@ async def _lookup_images_for_labels(
         'now', 'later', 'soon',
         'today', 'tomorrow', 'tonight', 'yesterday',
         'already', 'again', 'still', 'yet', 'then', 'next',
+        # Polite single-word trailing fillers added by LLM: "can I have water please"
+        'please',
     })
+
+    # Multi-word trailing phrases stripped as a unit before single-word stop processing.
+    # Each entry is a tuple of normalized words to match at the END of a phrase.
+    # Only stripped when content words remain after removal.
+    # e.g. "I want water thank you" → strip ('thank','you') → "I want water"
+    _TRAIL_PHRASES = [
+        ('thank', 'you'),
+        ('thank', 'you', 'so', 'much'),
+        ('if', 'you', 'please'),
+        ('if', 'you', 'don', 't', 'mind'),
+    ]
 
     # Multi-word leading phrases stripped as a unit before single-word stop processing.
     # Each entry is a tuple of normalized words to match at the start of a phrase.
@@ -21798,6 +21811,16 @@ async def _lookup_images_for_labels(
             if len(words) >= 2 and words[1] == 't':
                 break
             words = words[1:]
+        # Strip multi-word trailing phrases before single-word trail stops
+        changed = True
+        while changed and len(words) > 1:
+            changed = False
+            for ph in _TRAIL_PHRASES:
+                n = len(ph)
+                if len(words) > n and words[-n:] == list(ph):
+                    words = words[:-n]
+                    changed = True
+                    break
         while len(words) > 1 and words[-1] in _TRAIL_STOPS:
             words = words[:-1]
         return ' '.join(words)
