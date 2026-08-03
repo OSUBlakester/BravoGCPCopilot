@@ -359,13 +359,13 @@ template_user_data_paths = {
             {"row": 0,"col": 4,"text": "Talk About", "LLMQuery": "Generate #LLMOptions conversation starters and topic suggestions for discussing a new, specific topic. Consider the user's current location, people present, personal interests, and the time of year. Phrase each option as if the user is initiating the discussion, asking a question, or making a recommendation. Conclude each option with a clear invitation or prompt for others to engage with the topic.", "targetPage": "", "queryType": "", "speechPhrase": "I want to talk about something", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 5,"text": "Questions", "targetPage": "questions", "queryType": "", "speechPhrase": "I have a question", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 6,"text": "Describe", "LLMQuery": "", "targetPage": "describe", "queryType": "", "speechPhrase": "Here's what I think", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 7,"text": "Favorite Topics", "LLMQuery": "", "targetPage": "!favorites", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 8,"text": "Help", "LLMQuery": "Refer to the user info for most common physical issues and needs that can impact the user. Also include general physical issues that could be impacting someone with a similar condition to the user. Create up to #LLMOptions different statements that the user would announce if one of these physical issues was making the user uncomfortable or needing something addressed.  Each statement should be formed as if they are coming from the user and letting someone close by that the user is physically uncomfortable or needing something.  If there is a simple resolution for the issue, include it in the phrase with politely, including words like Please and Thank You, asking for the resolution.", "targetPage": "", "queryType": "options", "speechPhrase": "I need some help", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 9,"text": "About Me", "LLMQuery": "Based on the details provided in the context, generate #LLMOptions different statements about the user.  The statements should be in first person, as if the user was telling someone about the user.  Statements can include information like age, family, disability and favorites.  The statements should also be conversational, not just presenting a fact.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 10,"text": "Free Style", "targetPage": "!freestyle", "queryType": "", "speechPhrase": "I'm picking my words.  Give me a minute:", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 11,"text": "Open Thread", "targetPage": "!threads", "queryType": "", "speechPhrase": "", "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 12,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
-            {"row": 0,"col": 13,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 7,"text": "Help", "LLMQuery": "Refer to the user info for most common physical issues and needs that can impact the user. Also include general physical issues that could be impacting someone with a similar condition to the user. Create up to #LLMOptions different statements that the user would announce if one of these physical issues was making the user uncomfortable or needing something addressed.  Each statement should be formed as if they are coming from the user and letting someone close by that the user is physically uncomfortable or needing something.  If there is a simple resolution for the issue, include it in the phrase with politely, including words like Please and Thank You, asking for the resolution.", "targetPage": "", "queryType": "options", "speechPhrase": "I need some help", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 8,"text": "Food", "LLMQuery": "Generate #LLMOptions related to food preferences, types of food, or meal times.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 9,"text": "Drink", "LLMQuery": "Generate #LLMOptions related to drink preferences, types of drink.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 10,"text": "About Me", "LLMQuery": "Based on the details provided in the context, generate #LLMOptions different statements about the user.  The statements should be in first person, as if the user was telling someone about the user.  Statements can include information like age, family, disability and favorites.  The statements should also be conversational, not just presenting a fact.", "targetPage": "", "queryType": "options", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 11,"text": "Play Game", "targetPage": "!games", "queryType": "", "speechPhrase": "Let's play a game!", "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 12,"text": "Favorite Topics", "LLMQuery": "", "targetPage": "!favorites", "queryType": "", "speechPhrase": None, "customAudioFile": None, "hidden": False},
+            {"row": 0,"col": 13,"text": "Free Style", "targetPage": "!freestyle", "queryType": "", "speechPhrase": "I'm picking my words.  Give me a minute:", "customAudioFile": None, "hidden": False},
             {"row": 0,"col": 14,"text": "My Mood", "targetPage": "!mood", "queryType": "", "speechPhrase": "I want to update how I'm feeling", "customAudioFile": None, "hidden": False},
         ]
     },
@@ -31399,6 +31399,12 @@ Return ONLY the JSON:"""
 
         elif not request.anchor_item:
             # First user turn for non-alphabet options: all correct, diverse, seeds the anchor
+            color_note = (
+                '\nIMPORTANT: Do NOT include the color in the item name. '
+                'Use items whose color is universally recognized by itself '
+                '(e.g., "apple" not "red apple", "banana" not "yellow banana", "grass" not "green grass").'
+                if request.option == "Same Color" else ""
+            )
             llm_query = f"""You are generating item options for the "I'm Going on a Picnic" word game.
 
 Game option: "{request.option}"
@@ -31407,10 +31413,10 @@ This is the opening turn. The player's choice will define the specific pattern f
 Generate exactly {total_count} varied items that each represent a DIFFERENT possible sub-pattern within "{request.option}".
 
 Examples for "Rhyming": cat, dog, sun, ball (items from different rhyme groups)
-Examples for "Same Color": red apple, yellow banana, blue kite (items of different colors)
+Examples for "Same Color": apple, banana, kite, grass (items of different well-known colors — do NOT include the color word in the name)
 Examples for "Same First Letter": apple, banana, kite, dog (different starting letters)
 Examples for "Same Vowel Sound": cat, fish, hop, fun (different vowel sounds)
-
+{color_note}
 {base_rule}{exclusion_instruction}
 
 Return ONLY a JSON array of strings: ["item1", "item2", ...]
@@ -31427,12 +31433,19 @@ Generate {total_count} items now:"""
             # Build option-specific constraint description
             constraint_desc = {
                 "Rhyming": f'items must RHYME with "{anchor}"',
-                "Same Color": f'items must be the SAME COLOR as "{anchor}"',
+                "Same Color": f'items must be the SAME COLOR as "{anchor}" using each item\'s most commonly accepted color',
                 "Same First Letter": f'items must start with the letter "{anchor.strip()[0].upper()}" (same as "{anchor}")',
                 "Same Vowel Sound": f'items must have the SAME VOWEL SOUND as "{anchor}"',
                 "Same Last Letter": f'items must end with the same letter as "{anchor}"',
                 "Same Number of Syllables": f'items must have the SAME NUMBER OF SYLLABLES as "{anchor}"',
             }.get(request.option, f'items must fit the pattern "{request.option}" established by "{anchor}"')
+
+            color_note = (
+                '\nIMPORTANT: Do NOT include the color word in the item name. '
+                'Use the item\'s most commonly accepted color, not an explicit color prefix '
+                '(e.g., "apple" not "red apple", "carrot" not "orange carrot").'
+                if request.option == "Same Color" else ""
+            )
 
             llm_query = f"""You are generating item options for the "I'm Going on a Picnic" word game.
 
@@ -31440,6 +31453,7 @@ Game option: "{request.option}"
 Anchor item: "{anchor}" — {constraint_desc}
 
 Generate exactly {correct_count} CORRECT items ({constraint_desc}) and exactly {wrong_count} WRONG items (clearly do NOT fit the pattern).
+{color_note}
 {base_rule}{exclusion_instruction}
 
 Return a JSON object with two lists:
@@ -31479,6 +31493,15 @@ Return ONLY the JSON:"""
                 items = combined
         except Exception:
             items = [clean_item(line) for line in response.split('\n') if line.strip()]
+
+        # For Same Color: strip leading color adjectives the LLM may have added despite instructions
+        if request.option == "Same Color":
+            import re as _re_color
+            _color_prefix = _re_color.compile(
+                r'^(red|orange|yellow|green|blue|purple|violet|indigo|pink|brown|black|white|gray|grey|gold|silver|dark|light|bright)\s+',
+                _re_color.IGNORECASE
+            )
+            items = [_color_prefix.sub('', it).strip() for it in items]
 
         # Remove empties and enforce exclusion regardless of LLM compliance
         excluded_lower = {it.strip().lower() for it in (request.previous_items or []) if it.strip()}
@@ -31591,7 +31614,13 @@ async def check_picnic_item(
         anchor = request.anchor_item or ""
         option_prompts = {
             "Rhyming": f'Do "{item_clean}" and "{anchor}" RHYME? Rhyming is about SOUND, not spelling. Words rhyme if their ending vowel+consonant sounds match, regardless of how they are spelled. Examples that rhyme despite different spellings: sled/bread, bear/stare, eight/wait, blue/shoe, night/kite. Do "{item_clean}" and "{anchor}" end with the same sound?',
-            "Same Color": f'Are "{item_clean}" and "{anchor}" the SAME COLOR? Compare their most common/primary color.',
+            "Same Color": (
+                f'Are "{item_clean}" and "{anchor}" the SAME COLOR? '
+                f'Step 1: Decide the single most iconic/commonly associated color for "{anchor}" (e.g., apple=red, banana=yellow, grass=green, sky=blue, carrot=orange, cherry=red). '
+                f'Step 2: Decide the single most iconic/commonly associated color for "{item_clean}" using the same rule. '
+                f'Step 3: If both iconic colors match, return fits=true. '
+                f'When an item can be multiple colors, always pick the SINGLE most commonly associated one — do not use ambiguity as a reason to return fits=false.'
+            ),
             "Same Vowel Sound": f'Do "{item_clean}" and "{anchor}" share the SAME PRIMARY VOWEL SOUND?',
             "Same Number of Syllables": f'Count the syllables in "{item_clean}" and in "{anchor}" separately, then decide if the counts are equal. State each count in your explanation (e.g., "cucumber = 3, banana = 3"). Return fits=true only if both counts match exactly.',
         }
@@ -31653,6 +31682,16 @@ JSON response:"""
                     )
                     if len(syllable_counts) >= 2 and syllable_counts[0] == syllable_counts[-1]:
                         affirmation = True
+
+                # Same Color check: if the explanation mentions the same color word for both items,
+                # the LLM identified a match but still returned fits=false — flip it.
+                if not affirmation and request.option == "Same Color":
+                    color_words = ["red", "orange", "yellow", "green", "blue", "purple",
+                                   "pink", "brown", "black", "white", "gray", "grey", "gold"]
+                    for color in color_words:
+                        if exp_lower.count(color) >= 2:
+                            affirmation = True
+                            break
 
                 if affirmation and not negation:
                     logging.warning(f"[Picnic] LLM fits=false contradicted by explanation; flipping to true. explanation={explanation!r}")
