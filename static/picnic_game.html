@@ -487,7 +487,19 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) return;
-    if (waitForSwitchToScan && waitingForInitialSwitch) return;
+    // When waitForSwitchToScan is on, every new screen pauses here until the
+    // user presses the switch. The keydown handler calls _doStartScanning()
+    // directly to bypass this gate.
+    if (waitForSwitchToScan) {
+        waitingForInitialSwitch = true;
+        return;
+    }
+    _doStartScanning();
+}
+
+function _doStartScanning() {
+    waitingForInitialSwitch = false;
+    if (ScanningOff) return;
     if (scanMode === 'step') { currentButtonIndex = -1; advanceScanStep(); return; }
     const buttons = getVisibleButtons();
     if (buttons.length === 0) return;
@@ -519,14 +531,33 @@ function advanceScanStep() {
     if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
     currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
     currentlyScannedButton = buttons[currentButtonIndex];
-    if (currentlyScannedButton) currentlyScannedButton.classList.add('scanning');
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.add('scanning');
+        // Announce the focused button label in step mode
+        const text = (currentlyScannedButton.dataset.scanLabel || currentlyScannedButton.textContent || '').trim().replace(/\s+/g, ' ');
+        try { const u = new SpeechSynthesisUtterance(text); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch(e) {}
+    }
 }
 
 document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && currentlyScannedButton && !e.target.closest('input, textarea')) {
-        e.preventDefault(); stopAuditoryScanning(); currentlyScannedButton.click();
+    if (e.repeat) return;
+    if (e.target.closest('input, textarea')) return;
+
+    if (e.code === 'Space') {
+        e.preventDefault();
+        // Waiting for switch to begin scanning on this screen — start now
+        if (waitingForInitialSwitch || !currentlyScannedButton) {
+            stopAuditoryScanning();
+            _doStartScanning();
+            return;
+        }
+        // Switch press on highlighted button — select it
+        const btn = currentlyScannedButton;
+        stopAuditoryScanning();
+        btn.click();
     } else if (e.code === 'Tab' && scanMode === 'step') {
-        e.preventDefault(); advanceScanStep();
+        e.preventDefault();
+        advanceScanStep();
     }
 });
 
