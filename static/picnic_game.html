@@ -242,27 +242,25 @@
 
 <!-- Options Admin Modal -->
 <div id="admin-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] flex flex-col">
-        <div class="flex justify-between items-center p-6 border-b">
+    <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] flex flex-col">
+        <div class="flex justify-between items-center p-5 border-b">
             <h3 class="text-xl font-semibold text-gray-900">Manage Game Options</h3>
             <button id="close-admin-modal" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-xl"></i></button>
         </div>
-        <div class="flex-1 overflow-y-auto p-6">
-            <label class="block text-sm font-medium text-gray-700 mb-2">Enter game options (one per line):</label>
-            <textarea id="categories-input"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                rows="10"
-                placeholder="Rhyming&#10;Same Color&#10;Same First Letter"></textarea>
-            <p class="text-xs text-gray-500 mt-1"><i class="fas fa-info-circle mr-1"></i>One option per line. Empty lines are ignored.</p>
-            <p class="text-xs text-gray-400 mt-1"><span id="cat-count">0</span> options</p>
+        <div class="flex-1 overflow-y-auto p-5">
+            <p class="text-xs text-gray-500 mb-3"><i class="fas fa-info-circle mr-1"></i>Add, reorder, or remove game options. Search for an image by keyword or leave blank to auto-match the option label.</p>
+            <div id="options-editor-list" class="flex flex-col gap-3"></div>
+            <button id="add-option-btn" class="mt-4 w-full py-2 border-2 border-dashed border-blue-300 text-blue-600 rounded-lg hover:bg-blue-50 text-sm font-medium">
+                <i class="fas fa-plus mr-2"></i>Add Option
+            </button>
         </div>
-        <div class="flex justify-between items-center p-6 border-t bg-gray-50">
-            <button id="reset-defaults-btn" class="px-4 py-2 text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300">
+        <div class="flex justify-between items-center p-5 border-t bg-gray-50">
+            <button id="reset-defaults-btn" class="px-4 py-2 text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">
                 <i class="fas fa-undo mr-2"></i>Reset to Defaults
             </button>
             <div class="flex gap-3">
-                <button id="cancel-admin-btn" class="px-4 py-2 text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300">Cancel</button>
-                <button id="save-categories-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                <button id="cancel-admin-btn" class="px-4 py-2 text-gray-600 bg-gray-200 rounded-md hover:bg-gray-300 text-sm">Cancel</button>
+                <button id="save-categories-btn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
                     <i class="fas fa-save mr-2"></i>Save Options
                 </button>
             </div>
@@ -301,6 +299,7 @@ const gameState = {
     phase: 'option',
     option: null,
     options: [],
+    optionImages: {},   // label → custom imageUrl (null = auto-lookup)
     firstPlayer: null,
     currentPlayer: null,
     anchorItem: null,
@@ -488,7 +487,19 @@ function getVisibleButtons() {
 function startAuditoryScanning() {
     stopAuditoryScanning();
     if (ScanningOff) return;
-    if (waitForSwitchToScan && waitingForInitialSwitch) return;
+    // When waitForSwitchToScan is on, every new screen pauses here until the
+    // user presses the switch. The keydown handler calls _doStartScanning()
+    // directly to bypass this gate.
+    if (waitForSwitchToScan) {
+        waitingForInitialSwitch = true;
+        return;
+    }
+    _doStartScanning();
+}
+
+function _doStartScanning() {
+    waitingForInitialSwitch = false;
+    if (ScanningOff) return;
     if (scanMode === 'step') { currentButtonIndex = -1; advanceScanStep(); return; }
     const buttons = getVisibleButtons();
     if (buttons.length === 0) return;
@@ -520,19 +531,45 @@ function advanceScanStep() {
     if (currentlyScannedButton) currentlyScannedButton.classList.remove('scanning');
     currentButtonIndex = (currentButtonIndex + 1) % buttons.length;
     currentlyScannedButton = buttons[currentButtonIndex];
-    if (currentlyScannedButton) currentlyScannedButton.classList.add('scanning');
+    if (currentlyScannedButton) {
+        currentlyScannedButton.classList.add('scanning');
+        // Announce the focused button label in step mode
+        const text = (currentlyScannedButton.dataset.scanLabel || currentlyScannedButton.textContent || '').trim().replace(/\s+/g, ' ');
+        try { const u = new SpeechSynthesisUtterance(text); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch(e) {}
+    }
 }
 
 document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && currentlyScannedButton && !e.target.closest('input, textarea')) {
-        e.preventDefault(); stopAuditoryScanning(); currentlyScannedButton.click();
+    if (e.repeat) return;
+    if (e.target.closest('input, textarea')) return;
+
+    if (e.code === 'Space') {
+        e.preventDefault();
+        // Waiting for switch to begin scanning on this screen — start now
+        if (waitingForInitialSwitch || !currentlyScannedButton) {
+            stopAuditoryScanning();
+            _doStartScanning();
+            return;
+        }
+        // Switch press on highlighted button — select it
+        const btn = currentlyScannedButton;
+        stopAuditoryScanning();
+        btn.click();
     } else if (e.code === 'Tab' && scanMode === 'step') {
-        e.preventDefault(); advanceScanStep();
+        e.preventDefault();
+        advanceScanStep();
     }
 });
 
 // ─── Speech Recognition ───────────────────────────────────────────────────────
 function getWakeWord() { return `${wakeWordInterjection} ${wakeWordName}`.trim(); }
+
+// The built-in pattern-based game modes. Any option not in this list is a custom category
+// and must be validated on every turn (no free anchor turn).
+const STANDARD_PICNIC_OPTIONS = [
+    'Rhyming', 'Same Color', 'Same First Letter', 'Alphabet Next Letter',
+    'Same Vowel Sound', 'Same Last Letter', 'Same Number of Syllables'
+];
 
 // How long partner must be silent before their speech is processed.
 // Increase this if the partner is being cut off mid-sentence.
@@ -842,7 +879,11 @@ async function showOptionScreen() {
         anchorItem: null, currentLetter: null, usedItems: [], playedItems: [], log: [], wrongItem: null
     });
     await announce("Let's play I'm going on a picnic! Choose a game option.");
-    const btns = gameState.options.map(opt => ({ text: opt, onClick: () => onOptionSelected(opt) }));
+    const btns = gameState.options.map(opt => ({
+        text: opt,
+        imageUrl: gameState.optionImages[opt] || null, // null → auto-lookup by label
+        onClick: () => onOptionSelected(opt)
+    }));
     btns.push({ text: 'Exit Game', onClick: exitGame });
     await displayGridButtons(btns, document.getElementById('option-grid'));
 }
@@ -998,8 +1039,10 @@ async function onUserItemSelected(item) {
         });
         const { fits, explanation } = await res.json();
 
-        // Alphabet always checks via current_letter; other options bypass check on first turn
-        const alwaysCheck = gameState.option === 'Alphabet Next Letter';
+        // Standard pattern options bypass the check on the first turn (the item chosen becomes the anchor).
+        // Custom categories must always be validated — there is no anchor-defines-the-rule concept.
+        const isCustomCategory = !STANDARD_PICNIC_OPTIONS.includes(gameState.option);
+        const alwaysCheck = gameState.option === 'Alphabet Next Letter' || isCustomCategory;
         const isAnchorTurn = !alwaysCheck && !gameState.anchorItem;
         if (fits || isAnchorTurn) {
             addLogEntry('me', item, true);
@@ -1106,7 +1149,9 @@ async function processPartnerSpeech(transcript) {
         });
         const { fits, explanation } = await checkRes.json();
 
-        if (fits || !gameState.anchorItem) {
+        const isCustomCategoryPartner = !STANDARD_PICNIC_OPTIONS.includes(gameState.option);
+        const partnerIsAnchorTurn = !isCustomCategoryPartner && gameState.option !== 'Alphabet Next Letter' && !gameState.anchorItem;
+        if (fits || partnerIsAnchorTurn) {
             addLogEntry('partner', partnerItem, true);
             await playSound('right_answer.mp3');
             afterValidTurn(partnerItem);
@@ -1211,38 +1256,220 @@ async function submitPin() {
     }
 }
 
+// ─── Admin Modal ──────────────────────────────────────────────────────────────
+// Each entry in the editor is {label, imageUrl} — imageUrl null = auto-lookup.
+// gameState.optionImages maps label → stored imageUrl for use at runtime.
+
+function closeAdminModal() {
+    document.getElementById('admin-modal').classList.add('hidden');
+}
+document.getElementById('close-admin-modal').addEventListener('click', closeAdminModal);
+document.getElementById('cancel-admin-btn').addEventListener('click', closeAdminModal);
+
 function openOptionsEditor() {
-    const ta = document.getElementById('categories-input');
-    ta.value = gameState.options.join('\n');
-    updateCatCount();
+    renderOptionsEditor(
+        gameState.options.map(label => ({ label, imageUrl: gameState.optionImages[label] || null }))
+    );
     document.getElementById('admin-modal').classList.remove('hidden');
 }
 
-document.getElementById('close-admin-modal').addEventListener('click', () => {
-    document.getElementById('admin-modal').classList.add('hidden');
-});
-document.getElementById('cancel-admin-btn').addEventListener('click', () => {
-    document.getElementById('admin-modal').classList.add('hidden');
-});
-document.getElementById('categories-input').addEventListener('input', updateCatCount);
-
-function updateCatCount() {
-    const n = document.getElementById('categories-input').value.split('\n').filter(l => l.trim()).length;
-    document.getElementById('cat-count').textContent = n;
+function renderOptionsEditor(entries) {
+    const list = document.getElementById('options-editor-list');
+    list.innerHTML = '';
+    entries.forEach((entry, idx) => addOptionRow(list, entry, idx, entries));
 }
 
+function addOptionRow(list, entry, idx, allEntries) {
+    const row = document.createElement('div');
+    row.className = 'option-editor-row flex gap-2 items-start bg-gray-50 border border-gray-200 rounded-lg p-3';
+    row.dataset.idx = idx;
+
+    // Thumbnail preview
+    const thumb = document.createElement('div');
+    thumb.className = 'option-thumb flex-shrink-0 w-14 h-14 rounded border border-gray-300 bg-white flex items-center justify-center overflow-hidden';
+    if (entry.imageUrl) {
+        thumb.innerHTML = `<img src="${entry.imageUrl}" class="w-full h-full object-contain" onerror="this.parentElement.innerHTML='<i class=\\'fas fa-image text-gray-300 text-xl\\'></i>'">`;
+    } else {
+        thumb.innerHTML = '<i class="fas fa-image text-gray-300 text-xl"></i>';
+    }
+
+    // Main fields column
+    const fields = document.createElement('div');
+    fields.className = 'flex-1 flex flex-col gap-2';
+
+    // Label input
+    const labelInput = document.createElement('input');
+    labelInput.type = 'text';
+    labelInput.value = entry.label;
+    labelInput.placeholder = 'Option label';
+    labelInput.className = 'w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-400';
+    labelInput.dataset.role = 'label';
+
+    // Image search row
+    const searchRow = document.createElement('div');
+    searchRow.className = 'flex gap-2 items-center';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.value = entry.imageUrl ? '' : '';
+    searchInput.placeholder = 'Search image by keyword (leave blank to auto-match label)';
+    searchInput.className = 'flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-400';
+    searchInput.dataset.role = 'search';
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.innerHTML = '<i class="fas fa-search"></i>';
+    searchBtn.title = 'Search for image';
+    searchBtn.className = 'px-3 py-1.5 bg-blue-100 text-blue-700 rounded text-sm hover:bg-blue-200 flex-shrink-0';
+
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.innerHTML = '<i class="fas fa-times"></i>';
+    clearBtn.title = 'Clear custom image (use auto)';
+    clearBtn.className = 'px-3 py-1.5 bg-gray-100 text-gray-500 rounded text-sm hover:bg-gray-200 flex-shrink-0';
+
+    // Stored image URL (hidden)
+    let storedImageUrl = entry.imageUrl || null;
+
+    function updateThumb(url) {
+        storedImageUrl = url;
+        if (url) {
+            thumb.innerHTML = `<img src="${url}" class="w-full h-full object-contain" onerror="this.parentElement.innerHTML='<i class=\\'fas fa-image text-gray-300 text-xl\\'></i>'">`;
+        } else {
+            thumb.innerHTML = '<i class="fas fa-image text-gray-300 text-xl"></i>';
+        }
+    }
+
+    searchBtn.addEventListener('click', async () => {
+        const query = searchInput.value.trim() || labelInput.value.trim();
+        if (!query) return;
+        searchBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        searchBtn.disabled = true;
+        try {
+            const resp = await authenticatedFetch(`/api/symbols/button-search?q=${encodeURIComponent(query)}&limit=1`);
+            if (resp.ok) {
+                const data = await resp.json();
+                const url = data?.symbols?.length > 0 ? data.symbols[0].url : null;
+                updateThumb(url);
+                if (!url) alert('No image found for that keyword.');
+            }
+        } catch(e) { console.error(e); }
+        searchBtn.innerHTML = '<i class="fas fa-search"></i>';
+        searchBtn.disabled = false;
+    });
+
+    clearBtn.addEventListener('click', () => {
+        searchInput.value = '';
+        updateThumb(null);
+    });
+
+    searchRow.appendChild(searchInput);
+    searchRow.appendChild(searchBtn);
+    searchRow.appendChild(clearBtn);
+    fields.appendChild(labelInput);
+    fields.appendChild(searchRow);
+
+    // Status line: show current image source
+    const status = document.createElement('p');
+    status.className = 'text-xs text-gray-400';
+    status.textContent = entry.imageUrl ? 'Custom image set' : 'Auto image (from label)';
+    labelInput.addEventListener('input', () => {
+        if (!storedImageUrl) status.textContent = 'Auto image (from label)';
+    });
+    searchBtn.addEventListener('click', () => {
+        setTimeout(() => {
+            status.textContent = storedImageUrl ? 'Custom image set' : 'No image found — auto will be used';
+        }, 100);
+    });
+    clearBtn.addEventListener('click', () => { status.textContent = 'Auto image (from label)'; });
+    fields.appendChild(status);
+
+    // Reorder + delete controls
+    const controls = document.createElement('div');
+    controls.className = 'flex flex-col gap-1 flex-shrink-0 justify-center';
+
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.innerHTML = '<i class="fas fa-chevron-up"></i>';
+    upBtn.title = 'Move up';
+    upBtn.className = 'px-2 py-1 text-gray-400 hover:text-gray-700 text-xs';
+    upBtn.disabled = idx === 0;
+    upBtn.addEventListener('click', () => {
+        const current = readEditorEntries();
+        if (idx > 0) {
+            [current[idx - 1], current[idx]] = [current[idx], current[idx - 1]];
+            renderOptionsEditor(current);
+        }
+    });
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.innerHTML = '<i class="fas fa-chevron-down"></i>';
+    downBtn.title = 'Move down';
+    downBtn.className = 'px-2 py-1 text-gray-400 hover:text-gray-700 text-xs';
+    downBtn.disabled = idx === allEntries.length - 1;
+    downBtn.addEventListener('click', () => {
+        const current = readEditorEntries();
+        if (idx < current.length - 1) {
+            [current[idx], current[idx + 1]] = [current[idx + 1], current[idx]];
+            renderOptionsEditor(current);
+        }
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+    delBtn.title = 'Remove option';
+    delBtn.className = 'px-2 py-1 text-red-400 hover:text-red-600 text-xs';
+    delBtn.addEventListener('click', () => {
+        const current = readEditorEntries();
+        current.splice(idx, 1);
+        renderOptionsEditor(current);
+    });
+
+    controls.appendChild(upBtn);
+    controls.appendChild(downBtn);
+    controls.appendChild(delBtn);
+
+    // Attach getter for save
+    row._getEntry = () => ({ label: labelInput.value.trim(), imageUrl: storedImageUrl });
+
+    row.appendChild(thumb);
+    row.appendChild(fields);
+    row.appendChild(controls);
+    list.appendChild(row);
+}
+
+function readEditorEntries() {
+    return Array.from(document.querySelectorAll('#options-editor-list .option-editor-row'))
+        .map(r => r._getEntry())
+        .filter(e => e.label);
+}
+
+document.getElementById('add-option-btn').addEventListener('click', () => {
+    const current = readEditorEntries();
+    current.push({ label: '', imageUrl: null });
+    renderOptionsEditor(current);
+    // Focus the new label input
+    const rows = document.querySelectorAll('#options-editor-list .option-editor-row');
+    const last = rows[rows.length - 1];
+    if (last) last.querySelector('input[data-role="label"]')?.focus();
+});
+
 document.getElementById('save-categories-btn').addEventListener('click', async () => {
-    const opts = document.getElementById('categories-input').value.split('\n').map(l => l.trim()).filter(l => l);
-    if (!opts.length) { alert('Please enter at least one option.'); return; }
+    const entries = readEditorEntries();
+    if (!entries.length) { alert('Please add at least one option.'); return; }
     try {
         const res = await authenticatedFetch('/api/games/picnic/custom-categories', {
             method: 'POST',
-            body: JSON.stringify({ categories: opts })
+            body: JSON.stringify({ categories: entries })
         });
         if (!res.ok) throw new Error(`Save failed: ${res.status}`);
-        gameState.options = opts;
-        document.getElementById('admin-modal').classList.add('hidden');
-        alert(`Saved ${opts.length} options.`);
+        // Update runtime state
+        gameState.options = entries.map(e => e.label);
+        gameState.optionImages = {};
+        entries.forEach(e => { if (e.imageUrl) gameState.optionImages[e.label] = e.imageUrl; });
+        closeAdminModal();
+        alert(`Saved ${entries.length} options.`);
     } catch(err) {
         console.error(err);
         alert('Failed to save options. Please try again.');
@@ -1254,8 +1481,7 @@ document.getElementById('reset-defaults-btn').addEventListener('click', async ()
     try {
         await authenticatedFetch('/api/games/picnic/custom-categories', { method: 'DELETE' });
         await loadOptions();
-        document.getElementById('categories-input').value = gameState.options.join('\n');
-        updateCatCount();
+        openOptionsEditor();
         alert('Reset to defaults.');
     } catch(err) {
         alert('Failed to reset options.');
@@ -1263,15 +1489,23 @@ document.getElementById('reset-defaults-btn').addEventListener('click', async ()
 });
 
 // ─── Load Options ─────────────────────────────────────────────────────────────
+function _normalizeOptions(raw) {
+    // Server may return plain strings (legacy) or {label, imageUrl} objects
+    const entries = (raw || []).map(o => typeof o === 'string' ? { label: o, imageUrl: null } : o);
+    gameState.options = entries.map(e => e.label);
+    gameState.optionImages = {};
+    entries.forEach(e => { if (e.imageUrl) gameState.optionImages[e.label] = e.imageUrl; });
+}
+
 async function loadOptions() {
     try {
         const res = await authenticatedFetch('/api/games/picnic/categories');
         if (!res.ok) throw new Error(`${res.status}`);
         const { all_categories } = await res.json();
-        gameState.options = all_categories || [];
+        _normalizeOptions(all_categories);
     } catch(err) {
         console.error('[Picnic] Load options error:', err);
-        gameState.options = ["Rhyming","Same Color","Same First Letter","Alphabet Next Letter","Same Vowel Sound","Same Last Letter","Same Number of Syllables"];
+        _normalizeOptions(["Rhyming","Same Color","Same First Letter","Alphabet Next Letter","Same Vowel Sound","Same Last Letter","Same Number of Syllables"]);
     }
 }
 
