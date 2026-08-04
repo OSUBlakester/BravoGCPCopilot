@@ -9093,6 +9093,8 @@ async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Di
     """Load a transferable bundle of profile settings/configuration data."""
     settings = await load_settings_from_file(account_id, aac_user_id)
     birthdays = await load_birthdays_from_file(account_id, aac_user_id)
+    friends_family = await load_friends_family_from_file(account_id, aac_user_id)
+    diary_entries = await load_diary_entries(account_id, aac_user_id)
     user_narrative = await load_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
@@ -9168,6 +9170,8 @@ async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Di
         "display_name": display_name,
         "settings": settings,
         "birthdays": birthdays,
+        "friends_family": friends_family,
+        "diary_entries": diary_entries,
         "user_narrative": user_narrative,
         "current_state": current_state,
         "scraping_config": scraping_config,
@@ -9203,6 +9207,21 @@ async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bund
         if not await save_birthdays_to_file(account_id, aac_user_id, birthdays_data):
             raise HTTPException(status_code=500, detail="Failed to import birthdays.")
         imported_sections.append("birthdays")
+
+    if "friends_family" in bundle:
+        friends_family_data = bundle["friends_family"]
+        if not isinstance(friends_family_data, dict):
+            raise HTTPException(status_code=400, detail="Invalid friends_family payload format.")
+        if not await save_friends_family_to_file(account_id, aac_user_id, friends_family_data):
+            raise HTTPException(status_code=500, detail="Failed to import friends & family.")
+        imported_sections.append("friends_family")
+
+    if "diary_entries" in bundle:
+        diary_entries_data = bundle["diary_entries"]
+        if not isinstance(diary_entries_data, list):
+            raise HTTPException(status_code=400, detail="Invalid diary_entries payload format.")
+        await save_diary_entries(account_id, aac_user_id, diary_entries_data)
+        imported_sections.append("diary_entries")
 
     if "user_narrative" in bundle:
         user_narrative_data = bundle["user_narrative"]
