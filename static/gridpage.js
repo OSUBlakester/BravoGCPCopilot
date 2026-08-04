@@ -19,8 +19,10 @@ let followUpConversation = {
 const COMPOSE_SESSION_STORAGE_KEY = 'bravoComposeSession';
 const COMPOSE_PENDING_APPEND_KEY = 'bravoComposePendingAppend';
 const EMAIL_SESSION_STORAGE_KEY = 'bravoEmailSession';
+const TEXT_SESSION_STORAGE_KEY = 'bravoTextSession';
 let composeSession = null;
 let emailSession = null;
+let textSession = null;
 let composeMenuActionInProgress = false;
 
 function loadEmailSession() {
@@ -85,6 +87,39 @@ function clearEmailSession() {
 
 function isEmailSessionActive() {
     return Boolean(emailSession && emailSession.active === true);
+}
+
+// ─── Text Message Session ─────────────────────────────────────────────────────
+function loadTextSession() {
+    try {
+        const parsed = JSON.parse(sessionStorage.getItem(TEXT_SESSION_STORAGE_KEY) || '{}');
+        if (!parsed || typeof parsed !== 'object') return _defaultTextSession();
+        return {
+            active: parsed.active === true,
+            contactName: parsed.contactName || '',
+            recentTextContent: parsed.recentTextContent || '',
+            conversationLines: Array.isArray(parsed.conversationLines) ? parsed.conversationLines : [],
+            sourceFrom: parsed.sourceFrom || null,
+        };
+    } catch { return _defaultTextSession(); }
+}
+
+function _defaultTextSession() {
+    return { active: false, contactName: '', recentTextContent: '', conversationLines: [], sourceFrom: null };
+}
+
+function saveTextSession() {
+    if (!textSession) return;
+    sessionStorage.setItem(TEXT_SESSION_STORAGE_KEY, JSON.stringify(textSession));
+}
+
+function clearTextSession() {
+    textSession = _defaultTextSession();
+    sessionStorage.removeItem(TEXT_SESSION_STORAGE_KEY);
+}
+
+function isTextSessionActive() {
+    return Boolean(textSession && textSession.active === true);
 }
 
 function loadComposeSession() {
@@ -220,6 +255,7 @@ function syncComposeSessionFromStorage() {
 
 composeSession = loadComposeSession();
 emailSession = loadEmailSession();
+textSession = loadTextSession();
 
 // Restore querytype and currentQuestion from localStorage if available
 if (localStorage.getItem('llm_currentQueryType')) {
@@ -3363,6 +3399,504 @@ async function renderEmailFinalizeMenu(container, fromUrl) {
     setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'email-finalize-menu' }), 50);
 }
 
+// ─── Text Message Feature ─────────────────────────────────────────────────────
+
+const TEXT_SUMMARY_INSTRUCTION = 'For the "summary" key: write a 3-5 word label that captures the main intent or emotional tone of the message — not just the opening words. Examples: a message "I\'ve been thinking about you and hope everything is going well!" should summarize as "Thinking of you"; "Did you want to grab lunch sometime this week?" should summarize as "Lunch plans this week". The summary is what the user sees on the button, so make it meaningful at a glance.';
+
+function getTextReturnTarget() {
+    return textSession?.sourceFrom || 'gridpage.html?page=home';
+}
+
+function updateTextQuestionDisplay(message = '') {
+    const questionDisplay = document.getElementById('question-display');
+    const contact = textSession?.contactName || '';
+    const header = message || (contact ? `Text: ${contact}` : 'Text Message');
+    if (questionDisplay) {
+        questionDisplay.value = header;
+    }
+    updateStatusBar(`💬 ${header}`);
+}
+
+async function renderTextEntryMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    updateTextQuestionDisplay('Text: Choose a contact');
+
+    let contacts = [];
+    let loadError = null;
+    try {
+        const response = await authenticatedFetch('/api/friends-family', { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json();
+            contacts = Array.isArray(data.friends_family) ? data.friends_family : [];
+        } else {
+            loadError = `Unable to load contacts (${response.status})`;
+        }
+    } catch (err) {
+        loadError = err.message || 'Unable to load contacts';
+    }
+
+    let index = 0;
+
+    if (loadError) {
+        container.appendChild(createComposeGridButton('Try Again', async () => {
+            await renderTextEntryMenu(container, fromUrl);
+        }, index++));
+    } else if (!contacts.length) {
+        container.appendChild(createComposeGridButton('No Contacts Found', async () => {
+            await announce('No contacts found. Please add a contact first.', 'system', false);
+        }, index++));
+    } else {
+        contacts.forEach((contact) => {
+            const name = String(contact?.name || '').trim();
+            if (!name) return;
+            container.appendChild(createComposeGridButton(name, async () => {
+                textSession = {
+                    active: true,
+                    contactName: name,
+                    recentTextContent: '',
+                    conversationLines: [],
+                    sourceFrom: fromUrl || getTextReturnTarget(),
+                };
+                saveTextSession();
+                await renderTextModeMenu(container, fromUrl);
+            }, index++));
+        });
+    }
+
+    container.appendChild(createComposeGridButton('Add New Contact', async () => {
+        await announce(
+            'I need to add a new contact. Please ask me yes or no questions about who I want to add.',
+            'system', false
+        );
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Exit Text', async () => {
+        clearTextSession();
+        window.location.href = fromUrl || 'gridpage.html?page=home';
+    }, index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-entry-menu' }), 50);
+}
+
+async function renderTextModeMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const contact = textSession?.contactName || 'contact';
+    updateTextQuestionDisplay(`Text ${contact}: Choose topic`);
+
+    const options = [
+        {
+            label: 'Reply to Recent Text',
+            handler: async () => {
+                await renderTextRecentTextMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'New Topic',
+            handler: async () => {
+                await renderTextNewTopicMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Go Back',
+            handler: async () => {
+                clearTextSession();
+                await renderTextEntryMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Exit Text',
+            handler: async () => {
+                clearTextSession();
+                window.location.href = fromUrl || 'gridpage.html?page=home';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-mode-menu' }), 50);
+}
+
+async function renderTextRecentTextMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const contact = textSession?.contactName || 'contact';
+    updateTextQuestionDisplay(`Text ${contact}: Waiting for wake word`);
+
+    const interjection = wakeWordInterjection || 'hey';
+    const name = wakeWordName || 'bravo';
+    const wakePhrase = `${interjection} ${name}`;
+
+    await announce(
+        `Say ${wakePhrase} when you are ready to read the most recent text message from ${contact}.`,
+        'system', false
+    );
+
+    let textWakeRecognition = null;
+    let cancelledByUser = false;
+
+    const stopTextWakeRecognition = () => {
+        if (textWakeRecognition) {
+            try { textWakeRecognition.stop(); } catch (_) {}
+            textWakeRecognition.onresult = null;
+            textWakeRecognition.onerror = null;
+            textWakeRecognition.onend = null;
+            textWakeRecognition = null;
+        }
+    };
+
+    const startTextWakeListening = () => {
+        const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognitionAPI) return;
+
+        textWakeRecognition = new SpeechRecognitionAPI();
+        textWakeRecognition.lang = getWakeWordRecognitionLanguage ? getWakeWordRecognitionLanguage() : (userLanguageLocale || 'en-US');
+        textWakeRecognition.continuous = true;
+        textWakeRecognition.interimResults = false;
+
+        textWakeRecognition.onresult = async (event) => {
+            const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+            const phraseWithComma = `${interjection}, ${name}`;
+            if (!transcript.includes(wakePhrase) && !transcript.includes(phraseWithComma)) return;
+
+            stopTextWakeRecognition();
+            updateStatusBar('🎤 I\'m listening...', true);
+            await announce("I'm listening.", 'system', false);
+
+            // Now listen for the partner reading the text message
+            const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechAPI) return;
+
+            const partnerRecog = new SpeechAPI();
+            partnerRecog.lang = getEffectivePartnerLanguage();
+            partnerRecog.continuous = false;
+            partnerRecog.interimResults = true;
+            partnerRecog.maxAlternatives = 1;
+
+            let finalTranscript = '';
+            let hasProcessed = false;
+
+            partnerRecog.onresult = (ev) => {
+                let interim = '';
+                for (let i = ev.resultIndex; i < ev.results.length; i++) {
+                    if (ev.results[i].isFinal) { finalTranscript += ev.results[i][0].transcript; }
+                    else { interim += ev.results[i][0].transcript; }
+                }
+                const display = finalTranscript || interim;
+                updateStatusBar(display.trim());
+            };
+
+            partnerRecog.onend = async () => {
+                if (hasProcessed) return;
+                hasProcessed = true;
+                updateStatusBar('');
+
+                if (!finalTranscript.trim()) {
+                    await announce("I didn't catch that. Please try again.", 'system', false);
+                    if (!cancelledByUser) await renderTextRecentTextMenu(container, fromUrl);
+                    return;
+                }
+
+                textSession.recentTextContent = finalTranscript.trim();
+                saveTextSession();
+
+                await announce("Give me a moment to respond.", 'system', false);
+                await renderTextReplyMenu(container, fromUrl);
+            };
+
+            partnerRecog.onerror = async (ev) => {
+                if (hasProcessed) return;
+                hasProcessed = true;
+                updateStatusBar('');
+                await announce("I had trouble hearing that. Please try again.", 'system', false);
+                if (!cancelledByUser) await renderTextRecentTextMenu(container, fromUrl);
+            };
+
+            try { partnerRecog.start(); }
+            catch (e) {
+                await announce("Couldn't start listening. Please try again.", 'system', false);
+                if (!cancelledByUser) await renderTextRecentTextMenu(container, fromUrl);
+            }
+        };
+
+        textWakeRecognition.onerror = (event) => {
+            if (['no-speech', 'audio-capture', 'network'].includes(event.error) && !cancelledByUser) {
+                setTimeout(startTextWakeListening, 500);
+            }
+        };
+
+        textWakeRecognition.onend = () => {
+            if (!cancelledByUser && textWakeRecognition) {
+                setTimeout(startTextWakeListening, 200);
+            }
+        };
+
+        try { textWakeRecognition.start(); }
+        catch (e) { console.error('Text wake recognition start error:', e); }
+    };
+
+    startTextWakeListening();
+    updateStatusBar(`Say "${wakePhrase}" when ready...`);
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        cancelledByUser = true;
+        stopTextWakeRecognition();
+        updateStatusBar('');
+        await renderTextModeMenu(container, fromUrl);
+    }, 0));
+
+    container.appendChild(createComposeGridButton('Exit Text', async () => {
+        cancelledByUser = true;
+        stopTextWakeRecognition();
+        updateStatusBar('');
+        clearTextSession();
+        window.location.href = fromUrl || 'gridpage.html?page=home';
+    }, 1));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-recent-menu' }), 50);
+}
+
+async function renderTextReplyMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const contact = textSession?.contactName || 'contact';
+    const recentText = textSession?.recentTextContent || '';
+
+    updateTextQuestionDisplay(`Text ${contact}: Generating replies...`);
+    document.getElementById('loading-indicator').style.display = 'flex';
+
+    let options = [];
+    try {
+        const contextLines = (textSession?.conversationLines || [])
+            .map(l => `${l.role}: ${l.text}`)
+            .join('\n');
+
+        const prompt = [
+            `The user wants to reply to a text message from ${contact}.`,
+            recentText ? `Their recent message: "${recentText}"` : '',
+            contextLines ? `\nConversation so far:\n${contextLines}` : '',
+            `\nGenerate ${LLMOptions} short, natural text message reply options. Each should be a complete, ready-to-send reply.`,
+            TEXT_SUMMARY_INSTRUCTION
+        ].filter(Boolean).join('\n');
+
+        options = await getLLMResponse(prompt, { source: 'text-reply' });
+    } catch (err) {
+        console.error('Text reply LLM error:', err);
+    } finally {
+        document.getElementById('loading-indicator').style.display = 'none';
+    }
+
+    if (!options.length) {
+        await announce('Unable to generate reply options right now.', 'system', false);
+        await renderTextModeMenu(container, fromUrl);
+        return;
+    }
+
+    updateTextQuestionDisplay(`Text ${contact}: Choose your reply`);
+
+    let index = 0;
+    options.forEach((opt) => {
+        const fullText = opt.option || opt.summary;
+        const label = opt.summary || opt.option;
+        container.appendChild(createComposeGridButton(label, async () => {
+            textSession.conversationLines.push({ role: 'Me', text: fullText });
+            saveTextSession();
+            await handleTextOptionSelected(container, fromUrl, fullText, options);
+        }, index++));
+    });
+
+    container.appendChild(createComposeGridButton('Ask Again', async () => {
+        await renderTextReplyMenu(container, fromUrl);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderTextModeMenu(container, fromUrl);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Exit Text', async () => {
+        clearTextSession();
+        window.location.href = fromUrl || 'gridpage.html?page=home';
+    }, index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-reply-menu' }), 50);
+}
+
+async function renderTextNewTopicMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const contact = textSession?.contactName || 'contact';
+
+    updateTextQuestionDisplay(`Text ${contact}: Generating topics...`);
+    document.getElementById('loading-indicator').style.display = 'flex';
+
+    let options = [];
+    try {
+        const prompt = `The user wants to start a new text message conversation with ${contact}. Generate ${LLMOptions} conversation topic starters — short, friendly opening messages ready to send as a text.\n${TEXT_SUMMARY_INSTRUCTION}`;
+        options = await getLLMResponse(prompt, { source: 'text-new-topic' });
+    } catch (err) {
+        console.error('Text topic LLM error:', err);
+    } finally {
+        document.getElementById('loading-indicator').style.display = 'none';
+    }
+
+    if (!options.length) {
+        await announce('Unable to generate topic options right now.', 'system', false);
+        await renderTextModeMenu(container, fromUrl);
+        return;
+    }
+
+    updateTextQuestionDisplay(`Text ${contact}: Choose a topic`);
+
+    let index = 0;
+    options.forEach((opt) => {
+        const fullText = opt.option || opt.summary;
+        const label = opt.summary || opt.option;
+        container.appendChild(createComposeGridButton(label, async () => {
+            textSession.conversationLines.push({ role: 'Me', text: fullText });
+            saveTextSession();
+            await handleTextOptionSelected(container, fromUrl, fullText, options);
+        }, index++));
+    });
+
+    container.appendChild(createComposeGridButton('Ask Again', async () => {
+        await renderTextNewTopicMenu(container, fromUrl);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        await renderTextModeMenu(container, fromUrl);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Exit Text', async () => {
+        clearTextSession();
+        window.location.href = fromUrl || 'gridpage.html?page=home';
+    }, index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-new-topic-menu' }), 50);
+}
+
+async function handleTextOptionSelected(container, fromUrl, messageText, priorOptions) {
+    stopAuditoryScanning();
+    const contact = textSession?.contactName || 'contact';
+
+    // Announce just the selected text and record it to speech history
+    await announcePartnerFacingOutput(messageText, true);
+
+    updateTextQuestionDisplay(`Text ${contact}: What's next?`);
+    container.innerHTML = '';
+
+    // Generate follow-up options in the background while we render Send Text immediately
+    document.getElementById('loading-indicator').style.display = 'flex';
+
+    let followUpOptions = [];
+    try {
+        const contextLines = (textSession?.conversationLines || [])
+            .map(l => `${l.role}: ${l.text}`)
+            .join('\n');
+        const excludedText = Array.isArray(priorOptions)
+            ? priorOptions.map(o => o.option || o.summary).filter(Boolean).join('; ')
+            : '';
+        const followUpPrompt = [
+            `The user is texting ${contact}.`,
+            contextLines ? `Conversation so far:\n${contextLines}` : '',
+            excludedText ? `Do not repeat these options: ${excludedText}` : '',
+            `Generate ${LLMOptions} short follow-up text message options to continue the conversation.`,
+            TEXT_SUMMARY_INSTRUCTION
+        ].filter(Boolean).join('\n');
+        followUpOptions = await getLLMResponse(followUpPrompt, { source: 'text-followup' });
+    } catch (err) {
+        console.error('Text follow-up LLM error:', err);
+    } finally {
+        document.getElementById('loading-indicator').style.display = 'none';
+    }
+
+    let index = 0;
+
+    // "Send Text" is always first
+    container.appendChild(createComposeGridButton('Send Text', async () => {
+        const contact = textSession?.contactName || 'contact';
+        await announce(
+            `Please use the Copy button to copy my messages and paste it into my messaging app for ${contact}.`,
+            'system', false
+        );
+        await renderTextAfterSendMenu(container, fromUrl);
+    }, index++));
+
+    // Then follow-up options
+    followUpOptions.forEach((opt) => {
+        const fullText = opt.option || opt.summary;
+        const label = opt.summary || opt.option;
+        container.appendChild(createComposeGridButton(label, async () => {
+            textSession.conversationLines.push({ role: 'Me', text: fullText });
+            saveTextSession();
+            await handleTextOptionSelected(container, fromUrl, fullText, followUpOptions);
+        }, index++));
+    });
+
+    container.appendChild(createComposeGridButton('Go Back', async () => {
+        const hadRecentText = Boolean(textSession?.recentTextContent);
+        hadRecentText
+            ? await renderTextReplyMenu(container, fromUrl)
+            : await renderTextNewTopicMenu(container, fromUrl);
+    }, index++));
+
+    container.appendChild(createComposeGridButton('Exit Text', async () => {
+        clearTextSession();
+        window.location.href = fromUrl || 'gridpage.html?page=home';
+    }, index++));
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-followup-menu' }), 50);
+}
+
+async function renderTextAfterSendMenu(container, fromUrl) {
+    stopAuditoryScanning();
+    container.innerHTML = '';
+    const contact = textSession?.contactName || 'contact';
+    updateTextQuestionDisplay(`Text ${contact}: What next?`);
+
+    const options = [
+        {
+            label: 'Send Another Text',
+            handler: async () => {
+                textSession.recentTextContent = '';
+                saveTextSession();
+                await renderTextModeMenu(container, fromUrl);
+            }
+        },
+        {
+            label: 'Done',
+            handler: async () => {
+                clearTextSession();
+                window.location.href = fromUrl || 'gridpage.html?page=home';
+            }
+        }
+    ];
+
+    options.forEach((option, index) => {
+        container.appendChild(createComposeGridButton(option.label, option.handler, index));
+    });
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: true, source: 'text-after-send' }), 50);
+}
+
+function addQuitTextButton(container) {
+    if (!isTextSessionActive()) return;
+    if (container.querySelector('#text-quit-button')) return;
+
+    const currentCount = container.querySelectorAll('button').length;
+    const quitButton = createComposeGridButton('Exit Text', () => {
+        const fromUrl = getTextReturnTarget();
+        clearTextSession();
+        window.location.href = fromUrl;
+    }, currentCount);
+    quitButton.id = 'text-quit-button';
+    container.appendChild(quitButton);
+    updateTextQuestionDisplay('Text in progress');
+}
+
 function addQuitComposeButton(container) {
     if (!isComposeSessionActive()) return;
     if (container.querySelector('#compose-quit-button')) return;
@@ -3424,8 +3958,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const isEmailEntryView = params.get('email_menu') === '1';
     const isEmailFinalizeView = params.get('email_finalize') === '1';
     const isEmailComposeView = params.get('email_compose') === '1';
+    const isTextMenuView = params.get('text_menu') === '1';
     const composeResumeFlag = params.get('compose') === '1';
-    const isComposeFlowView = isComposeEntryView || isComposeFinalizeView || isEmailEntryView || isEmailFinalizeView || isEmailComposeView;
+    const isComposeFlowView = isComposeEntryView || isComposeFinalizeView || isEmailEntryView || isEmailFinalizeView || isEmailComposeView || isTextMenuView;
 
     // Remove the user-id-selector related UI elements if they exist
     document.getElementById('user-id-selector')?.closest('div')?.remove();
@@ -3498,6 +4033,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
             await renderComposeFinalizeMenu(gridContainer);
+        } else if (isTextMenuView) {
+            const fromUrl = params.get('from') || getTextReturnTarget();
+            await renderTextEntryMenu(gridContainer, fromUrl);
         } else if (isEmailEntryView) {
             const fromUrl = params.get('from') || getEmailReturnTarget();
             await renderEmailEntryMenu(gridContainer, fromUrl);
@@ -3529,6 +4067,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (isComposeSessionActive()) {
                 addQuitComposeButton(gridContainer);
                 updateSpeechHistoryPanel(); // Switch label to "Compose" and show composition text
+            }
+            if (isTextSessionActive()) {
+                addQuitTextButton(gridContainer);
             }
         }
 
@@ -3693,6 +4234,91 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         });
     }
+
+    // --- Copy History Modal ---
+    const copyHistoryBtn = document.getElementById('copy-history-btn');
+    const copyHistoryModal = document.getElementById('copy-history-modal');
+    const copyHistoryModalClose = document.getElementById('copy-history-modal-close');
+    const copyHistoryModalCancel = document.getElementById('copy-history-modal-cancel');
+    const copyHistoryModalCopy = document.getElementById('copy-history-modal-copy');
+    const copyHistoryModalContent = document.getElementById('copy-history-modal-content');
+
+    const closeCopyHistoryModal = () => {
+        if (!copyHistoryModal) return;
+        copyHistoryModal.classList.add('hidden');
+        copyHistoryModal.classList.remove('flex');
+    };
+
+    const openCopyHistoryModal = () => {
+        if (!copyHistoryModal || !copyHistoryModalContent) return;
+        const lines = String(document.getElementById('speech-history')?.value || '')
+            .split('\n')
+            .map(l => l.trim())
+            .filter(Boolean)
+            .reverse();
+
+        if (!lines.length) {
+            copyHistoryModalContent.innerHTML = '<p class="text-gray-500">No speech history to copy.</p>';
+        } else {
+            copyHistoryModalContent.innerHTML = lines.map((line, idx) => {
+                const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return `
+                    <label class="flex items-start gap-3 border border-gray-200 rounded p-2 cursor-pointer hover:bg-gray-50">
+                        <input type="checkbox" class="copy-history-checkbox mt-1 h-4 w-4 accent-green-600" data-line="${escaped}" />
+                        <span class="text-sm text-gray-800">${escaped}</span>
+                    </label>`;
+            }).join('');
+        }
+
+        copyHistoryModal.classList.remove('hidden');
+        copyHistoryModal.classList.add('flex');
+    };
+
+    if (copyHistoryBtn) {
+        copyHistoryBtn.addEventListener('click', openCopyHistoryModal);
+    }
+    if (copyHistoryModalClose) {
+        copyHistoryModalClose.addEventListener('click', closeCopyHistoryModal);
+    }
+    if (copyHistoryModalCancel) {
+        copyHistoryModalCancel.addEventListener('click', closeCopyHistoryModal);
+    }
+    if (copyHistoryModal) {
+        copyHistoryModal.addEventListener('click', (event) => {
+            if (event.target === copyHistoryModal) closeCopyHistoryModal();
+        });
+    }
+    if (copyHistoryModalCopy) {
+        copyHistoryModalCopy.addEventListener('click', async () => {
+            const checked = copyHistoryModalContent.querySelectorAll('.copy-history-checkbox:checked');
+            if (!checked.length) return;
+            const text = Array.from(checked).map(cb => cb.dataset.line).join('\n');
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch {
+                // Fallback for browsers that block clipboard without gesture
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            closeCopyHistoryModal();
+        });
+    }
+    const clearHistoryBtn = document.getElementById('clear-history-btn');
+    if (clearHistoryBtn) {
+        clearHistoryBtn.addEventListener('click', () => {
+            const sh = document.getElementById('speech-history');
+            if (sh) sh.value = '';
+            localStorage.removeItem(SPEECH_HISTORY_LOCAL_STORAGE_KEY(currentAacUserId));
+        });
+    }
+    // --- End Copy History Modal ---
+
     // If a compose session is already active (e.g. returning to compose grid), switch the panel
     updateSpeechHistoryPanel();
     window.addEventListener('pageshow', syncComposeSessionFromStorage);
@@ -4530,6 +5156,11 @@ async function handleButtonClick(buttonData) {
                     const params = new URLSearchParams();
                     params.set('from', window.location.href);
                     window.location.href = `numbers.html?${params.toString()}`;
+                } else if (specialPage === 'text' || specialPage === 'text-message') {
+                    const params = new URLSearchParams();
+                    params.set('from', window.location.href);
+                    params.set('text_menu', '1');
+                    window.location.href = `gridpage.html?${params.toString()}`;
                 } else if (specialPage === 'email' || specialPage === 'emails') {
                     const params = new URLSearchParams();
                     params.set('from', window.location.href);
