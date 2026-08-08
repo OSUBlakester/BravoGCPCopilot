@@ -5156,6 +5156,8 @@ async function handleButtonClick(buttonData) {
                     const params = new URLSearchParams();
                     params.set('from', window.location.href);
                     window.location.href = `numbers.html?${params.toString()}`;
+                } else if (specialPage === 'music') {
+                    window.location.href = 'gridpage.html?page=home';
                 } else if (specialPage === 'text' || specialPage === 'text-message') {
                     const params = new URLSearchParams();
                     params.set('from', window.location.href);
