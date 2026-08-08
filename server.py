@@ -21756,19 +21756,25 @@ async def _lookup_images_for_labels(
         'will', 'would', 'shall', 'should',
         'can', 'could', 'may', 'might', 'must',
         'have', 'has', 'had', 'do', 'does', 'did',
+        # Common leading content verbs whose object is the true key term:
+        # "want a hug"→"hug", "need a drink"→"drink", "want to dance"→"dance",
+        # "need to go to the store"→"store", "love to swim"→"swim",
+        # "feel like crying"→"crying", "get some water"→"water",
+        # "let me try"→"try", "try to relax"→"relax"
+        'want', 'need', 'love', 'feel', 'get', 'let', 'try', 'feeling',
         # Degree / intensifier adverbs — "so mad"→"mad", "very upset"→"upset",
         # "really frustrated"→"frustrated", "kind of sad"→"of sad"→"sad"
         # "easy" included so "it easy boss"→"boss", "it easy dad"→"dad"
         'so', 'very', 'really', 'quite', 'pretty', 'too',
         'extremely', 'super', 'totally', 'just', 'kind', 'sort', 'easy',
         # Greeting/address prefixes — "there, boss"→"boss", "doing, dad"→"dad"
-        'there', 'doing', 'go', 'something','somewhere'
+        'there', 'doing', 'go', 'something', 'somewhere',
         # Question words — "what you are watching"→"watching", "what's wrong"→"wrong"
         'what', 'how',
         # Temporal connectives — "then, at home"→norm→"then at home"→"home"
         'then',
         # Directional prepositions — "towards the park"→"park", "down, the street"→"street"
-        'towards', 'down',
+        'towards', 'down', 'going',
         # Conditional conjunction — "if you want"→"want"
         'if',
     })
@@ -21778,7 +21784,7 @@ async def _lookup_images_for_labels(
     # "book is that" → "book is" → "book", "playing now" → "playing".
     _TRAIL_STOPS = frozenset({
         # Articles dangling at the end: "open the" → "open", "eat a" → "eat"
-        'a', 'an', 'the',
+        'a', 'an', 'the','be'
         # Prepositions that trail without adding meaning to the key concept.
         # "on", "in", "out", "up" are intentionally excluded — they form phrasal
         # verbs ("turn on", "log in", "go out", "wake up") and must be preserved.
@@ -21804,6 +21810,7 @@ async def _lookup_images_for_labels(
         ('thank', 'you', 'so', 'much'),
         ('if', 'you', 'please'),
         ('if', 'you', 'don', 't', 'mind'),
+        
     ]
 
     # Multi-word leading phrases stripped as a unit before single-word stop processing.
