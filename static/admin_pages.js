@@ -70,6 +70,7 @@ const SPECIAL_PAGES = [
     { name: 'email', displayName: 'Email Page' },
     { name: 'compose', displayName: 'Compose Page' },
     { name: 'text', displayName: 'Text Message Page' },
+    { name: 'music', displayName: 'Music Page' },
     { name: 'games', displayName: 'Games Page' },
     { name: 'jokes', displayName: 'Jokes Page' },
     // Add more special pages here as needed
