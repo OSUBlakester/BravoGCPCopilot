@@ -21739,7 +21739,7 @@ async def _lookup_images_for_labels(
         'and', 'or', 'but',
         # Prepositions / particles
         'to', 'in', 'on', 'at', 'for', 'with', 'of', 'by', 'from', 'into', 'about', 'up', 'out',
-        'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though',
+        'since', 'after', 'before', 'until', 'while', 'when', 'because', 'like', 'than', 'though', 'as',
         # Possessive adjectives / intensifiers
         'my', 'your', 'his', 'her', 'its', 'our', 'their', 'own',
         # Quantifiers / demonstratives acting as articles
@@ -21761,7 +21761,7 @@ async def _lookup_images_for_labels(
         # "need to go to the store"→"store", "love to swim"→"swim",
         # "feel like crying"→"crying", "get some water"→"water",
         # "let me try"→"try", "try to relax"→"relax"
-        'want', 'need', 'love', 'feel', 'get', 'let', 'try', 'feeling',
+        'want', 'need', 'love', 'feel', 'get', 'let', 'try', 'feeling', 'wants', 'needs',
         # Degree / intensifier adverbs — "so mad"→"mad", "very upset"→"upset",
         # "really frustrated"→"frustrated", "kind of sad"→"of sad"→"sad"
         # "easy" included so "it easy boss"→"boss", "it easy dad"→"dad"
