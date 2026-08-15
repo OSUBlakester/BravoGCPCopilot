@@ -3823,16 +3823,7 @@ registerForm.addEventListener('submit', async (e) => {
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Phrases Rows</h4>
-                            <div style="display:flex;gap:16px;align-items:center;">
-                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">Rows for AI-generated, fully-formed phrases for faster communication. Set to 0 to disable.</p>
-                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Rows (0–10)</label>
-                                    <input id="wizardPhrasesRows" class="wizard-input wizard-input-number" type="number" min="0" max="10" value="${wizardState.phrasesRows !== undefined ? wizardState.phrasesRows : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
-                                </div>
-                            </div>
-                        </div>`;
+                        `;
 
                     document.getElementById('wizardGridColumns').addEventListener('change', function() {
                         wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(this.value) || 6));
@@ -4388,10 +4379,8 @@ registerForm.addEventListener('submit', async (e) => {
                 if (el) wizardState.gridColumns = Math.max(2, Math.min(12, parseInt(el.value) || 6));
                 if (wizardState.interfaceMode === 'tap') {
                     const wRows = document.getElementById('wizardWordsRows');
-                    const pRows = document.getElementById('wizardPhrasesRows');
                     const dRows = document.getElementById('wizardTapDynamicRows');
                     if (wRows) wizardState.wordsRows = Math.max(1, Math.min(7, parseInt(wRows.value) || 3));
-                    if (pRows) wizardState.phrasesRows = Math.max(0, Math.min(10, parseInt(pRows.value) || 0));
                     if (dRows) {
                         const dVal = parseInt(dRows.value, 10) || 0;
                         wizardState.useHybridPages = dVal > 0;
@@ -4493,7 +4482,7 @@ registerForm.addEventListener('submit', async (e) => {
                     voice_style: wizardState.voiceStyle,
                     gridColumns: wizardState.gridColumns,
                     tapWordsRows: wizardState.wordsRows,
-                    tapPhrasesRows: wizardState.phrasesRows,
+                    tapPhrasesRows: 0,
                     useHybridPages: wizardState.useHybridPages,
                     tapDynamicRows: wizardState.tapDynamicRows,
                     useBravoBuild: wizardState.useBravoBuild,
