@@ -1651,10 +1651,10 @@
         // Wake Word Variables (from gridpage)
         let wakeWordInterjection = "hey";
         let wakeWordName = "friend";  // Default should match gridpage
-        let LLMOptions = 10; // Default number of phrase options to generate
+        let LLMOptions = 0; // Phrases feature disabled
         let FreestyleWordOptions = 15; // Default number of word options to generate  
         let tapWordsRows = 4;
-        let tapPhrasesRows = 1;
+        let tapPhrasesRows = 0; // Phrases feature disabled
         let gridColumns = 10; // Default number of grid columns for button sizing
         let spellLetterOrder = 'alphabetical'; // Default spell letter order (alphabetical, qwerty, or frequency)
         let autoClean = false; // Auto Clean setting for automatic cleanup before speaking
@@ -5841,17 +5841,10 @@
                     tapWordsRows = 4;
                 }
 
-                if (settings && typeof settings.tapPhrasesRows === 'number' && !isNaN(settings.tapPhrasesRows)) {
-                    tapPhrasesRows = Math.max(0, Math.min(10, parseInt(settings.tapPhrasesRows)));
-                    console.log(`Tap Phrases Rows loaded: ${tapPhrasesRows}`);
-                } else {
-                    tapPhrasesRows = 1;
-                }
-
-                // Calculate LLMOptions and FreestyleWordOptions based on grid layout
+                // Phrases feature disabled — tapPhrasesRows and LLMOptions remain 0
+                // Calculate FreestyleWordOptions based on grid layout
                 FreestyleWordOptions = (gridColumns * tapWordsRows) - 1;
-                LLMOptions = tapPhrasesRows > 0 ? (gridColumns * tapPhrasesRows) - 1 : 0;
-                console.log(`Computed FreestyleWordOptions: ${FreestyleWordOptions}, LLMOptions: ${LLMOptions}`);
+                console.log(`Computed FreestyleWordOptions: ${FreestyleWordOptions}`);
                 
                 // Load spellLetterOrder
                 if (settings && typeof settings.spellLetterOrder === 'string') {
@@ -6139,15 +6132,9 @@
                 // If a home board is configured, open it on refresh instead of loading generic defaults.
                 let openedHomeBoard = await navigateToHomeBoard();
                 
-                // Load phrases and words in PARALLEL
+                // Load words (phrases feature disabled)
                 if (!openedHomeBoard) {
-                    console.log('⏱️ Starting parallel load of phrases and words at:', Date.now());
-                    const phrasesPromise = loadInitialPhrases();
-                    const wordsPromise = loadFreestyleOptions();
-
-                    console.log('⏱️ Waiting for both to complete at:', Date.now());
-                    await Promise.all([phrasesPromise, wordsPromise]);
-                    console.log('⏱️ Both completed at:', Date.now());
+                    await loadFreestyleOptions();
                 }
                 
                 // Pre-cache images in BACKGROUND - DISABLED for performance
@@ -13563,8 +13550,6 @@ VARIETY RULES:
 
         async function renderInterface() {
             renderCategories();
-            // Load initial generic phrases and freestyle options
-            await loadInitialPhrases();
             // Freestyle options are loaded separately in initializeUserData()
         }
 

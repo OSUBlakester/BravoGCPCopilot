@@ -59,7 +59,7 @@ const speechRateInput = document.getElementById('speechRate');
 const LLMOptionsInput = document.getElementById('LLMOptions');
 const FreestyleOptionsInput = document.getElementById('FreestyleOptions');
 const tapWordsRowsInput = document.getElementById('tapWordsRows');
-const tapPhrasesRowsInput = document.getElementById('tapPhrasesRows');
+// tapPhrasesRows removed from UI
 const scanLoopLimitInput = document.getElementById('scanLoopLimit');
 const scanModeInput = document.getElementById('scanMode');
 const ScanningOffInput = document.getElementById('ScanningOff');
@@ -767,9 +767,6 @@ async function loadSettings() {
         if (tapWordsRowsInput) {
             tapWordsRowsInput.value = currentSettings.tapWordsRows !== null && currentSettings.tapWordsRows !== undefined ? currentSettings.tapWordsRows : 4;
         }
-        if (tapPhrasesRowsInput) {
-            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 0;
-        }
         if (tapDynamicRowsInput) {
             tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== null && currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 0;
         }
@@ -1076,7 +1073,7 @@ async function saveSettings() {
     const newFreestyleOptions = FreestyleOptionsInput.value;
     console.log('DEBUG FreestyleOptions - Save value:', newFreestyleOptions);
     const newTapWordsRows = tapWordsRowsInput ? tapWordsRowsInput.value : '';
-    const newTapPhrasesRows = tapPhrasesRowsInput ? tapPhrasesRowsInput.value : '';
+    const newTapPhrasesRows = '0';
     const newTapDynamicRows = tapDynamicRowsInput ? tapDynamicRowsInput.value : '';
     const newUseHybridPages = newTapDynamicRows !== '' && parseInt(newTapDynamicRows) > 0;
     const newScanLoopLimit = scanLoopLimitInput.value;
@@ -1171,11 +1168,7 @@ async function saveSettings() {
         settingsStatus.textContent = 'Invalid Tap Words Rows. Must be a number between 1 and 10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
-    if (newTapPhrasesRows !== '' && (isNaN(parseInt(newTapPhrasesRows)) || parseInt(newTapPhrasesRows) < 0 || parseInt(newTapPhrasesRows) > 10)) {
-        settingsStatus.textContent = 'Invalid Tap Phrases Rows. Must be a number between 0 and 10.';
-        settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
-    }
-    if (newTapDynamicRows !== '' && (isNaN(parseInt(newTapDynamicRows)) || parseInt(newTapDynamicRows) < 0 || parseInt(newTapDynamicRows) > 10)) {
+if (newTapDynamicRows !== '' && (isNaN(parseInt(newTapDynamicRows)) || parseInt(newTapDynamicRows) < 0 || parseInt(newTapDynamicRows) > 10)) {
         settingsStatus.textContent = 'Invalid Tap Dynamic Rows. Must be a number between 0 and 10.';
         settingsStatus.style.color = 'red'; setTimeout(() => { settingsStatus.textContent = ''; }, 4000); return;
     }
@@ -1298,9 +1291,6 @@ async function saveSettings() {
         }
         if (tapWordsRowsInput) {
             tapWordsRowsInput.value = currentSettings.tapWordsRows !== null && currentSettings.tapWordsRows !== undefined ? currentSettings.tapWordsRows : 4;
-        }
-        if (tapPhrasesRowsInput) {
-            tapPhrasesRowsInput.value = currentSettings.tapPhrasesRows !== null && currentSettings.tapPhrasesRows !== undefined ? currentSettings.tapPhrasesRows : 0;
         }
         if (tapDynamicRowsInput) {
             tapDynamicRowsInput.value = currentSettings.tapDynamicRows !== undefined ? currentSettings.tapDynamicRows : 0;
