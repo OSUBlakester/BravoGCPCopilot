@@ -3807,19 +3807,15 @@ registerForm.addEventListener('submit', async (e) => {
                         </div>
                         <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
                             <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
-                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;line-height:1.4;">Split into Static (fixed) and Dynamic (AI-generated, optional). Set Dynamic to 0 for static-only.</p>
-                            <div style="display:flex;gap:12px;align-items:flex-end;">
-                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;line-height:1.4;">Total rows of word buttons. Optionally add one AI-generated dynamic row at the bottom (like predictive text).</p>
+                            <div style="display:flex;gap:16px;align-items:center;">
+                                <div style="display:flex;flex-direction:column;align-items:center;">
                                     <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Total (1–7)</label>
-                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:80px;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
                                 </div>
-                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Static</label>
-                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;background:#f3f4f6;color:#374151;border-color:#d1d5db;cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
-                                </div>
-                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Dynamic</label>
-                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                                <div style="display:flex;flex-direction:column;align-items:center;">
+                                    <label class="wizard-field-label" style="margin:0 0 8px 0;font-size:0.75rem;text-align:center;">Include Dynamic Row</label>
+                                    <input id="wizardTapDynamicRows" type="checkbox" ${wizardState.useHybridPages && wizardState.tapDynamicRows > 0 ? 'checked' : ''} style="width:20px;height:20px;">
                                 </div>
                             </div>
                         </div>
@@ -3830,27 +3826,20 @@ registerForm.addEventListener('submit', async (e) => {
                     });
 
                     const wordsInput = document.getElementById('wizardWordsRows');
-                    const dynamicInput = document.getElementById('wizardTapDynamicRows');
-                    const staticDisplay = document.getElementById('wizardStaticRowsDisplay');
+                    const dynamicCheckbox = document.getElementById('wizardTapDynamicRows');
                     function updateRows() {
                         let total = parseInt(wordsInput.value, 10) || 3;
                         if (total < 1) total = 1;
                         if (total > 7) total = 7;
                         wordsInput.value = total;
-                        let dynamic = parseInt(dynamicInput.value, 10) || 0;
-                        if (dynamic < 0) dynamic = 0;
-                        if (dynamic > total) dynamic = total;
-                        dynamicInput.value = dynamic;
-                        dynamicInput.max = total;
-                        staticDisplay.value = total - dynamic;
+                        const dynamic = dynamicCheckbox.checked ? 1 : 0;
                         wizardState.wordsRows = total;
                         wizardState.tapDynamicRows = dynamic;
                         wizardState.useHybridPages = dynamic > 0;
                     }
                     wordsInput.addEventListener('input', updateRows);
-                    dynamicInput.addEventListener('input', updateRows);
                     wordsInput.addEventListener('change', updateRows);
-                    dynamicInput.addEventListener('change', updateRows);
+                    dynamicCheckbox.addEventListener('change', updateRows);
                     updateRows();
                 } else {
                     titleEl.textContent = 'Button Size';
@@ -4382,9 +4371,9 @@ registerForm.addEventListener('submit', async (e) => {
                     const dRows = document.getElementById('wizardTapDynamicRows');
                     if (wRows) wizardState.wordsRows = Math.max(1, Math.min(7, parseInt(wRows.value) || 3));
                     if (dRows) {
-                        const dVal = parseInt(dRows.value, 10) || 0;
+                        const dVal = dRows.checked ? 1 : 0;
                         wizardState.useHybridPages = dVal > 0;
-                        wizardState.tapDynamicRows = Math.max(0, dVal);
+                        wizardState.tapDynamicRows = dVal;
                     }
                 }
             } else if (s === 5) {
