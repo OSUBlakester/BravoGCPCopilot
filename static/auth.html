@@ -3795,28 +3795,27 @@ registerForm.addEventListener('submit', async (e) => {
                 if (wizardState.interfaceMode === 'tap') {
                     titleEl.textContent = 'Button Layout';
                     contentEl.innerHTML = `
-                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Buttons per Row</h4>
-                            <div style="display:flex;gap:16px;align-items:center;">
-                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">How many buttons appear in each row. Fewer = larger buttons.</p>
-                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Columns (2–12)</label>
-                                    <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                        <div style="display:flex;flex-direction:column;gap:0;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #e5e7eb;">
+                                <div style="flex:1;padding-right:16px;">
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;margin-bottom:3px;">Buttons per Row</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;line-height:1.4;">How many buttons appear across each row. Fewer buttons means larger, easier-to-tap targets. More buttons means more options visible at once.</div>
                                 </div>
+                                <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}" style="width:64px;height:40px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;flex-shrink:0;">
                             </div>
-                        </div>
-                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
-                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;line-height:1.4;">Total rows of word buttons. Optionally add one AI-generated dynamic row at the bottom (like predictive text).</p>
-                            <div style="display:flex;gap:16px;align-items:center;">
-                                <div style="display:flex;flex-direction:column;align-items:center;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Total (1–7)</label>
-                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:80px;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #e5e7eb;">
+                                <div style="flex:1;padding-right:16px;">
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;margin-bottom:3px;">Number of Rows</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;line-height:1.4;">Total rows of word buttons displayed on each board. More rows show more vocabulary at once. This does not include the dynamic row below.</div>
                                 </div>
-                                <div style="display:flex;flex-direction:column;align-items:center;">
-                                    <label class="wizard-field-label" style="margin:0 0 8px 0;font-size:0.75rem;text-align:center;">Include Dynamic Row</label>
-                                    <input id="wizardTapDynamicRows" type="checkbox" ${wizardState.useHybridPages && wizardState.tapDynamicRows > 0 ? 'checked' : ''} style="width:20px;height:20px;">
+                                <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:64px;height:40px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;flex-shrink:0;">
+                            </div>
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;">
+                                <div style="flex:1;padding-right:16px;">
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;margin-bottom:3px;">Dynamic Row</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;line-height:1.4;">Adds one AI-generated row at the bottom of each board — like the predictive word bar on a smartphone keyboard. The suggested words update based on what was just selected. Disable if you prefer a fully fixed layout.</div>
                                 </div>
+                                <input id="wizardTapDynamicRows" type="checkbox" ${wizardState.useHybridPages && wizardState.tapDynamicRows > 0 ? 'checked' : ''} style="width:22px;height:22px;flex-shrink:0;accent-color:#6366f1;cursor:pointer;">
                             </div>
                         </div>
                         `;
