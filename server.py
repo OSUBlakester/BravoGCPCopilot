@@ -22854,12 +22854,6 @@ async def _assign_images_to_tap_config(
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict) or board.get('board_type') != 'static':
                 continue
-            # Nav sub-boards (source='navigation') are AI-driven: they have llm_prompt
-            # set so the tap interface generates dynamic follow-up content.  Backfilling
-            # them here would add ~11 K buttons and push the config back to ~2.8 MB,
-            # causing multi-minute chunked Firestore writes.  Skip them.
-            if board.get('source') == 'navigation':
-                continue
             existing = board.get('buttons') or []
             pool_btns = [b for b in existing if isinstance(b, dict) and b.get('pool_index') is not None]
             pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
@@ -25361,23 +25355,25 @@ async def _clear_chunked_tap_boards(doc_ref) -> None:
 
 async def _save_chunked_tap_boards(doc_ref, boards: List[Dict[str, Any]]) -> int:
     chunks = _split_boards_into_chunks(boards)
-    for idx, chunk in enumerate(chunks):
+    now_iso = dt.now().isoformat()
+
+    # Write all chunks in parallel — previously sequential, which caused multi-minute
+    # delays for large configs (~2.8 MB with nav sub-board buttons).
+    async def _write_chunk(idx: int, chunk: list) -> None:
         chunk_ref = doc_ref.collection("boards_chunks").document(f"chunk_{idx:04d}")
         await asyncio.to_thread(
             chunk_ref.set,
-            {
-                "index": idx,
-                "boards": chunk,
-                "updated_at": dt.now().isoformat(),
-            },
+            {"index": idx, "boards": chunk, "updated_at": now_iso},
         )
 
-    # Remove stale chunk documents from previous larger saves.
+    await asyncio.gather(*[_write_chunk(i, c) for i, c in enumerate(chunks)])
+
+    # Remove stale chunk documents from previous larger saves (also in parallel).
     existing_docs = await asyncio.to_thread(lambda: list(doc_ref.collection("boards_chunks").stream()))
     valid_ids = {f"chunk_{i:04d}" for i in range(len(chunks))}
-    for existing in existing_docs:
-        if existing.id not in valid_ids:
-            await asyncio.to_thread(existing.reference.delete)
+    stale = [d for d in existing_docs if d.id not in valid_ids]
+    if stale:
+        await asyncio.gather(*[asyncio.to_thread(d.reference.delete) for d in stale])
 
     return len(chunks)
 
