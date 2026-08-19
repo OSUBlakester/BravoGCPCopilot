@@ -9032,6 +9032,12 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                             continue
                         if CATEGORY_STATIC_POOLS.get(f'after_{word_key}'):
                             sub_board_id = f'nav_sub_{word_key}'
+                            # Store stubs without buttons — buttons are populated by the
+                            # _assign_images_to_tap_config backfill (which already handles
+                            # CATEGORY_STATIC_POOLS lookup).  Keeping stubs lean cuts the
+                            # saved config from ~2.8 MB to ~200 KB, avoiding chunked storage
+                            # and dramatically speeding up both the initial write and image
+                            # assignment reload.
                             nav_sub_board_shells.append({
                                 'id': sub_board_id,
                                 'label': word,
@@ -9047,7 +9053,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                                     f'"{word}" in everyday AAC communication. '
                                     f'Focus on what someone would say next after saying "{word}".'
                                 ),
-                                'buttons': [],
+                                # buttons intentionally omitted — backfill will populate
                             })
                             nav_board_by_pool_key[word_key] = sub_board_id
 
@@ -9081,23 +9087,12 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                         buttons.append(btn)
                     board['buttons'] = buttons
 
-                # Step 5: Fill buttons for nav sub-board shells.
-                # Words in after_<X> pools that match an existing board or another nav sub-board
-                # navigate to that board; everything else is do_nothing.
-                for sub_board in nav_sub_board_shells:
-                    after_pool = CATEGORY_STATIC_POOLS.get(str(sub_board.get('prompt_category') or ''), [])
-                    sub_board_id = sub_board['id']
-                    buttons = []
-                    for idx, word in enumerate(after_pool):
-                        word_key = _pool_key(str(word))
-                        target_id = all_board_by_pool_key.get(word_key)
-                        if target_id:
-                            btn = _make_pool_button_entry(idx, word, sub_board_id, idx >= max_buttons, grid_cols, 'navigate')
-                            btn['target_board_id'] = target_id
-                        else:
-                            btn = _make_pool_button_entry(idx, word, sub_board_id, idx >= max_buttons, grid_cols, 'do_nothing')
-                        buttons.append(btn)
-                    sub_board['buttons'] = buttons
+                # Step 5 removed: nav sub-board shells are stored as stubs (buttons: []).
+                # The _assign_images_to_tap_config backfill detects empty-button static boards
+                # whose prompt_category matches a CATEGORY_STATIC_POOLS key and regenerates
+                # buttons there, alongside image assignment.  This cuts the saved config from
+                # ~2.8 MB to ~200 KB, eliminating chunked Firestore writes and accelerating
+                # the wizard completion path.
 
                 new_tap_config['boards'].extend(nav_sub_board_shells)
 
@@ -21754,6 +21749,13 @@ async def button_symbol_search(
 _batch_search_cache: dict = {}
 _BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 
+# Module-level image URL cache shared across all profile builds.
+# Key: (mascot_clean, original_label) → image_url or None
+# Survives the lifetime of the server process; common AAC words hit Firestore once
+# and are served from memory for every subsequent profile.
+_image_url_cache: dict = {}
+_IMAGE_URL_CACHE_MAX = 5000  # evict oldest half when full
+
 
 def _make_pool_button_entry(
     pool_idx: int,
@@ -22103,6 +22105,25 @@ async def _lookup_images_for_labels(
 
     mascot_clean = str(mascot or '').strip().lower()
     unique_labels = list(dict.fromkeys(labels))  # preserve order, dedupe
+
+    # Fast path: serve any label already in the process-level image cache.
+    label_to_url: Dict[str, str] = {}
+    cache_hits: set = set()
+    for lbl in unique_labels:
+        cached_val = _image_url_cache.get((mascot_clean, lbl))
+        if cached_val is not None:  # None → cached miss; not in dict → unknown
+            if cached_val:  # non-empty string means a real URL was found
+                label_to_url[lbl] = cached_val
+            cache_hits.add(lbl)
+
+    uncached_labels = [lbl for lbl in unique_labels if lbl not in cache_hits]
+    if not uncached_labels:
+        logging.debug(f"_lookup_images_for_labels: all {len(unique_labels)} labels served from cache (mascot={mascot_clean!r})")
+        return label_to_url
+
+    # Continue with Firestore queries only for labels not in the cache.
+    unique_labels = uncached_labels
+
     norm_map = {lbl: _norm(lbl) for lbl in unique_labels}  # label → normalized
     key_term_map = {lbl: _key_term(norm_map[lbl]) for lbl in unique_labels if norm_map.get(lbl)}
 
@@ -22312,8 +22333,9 @@ async def _lookup_images_for_labels(
                 score -= 1000   # no mascot when user has one: mild penalty vs correct-mascot image
         return score
 
-    # Score all pre-processed candidates for each label.
-    label_to_url: Dict[str, str] = {}
+    # Score all pre-processed candidates for each uncached label.
+    # label_to_url was pre-populated with cache hits above; merge new results in.
+    newly_resolved: Dict[str, str] = {}
     for lbl in unique_labels:
         norm_lbl = norm_map.get(lbl, '')
         if not norm_lbl:
@@ -22332,15 +22354,30 @@ async def _lookup_images_for_labels(
                 best_url = cand["url"]
 
         if best_url:
-            label_to_url[lbl] = best_url
+            newly_resolved[lbl] = best_url
 
-    logging.info(f"_lookup_images_for_labels: {len(label_to_url)}/{len(unique_labels)} labels resolved (mascot={mascot_clean!r}, source={source!r})")
+    label_to_url.update(newly_resolved)
+
+    logging.info(f"_lookup_images_for_labels: {len(newly_resolved)}/{len(unique_labels)} new labels resolved from Firestore, {len(cache_hits)} from cache (mascot={mascot_clean!r}, source={source!r})")
+
+    # Populate the process-level cache with results for this batch.
+    # Cache both hits (url string) and misses (empty string) so repeated lookups
+    # of unresolved labels skip Firestore too.
+    if len(_image_url_cache) >= _IMAGE_URL_CACHE_MAX:
+        # Evict the oldest half by reinserting only the newer half.
+        items = list(_image_url_cache.items())
+        _image_url_cache.clear()
+        for k, v in items[len(items) // 2:]:
+            _image_url_cache[k] = v
+    for lbl in unique_labels:
+        _image_url_cache[(mascot_clean, lbl)] = newly_resolved.get(lbl, '')
 
     # Log any labels that had no matching image so admins can track gaps.
+    # Only log for labels queried in this call (not cache hits — those were already logged).
     # Skip pure numbers — they display as text and are not expected to have images.
     missing_labels = [
         lbl for lbl in unique_labels
-        if lbl not in label_to_url and not _norm(lbl).replace(' ', '').isdigit()
+        if lbl not in newly_resolved and not _norm(lbl).replace(' ', '').isdigit()
     ]
     if missing_labels:
         context = {"source": source, "mascot": mascot_clean, "account_id": account_id, "aac_user_id": aac_user_id}
