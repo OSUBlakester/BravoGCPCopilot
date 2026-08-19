@@ -22489,7 +22489,7 @@ async def _lookup_images_for_labels(
 
     # Run in small batches to avoid saturating the shared ThreadPoolExecutor and
     # blocking unrelated Firestore operations on other in-flight requests.
-    _BATCH = 5
+    _BATCH = 30
     streams: List[Any] = []
     try:
         asyncio.get_running_loop()
@@ -22853,6 +22853,12 @@ async def _assign_images_to_tap_config(
         backfill_changed = False
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict) or board.get('board_type') != 'static':
+                continue
+            # Nav sub-boards (source='navigation') are AI-driven: they have llm_prompt
+            # set so the tap interface generates dynamic follow-up content.  Backfilling
+            # them here would add ~11 K buttons and push the config back to ~2.8 MB,
+            # causing multi-minute chunked Firestore writes.  Skip them.
+            if board.get('source') == 'navigation':
                 continue
             existing = board.get('buttons') or []
             pool_btns = [b for b in existing if isinstance(b, dict) and b.get('pool_index') is not None]
