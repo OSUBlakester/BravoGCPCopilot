@@ -8990,29 +8990,116 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                     f"board_types_sample={[b.get('board_type') for b in new_tap_config.get('boards', []) if isinstance(b, dict)][:5]}"
                 )
 
+                max_buttons = static_rows * grid_cols
+
+                # Step 1: Set dynamic_rows on every static board.
+                for board in new_tap_config.get('boards', []):
+                    if isinstance(board, dict) and board.get('board_type') == 'static':
+                        board['dynamic_rows'] = tap_dynamic_rows
+
+                # Step 2: Build a lookup of all existing boards by their effective pool key
+                # (prompt_category first, label as fallback). Used so that Home/Actions buttons
+                # that already have a corresponding board (e.g. "Help") reuse it instead of
+                # generating a duplicate sub-board.
+                existing_board_by_pool_key: dict = {}
+                for b in new_tap_config.get('boards', []):
+                    if not isinstance(b, dict) or not str(b.get('id') or '').strip():
+                        continue
+                    for attr in ('prompt_category', 'label'):
+                        bk = _pool_key(str(b.get(attr) or ''))
+                        if bk and bk not in existing_board_by_pool_key:
+                            existing_board_by_pool_key[bk] = str(b['id']).strip()
+
+                # Step 3: Pre-create sub-board shells for Home/Actions words that don't already
+                # have a board and have an after_<word> pool defined. Shells are created first
+                # (with empty buttons) so we can build a complete ID lookup before filling buttons.
+                # Using a word-keyed ID (nav_sub_<word>) prevents duplicate sub-boards when the
+                # same word appears in both Home and Actions.
+                nav_sub_board_shells: list = []
+                nav_board_by_pool_key: dict = {}  # newly created nav sub-board IDs
+
                 for board in new_tap_config.get('boards', []):
                     if not isinstance(board, dict):
                         continue
-                    # Always record the explicit dynamic_rows count on static boards so the
-                    # tap interface and board builder both reflect the chosen value (0 = all static).
-                    if board.get('board_type') == 'static':
-                        board['dynamic_rows'] = tap_dynamic_rows
-                    # Pre-populate empty static rows with vocabulary from the pool
-                    if (
-                        board.get('board_type') == 'static'
-                        and static_rows > 0
-                        and not board.get('buttons')
-                        and CATEGORY_STATIC_POOLS
-                    ):
-                        pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('prompt_category') or '')), [])
-                        if not pool:
-                            pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
-                        if pool:
-                            max_buttons = static_rows * grid_cols
-                            board['buttons'] = [
-                                _make_pool_button_entry(idx, word, board['id'], idx >= max_buttons, grid_cols, default_button_action)
-                                for idx, word in enumerate(pool)
-                            ]
+                    bpk = _pool_key(str(board.get('prompt_category') or ''))
+                    if not CATEGORY_STATIC_POOLS.get(bpk):
+                        bpk = _pool_key(str(board.get('label') or ''))
+                    if bpk not in ('home', 'actions'):
+                        continue
+                    for word in CATEGORY_STATIC_POOLS.get(bpk, []):
+                        word_key = _pool_key(str(word))
+                        if word_key in existing_board_by_pool_key or word_key in nav_board_by_pool_key:
+                            continue
+                        if CATEGORY_STATIC_POOLS.get(f'after_{word_key}'):
+                            sub_board_id = f'nav_sub_{word_key}'
+                            nav_sub_board_shells.append({
+                                'id': sub_board_id,
+                                'label': word,
+                                'board_type': 'static',
+                                'source': 'navigation',
+                                'source_button_id': None,
+                                'owner_scope': 'user',
+                                'hidden': False,
+                                'prompt_category': f'after_{word_key}',
+                                'dynamic_rows': tap_dynamic_rows,
+                                'llm_prompt': (
+                                    f'Generate short words and phrases that commonly follow '
+                                    f'"{word}" in everyday AAC communication. '
+                                    f'Focus on what someone would say next after saying "{word}".'
+                                ),
+                                'buttons': [],
+                            })
+                            nav_board_by_pool_key[word_key] = sub_board_id
+
+                # Combined lookup: existing boards + newly created nav sub-boards.
+                all_board_by_pool_key: dict = {**existing_board_by_pool_key, **nav_board_by_pool_key}
+
+                # Step 4: Populate buttons for all existing static boards.
+                # Any word that matches a board in all_board_by_pool_key gets navigate;
+                # everything else gets do_nothing. This applies to ALL boards, not just
+                # Home/Actions — so e.g. Greetings "hello" navigates to nav_sub_hello.
+                for board in new_tap_config.get('boards', []):
+                    if not isinstance(board, dict):
+                        continue
+                    if not (board.get('board_type') == 'static' and static_rows > 0 and not board.get('buttons') and CATEGORY_STATIC_POOLS):
+                        continue
+                    bpk = _pool_key(str(board.get('prompt_category') or ''))
+                    if not CATEGORY_STATIC_POOLS.get(bpk):
+                        bpk = _pool_key(str(board.get('label') or ''))
+                    pool = CATEGORY_STATIC_POOLS.get(bpk, [])
+                    if not pool:
+                        continue
+                    buttons = []
+                    for idx, word in enumerate(pool):
+                        word_key = _pool_key(str(word))
+                        target_id = all_board_by_pool_key.get(word_key)
+                        if target_id:
+                            btn = _make_pool_button_entry(idx, word, board['id'], idx >= max_buttons, grid_cols, 'navigate')
+                            btn['target_board_id'] = target_id
+                        else:
+                            btn = _make_pool_button_entry(idx, word, board['id'], idx >= max_buttons, grid_cols, 'do_nothing')
+                        buttons.append(btn)
+                    board['buttons'] = buttons
+
+                # Step 5: Fill buttons for nav sub-board shells.
+                # Words in after_<X> pools that match an existing board or another nav sub-board
+                # navigate to that board; everything else is do_nothing.
+                for sub_board in nav_sub_board_shells:
+                    after_pool = CATEGORY_STATIC_POOLS.get(str(sub_board.get('prompt_category') or ''), [])
+                    sub_board_id = sub_board['id']
+                    buttons = []
+                    for idx, word in enumerate(after_pool):
+                        word_key = _pool_key(str(word))
+                        target_id = all_board_by_pool_key.get(word_key)
+                        if target_id:
+                            btn = _make_pool_button_entry(idx, word, sub_board_id, idx >= max_buttons, grid_cols, 'navigate')
+                            btn['target_board_id'] = target_id
+                        else:
+                            btn = _make_pool_button_entry(idx, word, sub_board_id, idx >= max_buttons, grid_cols, 'do_nothing')
+                        buttons.append(btn)
+                    sub_board['buttons'] = buttons
+
+                new_tap_config['boards'].extend(nav_sub_board_shells)
 
                 logging.warning(
                     f"DEBUG regenerate_boards after loop: "

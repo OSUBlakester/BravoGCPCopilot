@@ -3517,9 +3517,16 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // Both modes: 9 steps (step 9 = optional User Profile Interview)
-            // tap: includes mascot at step 2; scan: skips mascot, scan config at display 8
-            return 9;
+            // tap: 8 steps (Button Action step removed; do_nothing is hardcoded)
+            // scan: 9 steps
+            return wizardState.interfaceMode === 'tap' ? 8 : 9;
+        }
+
+        // For tap mode, display step 5+ maps to content step 6+ (skipping Button Action).
+        // scan mode has no remapping.
+        function tapContentStep(displayStep) {
+            if (wizardState.interfaceMode !== 'tap') return displayStep;
+            return displayStep >= 5 ? displayStep + 1 : displayStep;
         }
 
         async function openSetupWizard() {
@@ -3668,10 +3675,15 @@ registerForm.addEventListener('submit', async (e) => {
         function renderWizardStep(step) {
             const contentEl = document.getElementById('wizardStepContent');
             const titleEl = document.getElementById('wizardTitle');
-            // Scan mode skips the mascot step (content step 2), so display step 2 maps to content step 3, etc.
-            const s = (wizardState.interfaceMode === 'scan' && step >= 2) ? step + 1 : step;
+            // Scan skips mascot (content 2): display 2+ → content +1
+            // Tap skips Button Action (content 5): display 5+ → content +1
+            const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
+                    : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
+                    : step;
+            // Last step: scan display 9, tap display 8
+            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
 
-            if (step === 9) {
+            if (isLastStep) {
                 // Last step for both tap and scan — optional User Profile Interview
                 titleEl.textContent = 'User Profile Interview';
                 contentEl.innerHTML = `
@@ -4345,9 +4357,13 @@ registerForm.addEventListener('submit', async (e) => {
 
         function wizardCollectCurrentStep() {
             const step = wizardState.currentStep;
-            // Scan mode skips mascot (content step 2), so display step 2 = content step 3, etc.
-            const s = (wizardState.interfaceMode === 'scan' && step >= 2) ? step + 1 : step;
-            if (step === 9) {
+            // Scan skips mascot (content 2): display 2+ → content +1
+            // Tap skips Button Action (content 5): display 5+ → content +1
+            const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
+                    : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
+                    : step;
+            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
+            if (isLastStep) {
                 // Last step (both modes) — optional interview
                 const runEl = document.querySelector('input[name="wizardInterviewChoice"]:checked');
                 if (runEl) wizardState.runInterviewAfter = runEl.value === 'run';
@@ -4473,8 +4489,9 @@ registerForm.addEventListener('submit', async (e) => {
                     tapPhrasesRows: 0,
                     useHybridPages: wizardState.useHybridPages,
                     tapDynamicRows: wizardState.tapDynamicRows,
-                    useBravoBuild: wizardState.useBravoBuild,
-                    defaultButtonAction: wizardState.defaultButtonAction,
+                    // Tap mode always uses do_nothing; scan mode uses whatever was set in the wizard
+                    useBravoBuild: wizardState.interfaceMode === 'tap' ? false : wizardState.useBravoBuild,
+                    defaultButtonAction: wizardState.interfaceMode === 'tap' ? 'do_nothing' : wizardState.defaultButtonAction,
                     mascot: wizardState.mascot,
                     hasLoggedIn: true,
                     regenerate_boards: true
