@@ -3517,9 +3517,16 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // Both modes: 9 steps (step 9 = optional User Profile Interview)
-            // tap: includes mascot at step 2; scan: skips mascot, scan config at display 8
-            return 9;
+            // tap: 8 steps (Button Action step removed; do_nothing is hardcoded)
+            // scan: 9 steps
+            return wizardState.interfaceMode === 'tap' ? 8 : 9;
+        }
+
+        // For tap mode, display step 5+ maps to content step 6+ (skipping Button Action).
+        // scan mode has no remapping.
+        function tapContentStep(displayStep) {
+            if (wizardState.interfaceMode !== 'tap') return displayStep;
+            return displayStep >= 5 ? displayStep + 1 : displayStep;
         }
 
         async function openSetupWizard() {
@@ -3668,10 +3675,15 @@ registerForm.addEventListener('submit', async (e) => {
         function renderWizardStep(step) {
             const contentEl = document.getElementById('wizardStepContent');
             const titleEl = document.getElementById('wizardTitle');
-            // Scan mode skips the mascot step (content step 2), so display step 2 maps to content step 3, etc.
-            const s = (wizardState.interfaceMode === 'scan' && step >= 2) ? step + 1 : step;
+            // Scan skips mascot (content 2): display 2+ → content +1
+            // Tap skips Button Action (content 5): display 5+ → content +1
+            const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
+                    : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
+                    : step;
+            // Last step: scan display 9, tap display 8
+            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
 
-            if (step === 9) {
+            if (isLastStep) {
                 // Last step for both tap and scan — optional User Profile Interview
                 titleEl.textContent = 'User Profile Interview';
                 contentEl.innerHTML = `
@@ -3795,32 +3807,27 @@ registerForm.addEventListener('submit', async (e) => {
                 if (wizardState.interfaceMode === 'tap') {
                     titleEl.textContent = 'Button Layout';
                     contentEl.innerHTML = `
-                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Buttons per Row</h4>
-                            <div style="display:flex;gap:16px;align-items:center;">
-                                <p style="font-size:0.875rem;color:#4b5563;margin:0;line-height:1.4;flex:1;">How many buttons appear in each row. Fewer = larger buttons.</p>
-                                <div style="display:flex;flex-direction:column;align-items:center;width:110px;flex-shrink:0;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Columns (2–12)</label>
-                                    <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                        <div style="display:flex;flex-direction:column;gap:0;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #e5e7eb;">
+                                <div style="flex:1;padding-right:16px;">
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;margin-bottom:3px;">Buttons per Row</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;line-height:1.4;">How many buttons appear across each row. Fewer buttons means larger, easier-to-tap targets. More buttons means more options visible at once.</div>
                                 </div>
+                                <input id="wizardGridColumns" class="wizard-input wizard-input-number" type="number" min="2" max="12" value="${wizardState.gridColumns}" style="width:64px;height:40px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;flex-shrink:0;">
                             </div>
-                        </div>
-                        <div style="margin-bottom:16px;border-bottom:1px solid #e5e7eb;padding-bottom:16px;">
-                            <h4 style="font-weight:600;color:#111827;margin:0 0 4px 0;font-size:1.05rem;">Words Rows</h4>
-                            <p style="font-size:0.875rem;color:#4b5563;margin:0 0 10px 0;line-height:1.4;">Split into Static (fixed) and Dynamic (AI-generated, optional). Set Dynamic to 0 for static-only.</p>
-                            <div style="display:flex;gap:12px;align-items:flex-end;">
-                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Total (1–7)</label>
-                                    <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid #e5e7eb;">
+                                <div style="flex:1;padding-right:16px;">
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;margin-bottom:3px;">Number of Rows</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;line-height:1.4;">Total rows of word buttons displayed on each board. More rows show more vocabulary at once. This does not include the dynamic row below.</div>
                                 </div>
-                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Static</label>
-                                    <input id="wizardStaticRowsDisplay" class="wizard-input wizard-input-number" type="number" readonly style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;background:#f3f4f6;color:#374151;border-color:#d1d5db;cursor:not-allowed;" value="${(wizardState.wordsRows || 3) - (wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0)}">
+                                <input id="wizardWordsRows" class="wizard-input wizard-input-number" type="number" min="1" max="7" value="${wizardState.wordsRows || 3}" style="width:64px;height:40px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;flex-shrink:0;">
+                            </div>
+                            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;">
+                                <div style="flex:1;padding-right:16px;">
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;margin-bottom:3px;">Dynamic Row</div>
+                                    <div style="font-size:0.8rem;color:#6b7280;line-height:1.4;">Adds one AI-generated row at the bottom of each board — like the predictive word bar on a smartphone keyboard. The suggested words update based on what was just selected. Disable if you prefer a fully fixed layout.</div>
                                 </div>
-                                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-                                    <label class="wizard-field-label" style="margin:0 0 4px 0;font-size:0.75rem;text-align:center;">Dynamic</label>
-                                    <input id="wizardTapDynamicRows" class="wizard-input wizard-input-number" type="number" min="0" max="${wizardState.wordsRows || 3}" value="${wizardState.useHybridPages ? (wizardState.tapDynamicRows || 0) : 0}" style="width:100%;height:36px;font-size:1.15rem;padding:4px 0;text-align:center;box-sizing:border-box;">
-                                </div>
+                                <input id="wizardTapDynamicRows" type="checkbox" ${wizardState.useHybridPages && wizardState.tapDynamicRows > 0 ? 'checked' : ''} style="width:22px;height:22px;flex-shrink:0;accent-color:#6366f1;cursor:pointer;">
                             </div>
                         </div>
                         `;
@@ -3830,27 +3837,20 @@ registerForm.addEventListener('submit', async (e) => {
                     });
 
                     const wordsInput = document.getElementById('wizardWordsRows');
-                    const dynamicInput = document.getElementById('wizardTapDynamicRows');
-                    const staticDisplay = document.getElementById('wizardStaticRowsDisplay');
+                    const dynamicCheckbox = document.getElementById('wizardTapDynamicRows');
                     function updateRows() {
                         let total = parseInt(wordsInput.value, 10) || 3;
                         if (total < 1) total = 1;
                         if (total > 7) total = 7;
                         wordsInput.value = total;
-                        let dynamic = parseInt(dynamicInput.value, 10) || 0;
-                        if (dynamic < 0) dynamic = 0;
-                        if (dynamic > total) dynamic = total;
-                        dynamicInput.value = dynamic;
-                        dynamicInput.max = total;
-                        staticDisplay.value = total - dynamic;
+                        const dynamic = dynamicCheckbox.checked ? 1 : 0;
                         wizardState.wordsRows = total;
                         wizardState.tapDynamicRows = dynamic;
                         wizardState.useHybridPages = dynamic > 0;
                     }
                     wordsInput.addEventListener('input', updateRows);
-                    dynamicInput.addEventListener('input', updateRows);
                     wordsInput.addEventListener('change', updateRows);
-                    dynamicInput.addEventListener('change', updateRows);
+                    dynamicCheckbox.addEventListener('change', updateRows);
                     updateRows();
                 } else {
                     titleEl.textContent = 'Button Size';
@@ -4357,9 +4357,13 @@ registerForm.addEventListener('submit', async (e) => {
 
         function wizardCollectCurrentStep() {
             const step = wizardState.currentStep;
-            // Scan mode skips mascot (content step 2), so display step 2 = content step 3, etc.
-            const s = (wizardState.interfaceMode === 'scan' && step >= 2) ? step + 1 : step;
-            if (step === 9) {
+            // Scan skips mascot (content 2): display 2+ → content +1
+            // Tap skips Button Action (content 5): display 5+ → content +1
+            const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
+                    : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
+                    : step;
+            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
+            if (isLastStep) {
                 // Last step (both modes) — optional interview
                 const runEl = document.querySelector('input[name="wizardInterviewChoice"]:checked');
                 if (runEl) wizardState.runInterviewAfter = runEl.value === 'run';
@@ -4382,9 +4386,9 @@ registerForm.addEventListener('submit', async (e) => {
                     const dRows = document.getElementById('wizardTapDynamicRows');
                     if (wRows) wizardState.wordsRows = Math.max(1, Math.min(7, parseInt(wRows.value) || 3));
                     if (dRows) {
-                        const dVal = parseInt(dRows.value, 10) || 0;
+                        const dVal = dRows.checked ? 1 : 0;
                         wizardState.useHybridPages = dVal > 0;
-                        wizardState.tapDynamicRows = Math.max(0, dVal);
+                        wizardState.tapDynamicRows = dVal;
                     }
                 }
             } else if (s === 5) {
@@ -4485,8 +4489,9 @@ registerForm.addEventListener('submit', async (e) => {
                     tapPhrasesRows: 0,
                     useHybridPages: wizardState.useHybridPages,
                     tapDynamicRows: wizardState.tapDynamicRows,
-                    useBravoBuild: wizardState.useBravoBuild,
-                    defaultButtonAction: wizardState.defaultButtonAction,
+                    // Tap mode always uses do_nothing; scan mode uses whatever was set in the wizard
+                    useBravoBuild: wizardState.interfaceMode === 'tap' ? false : wizardState.useBravoBuild,
+                    defaultButtonAction: wizardState.interfaceMode === 'tap' ? 'do_nothing' : wizardState.defaultButtonAction,
                     mascot: wizardState.mascot,
                     hasLoggedIn: true,
                     regenerate_boards: true
