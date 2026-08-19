@@ -19571,6 +19571,81 @@ async def prewarm_cache_endpoint(
         logging.error(f"Error prewarming cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/admin/image-index/build")
+async def build_image_index_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: str = "",
+):
+    """
+    Pre-compute and store the static image index for the given mascot (or all known mascots).
+    Run this once after deployment or whenever the aac_images collection changes significantly.
+    Subsequent profile builds will load the index in one Firestore round-trip instead of
+    running hundreds of per-label queries.
+    """
+    try:
+        if mascot:
+            label_to_url = await _build_static_image_index(mascot.strip().lower())
+            return {"success": True, "mascot": mascot, "labels_resolved": len(label_to_url)}
+
+        # Discover all mascots from the aac_images collection.
+        if not firestore_db:
+            raise HTTPException(status_code=503, detail="Firestore not available")
+        docs = await asyncio.to_thread(
+            lambda: list(
+                firestore_db.collection('aac_images')
+                .select(['mascot'])
+                .limit(3000)
+                .stream()
+            )
+        )
+        mascot_set = {
+            str(d.to_dict().get('mascot') or '').strip().lower()
+            for d in docs
+        }
+        mascot_set.discard('')
+        results: Dict[str, int] = {}
+        for m in sorted(mascot_set):
+            ltu = await _build_static_image_index(m)
+            results[m] = len(ltu)
+        return {"success": True, "mascots_built": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"build_image_index_endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/image-index/clear")
+async def clear_image_index_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: str = "",
+):
+    """
+    Clear the in-memory static image index cache (and optionally the Firestore copy)
+    so the next profile build triggers a fresh rebuild.  Pass mascot= to target one mascot
+    or omit to clear all in-memory entries.
+    """
+    global _static_image_index_cache
+    mc = str(mascot or '').strip().lower()
+    if mc:
+        _static_image_index_cache.pop(mc, None)
+        return {"success": True, "cleared_mascot": mc, "note": "In-memory cleared; Firestore index unchanged."}
+    _static_image_index_cache.clear()
+    return {"success": True, "cleared": "all mascots (in-memory only)"}
+
+
+@app.get("/api/admin/image-index/status")
+async def image_index_status_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Return the current state of the in-memory static image index cache."""
+    return {
+        "cached_mascots": {
+            m: len(idx) for m, idx in _static_image_index_cache.items()
+        }
+    }
+
+
 @app.get("/api/admin/images/browse")
 async def browse_images_for_admin(
     token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
@@ -21756,6 +21831,101 @@ _BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 _image_url_cache: dict = {}
 _IMAGE_URL_CACHE_MAX = 5000  # evict oldest half when full
 
+# Pre-computed per-mascot image index for all CATEGORY_STATIC_POOLS labels.
+# Loaded from Firestore on first use; eliminates bulk Firestore queries during profile creation.
+# Key: mascot_clean → {original_label: image_url}
+_static_image_index_cache: Dict[str, Dict[str, str]] = {}
+# Labels per Firestore chunk doc — at ~200 bytes/entry, 800 entries ≈ 160 KB (safely under 1 MB).
+_STATIC_IMAGE_INDEX_CHUNK_SIZE = 800
+
+
+async def _load_static_image_index(mascot: str) -> Dict[str, str]:
+    """Load the pre-computed static-pool image index from Firestore (or in-memory cache)."""
+    mc = str(mascot or '').strip().lower()
+    if not mc:
+        return {}
+    if mc in _static_image_index_cache:
+        return _static_image_index_cache[mc]
+    if not firestore_db:
+        return {}
+    try:
+        chunks_ref = (firestore_db.collection('aac_image_index')
+                      .document(mc).collection('chunks'))
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_ref.stream()))
+        merged: Dict[str, str] = {}
+        for doc in chunk_docs:
+            chunk_map = (doc.to_dict() or {}).get('labels') or {}
+            merged.update(chunk_map)
+        if merged:
+            _static_image_index_cache[mc] = merged
+            logging.info(f"_load_static_image_index: loaded {len(merged)} entries for mascot={mc!r}")
+        return merged
+    except Exception as e:
+        logging.warning(f"_load_static_image_index: Firestore error for {mc!r}: {e}")
+        return {}
+
+
+async def _save_static_image_index(mascot: str, label_map: Dict[str, str]) -> None:
+    """Chunk and save the static image index to Firestore, then update the in-memory cache."""
+    mc = str(mascot or '').strip().lower()
+    if not firestore_db or not mc or not label_map:
+        return
+    try:
+        meta_ref = firestore_db.collection('aac_image_index').document(mc)
+        chunks_ref = meta_ref.collection('chunks')
+        items = list(label_map.items())
+        chunk_size = _STATIC_IMAGE_INDEX_CHUNK_SIZE
+        num_chunks = (len(items) + chunk_size - 1) // chunk_size
+
+        async def _write_chunk(idx: int, chunk_items: list) -> None:
+            await asyncio.to_thread(
+                lambda: chunks_ref.document(str(idx)).set({'labels': dict(chunk_items)})
+            )
+
+        await asyncio.gather(*[
+            _write_chunk(i, items[start:start + chunk_size])
+            for i, start in enumerate(range(0, len(items), chunk_size))
+        ])
+        await asyncio.to_thread(lambda: meta_ref.set({
+            'mascot': mc,
+            'label_count': len(label_map),
+            'chunk_count': num_chunks,
+            'computed_at': firestore.SERVER_TIMESTAMP,
+        }))
+        _static_image_index_cache[mc] = label_map
+        logging.info(
+            f"_save_static_image_index: saved {len(label_map)} entries "
+            f"in {num_chunks} chunks for mascot={mc!r}"
+        )
+    except Exception as e:
+        logging.warning(f"_save_static_image_index: failed for {mc!r}: {e}")
+
+
+async def _build_static_image_index(mascot: str) -> Dict[str, str]:
+    """Compute image URLs for every CATEGORY_STATIC_POOLS label and persist to Firestore."""
+    mc = str(mascot or '').strip().lower()
+    all_pool_labels: List[str] = []
+    for words in CATEGORY_STATIC_POOLS.values():
+        all_pool_labels.extend(str(w).strip() for w in words if str(w).strip())
+    unique_labels = list(dict.fromkeys(all_pool_labels))
+    logging.info(
+        f"_build_static_image_index: resolving {len(unique_labels)} unique "
+        f"pool labels for mascot={mc!r}"
+    )
+    label_to_url = await _lookup_images_for_labels(
+        unique_labels, mc, '', '', source='static_image_index'
+    )
+    await _save_static_image_index(mc, label_to_url)
+    return label_to_url
+
+
+async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
+    """Return the static image index for the given mascot, building it if not yet stored."""
+    idx = await _load_static_image_index(mascot)
+    if not idx:
+        idx = await _build_static_image_index(mascot)
+    return idx
+
 
 def _make_pool_button_entry(
     pool_idx: int,
@@ -22602,7 +22772,21 @@ async def _assign_images_to_tap_config(
 
         label_to_url: Dict[str, str] = {}
         if all_labels:
-            label_to_url = await _lookup_images_for_labels(all_labels, mascot, account_id, aac_user_id, source="tap_config")
+            # Pre-computed index covers all CATEGORY_STATIC_POOLS labels — read in one Firestore
+            # round-trip instead of running hundreds of per-label queries.  Built lazily on first
+            # call for each mascot, then cached in memory and in Firestore for subsequent builds.
+            static_idx = await _ensure_static_image_index(mascot)
+            all_labels_set = set(all_labels)
+            label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
+
+            # Any labels not covered by the static index (custom boards, boards_menu entries
+            # with non-pool words) still go through the normal Firestore query path.
+            remaining_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
+            if remaining_labels:
+                extra = await _lookup_images_for_labels(
+                    remaining_labels, mascot, account_id, aac_user_id, source="tap_config"
+                )
+                label_to_url.update(extra)
 
         stats["images_resolved"] = len(label_to_url)
 
