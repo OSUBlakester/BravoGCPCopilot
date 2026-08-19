@@ -21902,15 +21902,27 @@ async def _save_static_image_index(mascot: str, label_map: Dict[str, str]) -> No
 
 
 async def _build_static_image_index(mascot: str) -> Dict[str, str]:
-    """Compute image URLs for every CATEGORY_STATIC_POOLS label and persist to Firestore."""
+    """Compute image URLs for every CATEGORY_STATIC_POOLS label and persist to Firestore.
+
+    Clears both per-label and per-mascot in-memory caches before querying so that
+    image updates in aac_images are always picked up fresh.
+    """
     mc = str(mascot or '').strip().lower()
+
+    # Evict any stale entries from the per-label cache for this mascot so that
+    # changed images in aac_images are fetched fresh from Firestore.
+    stale_keys = [k for k in _image_url_cache if k[0] == mc]
+    for k in stale_keys:
+        del _image_url_cache[k]
+    _static_image_index_cache.pop(mc, None)
+
     all_pool_labels: List[str] = []
     for words in CATEGORY_STATIC_POOLS.values():
         all_pool_labels.extend(str(w).strip() for w in words if str(w).strip())
     unique_labels = list(dict.fromkeys(all_pool_labels))
     logging.info(
         f"_build_static_image_index: resolving {len(unique_labels)} unique "
-        f"pool labels for mascot={mc!r}"
+        f"pool labels for mascot={mc!r} (caches cleared)"
     )
     label_to_url = await _lookup_images_for_labels(
         unique_labels, mc, '', '', source='static_image_index'
