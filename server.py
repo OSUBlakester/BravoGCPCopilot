@@ -9120,7 +9120,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                     async def _run_assign_and_clear(_cfg=new_tap_config, _mc=_mascot_for_assign,
                                                     _aid=account_id, _uid=aac_user_id, _key=_assign_key):
                         try:
-                            await _assign_images_to_tap_config(_cfg, _mc, _aid, _uid)
+                            await _assign_images_to_tap_config(_cfg, _mc, _aid, _uid, skip_remaining_lookup=True)
                         finally:
                             _image_assign_in_flight.discard(_key)
 
@@ -23123,6 +23123,7 @@ async def _assign_images_to_tap_config(
     mascot: str,
     account_id: str,
     aac_user_id: str,
+    skip_remaining_lookup: bool = False,
 ) -> Dict[str, Any]:
     """
     Resolve images for every static pool button in the tap config and save to Firestore.
@@ -23245,11 +23246,16 @@ async def _assign_images_to_tap_config(
         label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
 
         remaining_board_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
-        if remaining_board_labels:
+        if remaining_board_labels and not skip_remaining_lookup:
             extra = await _lookup_images_for_labels(
                 remaining_board_labels, mascot, account_id, aac_user_id, source="tap_config"
             )
             label_to_url.update(extra)
+        elif remaining_board_labels:
+            logging.info(
+                f"_assign_images: skipping Firestore lookup for {len(remaining_board_labels)} "
+                f"remaining labels (skip_remaining_lookup=True) [{account_id}/{aac_user_id}]"
+            )
         _elapsed("lookup_remaining", _t3)
 
         # --- boards_menu labels ---
@@ -23383,7 +23389,22 @@ async def assign_all_board_images(
         if not config_data:
             raise HTTPException(status_code=404, detail='Board config not found')
 
-        # Run synchronously so the response confirms completion
+        # Guard against a background task from regenerate_boards still running.
+        # Wait up to 90s for it to finish, then run the full lookup ourselves.
+        _assign_key = (account_id, aac_user_id)
+        waited = 0.0
+        while _assign_key in _image_assign_in_flight and waited < 90.0:
+            await asyncio.sleep(1.0)
+            waited += 1.0
+        if waited:
+            logging.info(
+                f"assign_all_board_images: waited {waited:.0f}s for in-flight task to finish "
+                f"[{account_id}/{aac_user_id}]"
+            )
+            # Reload config so we get the version written by the background task
+            config_data = await load_tap_nav_config(account_id, aac_user_id) or config_data
+
+        # Run synchronously so the response confirms completion (full Firestore lookup)
         stats = await _assign_images_to_tap_config(config_data, mascot, account_id, aac_user_id)
 
         return JSONResponse(content={'success': True, 'mascot': mascot, 'debug': stats})
