@@ -23087,12 +23087,20 @@ async def _assign_images_to_tap_config(
     Uses config_data only to collect labels; reloads a fresh copy from Firestore
     before saving so concurrent writes (e.g. wizard boards-menu save) are not lost.
     """
+    import time as _t
+    _t0 = _t.perf_counter()
+    def _elapsed(label: str, since=None) -> float:
+        ms = round((_t.perf_counter() - (since or _t0)) * 1000)
+        logging.info(f"⏱ _assign_images [{account_id}/{aac_user_id}] {label}: {ms}ms")
+        return _t.perf_counter()
+
     stats: Dict[str, Any] = {"labels_found": 0, "images_resolved": 0, "save_ok": False, "backfill_changed": False, "error": None}
     try:
         # Load a fresh copy from Firestore so we work with the latest state.
         fresh_config = await load_tap_nav_config(account_id, aac_user_id)
         if not fresh_config:
             fresh_config = config_data
+        _t1 = _elapsed("load_fresh_config")
 
         # Race-condition guard: the background task now runs fast enough that a
         # concurrent wizard save can land between our creation and this read.  If
@@ -23168,6 +23176,7 @@ async def _assign_images_to_tap_config(
 
         stats["labels_found"] = len(all_labels)
         stats["backfill_changed"] = backfill_changed
+        _t2 = _elapsed("backfill+collect_labels", _t1)
 
         if not all_labels and not backfill_changed:
             return stats
@@ -23178,6 +23187,7 @@ async def _assign_images_to_tap_config(
             # round-trip instead of running hundreds of per-label queries.  Built lazily on first
             # call for each mascot, then cached in memory and in Firestore for subsequent builds.
             static_idx = await _ensure_static_image_index(mascot)
+            _t3 = _elapsed("ensure_static_index", _t2)
             all_labels_set = set(all_labels)
             label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
 
@@ -23189,6 +23199,7 @@ async def _assign_images_to_tap_config(
                     remaining_labels, mascot, account_id, aac_user_id, source="tap_config"
                 )
                 label_to_url.update(extra)
+            _elapsed("lookup_remaining", _t3)
 
         stats["images_resolved"] = len(label_to_url)
 
@@ -23269,9 +23280,12 @@ async def _assign_images_to_tap_config(
         if menu_changed[0]:
             fresh_config['buttons'] = compose_legacy_buttons_from_boards_menu(fresh_config)
 
+        _t_presave = _t.perf_counter()
         if backfill_changed or img_changed or menu_changed[0]:
             save_ok = await save_tap_nav_config(account_id, aac_user_id, fresh_config)
             stats["save_ok"] = bool(save_ok)
+            _elapsed("save_tap_nav_config", _t_presave)
+            _elapsed("TOTAL", )
             logging.info(
                 f"✅ Pool/image assignment complete for {account_id}/{aac_user_id}: "
                 f"backfill={backfill_changed} images={len(label_to_url)} save_ok={save_ok}"
