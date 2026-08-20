@@ -19643,12 +19643,64 @@ async def clear_image_index_endpoint(
 async def image_index_status_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
 ):
-    """Return the current state of the in-memory static image index cache."""
-    return {
-        "cached_mascots": {
-            m: len(idx) for m, idx in _static_image_index_cache.items()
-        }
+    """Diagnose the image index pipeline so slow profile creation can be root-caused.
+
+    Reports for each mascot:
+      - static_file_labels   : entries in STATIC_IMAGE_ASSIGNMENTS (0 = import failed)
+      - bucket_name          : AAC_IMAGES_BUCKET_NAME (null = storage deps missing)
+      - memory_cache_labels  : entries currently in _static_image_index_cache
+      - firestore_index_labels : entries readable from aac_image_index in Firestore
+      - expected_path        : which priority level will be used on next cold-start
+    """
+    import time as _time
+
+    mascots_to_check = ["bobby", "bonnie", "buddy"]
+    result: Dict[str, Any] = {
+        "bucket_name": AAC_IMAGES_BUCKET_NAME,
+        "vertex_ai_available": VERTEX_AI_AVAILABLE,
+        "static_file_loaded": bool(STATIC_IMAGE_ASSIGNMENTS),
+        "mascots": {},
     }
+
+    for mc in mascots_to_check:
+        file_entries = len(STATIC_IMAGE_ASSIGNMENTS.get(mc) or {})
+        mem_entries = len(_static_image_index_cache.get(mc) or {})
+
+        # Try reading the Firestore index directly
+        t0 = _time.time()
+        fs_entries = 0
+        fs_error = None
+        try:
+            if firestore_db:
+                chunks_ref = (firestore_db.collection('aac_image_index')
+                              .document(mc).collection('chunks'))
+                chunk_docs = await asyncio.to_thread(lambda: list(chunks_ref.stream()))
+                for doc in chunk_docs:
+                    fs_entries += len((doc.to_dict() or {}).get('labels') or {})
+        except Exception as _e:
+            fs_error = str(_e)
+        fs_ms = round((_time.time() - t0) * 1000)
+
+        # Determine which path would be taken on a cold-start
+        if mem_entries:
+            path = "1-memory-cache"
+        elif file_entries and AAC_IMAGES_BUCKET_NAME:
+            path = "2-static-python-file"
+        elif fs_entries:
+            path = "3-firestore-index"
+        else:
+            path = "4-build-from-scratch (SLOW)"
+
+        result["mascots"][mc] = {
+            "static_file_labels": file_entries,
+            "memory_cache_labels": mem_entries,
+            "firestore_index_labels": fs_entries,
+            "firestore_read_ms": fs_ms,
+            "firestore_error": fs_error,
+            "cold_start_path": path,
+        }
+
+    return result
 
 
 @app.get("/api/admin/image-index/export")
