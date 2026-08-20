@@ -23167,7 +23167,10 @@ async def _assign_images_to_tap_config(
             board['dynamic_rows'] = tap_dynamic_rows
             backfill_changed = True
 
-        # Collect all unique labels for image lookup (includes newly added pool buttons)
+        # Collect labels only for buttons that have no image_url yet.
+        # Buttons that already have an image_url are left untouched — re-querying
+        # Firestore for thousands of existing images is the main source of the
+        # 50-90 second lookup_remaining delay on profiles with many non-pool boards.
         all_labels: List[str] = []
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict):
@@ -23176,7 +23179,7 @@ async def _assign_images_to_tap_config(
                 if not isinstance(btn, dict):
                     continue
                 lbl = str(btn.get('label') or '').strip()
-                if lbl:
+                if lbl and not btn.get('image_url'):
                     all_labels.append(lbl)
 
         # Collect boards_menu labels separately so we can apply the static index without
@@ -25759,21 +25762,6 @@ async def _save_split_tap_docs(account_id: str, aac_user_id: str, config_data: D
             'created_at': created_at,
         }
 
-        estimated_boards_size = _estimate_json_size_bytes({'boards': boards})
-        if estimated_boards_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
-            boards_payload['boards'] = boards
-            boards_payload.pop('boards_storage', None)
-            boards_payload.pop('boards_chunk_count', None)
-            boards_payload.pop('boards_count', None)
-            await asyncio.to_thread(boards_ref.set, boards_payload)
-            await _clear_chunked_tap_boards(boards_ref)
-        else:
-            chunk_count = await _save_chunked_tap_boards(boards_ref, boards)
-            boards_payload['boards_storage'] = 'chunked'
-            boards_payload['boards_chunk_count'] = chunk_count
-            boards_payload['boards_count'] = len(boards)
-            await asyncio.to_thread(boards_ref.set, boards_payload)
-
         boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
         menu_payload = {
             'boards_menu': dedupe_boards_menu_tree(boards_menu),
@@ -25782,7 +25770,28 @@ async def _save_split_tap_docs(account_id: str, aac_user_id: str, config_data: D
             'updated_at': now_iso,
             'created_at': created_at,
         }
-        await asyncio.to_thread(menu_ref.set, menu_payload)
+
+        estimated_boards_size = _estimate_json_size_bytes({'boards': boards})
+        if estimated_boards_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            boards_payload['boards'] = boards
+            boards_payload.pop('boards_storage', None)
+            boards_payload.pop('boards_chunk_count', None)
+            boards_payload.pop('boards_count', None)
+            await asyncio.gather(
+                asyncio.to_thread(boards_ref.set, boards_payload),
+                asyncio.to_thread(menu_ref.set, menu_payload),
+            )
+            await _clear_chunked_tap_boards(boards_ref)
+        else:
+            # Write chunks first (parallel), then the header + menu in parallel.
+            chunk_count = await _save_chunked_tap_boards(boards_ref, boards)
+            boards_payload['boards_storage'] = 'chunked'
+            boards_payload['boards_chunk_count'] = chunk_count
+            boards_payload['boards_count'] = len(boards)
+            await asyncio.gather(
+                asyncio.to_thread(boards_ref.set, boards_payload),
+                asyncio.to_thread(menu_ref.set, menu_payload),
+            )
 
         return True
     except Exception as e:
@@ -25863,25 +25872,27 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
         doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
 
-        split_saved = await _save_split_tap_docs(account_id, aac_user_id, working_config)
+        # Run split-doc save and legacy-doc existence check in parallel.
+        split_saved, legacy_doc = await asyncio.gather(
+            _save_split_tap_docs(account_id, aac_user_id, working_config),
+            asyncio.to_thread(doc_ref.get),
+        )
         if not split_saved:
             return False
 
-        legacy_doc = await asyncio.to_thread(doc_ref.get)
         if not legacy_doc.exists:
             return True
 
         estimated_size = _estimate_json_size_bytes(working_config)
-        combined_saved = False
         if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
             working_config.pop('boards_storage', None)
             working_config.pop('boards_chunk_count', None)
             working_config.pop('boards_count', None)
-            await asyncio.to_thread(doc_ref.set, working_config)
-            await _clear_chunked_tap_boards(doc_ref)
-            combined_saved = True
+            await asyncio.gather(
+                asyncio.to_thread(doc_ref.set, working_config),
+                _clear_chunked_tap_boards(doc_ref),
+            )
         else:
-            # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
             base_config = copy.deepcopy(working_config)
             base_config.pop('boards', None)
             chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
@@ -25889,9 +25900,8 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
             base_config['boards_chunk_count'] = chunk_count
             base_config['boards_count'] = len(boards)
             await asyncio.to_thread(doc_ref.set, base_config)
-            combined_saved = True
 
-        return combined_saved
+        return True
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
         return False
