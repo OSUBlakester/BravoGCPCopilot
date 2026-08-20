@@ -19735,6 +19735,101 @@ async def export_image_index_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/admin/master-profiles/build")
+async def build_master_profiles_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: Optional[str] = None,
+):
+    """
+    Build (or rebuild) master profile(s) under the admin account so that
+    new user profiles can copy image assignments instead of running a full
+    Firestore image lookup.
+
+    - mascot=bobby|bonnie|buddy  → build one master profile
+    - mascot omitted             → build all three
+
+    Each master profile is named  master_{mascot}  (e.g. "master_bobby").
+    The profile is created with create_default_tap_config, then
+    _assign_images_to_tap_config is run synchronously (not as a background
+    task) so the endpoint only returns after images are fully resolved.
+
+    This is a one-time admin operation; after it completes, new profiles
+    are sped up because _load_master_profile_image_map() returns the cached
+    label→URL map with zero Firestore queries.
+    """
+    try:
+        admin_id = await _get_admin_account_id()
+        if not admin_id:
+            raise HTTPException(status_code=500, detail="Admin account not found in Firestore.")
+
+        all_mascots = [mascot.strip().lower()] if mascot else ["bobby", "bonnie", "buddy"]
+        results = {}
+
+        for mc in all_mascots:
+            master_user_id = f"{MASTER_PROFILE_PREFIX}{mc}"
+            logging.info(f"build_master_profiles: building {master_user_id!r} under admin account {admin_id!r}")
+
+            # Create a fresh default tap config for the master profile.
+            new_config = create_default_tap_config(admin_id, master_user_id, use_hybrid_pages=True)
+
+            # Build nav sub-board shells (mirrors regenerate_boards logic).
+            nav_sub_board_shells = []
+            for word_key, pool_words in CATEGORY_STATIC_POOLS.items():
+                nav_sub_board_shells.append({
+                    'id': f"nav_sub_{word_key}",
+                    'title': str(word_key).replace('_', ' ').title(),
+                    'buttons': [],
+                    'source': 'navigation',
+                    'prompt_category': f"after_{word_key}",
+                    'llm_prompt': f"Words related to: {str(word_key).replace('_', ' ')}",
+                })
+            new_config['boards'].extend(nav_sub_board_shells)
+
+            # Save to Firestore before running image assignment.
+            await save_tap_nav_config(admin_id, master_user_id, new_config)
+
+            # Run image assignment synchronously (so the endpoint waits for completion).
+            stats = await _assign_images_to_tap_config(new_config, mc, admin_id, master_user_id)
+
+            # Evict master profile image cache so the next call re-reads.
+            _master_profile_image_cache.pop(mc, None)
+
+            results[mc] = {
+                "master_user_id": master_user_id,
+                "admin_account_id": admin_id,
+                **stats,
+            }
+            logging.info(f"build_master_profiles: {master_user_id!r} done — {stats}")
+
+        return {"ok": True, "results": results}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"build_master_profiles_endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/master-profiles/clear")
+async def clear_master_profile_cache_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: Optional[str] = None,
+):
+    """Evict the in-memory master profile image cache (one or all mascots)."""
+    global _admin_account_id_cache
+    if mascot:
+        mc = mascot.strip().lower()
+        _master_profile_image_cache.pop(mc, None)
+        _static_image_index_cache.pop(mc, None)
+        evicted = [mc]
+    else:
+        evicted = list(_master_profile_image_cache.keys())
+        _master_profile_image_cache.clear()
+        _static_image_index_cache.clear()
+        _admin_account_id_cache = None
+    return {"ok": True, "evicted": evicted}
+
+
 @app.get("/api/admin/images/browse")
 async def browse_images_for_admin(
     token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
@@ -21920,6 +22015,85 @@ _BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 _image_url_cache: dict = {}
 _IMAGE_URL_CACHE_MAX = 5000  # evict oldest half when full
 
+# Cached admin account ID (resolved once from Firestore by email).
+_admin_account_id_cache: Optional[str] = None
+
+# In-memory master-profile image maps: mascot_clean → {label: image_url}
+# Populated by _load_master_profile_image_map(); survives server lifetime.
+_master_profile_image_cache: Dict[str, Dict[str, str]] = {}
+
+MASTER_PROFILE_PREFIX = "master_"  # profile IDs under admin account: master_bobby, etc.
+
+
+async def _get_admin_account_id() -> Optional[str]:
+    """Return the Firestore account ID for admin@talkwithbravo.com, cached after first call."""
+    global _admin_account_id_cache
+    if _admin_account_id_cache:
+        return _admin_account_id_cache
+    if not firestore_db:
+        return None
+    try:
+        docs = await asyncio.to_thread(
+            lambda: list(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+                .where("email", "==", "admin@talkwithbravo.com")
+                .limit(1)
+                .stream()
+            )
+        )
+        if docs:
+            _admin_account_id_cache = docs[0].id
+            logging.info(f"_get_admin_account_id: resolved admin account → {_admin_account_id_cache!r}")
+        return _admin_account_id_cache
+    except Exception as e:
+        logging.warning(f"_get_admin_account_id: lookup failed: {e}")
+        return None
+
+
+async def _load_master_profile_image_map(mascot: str) -> Dict[str, str]:
+    """
+    Build {label: image_url} from the master profile's tap config buttons.
+    Checks in-memory cache first; loads from Firestore master profile on miss.
+    Returns {} if no master profile exists for this mascot.
+    """
+    mc = str(mascot or '').strip().lower()
+    if not mc:
+        return {}
+    if mc in _master_profile_image_cache:
+        return _master_profile_image_cache[mc]
+
+    admin_id = await _get_admin_account_id()
+    if not admin_id:
+        return {}
+
+    master_user_id = f"{MASTER_PROFILE_PREFIX}{mc}"
+    try:
+        master_config = await load_tap_nav_config(admin_id, master_user_id)
+        if not master_config:
+            return {}
+        label_map: Dict[str, str] = {}
+        for board in (master_config.get('boards') or []):
+            if not isinstance(board, dict):
+                continue
+            for btn in (board.get('buttons') or []):
+                if not isinstance(btn, dict):
+                    continue
+                lbl = str(btn.get('label') or '').strip()
+                url = str(btn.get('image_url') or '').strip()
+                if lbl and url and lbl not in label_map:
+                    label_map[lbl] = url
+        if label_map:
+            _master_profile_image_cache[mc] = label_map
+            logging.info(
+                f"_load_master_profile_image_map: loaded {len(label_map)} label→url "
+                f"entries from master profile {master_user_id!r} for mascot={mc!r}"
+            )
+        return label_map
+    except Exception as e:
+        logging.warning(f"_load_master_profile_image_map: failed for {mc!r}: {e}")
+        return {}
+
+
 # Pre-computed per-mascot image index for all CATEGORY_STATIC_POOLS labels.
 # Loaded from Firestore on first use; eliminates bulk Firestore queries during profile creation.
 # Key: mascot_clean → {original_label: image_url}
@@ -22025,10 +22199,11 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
 
     Priority order:
       1. In-memory cache (_static_image_index_cache) — zero cost.
-      2. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero Firestore reads;
+      2. Master profile image map (admin@talkwithbravo.com / master_{mascot}) — one Firestore read, then cached.
+      3. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero Firestore reads;
          paths are converted to full URLs using AAC_IMAGES_BUCKET_NAME.
-      3. Firestore aac_image_index chunks — one round-trip, cached in memory.
-      4. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
+      4. Firestore aac_image_index chunks — one round-trip, cached in memory.
+      5. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
     """
     mc = str(mascot or '').strip().lower()
     if not mc:
@@ -22038,7 +22213,17 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
     if mc in _static_image_index_cache:
         return _static_image_index_cache[mc]
 
-    # 2. Committed Python file — fastest, zero I/O.
+    # 2. Master profile image map (admin-controlled, no code deployment needed)
+    master_map = await _load_master_profile_image_map(mc)
+    if master_map:
+        _static_image_index_cache[mc] = master_map
+        logging.info(
+            f"_ensure_static_image_index: loaded {len(master_map)} entries "
+            f"from master profile for mascot={mc!r}"
+        )
+        return master_map
+
+    # 3. Committed Python file — fastest, zero I/O.
     file_paths = STATIC_IMAGE_ASSIGNMENTS.get(mc) or {}
     if file_paths and AAC_IMAGES_BUCKET_NAME:
         base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
@@ -22051,12 +22236,12 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
             )
             return resolved
 
-    # 3. Firestore index (built by admin endpoint)
+    # 4. Firestore index (built by admin endpoint)
     idx = await _load_static_image_index(mc)
     if idx:
         return idx
 
-    # 4. Build from scratch (first-ever run for this mascot)
+    # 5. Build from scratch (first-ever run for this mascot)
     return await _build_static_image_index(mc)
 
 
@@ -22839,6 +23024,21 @@ async def _assign_images_to_tap_config(
         fresh_config = await load_tap_nav_config(account_id, aac_user_id)
         if not fresh_config:
             fresh_config = config_data
+
+        # Race-condition guard: the background task now runs fast enough that a
+        # concurrent wizard save can land between our creation and this read.  If
+        # the fresh copy has FEWER boards than the config we were handed at task
+        # creation time, the fresh copy is stale/truncated — use the original
+        # board list to avoid silently dropping boards (e.g. the Actions board).
+        original_boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        fresh_boards = fresh_config.get('boards') if isinstance(fresh_config.get('boards'), list) else []
+        if len(original_boards) > len(fresh_boards):
+            logging.warning(
+                f"_assign_images_to_tap_config: fresh_config has {len(fresh_boards)} boards "
+                f"but config_data has {len(original_boards)}; using config_data boards to avoid "
+                f"data loss from a concurrent wizard save for {account_id}/{aac_user_id}"
+            )
+            fresh_config['boards'] = original_boards
 
         # --- Backfill missing pool buttons ---
         # Static boards created before the pool feature have no pool_index buttons.
