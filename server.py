@@ -23271,6 +23271,13 @@ async def _assign_images_to_tap_config(
                 f"remaining labels (skip_remaining_lookup=True) [{account_id}/{aac_user_id}]"
             )
         _elapsed("lookup_remaining", _t3)
+        _sample_url = next(iter(label_to_url.values()), None)
+        logging.info(
+            f"_assign_images [{account_id}/{aac_user_id}] "
+            f"images_resolved={len(label_to_url)}/{len(all_labels)} all_labels "
+            f"(backfill_changed={backfill_changed}, "
+            f"sample_url={(_sample_url or 'none')[:80]!r})"
+        )
 
         # --- boards_menu labels ---
         # Apply static index only.  Category names / AI-generated labels that miss
