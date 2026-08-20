@@ -19704,12 +19704,40 @@ async def image_index_status_endpoint(
         else:
             path = "4-build-from-scratch (SLOW)"
 
+        # Check master profile under admin account
+        master_labels = 0
+        master_sample_url = None
+        master_error = None
+        t1 = _time.time()
+        try:
+            admin_id = await _get_admin_account_id()
+            if admin_id:
+                master_config = await load_tap_nav_config(admin_id, f"{MASTER_PROFILE_PREFIX}{mc}")
+                if master_config:
+                    for board in (master_config.get('boards') or []):
+                        for btn in (board.get('buttons') or []):
+                            url = str(btn.get('image_url') or '').strip()
+                            lbl = str(btn.get('label') or '').strip()
+                            if lbl and url:
+                                master_labels += 1
+                                if not master_sample_url:
+                                    master_sample_url = url
+            else:
+                master_error = "admin account not found"
+        except Exception as _e:
+            master_error = str(_e)
+        master_ms = round((_time.time() - t1) * 1000)
+
         result["mascots"][mc] = {
             "static_file_labels": file_entries,
             "memory_cache_labels": mem_entries,
             "firestore_index_labels": fs_entries,
             "firestore_read_ms": fs_ms,
             "firestore_error": fs_error,
+            "master_profile_buttons_with_images": master_labels,
+            "master_profile_sample_url": master_sample_url,
+            "master_profile_read_ms": master_ms,
+            "master_profile_error": master_error,
             "cold_start_path": path,
         }
 
