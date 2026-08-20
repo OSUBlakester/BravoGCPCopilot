@@ -19865,13 +19865,15 @@ async def build_master_profiles_endpoint(
             # Create a fresh default tap config for the master profile.
             new_config = create_default_tap_config(admin_id, master_user_id, use_hybrid_pages=True)
 
-            # Build nav sub-board shells (mirrors regenerate_boards logic).
+            # Build nav sub-board shells — MUST include board_type='static' so the
+            # backfill in _assign_images_to_tap_config populates pool buttons.
+            # (regenerate_boards sets this field; omitting it caused 0 images on master profiles.)
             nav_sub_board_shells = []
             for word_key, pool_words in CATEGORY_STATIC_POOLS.items():
                 nav_sub_board_shells.append({
                     'id': f"nav_sub_{word_key}",
-                    'title': str(word_key).replace('_', ' ').title(),
-                    'buttons': [],
+                    'label': str(word_key).replace('_', ' ').title(),
+                    'board_type': 'static',
                     'source': 'navigation',
                     'prompt_category': f"after_{word_key}",
                     'llm_prompt': f"Words related to: {str(word_key).replace('_', ' ')}",
@@ -19888,26 +19890,35 @@ async def build_master_profiles_endpoint(
             _master_profile_image_cache.pop(mc, None)
             _static_image_index_cache.pop(mc, None)
 
-            # Populate the Firestore aac_image_index so cold-start Cloud Run instances
-            # can load the label→URL map quickly (a flat chunk read) instead of having
-            # to reload the full ~6 MB master profile tap_nav_config.
-            # We build the map directly from the static Python file (already in memory)
-            # with this environment's bucket prefix — zero extra Firestore queries.
-            if STATIC_IMAGE_ASSIGNMENTS.get(mc) and AAC_IMAGES_BUCKET_NAME:
-                base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
-                env_label_map = {
-                    label: base + path
-                    for label, path in STATIC_IMAGE_ASSIGNMENTS[mc].items()
-                    if path
-                }
-                if env_label_map:
-                    await _save_static_image_index(mc, env_label_map)
-                    _static_image_index_cache[mc] = env_label_map
-                    stats["firestore_index_labels"] = len(env_label_map)
-                    logging.info(
-                        f"build_master_profiles: saved {len(env_label_map)} labels to "
-                        f"aac_image_index for {mc!r} (env bucket: {AAC_IMAGES_BUCKET_NAME})"
-                    )
+            # Populate the Firestore aac_image_index from the master profile buttons —
+            # these URLs were resolved from THIS environment's aac_images collection,
+            # so they are guaranteed to exist in this environment's GCS bucket.
+            # (The previous approach used static_image_assignments.py paths which were
+            # generated from dev and may not match the test/prod bucket structure.)
+            master_config = await load_tap_nav_config(admin_id, master_user_id)
+            env_label_map: Dict[str, str] = {}
+            if master_config:
+                for _board in (master_config.get('boards') or []):
+                    for _btn in (_board.get('buttons') or [] if isinstance(_board, dict) else []):
+                        if not isinstance(_btn, dict):
+                            continue
+                        _lbl = str(_btn.get('label') or '').strip()
+                        _url = str(_btn.get('image_url') or '').strip()
+                        if _lbl and _url and _lbl not in env_label_map:
+                            env_label_map[_lbl] = _url
+            if env_label_map:
+                await _save_static_image_index(mc, env_label_map)
+                _static_image_index_cache[mc] = env_label_map
+                stats["firestore_index_labels"] = len(env_label_map)
+                logging.info(
+                    f"build_master_profiles: saved {len(env_label_map)} labels to "
+                    f"aac_image_index for {mc!r} (sourced from master profile buttons)"
+                )
+            else:
+                logging.warning(
+                    f"build_master_profiles: no labeled buttons with images found in "
+                    f"master profile {master_user_id!r} — Firestore index not updated"
+                )
 
             results[mc] = {
                 "master_user_id": master_user_id,
@@ -22318,16 +22329,16 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
 
     Priority order:
       1. In-memory cache (_static_image_index_cache) — zero cost.
-      2. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero Firestore reads;
-         paths are converted to full URLs using AAC_IMAGES_BUCKET_NAME.
-      3. Firestore aac_image_index chunks — populated by the admin master-profiles build
-         endpoint; one fast round-trip, then cached in memory.
+      2. Firestore aac_image_index chunks — populated by POST /api/admin/master-profiles/build
+         using this environment's own aac_images collection, so URLs exist in this bucket.
+         One fast round-trip (~100-300ms), then cached in memory forever.
+      3. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero I/O fallback when the
+         Firestore index has not been built yet.  Generated from dev; paths may differ in test/prod.
       4. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
 
-    Note: the master profile tap_nav_config is NOT read here because loading the full
-    ~6 MB chunked config on every cold-start is slower than the static file.  Instead,
-    build_master_profiles_endpoint writes the label→URL map to aac_image_index so it
-    shows up at priority 3 above.
+    Note: the master profile tap_nav_config is NOT read here (loading the full chunked config
+    is slow).  build_master_profiles_endpoint writes a compact label→URL map to aac_image_index
+    which loads in ~100-300ms and is then served from memory.
     """
     mc = str(mascot or '').strip().lower()
     if not mc:
@@ -22337,7 +22348,15 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
     if mc in _static_image_index_cache:
         return _static_image_index_cache[mc]
 
-    # 2. Committed Python file — fastest, zero I/O.
+    # 2. Firestore aac_image_index — built by POST /api/admin/master-profiles/build using
+    #    this environment's own aac_images collection, so URLs are guaranteed to exist in
+    #    this environment's GCS bucket.  One fast round-trip (~100-300ms), then cached.
+    idx = await _load_static_image_index(mc)
+    if idx:
+        return idx
+
+    # 3. Committed Python file — zero I/O fallback when Firestore index is not yet built.
+    #    Generated from dev; paths may not exist in test/prod bucket but is better than nothing.
     file_paths = STATIC_IMAGE_ASSIGNMENTS.get(mc) or {}
     if file_paths and AAC_IMAGES_BUCKET_NAME:
         base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
@@ -22349,11 +22368,6 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
                 f"from static_image_assignments.py for mascot={mc!r}"
             )
             return resolved
-
-    # 3. Firestore aac_image_index (built by POST /api/admin/master-profiles/build)
-    idx = await _load_static_image_index(mc)
-    if idx:
-        return idx
 
     # 4. Build from scratch (first-ever run for this mascot)
     return await _build_static_image_index(mc)
