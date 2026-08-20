@@ -25920,37 +25920,37 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
 
         doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
-
-        # Run split-doc save and legacy-doc existence check in parallel.
-        split_saved, legacy_doc = await asyncio.gather(
-            _save_split_tap_docs(account_id, aac_user_id, working_config),
-            asyncio.to_thread(doc_ref.get),
-        )
-        if not split_saved:
-            return False
-
-        if not legacy_doc.exists:
-            return True
-
         estimated_size = _estimate_json_size_bytes(working_config)
-        if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
-            working_config.pop('boards_storage', None)
-            working_config.pop('boards_chunk_count', None)
-            working_config.pop('boards_count', None)
-            await asyncio.gather(
-                asyncio.to_thread(doc_ref.set, working_config),
-                _clear_chunked_tap_boards(doc_ref),
-            )
-        else:
-            base_config = copy.deepcopy(working_config)
-            base_config.pop('boards', None)
-            chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
-            base_config['boards_storage'] = 'chunked'
-            base_config['boards_chunk_count'] = chunk_count
-            base_config['boards_count'] = len(boards)
-            await asyncio.to_thread(doc_ref.set, base_config)
 
-        return True
+        async def _save_legacy_doc() -> None:
+            """Mirror to legacy combined doc only if it already exists."""
+            legacy_doc = await asyncio.to_thread(doc_ref.get)
+            if not legacy_doc.exists:
+                return
+            if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+                cfg = copy.deepcopy(working_config)
+                cfg.pop('boards_storage', None)
+                cfg.pop('boards_chunk_count', None)
+                cfg.pop('boards_count', None)
+                await asyncio.gather(
+                    asyncio.to_thread(doc_ref.set, cfg),
+                    _clear_chunked_tap_boards(doc_ref),
+                )
+            else:
+                base_config = copy.deepcopy(working_config)
+                base_config.pop('boards', None)
+                chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
+                base_config['boards_storage'] = 'chunked'
+                base_config['boards_chunk_count'] = chunk_count
+                base_config['boards_count'] = len(boards)
+                await asyncio.to_thread(doc_ref.set, base_config)
+
+        # Run split-doc save and legacy-doc mirror in parallel.
+        split_saved, _ = await asyncio.gather(
+            _save_split_tap_docs(account_id, aac_user_id, working_config),
+            _save_legacy_doc(),
+        )
+        return bool(split_saved)
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
         return False
