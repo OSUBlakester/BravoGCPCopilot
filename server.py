@@ -19791,8 +19791,30 @@ async def build_master_profiles_endpoint(
             # Run image assignment synchronously (so the endpoint waits for completion).
             stats = await _assign_images_to_tap_config(new_config, mc, admin_id, master_user_id)
 
-            # Evict master profile image cache so the next call re-reads.
+            # Evict stale caches.
             _master_profile_image_cache.pop(mc, None)
+            _static_image_index_cache.pop(mc, None)
+
+            # Populate the Firestore aac_image_index so cold-start Cloud Run instances
+            # can load the label→URL map quickly (a flat chunk read) instead of having
+            # to reload the full ~6 MB master profile tap_nav_config.
+            # We build the map directly from the static Python file (already in memory)
+            # with this environment's bucket prefix — zero extra Firestore queries.
+            if STATIC_IMAGE_ASSIGNMENTS.get(mc) and AAC_IMAGES_BUCKET_NAME:
+                base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
+                env_label_map = {
+                    label: base + path
+                    for label, path in STATIC_IMAGE_ASSIGNMENTS[mc].items()
+                    if path
+                }
+                if env_label_map:
+                    await _save_static_image_index(mc, env_label_map)
+                    _static_image_index_cache[mc] = env_label_map
+                    stats["firestore_index_labels"] = len(env_label_map)
+                    logging.info(
+                        f"build_master_profiles: saved {len(env_label_map)} labels to "
+                        f"aac_image_index for {mc!r} (env bucket: {AAC_IMAGES_BUCKET_NAME})"
+                    )
 
             results[mc] = {
                 "master_user_id": master_user_id,
@@ -22199,11 +22221,16 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
 
     Priority order:
       1. In-memory cache (_static_image_index_cache) — zero cost.
-      2. Master profile image map (admin@talkwithbravo.com / master_{mascot}) — one Firestore read, then cached.
-      3. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero Firestore reads;
+      2. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero Firestore reads;
          paths are converted to full URLs using AAC_IMAGES_BUCKET_NAME.
-      4. Firestore aac_image_index chunks — one round-trip, cached in memory.
-      5. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
+      3. Firestore aac_image_index chunks — populated by the admin master-profiles build
+         endpoint; one fast round-trip, then cached in memory.
+      4. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
+
+    Note: the master profile tap_nav_config is NOT read here because loading the full
+    ~6 MB chunked config on every cold-start is slower than the static file.  Instead,
+    build_master_profiles_endpoint writes the label→URL map to aac_image_index so it
+    shows up at priority 3 above.
     """
     mc = str(mascot or '').strip().lower()
     if not mc:
@@ -22213,17 +22240,7 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
     if mc in _static_image_index_cache:
         return _static_image_index_cache[mc]
 
-    # 2. Master profile image map (admin-controlled, no code deployment needed)
-    master_map = await _load_master_profile_image_map(mc)
-    if master_map:
-        _static_image_index_cache[mc] = master_map
-        logging.info(
-            f"_ensure_static_image_index: loaded {len(master_map)} entries "
-            f"from master profile for mascot={mc!r}"
-        )
-        return master_map
-
-    # 3. Committed Python file — fastest, zero I/O.
+    # 2. Committed Python file — fastest, zero I/O.
     file_paths = STATIC_IMAGE_ASSIGNMENTS.get(mc) or {}
     if file_paths and AAC_IMAGES_BUCKET_NAME:
         base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
@@ -22236,12 +22253,12 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
             )
             return resolved
 
-    # 4. Firestore index (built by admin endpoint)
+    # 3. Firestore aac_image_index (built by POST /api/admin/master-profiles/build)
     idx = await _load_static_image_index(mc)
     if idx:
         return idx
 
-    # 5. Build from scratch (first-ever run for this mascot)
+    # 4. Build from scratch (first-ever run for this mascot)
     return await _build_static_image_index(mc)
 
 
