@@ -9113,9 +9113,22 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                 # Assign images to all static pool buttons in the background.
                 # Use a fresh copy of the saved config so in-place mutation is safe.
                 _mascot_for_assign = str(saved_settings_dict.get('mascot') or 'buddy').strip().lower()
-                asyncio.create_task(
-                    _assign_images_to_tap_config(new_tap_config, _mascot_for_assign, account_id, aac_user_id)
-                )
+                _assign_key = (account_id, aac_user_id)
+                if _assign_key not in _image_assign_in_flight:
+                    _image_assign_in_flight.add(_assign_key)
+
+                    async def _run_assign_and_clear(_cfg=new_tap_config, _mc=_mascot_for_assign,
+                                                    _aid=account_id, _uid=aac_user_id, _key=_assign_key):
+                        try:
+                            await _assign_images_to_tap_config(_cfg, _mc, _aid, _uid)
+                        finally:
+                            _image_assign_in_flight.discard(_key)
+
+                    asyncio.create_task(_run_assign_and_clear())
+                else:
+                    logging.info(
+                        f"_assign_images_to_tap_config already in flight for {account_id}/{aac_user_id}; skipping duplicate task"
+                    )
             except Exception as e:
                 logging.error(f"Failed to regenerate tap boards after settings update: {e}", exc_info=True)
 
@@ -22089,6 +22102,10 @@ _BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 _image_url_cache: dict = {}
 _IMAGE_URL_CACHE_MAX = 5000  # evict oldest half when full
 
+# Tracks in-flight image assignment tasks to prevent duplicate concurrent runs for the
+# same (account_id, aac_user_id) pair when the wizard schedules the task more than once.
+_image_assign_in_flight: set = set()
+
 # Cached admin account ID (resolved once from Firestore by email).
 _admin_account_id_cache: Optional[str] = None
 
@@ -23162,44 +23179,56 @@ async def _assign_images_to_tap_config(
                 if lbl:
                     all_labels.append(lbl)
 
-        # Also collect labels from boards_menu items (recursive tree structure)
+        # Collect boards_menu labels separately so we can apply the static index without
+        # running Firestore queries for AI-generated / category-name labels that aren't
+        # in the pool.  Running _lookup_images_for_labels on thousands of unique
+        # boards_menu labels causes 50-90 second delays.
+        menu_labels: List[str] = []
         def _walk_menu_labels(items: list) -> None:
             for item in (items or []):
                 if not isinstance(item, dict):
                     continue
                 lbl = str(item.get('label') or '').strip()
                 if lbl:
-                    all_labels.append(lbl)
+                    menu_labels.append(lbl)
                 _walk_menu_labels(item.get('children') or [])
 
         _walk_menu_labels(fresh_config.get('boards_menu') or [])
 
-        stats["labels_found"] = len(all_labels)
+        stats["labels_found"] = len(all_labels) + len(menu_labels)
         stats["backfill_changed"] = backfill_changed
         _t2 = _elapsed("backfill+collect_labels", _t1)
 
-        if not all_labels and not backfill_changed:
+        if not all_labels and not menu_labels and not backfill_changed:
             return stats
 
         label_to_url: Dict[str, str] = {}
-        if all_labels:
-            # Pre-computed index covers all CATEGORY_STATIC_POOLS labels — read in one Firestore
-            # round-trip instead of running hundreds of per-label queries.  Built lazily on first
-            # call for each mascot, then cached in memory and in Firestore for subsequent builds.
-            static_idx = await _ensure_static_image_index(mascot)
-            _t3 = _elapsed("ensure_static_index", _t2)
-            all_labels_set = set(all_labels)
-            label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
 
-            # Any labels not covered by the static index (custom boards, boards_menu entries
-            # with non-pool words) still go through the normal Firestore query path.
-            remaining_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
-            if remaining_labels:
-                extra = await _lookup_images_for_labels(
-                    remaining_labels, mascot, account_id, aac_user_id, source="tap_config"
-                )
-                label_to_url.update(extra)
-            _elapsed("lookup_remaining", _t3)
+        # --- Board button labels (static pool words) ---
+        # The pre-computed static index covers all CATEGORY_STATIC_POOLS labels.
+        # Any truly custom board labels that miss the index go to Firestore, but
+        # the set should be small (custom boards only, not nav sub-boards).
+        static_idx = await _ensure_static_image_index(mascot)
+        _t3 = _elapsed("ensure_static_index", _t2)
+        all_labels_set = set(all_labels)
+        label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
+
+        remaining_board_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
+        if remaining_board_labels:
+            extra = await _lookup_images_for_labels(
+                remaining_board_labels, mascot, account_id, aac_user_id, source="tap_config"
+            )
+            label_to_url.update(extra)
+        _elapsed("lookup_remaining", _t3)
+
+        # --- boards_menu labels ---
+        # Apply static index only.  Category names / AI-generated labels that miss
+        # the index are skipped here — running Firestore queries for thousands of
+        # unique menu labels adds 50-90 seconds per profile creation.
+        menu_labels_set = set(menu_labels)
+        for lbl, url in static_idx.items():
+            if lbl in menu_labels_set and lbl not in label_to_url:
+                label_to_url[lbl] = url
 
         stats["images_resolved"] = len(label_to_url)
 
