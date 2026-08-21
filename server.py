@@ -19725,7 +19725,8 @@ async def image_index_status_endpoint(
         try:
             admin_id = await _get_admin_account_id()
             if admin_id:
-                master_config = await load_tap_nav_config(admin_id, f"{MASTER_PROFILE_PREFIX}{mc}")
+                _master_uid = await _find_master_profile_user_id(admin_id, mc)
+                master_config = await load_tap_nav_config(admin_id, _master_uid) if _master_uid else None
                 if master_config:
                     for board in (master_config.get('boards') or []):
                         for btn in (board.get('buttons') or []):
@@ -22271,11 +22272,77 @@ async def _get_admin_account_id() -> Optional[str]:
         return None
 
 
+async def _find_master_profile_user_id(admin_id: str, mascot_clean: str) -> Optional[str]:
+    """
+    Find the real Firestore user document ID for a master profile.
+
+    Tries (in order):
+      1. The legacy string ID used by build_master_profiles_endpoint ("master_bobby")
+      2. Any user under the admin account whose display_name matches
+         "master {mascot}" or "master_{mascot}" (case-insensitive, stripped).
+
+    Returns the user_id string or None if not found.
+    """
+    if not firestore_db or not admin_id or not mascot_clean:
+        return None
+
+    # Fast path: legacy string user ID written by build_master_profiles_endpoint
+    legacy_id = f"{MASTER_PROFILE_PREFIX}{mascot_clean}"
+    try:
+        legacy_cfg = await load_tap_nav_config(admin_id, legacy_id)
+        if legacy_cfg and legacy_cfg.get('boards'):
+            logging.info(f"_find_master_profile_user_id: found legacy id={legacy_id!r} for mascot={mascot_clean!r}")
+            return legacy_id
+    except Exception:
+        pass
+
+    # Scan users subcollection for a display_name matching "master {mascot}" or "master_{mascot}"
+    target_names = {f"master {mascot_clean}", f"master_{mascot_clean}", mascot_clean}
+    try:
+        users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(admin_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+        user_docs = await asyncio.to_thread(lambda: list(users_ref.stream()))
+        for doc in user_docs:
+            data = doc.to_dict() or {}
+            dn = str(data.get('display_name') or '').strip().lower()
+            if dn in target_names:
+                logging.info(
+                    f"_find_master_profile_user_id: found user {doc.id!r} "
+                    f"with display_name={dn!r} for mascot={mascot_clean!r}"
+                )
+                return doc.id
+        logging.info(
+            f"_find_master_profile_user_id: no user found for mascot={mascot_clean!r} "
+            f"under admin_id={admin_id!r} (searched {len(user_docs)} users)"
+        )
+    except Exception as e:
+        logging.warning(f"_find_master_profile_user_id: scan failed for {mascot_clean!r}: {e}")
+    return None
+
+
+async def _extract_label_map_from_config(master_config: Dict) -> Dict[str, str]:
+    """Return {label: image_url} from all buttons in a tap config."""
+    label_map: Dict[str, str] = {}
+    for board in (master_config.get('boards') or []):
+        if not isinstance(board, dict):
+            continue
+        for btn in (board.get('buttons') or []):
+            if not isinstance(btn, dict):
+                continue
+            lbl = str(btn.get('label') or '').strip()
+            url = str(btn.get('image_url') or '').strip()
+            if lbl and url and lbl not in label_map:
+                label_map[lbl] = url
+    return label_map
+
+
 async def _load_master_profile_image_map(mascot: str) -> Dict[str, str]:
     """
     Build {label: image_url} from the master profile's tap config buttons.
     Checks in-memory cache first; loads from Firestore master profile on miss.
-    Returns {} if no master profile exists for this mascot.
+
+    Searches both the legacy string user ID ("master_bobby") and any user
+    under the admin account whose display_name matches "master {mascot}".
+    Returns {} if no master profile with images exists.
     """
     mc = str(mascot or '').strip().lower()
     if not mc:
@@ -22287,27 +22354,22 @@ async def _load_master_profile_image_map(mascot: str) -> Dict[str, str]:
     if not admin_id:
         return {}
 
-    master_user_id = f"{MASTER_PROFILE_PREFIX}{mc}"
     try:
+        master_user_id = await _find_master_profile_user_id(admin_id, mc)
+        if not master_user_id:
+            logging.info(f"_load_master_profile_image_map: no master profile found for mascot={mc!r}")
+            return {}
+
         master_config = await load_tap_nav_config(admin_id, master_user_id)
         if not master_config:
             return {}
-        label_map: Dict[str, str] = {}
-        for board in (master_config.get('boards') or []):
-            if not isinstance(board, dict):
-                continue
-            for btn in (board.get('buttons') or []):
-                if not isinstance(btn, dict):
-                    continue
-                lbl = str(btn.get('label') or '').strip()
-                url = str(btn.get('image_url') or '').strip()
-                if lbl and url and lbl not in label_map:
-                    label_map[lbl] = url
+
+        label_map = await _extract_label_map_from_config(master_config)
         if label_map:
             _master_profile_image_cache[mc] = label_map
             logging.info(
                 f"_load_master_profile_image_map: loaded {len(label_map)} label→url "
-                f"entries from master profile {master_user_id!r} for mascot={mc!r}"
+                f"entries from user={master_user_id!r} for mascot={mc!r}"
             )
         return label_map
     except Exception as e:
