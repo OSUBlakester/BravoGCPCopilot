@@ -19862,6 +19862,30 @@ async def build_master_profiles_endpoint(
             master_user_id = f"{MASTER_PROFILE_PREFIX}{mc}"
             logging.info(f"build_master_profiles: building {master_user_id!r} under admin account {admin_id!r}")
 
+            # Clear stale caches so the full aac_images lookup runs from scratch.
+            # Without this, _ensure_static_image_index returns the pre-populated static
+            # index (6131 dev-generated paths), leaving remaining_board_labels empty and
+            # bypassing _lookup_images_for_labels entirely.  Master profiles would then
+            # inherit dev-bucket paths that don't exist in the test/prod bucket.
+            _master_profile_image_cache.pop(mc, None)
+            _static_image_index_cache.pop(mc, None)
+            if firestore_db:
+                try:
+                    _idx_ref = firestore_db.collection('aac_image_index').document(mc)
+                    _chunk_docs = await asyncio.to_thread(
+                        lambda: list(_idx_ref.collection('chunks').stream())
+                    )
+                    await asyncio.gather(*[
+                        asyncio.to_thread(lambda d=_d: d.reference.delete())
+                        for _d in _chunk_docs
+                    ])
+                    logging.info(
+                        f"build_master_profiles: cleared {len(_chunk_docs)} aac_image_index "
+                        f"chunks for mascot={mc!r}"
+                    )
+                except Exception as _e:
+                    logging.warning(f"build_master_profiles: could not clear aac_image_index for {mc!r}: {_e}")
+
             # Create a fresh default tap config for the master profile.
             new_config = create_default_tap_config(admin_id, master_user_id, use_hybrid_pages=True)
 
@@ -19883,10 +19907,13 @@ async def build_master_profiles_endpoint(
             # Save to Firestore before running image assignment.
             await save_tap_nav_config(admin_id, master_user_id, new_config)
 
-            # Run image assignment synchronously (so the endpoint waits for completion).
-            stats = await _assign_images_to_tap_config(new_config, mc, admin_id, master_user_id)
+            # Run image assignment using a full live aac_images lookup (force_full_lookup=True)
+            # so master profiles get environment-specific URLs — not the dev-generated static index.
+            stats = await _assign_images_to_tap_config(
+                new_config, mc, admin_id, master_user_id, force_full_lookup=True
+            )
 
-            # Evict stale caches.
+            # Evict stale caches so the Firestore index we're about to write is loaded fresh.
             _master_profile_image_cache.pop(mc, None)
             _static_image_index_cache.pop(mc, None)
 
@@ -23146,6 +23173,7 @@ async def _assign_images_to_tap_config(
     account_id: str,
     aac_user_id: str,
     skip_remaining_lookup: bool = False,
+    force_full_lookup: bool = False,
 ) -> Dict[str, Any]:
     """
     Resolve images for every static pool button in the tap config and save to Firestore.
@@ -23259,13 +23287,19 @@ async def _assign_images_to_tap_config(
         label_to_url: Dict[str, str] = {}
 
         # --- Board button labels (static pool words) ---
-        # The pre-computed static index covers all CATEGORY_STATIC_POOLS labels.
-        # Any truly custom board labels that miss the index go to Firestore, but
-        # the set should be small (custom boards only, not nav sub-boards).
-        static_idx = await _ensure_static_image_index(mascot)
-        _t3 = _elapsed("ensure_static_index", _t2)
-        all_labels_set = set(all_labels)
-        label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
+        # force_full_lookup=True skips the cached index so every label goes through
+        # _lookup_images_for_labels.  Used by build_master_profiles_endpoint to ensure
+        # master profiles contain environment-specific URLs from the live aac_images
+        # collection rather than dev-generated paths from the static index.
+        if not force_full_lookup:
+            static_idx = await _ensure_static_image_index(mascot)
+            _t3 = _elapsed("ensure_static_index", _t2)
+            all_labels_set = set(all_labels)
+            label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
+        else:
+            static_idx = {}
+            _t3 = _elapsed("ensure_static_index(skipped)", _t2)
+            all_labels_set = set(all_labels)
 
         remaining_board_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
         if remaining_board_labels and not skip_remaining_lookup:
