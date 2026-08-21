@@ -23198,6 +23198,13 @@ async def _assign_images_to_tap_config(
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
                 continue
+            # Debug home board specifically
+            if str(board.get('id') or '') == 'board_home' or str(board.get('label') or '').lower() == 'home':
+                logging.info(
+                    f"🏠 home board backfill check [{account_id}/{aac_user_id}]: "
+                    f"existing_btns={len(existing)} pool_btns={len(pool_btns)} pool_size={len(pool)} "
+                    f"static_rows={static_rows} max_on_page={static_rows * grid_cols}"
+                )
             # Skip only if pool buttons already exist AND the count matches the current pool definition.
             # Stale boards created before a pool was resized (e.g. 84-item padded → 36-item) must be replaced.
             if pool_btns and len(pool_btns) == len(pool):
@@ -23218,7 +23225,15 @@ async def _assign_images_to_tap_config(
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict):
                 continue
-            for btn in (board.get('buttons') or []):
+            btns_for_board = board.get('buttons') or []
+            if str(board.get('id') or '') == 'board_home' or str(board.get('label') or '').lower() == 'home':
+                no_img = [b for b in btns_for_board if isinstance(b, dict) and not b.get('image_url')]
+                logging.info(
+                    f"🏠 home board collect [{account_id}/{aac_user_id}]: "
+                    f"total_btns={len(btns_for_board)} no_image_url={len(no_img)} "
+                    f"sample_labels={[b.get('label') for b in no_img[:5]]}"
+                )
+            for btn in btns_for_board:
                 if not isinstance(btn, dict):
                     continue
                 lbl = str(btn.get('label') or '').strip()
@@ -23258,6 +23273,18 @@ async def _assign_images_to_tap_config(
         _t3 = _elapsed("ensure_static_index", _t2)
         all_labels_set = set(all_labels)
         label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
+        # Debug: check how many home pool words landed in label_to_url
+        _home_pool = CATEGORY_STATIC_POOLS.get('home', [])
+        _home_in_idx = sum(1 for l in _home_pool if l in static_idx)
+        _home_in_labels = sum(1 for l in _home_pool if l in all_labels_set)
+        _home_resolved = [lbl for lbl in _home_pool if lbl in label_to_url]
+        _home_missing = [lbl for lbl in _home_pool if lbl not in label_to_url]
+        logging.info(
+            f"🏠 home pool resolution [{account_id}/{aac_user_id}]: "
+            f"pool_size={len(_home_pool)} in_static_idx={_home_in_idx} "
+            f"in_all_labels={_home_in_labels} resolved={len(_home_resolved)} "
+            f"missing={_home_missing[:5]}"
+        )
 
         remaining_board_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
         if remaining_board_labels and not skip_remaining_lookup:
