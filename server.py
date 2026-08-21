@@ -6335,6 +6335,19 @@ async def lifespan(app: FastAPI):
     # Start periodic cache cleanup task
     cleanup_task = asyncio.create_task(periodic_cache_cleanup())
     logging.info("✅ Started periodic cache cleanup task (runs every hour)")
+
+    # Warm the static image index in the background so new profiles don't wait.
+    # Runs automatically on every cold start; a no-op if the index is already valid.
+    async def _warm_image_indexes():
+        await asyncio.sleep(5)  # let other startup tasks settle first
+        for _mc in ("bobby", "bonnie", "buddy"):
+            try:
+                idx = await _ensure_static_image_index(_mc)
+                logging.info(f"✅ Image index warmed for mascot={_mc!r}: {len(idx)} entries")
+            except Exception as _e:
+                logging.warning(f"Image index warmup failed for {_mc!r}: {_e}")
+    asyncio.create_task(_warm_image_indexes())
+    logging.info("✅ Started image index warmup task")
     
     logging.info("Startup complete (shared services).")
     yield
@@ -22260,7 +22273,14 @@ _STATIC_IMAGE_INDEX_CHUNK_SIZE = 800
 
 
 async def _load_static_image_index(mascot: str) -> Dict[str, str]:
-    """Load the pre-computed static-pool image index from Firestore (or in-memory cache)."""
+    """Load the pre-computed static-pool image index from Firestore.
+
+    Only trusts indexes that were built from a live aac_images query
+    (build_source='live_lookup' in the metadata doc).  Indexes written
+    by build_image_index.py (which uses dev-generated relative paths)
+    lack this metadata and are discarded so the system rebuilds from
+    the live aac_images collection automatically.
+    """
     mc = str(mascot or '').strip().lower()
     if not mc:
         return {}
@@ -22269,8 +22289,16 @@ async def _load_static_image_index(mascot: str) -> Dict[str, str]:
     if not firestore_db:
         return {}
     try:
-        chunks_ref = (firestore_db.collection('aac_image_index')
-                      .document(mc).collection('chunks'))
+        index_ref = firestore_db.collection('aac_image_index').document(mc)
+        meta_doc = await asyncio.to_thread(index_ref.get)
+        meta = (meta_doc.to_dict() or {}) if meta_doc.exists else {}
+        if meta.get('build_source') != 'live_lookup':
+            logging.info(
+                f"_load_static_image_index: index for {mc!r} has "
+                f"build_source={meta.get('build_source')!r} — discarding; will rebuild from aac_images"
+            )
+            return {}
+        chunks_ref = index_ref.collection('chunks')
         chunk_docs = await asyncio.to_thread(lambda: list(chunks_ref.stream()))
         merged: Dict[str, str] = {}
         for doc in chunk_docs:
@@ -22311,6 +22339,7 @@ async def _save_static_image_index(mascot: str, label_map: Dict[str, str]) -> No
             'label_count': len(label_map),
             'chunk_count': num_chunks,
             'computed_at': firestore.SERVER_TIMESTAMP,
+            'build_source': 'live_lookup',  # marks this as built from live aac_images, not static file
         }))
         _static_image_index_cache[mc] = label_map
         logging.info(
