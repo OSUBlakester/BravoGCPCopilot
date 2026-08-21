@@ -22328,17 +22328,14 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
     """Return the static image index for the given mascot.
 
     Priority order:
-      1. In-memory cache (_static_image_index_cache) — zero cost.
-      2. Firestore aac_image_index chunks — populated by POST /api/admin/master-profiles/build
-         using this environment's own aac_images collection, so URLs exist in this bucket.
-         One fast round-trip (~100-300ms), then cached in memory forever.
-      3. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — zero I/O fallback when the
-         Firestore index has not been built yet.  Generated from dev; paths may differ in test/prod.
-      4. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
-
-    Note: the master profile tap_nav_config is NOT read here (loading the full chunked config
-    is slow).  build_master_profiles_endpoint writes a compact label→URL map to aac_image_index
-    which loads in ~100-300ms and is then served from memory.
+      1. In-memory cache — zero cost.
+      2. Firestore aac_image_index — compact label→URL map written by build_master_profiles_endpoint.
+      3. Master profile tap config — read directly and save to aac_image_index for future calls.
+         URLs come from the master profile's own image_url fields, which were resolved against
+         this environment's aac_images collection, so they are guaranteed valid for this bucket.
+      4. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — last-resort fallback; dev-generated
+         paths may not exist in test/prod bucket.
+      5. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
     """
     mc = str(mascot or '').strip().lower()
     if not mc:
@@ -22348,15 +22345,26 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
     if mc in _static_image_index_cache:
         return _static_image_index_cache[mc]
 
-    # 2. Firestore aac_image_index — built by POST /api/admin/master-profiles/build using
-    #    this environment's own aac_images collection, so URLs are guaranteed to exist in
-    #    this environment's GCS bucket.  One fast round-trip (~100-300ms), then cached.
+    # 2. Firestore aac_image_index — fast compact cache populated by master profile build.
     idx = await _load_static_image_index(mc)
     if idx:
         return idx
 
-    # 3. Committed Python file — zero I/O fallback when Firestore index is not yet built.
-    #    Generated from dev; paths may not exist in test/prod bucket but is better than nothing.
+    # 3. Master profile — load button image_urls directly.  These are env-specific URLs
+    #    because build_master_profiles_endpoint resolves them against the live aac_images
+    #    collection in this environment.  Save the result to aac_image_index so step 2
+    #    wins on all future calls.
+    master_idx = await _load_master_profile_image_map(mc)
+    if master_idx:
+        logging.info(
+            f"_ensure_static_image_index: loaded {len(master_idx)} entries "
+            f"from master profile for mascot={mc!r}; saving to aac_image_index"
+        )
+        await _save_static_image_index(mc, master_idx)
+        return master_idx
+
+    # 4. Committed Python file — zero I/O fallback when neither index nor master profile
+    #    is available (first deploy or mascot not yet in master profiles).
     file_paths = STATIC_IMAGE_ASSIGNMENTS.get(mc) or {}
     if file_paths and AAC_IMAGES_BUCKET_NAME:
         base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
@@ -22369,7 +22377,7 @@ async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
             )
             return resolved
 
-    # 4. Build from scratch (first-ever run for this mascot)
+    # 5. Build from scratch (no master profile and no static file for this mascot)
     return await _build_static_image_index(mc)
 
 
@@ -23198,13 +23206,6 @@ async def _assign_images_to_tap_config(
                 pool = CATEGORY_STATIC_POOLS.get(_pool_key(str(board.get('label') or '')), [])
             if not pool:
                 continue
-            # Debug home board specifically
-            if str(board.get('id') or '') == 'board_home' or str(board.get('label') or '').lower() == 'home':
-                logging.info(
-                    f"🏠 home board backfill check [{account_id}/{aac_user_id}]: "
-                    f"existing_btns={len(existing)} pool_btns={len(pool_btns)} pool_size={len(pool)} "
-                    f"static_rows={static_rows} max_on_page={static_rows * grid_cols}"
-                )
             # Skip only if pool buttons already exist AND the count matches the current pool definition.
             # Stale boards created before a pool was resized (e.g. 84-item padded → 36-item) must be replaced.
             if pool_btns and len(pool_btns) == len(pool):
@@ -23225,15 +23226,7 @@ async def _assign_images_to_tap_config(
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict):
                 continue
-            btns_for_board = board.get('buttons') or []
-            if str(board.get('id') or '') == 'board_home' or str(board.get('label') or '').lower() == 'home':
-                no_img = [b for b in btns_for_board if isinstance(b, dict) and not b.get('image_url')]
-                logging.info(
-                    f"🏠 home board collect [{account_id}/{aac_user_id}]: "
-                    f"total_btns={len(btns_for_board)} no_image_url={len(no_img)} "
-                    f"sample_labels={[b.get('label') for b in no_img[:5]]}"
-                )
-            for btn in btns_for_board:
+            for btn in (board.get('buttons') or []):
                 if not isinstance(btn, dict):
                     continue
                 lbl = str(btn.get('label') or '').strip()
@@ -23273,18 +23266,6 @@ async def _assign_images_to_tap_config(
         _t3 = _elapsed("ensure_static_index", _t2)
         all_labels_set = set(all_labels)
         label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
-        # Debug: check how many home pool words landed in label_to_url
-        _home_pool = CATEGORY_STATIC_POOLS.get('home', [])
-        _home_in_idx = sum(1 for l in _home_pool if l in static_idx)
-        _home_in_labels = sum(1 for l in _home_pool if l in all_labels_set)
-        _home_resolved = [lbl for lbl in _home_pool if lbl in label_to_url]
-        _home_missing = [lbl for lbl in _home_pool if lbl not in label_to_url]
-        logging.info(
-            f"🏠 home pool resolution [{account_id}/{aac_user_id}]: "
-            f"pool_size={len(_home_pool)} in_static_idx={_home_in_idx} "
-            f"in_all_labels={_home_in_labels} resolved={len(_home_resolved)} "
-            f"missing={_home_missing[:5]}"
-        )
 
         remaining_board_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
         if remaining_board_labels and not skip_remaining_lookup:
