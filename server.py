@@ -19976,6 +19976,57 @@ async def build_master_profiles_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/image-index-status")
+async def image_index_status_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Return the current state of the static image index for each mascot.
+
+    Useful for diagnosing why images are not appearing in test/prod.
+    Call from the browser console:
+        fetch('/api/admin/image-index-status').then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2)))
+    """
+    report = {"bucket": AAC_IMAGES_BUCKET_NAME, "mascots": {}}
+    home_probe = ["I", "want", "need", "yes", "no", "help"]
+    for mc in ("bobby", "bonnie", "buddy"):
+        # In-memory cache state
+        cached = _static_image_index_cache.get(mc, {})
+        master_cached = _master_profile_image_cache.get(mc, {})
+
+        # Firestore index metadata
+        fs_meta: Dict[str, Any] = {}
+        fs_chunk_count = 0
+        fs_label_count = 0
+        try:
+            if firestore_db:
+                _ref = firestore_db.collection('aac_image_index').document(mc)
+                _meta = await asyncio.to_thread(_ref.get)
+                if _meta.exists:
+                    fs_meta = _meta.to_dict() or {}
+                    fs_chunk_count = len(await asyncio.to_thread(
+                        lambda: list(_ref.collection('chunks').stream())
+                    ))
+                    fs_label_count = fs_meta.get('label_count', 0)
+        except Exception as _e:
+            fs_meta = {"error": str(_e)}
+
+        # Sample URLs from whichever source is active
+        idx = cached or {}
+        sample = {lbl: idx.get(lbl, "MISSING") for lbl in home_probe}
+
+        report["mascots"][mc] = {
+            "memory_cache_size": len(cached),
+            "master_profile_cache_size": len(master_cached),
+            "firestore_build_source": fs_meta.get("build_source", "NOT_SET"),
+            "firestore_label_count": fs_label_count,
+            "firestore_chunk_docs": fs_chunk_count,
+            "firestore_computed_at": str(fs_meta.get("computed_at", "n/a")),
+            "home_word_sample": sample,
+        }
+
+    return report
+
+
 @app.post("/api/admin/master-profiles/clear")
 async def clear_master_profile_cache_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
