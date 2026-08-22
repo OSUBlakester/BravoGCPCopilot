@@ -9123,12 +9123,17 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                     f"✅ Regenerated tap boards for {account_id}/{aac_user_id}: "
                     f"use_hybrid_pages={use_hybrid_pages}, tap_dynamic_rows={tap_dynamic_rows}"
                 )
-                # Assign images to all static pool buttons in the background.
-                # Use a fresh copy of the saved config so in-place mutation is safe.
+                # Assign images to all static pool buttons.
+                # When the static image index is already cached in memory, assignment
+                # completes in <5 seconds — run synchronously so the client receives
+                # the config WITH images in its very next request (no background-race).
+                # When the index is cold (cache miss), fall back to a background task
+                # so the settings response isn't held for 20-30 seconds.
                 _mascot_for_assign = str(saved_settings_dict.get('mascot') or 'buddy').strip().lower()
                 _assign_key = (account_id, aac_user_id)
                 if _assign_key not in _image_assign_in_flight:
                     _image_assign_in_flight.add(_assign_key)
+                    _index_is_hot = _mascot_for_assign in _static_image_index_cache
 
                     async def _run_assign_and_clear(_cfg=new_tap_config, _mc=_mascot_for_assign,
                                                     _aid=account_id, _uid=aac_user_id, _key=_assign_key):
@@ -9137,7 +9142,18 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                         finally:
                             _image_assign_in_flight.discard(_key)
 
-                    asyncio.create_task(_run_assign_and_clear())
+                    if _index_is_hot:
+                        logging.info(
+                            f"Image index cached for mascot={_mascot_for_assign!r}; "
+                            f"running image assignment synchronously for {account_id}/{aac_user_id}"
+                        )
+                        await _run_assign_and_clear()
+                    else:
+                        logging.info(
+                            f"Image index cold for mascot={_mascot_for_assign!r}; "
+                            f"running image assignment as background task for {account_id}/{aac_user_id}"
+                        )
+                        asyncio.create_task(_run_assign_and_clear())
                 else:
                     logging.info(
                         f"_assign_images_to_tap_config already in flight for {account_id}/{aac_user_id}; skipping duplicate task"
