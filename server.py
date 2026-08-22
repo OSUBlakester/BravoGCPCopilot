@@ -167,6 +167,11 @@ try:
     from scratch_pools import CATEGORY_STATIC_POOLS, WORD_VARIANTS
 except ImportError:
     CATEGORY_STATIC_POOLS = {}
+
+try:
+    from static_image_assignments import STATIC_IMAGE_ASSIGNMENTS
+except ImportError:
+    STATIC_IMAGE_ASSIGNMENTS = {}
     WORD_VARIANTS = {}
 
 oauth2_scheme = HTTPBearer()
@@ -6330,6 +6335,19 @@ async def lifespan(app: FastAPI):
     # Start periodic cache cleanup task
     cleanup_task = asyncio.create_task(periodic_cache_cleanup())
     logging.info("✅ Started periodic cache cleanup task (runs every hour)")
+
+    # Warm the static image index in the background so new profiles don't wait.
+    # Runs automatically on every cold start; a no-op if the index is already valid.
+    async def _warm_image_indexes():
+        await asyncio.sleep(5)  # let other startup tasks settle first
+        for _mc in ("bobby", "bonnie", "buddy"):
+            try:
+                idx = await _ensure_static_image_index(_mc)
+                logging.info(f"✅ Image index warmed for mascot={_mc!r}: {len(idx)} entries")
+            except Exception as _e:
+                logging.warning(f"Image index warmup failed for {_mc!r}: {_e}")
+    asyncio.create_task(_warm_image_indexes())
+    logging.info("✅ Started image index warmup task")
     
     logging.info("Startup complete (shared services).")
     yield
@@ -9032,6 +9050,12 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                             continue
                         if CATEGORY_STATIC_POOLS.get(f'after_{word_key}'):
                             sub_board_id = f'nav_sub_{word_key}'
+                            # Store stubs without buttons — buttons are populated by the
+                            # _assign_images_to_tap_config backfill (which already handles
+                            # CATEGORY_STATIC_POOLS lookup).  Keeping stubs lean cuts the
+                            # saved config from ~2.8 MB to ~200 KB, avoiding chunked storage
+                            # and dramatically speeding up both the initial write and image
+                            # assignment reload.
                             nav_sub_board_shells.append({
                                 'id': sub_board_id,
                                 'label': word,
@@ -9047,7 +9071,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                                     f'"{word}" in everyday AAC communication. '
                                     f'Focus on what someone would say next after saying "{word}".'
                                 ),
-                                'buttons': [],
+                                # buttons intentionally omitted — backfill will populate
                             })
                             nav_board_by_pool_key[word_key] = sub_board_id
 
@@ -9081,23 +9105,12 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                         buttons.append(btn)
                     board['buttons'] = buttons
 
-                # Step 5: Fill buttons for nav sub-board shells.
-                # Words in after_<X> pools that match an existing board or another nav sub-board
-                # navigate to that board; everything else is do_nothing.
-                for sub_board in nav_sub_board_shells:
-                    after_pool = CATEGORY_STATIC_POOLS.get(str(sub_board.get('prompt_category') or ''), [])
-                    sub_board_id = sub_board['id']
-                    buttons = []
-                    for idx, word in enumerate(after_pool):
-                        word_key = _pool_key(str(word))
-                        target_id = all_board_by_pool_key.get(word_key)
-                        if target_id:
-                            btn = _make_pool_button_entry(idx, word, sub_board_id, idx >= max_buttons, grid_cols, 'navigate')
-                            btn['target_board_id'] = target_id
-                        else:
-                            btn = _make_pool_button_entry(idx, word, sub_board_id, idx >= max_buttons, grid_cols, 'do_nothing')
-                        buttons.append(btn)
-                    sub_board['buttons'] = buttons
+                # Step 5 removed: nav sub-board shells are stored as stubs (buttons: []).
+                # The _assign_images_to_tap_config backfill detects empty-button static boards
+                # whose prompt_category matches a CATEGORY_STATIC_POOLS key and regenerates
+                # buttons there, alongside image assignment.  This cuts the saved config from
+                # ~2.8 MB to ~200 KB, eliminating chunked Firestore writes and accelerating
+                # the wizard completion path.
 
                 new_tap_config['boards'].extend(nav_sub_board_shells)
 
@@ -9110,12 +9123,41 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                     f"✅ Regenerated tap boards for {account_id}/{aac_user_id}: "
                     f"use_hybrid_pages={use_hybrid_pages}, tap_dynamic_rows={tap_dynamic_rows}"
                 )
-                # Assign images to all static pool buttons in the background.
-                # Use a fresh copy of the saved config so in-place mutation is safe.
+                # Assign images to all static pool buttons.
+                # When the static image index is already cached in memory, assignment
+                # completes in <5 seconds — run synchronously so the client receives
+                # the config WITH images in its very next request (no background-race).
+                # When the index is cold (cache miss), fall back to a background task
+                # so the settings response isn't held for 20-30 seconds.
                 _mascot_for_assign = str(saved_settings_dict.get('mascot') or 'buddy').strip().lower()
-                asyncio.create_task(
-                    _assign_images_to_tap_config(new_tap_config, _mascot_for_assign, account_id, aac_user_id)
-                )
+                _assign_key = (account_id, aac_user_id)
+                if _assign_key not in _image_assign_in_flight:
+                    _image_assign_in_flight.add(_assign_key)
+                    _index_is_hot = _mascot_for_assign in _static_image_index_cache
+
+                    async def _run_assign_and_clear(_cfg=new_tap_config, _mc=_mascot_for_assign,
+                                                    _aid=account_id, _uid=aac_user_id, _key=_assign_key):
+                        try:
+                            await _assign_images_to_tap_config(_cfg, _mc, _aid, _uid, skip_remaining_lookup=True)
+                        finally:
+                            _image_assign_in_flight.discard(_key)
+
+                    if _index_is_hot:
+                        logging.info(
+                            f"Image index cached for mascot={_mascot_for_assign!r}; "
+                            f"running image assignment synchronously for {account_id}/{aac_user_id}"
+                        )
+                        await _run_assign_and_clear()
+                    else:
+                        logging.info(
+                            f"Image index cold for mascot={_mascot_for_assign!r}; "
+                            f"running image assignment as background task for {account_id}/{aac_user_id}"
+                        )
+                        asyncio.create_task(_run_assign_and_clear())
+                else:
+                    logging.info(
+                        f"_assign_images_to_tap_config already in flight for {account_id}/{aac_user_id}; skipping duplicate task"
+                    )
             except Exception as e:
                 logging.error(f"Failed to regenerate tap boards after settings update: {e}", exc_info=True)
 
@@ -19576,6 +19618,452 @@ async def prewarm_cache_endpoint(
         logging.error(f"Error prewarming cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/admin/image-index/build")
+async def build_image_index_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: str = "",
+):
+    """
+    Pre-compute and store the static image index for the given mascot (or all known mascots).
+    Run this once after deployment or whenever the aac_images collection changes significantly.
+    Subsequent profile builds will load the index in one Firestore round-trip instead of
+    running hundreds of per-label queries.
+    """
+    try:
+        if mascot:
+            label_to_url = await _build_static_image_index(mascot.strip().lower())
+            return {"success": True, "mascot": mascot, "labels_resolved": len(label_to_url)}
+
+        # Discover all mascots from the aac_images collection.
+        if not firestore_db:
+            raise HTTPException(status_code=503, detail="Firestore not available")
+        docs = await asyncio.to_thread(
+            lambda: list(
+                firestore_db.collection('aac_images')
+                .select(['mascot'])
+                .limit(3000)
+                .stream()
+            )
+        )
+        mascot_set = {
+            str(d.to_dict().get('mascot') or '').strip().lower()
+            for d in docs
+        }
+        mascot_set.discard('')
+        results: Dict[str, int] = {}
+        for m in sorted(mascot_set):
+            ltu = await _build_static_image_index(m)
+            results[m] = len(ltu)
+        return {"success": True, "mascots_built": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"build_image_index_endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/image-index/clear")
+async def clear_image_index_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: str = "",
+):
+    """
+    Clear the in-memory static image index cache (and optionally the Firestore copy)
+    so the next profile build triggers a fresh rebuild.  Pass mascot= to target one mascot
+    or omit to clear all in-memory entries.
+    """
+    global _static_image_index_cache
+    mc = str(mascot or '').strip().lower()
+    if mc:
+        _static_image_index_cache.pop(mc, None)
+        return {"success": True, "cleared_mascot": mc, "note": "In-memory cleared; Firestore index unchanged."}
+    _static_image_index_cache.clear()
+    return {"success": True, "cleared": "all mascots (in-memory only)"}
+
+
+@app.get("/api/admin/image-index/status")
+async def image_index_status_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Diagnose the image index pipeline so slow profile creation can be root-caused.
+
+    Reports for each mascot:
+      - static_file_labels   : entries in STATIC_IMAGE_ASSIGNMENTS (0 = import failed)
+      - bucket_name          : AAC_IMAGES_BUCKET_NAME (null = storage deps missing)
+      - memory_cache_labels  : entries currently in _static_image_index_cache
+      - firestore_index_labels : entries readable from aac_image_index in Firestore
+      - expected_path        : which priority level will be used on next cold-start
+    """
+    import time as _time
+
+    mascots_to_check = ["bobby", "bonnie", "buddy"]
+    result: Dict[str, Any] = {
+        "bucket_name": AAC_IMAGES_BUCKET_NAME,
+        "vertex_ai_available": VERTEX_AI_AVAILABLE,
+        "static_file_loaded": bool(STATIC_IMAGE_ASSIGNMENTS),
+        "mascots": {},
+    }
+
+    for mc in mascots_to_check:
+        file_entries = len(STATIC_IMAGE_ASSIGNMENTS.get(mc) or {})
+        mem_entries = len(_static_image_index_cache.get(mc) or {})
+
+        # Try reading the Firestore index directly
+        t0 = _time.time()
+        fs_entries = 0
+        fs_error = None
+        try:
+            if firestore_db:
+                chunks_ref = (firestore_db.collection('aac_image_index')
+                              .document(mc).collection('chunks'))
+                chunk_docs = await asyncio.to_thread(lambda: list(chunks_ref.stream()))
+                for doc in chunk_docs:
+                    fs_entries += len((doc.to_dict() or {}).get('labels') or {})
+        except Exception as _e:
+            fs_error = str(_e)
+        fs_ms = round((_time.time() - t0) * 1000)
+
+        # Determine which path would be taken on a cold-start
+        if mem_entries:
+            path = "1-memory-cache"
+        elif file_entries and AAC_IMAGES_BUCKET_NAME:
+            path = "2-static-python-file"
+        elif fs_entries:
+            path = "3-firestore-index"
+        else:
+            path = "4-build-from-scratch (SLOW)"
+
+        # Check master profile under admin account
+        master_labels = 0
+        master_sample_url = None
+        master_error = None
+        t1 = _time.time()
+        try:
+            admin_id = await _get_admin_account_id()
+            if admin_id:
+                _master_uid = await _find_master_profile_user_id(admin_id, mc)
+                master_config = await load_tap_nav_config(admin_id, _master_uid) if _master_uid else None
+                if master_config:
+                    for board in (master_config.get('boards') or []):
+                        for btn in (board.get('buttons') or []):
+                            url = str(btn.get('image_url') or '').strip()
+                            lbl = str(btn.get('label') or '').strip()
+                            if lbl and url:
+                                master_labels += 1
+                                if not master_sample_url:
+                                    master_sample_url = url
+            else:
+                master_error = "admin account not found"
+        except Exception as _e:
+            master_error = str(_e)
+        master_ms = round((_time.time() - t1) * 1000)
+
+        result["mascots"][mc] = {
+            "static_file_labels": file_entries,
+            "memory_cache_labels": mem_entries,
+            "firestore_index_labels": fs_entries,
+            "firestore_read_ms": fs_ms,
+            "firestore_error": fs_error,
+            "master_profile_buttons_with_images": master_labels,
+            "master_profile_sample_url": master_sample_url,
+            "master_profile_read_ms": master_ms,
+            "master_profile_error": master_error,
+            "cold_start_path": path,
+        }
+
+    return result
+
+
+@app.get("/api/admin/image-index/export")
+async def export_image_index_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """
+    Export the current static image index as a ready-to-commit Python source file.
+
+    The output stores relative GCS paths (bucket name stripped) so the same file
+    works in every environment.  At runtime the server prepends
+    https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/ to reconstruct the URL.
+
+    Workflow:
+      1. POST /api/admin/image-index/build  (once, to populate the Firestore index)
+      2. GET  /api/admin/image-index/export (copy the response body)
+      3. Paste into static_image_assignments.py and commit
+      4. Re-run only when aac_images changes or new mascots are added
+    """
+    import re as _re
+    try:
+        # Load indices for all known mascots (in-memory + Firestore).
+        if not firestore_db:
+            raise HTTPException(status_code=503, detail="Firestore not available")
+
+        # Discover mascots from Firestore aac_image_index collection.
+        meta_docs = await asyncio.to_thread(
+            lambda: list(firestore_db.collection('aac_image_index').stream())
+        )
+        mascot_names = [d.id for d in meta_docs]
+        if not mascot_names:
+            raise HTTPException(
+                status_code=404,
+                detail="No index found. Run POST /api/admin/image-index/build first."
+            )
+
+        # Load each mascot's label→url map and convert urls to relative paths.
+        _bucket_re = _re.compile(r'^https://storage\.googleapis\.com/[^/]+/')
+        all_assignments: Dict[str, Dict[str, str]] = {}
+        for m in sorted(mascot_names):
+            idx = await _load_static_image_index(m)
+            if not idx:
+                continue
+            paths: Dict[str, str] = {}
+            for label, url in sorted(idx.items()):
+                rel_path = _bucket_re.sub('', url) if url else ''
+                if rel_path:
+                    paths[label] = rel_path
+            if paths:
+                all_assignments[m] = paths
+
+        if not all_assignments:
+            raise HTTPException(status_code=404, detail="Index loaded but contained no URLs.")
+
+        # Render as Python source.
+        lines = [
+            '# Auto-generated by GET /api/admin/image-index/export',
+            '# DO NOT EDIT MANUALLY — re-generate when aac_images changes or mascots are added.',
+            '#',
+            '# Stores GCS-relative paths (no bucket prefix).  The server prepends:',
+            '#   https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/',
+            '# so this file works identically in dev, test, and prod.',
+            '',
+            'from typing import Dict',
+            '',
+            'STATIC_IMAGE_ASSIGNMENTS: Dict[str, Dict[str, str]] = {',
+        ]
+        for mascot, paths in all_assignments.items():
+            lines.append(f'    {mascot!r}: {{')
+            for label, path in paths.items():
+                lines.append(f'        {label!r}: {path!r},')
+            lines.append('    },')
+        lines.append('}')
+        lines.append('')
+
+        python_src = '\n'.join(lines)
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(python_src, media_type='text/x-python')
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"export_image_index_endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/master-profiles/build")
+async def build_master_profiles_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: Optional[str] = None,
+):
+    """
+    Build (or rebuild) master profile(s) under the admin account so that
+    new user profiles can copy image assignments instead of running a full
+    Firestore image lookup.
+
+    - mascot=bobby|bonnie|buddy  → build one master profile
+    - mascot omitted             → build all three
+
+    Each master profile is named  master_{mascot}  (e.g. "master_bobby").
+    The profile is created with create_default_tap_config, then
+    _assign_images_to_tap_config is run synchronously (not as a background
+    task) so the endpoint only returns after images are fully resolved.
+
+    This is a one-time admin operation; after it completes, new profiles
+    are sped up because _load_master_profile_image_map() returns the cached
+    label→URL map with zero Firestore queries.
+    """
+    try:
+        admin_id = await _get_admin_account_id()
+        if not admin_id:
+            raise HTTPException(status_code=500, detail="Admin account not found in Firestore.")
+
+        all_mascots = [mascot.strip().lower()] if mascot else ["bobby", "bonnie", "buddy"]
+        results = {}
+
+        for mc in all_mascots:
+            master_user_id = f"{MASTER_PROFILE_PREFIX}{mc}"
+            logging.info(f"build_master_profiles: building {master_user_id!r} under admin account {admin_id!r}")
+
+            # Clear stale caches so the full aac_images lookup runs from scratch.
+            # Without this, _ensure_static_image_index returns the pre-populated static
+            # index (6131 dev-generated paths), leaving remaining_board_labels empty and
+            # bypassing _lookup_images_for_labels entirely.  Master profiles would then
+            # inherit dev-bucket paths that don't exist in the test/prod bucket.
+            _master_profile_image_cache.pop(mc, None)
+            _static_image_index_cache.pop(mc, None)
+            if firestore_db:
+                try:
+                    _idx_ref = firestore_db.collection('aac_image_index').document(mc)
+                    _chunk_docs = await asyncio.to_thread(
+                        lambda: list(_idx_ref.collection('chunks').stream())
+                    )
+                    await asyncio.gather(*[
+                        asyncio.to_thread(lambda d=_d: d.reference.delete())
+                        for _d in _chunk_docs
+                    ])
+                    logging.info(
+                        f"build_master_profiles: cleared {len(_chunk_docs)} aac_image_index "
+                        f"chunks for mascot={mc!r}"
+                    )
+                except Exception as _e:
+                    logging.warning(f"build_master_profiles: could not clear aac_image_index for {mc!r}: {_e}")
+
+            # Create a fresh default tap config for the master profile.
+            new_config = create_default_tap_config(admin_id, master_user_id, use_hybrid_pages=True)
+
+            # Build nav sub-board shells — MUST include board_type='static' so the
+            # backfill in _assign_images_to_tap_config populates pool buttons.
+            # (regenerate_boards sets this field; omitting it caused 0 images on master profiles.)
+            nav_sub_board_shells = []
+            for word_key, pool_words in CATEGORY_STATIC_POOLS.items():
+                nav_sub_board_shells.append({
+                    'id': f"nav_sub_{word_key}",
+                    'label': str(word_key).replace('_', ' ').title(),
+                    'board_type': 'static',
+                    'source': 'navigation',
+                    'prompt_category': f"after_{word_key}",
+                    'llm_prompt': f"Words related to: {str(word_key).replace('_', ' ')}",
+                })
+            new_config['boards'].extend(nav_sub_board_shells)
+
+            # Save to Firestore before running image assignment.
+            await save_tap_nav_config(admin_id, master_user_id, new_config)
+
+            # Run image assignment using a full live aac_images lookup (force_full_lookup=True)
+            # so master profiles get environment-specific URLs — not the dev-generated static index.
+            stats = await _assign_images_to_tap_config(
+                new_config, mc, admin_id, master_user_id, force_full_lookup=True
+            )
+
+            # Evict stale caches so the Firestore index we're about to write is loaded fresh.
+            _master_profile_image_cache.pop(mc, None)
+            _static_image_index_cache.pop(mc, None)
+
+            # Populate the Firestore aac_image_index from the master profile buttons —
+            # these URLs were resolved from THIS environment's aac_images collection,
+            # so they are guaranteed to exist in this environment's GCS bucket.
+            # (The previous approach used static_image_assignments.py paths which were
+            # generated from dev and may not match the test/prod bucket structure.)
+            master_config = await load_tap_nav_config(admin_id, master_user_id)
+            env_label_map: Dict[str, str] = {}
+            if master_config:
+                for _board in (master_config.get('boards') or []):
+                    for _btn in (_board.get('buttons') or [] if isinstance(_board, dict) else []):
+                        if not isinstance(_btn, dict):
+                            continue
+                        _lbl = str(_btn.get('label') or '').strip()
+                        _url = str(_btn.get('image_url') or '').strip()
+                        if _lbl and _url and _lbl not in env_label_map:
+                            env_label_map[_lbl] = _url
+            if env_label_map:
+                await _save_static_image_index(mc, env_label_map)
+                _static_image_index_cache[mc] = env_label_map
+                stats["firestore_index_labels"] = len(env_label_map)
+                logging.info(
+                    f"build_master_profiles: saved {len(env_label_map)} labels to "
+                    f"aac_image_index for {mc!r} (sourced from master profile buttons)"
+                )
+            else:
+                logging.warning(
+                    f"build_master_profiles: no labeled buttons with images found in "
+                    f"master profile {master_user_id!r} — Firestore index not updated"
+                )
+
+            results[mc] = {
+                "master_user_id": master_user_id,
+                "admin_account_id": admin_id,
+                **stats,
+            }
+            logging.info(f"build_master_profiles: {master_user_id!r} done — {stats}")
+
+        return {"ok": True, "results": results}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"build_master_profiles_endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/image-index-status")
+async def image_index_status_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Return the current state of the static image index for each mascot.
+
+    Useful for diagnosing why images are not appearing in test/prod.
+    Call from the browser console:
+        fetch('/api/admin/image-index-status').then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2)))
+    """
+    report = {"bucket": AAC_IMAGES_BUCKET_NAME, "mascots": {}}
+    home_probe = ["I", "want", "need", "yes", "no", "help"]
+    for mc in ("bobby", "bonnie", "buddy"):
+        # In-memory cache state
+        cached = _static_image_index_cache.get(mc, {})
+        master_cached = _master_profile_image_cache.get(mc, {})
+
+        # Firestore index metadata
+        fs_meta: Dict[str, Any] = {}
+        fs_chunk_count = 0
+        fs_label_count = 0
+        try:
+            if firestore_db:
+                _ref = firestore_db.collection('aac_image_index').document(mc)
+                _meta = await asyncio.to_thread(_ref.get)
+                if _meta.exists:
+                    fs_meta = _meta.to_dict() or {}
+                    fs_chunk_count = len(await asyncio.to_thread(
+                        lambda: list(_ref.collection('chunks').stream())
+                    ))
+                    fs_label_count = fs_meta.get('label_count', 0)
+        except Exception as _e:
+            fs_meta = {"error": str(_e)}
+
+        # Sample URLs from whichever source is active
+        idx = cached or {}
+        sample = {lbl: idx.get(lbl, "MISSING") for lbl in home_probe}
+
+        report["mascots"][mc] = {
+            "memory_cache_size": len(cached),
+            "master_profile_cache_size": len(master_cached),
+            "firestore_build_source": fs_meta.get("build_source", "NOT_SET"),
+            "firestore_label_count": fs_label_count,
+            "firestore_chunk_docs": fs_chunk_count,
+            "firestore_computed_at": str(fs_meta.get("computed_at", "n/a")),
+            "home_word_sample": sample,
+        }
+
+    return report
+
+
+@app.post("/api/admin/master-profiles/clear")
+async def clear_master_profile_cache_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    mascot: Optional[str] = None,
+):
+    """Evict the in-memory master profile image cache (one or all mascots)."""
+    global _admin_account_id_cache
+    if mascot:
+        mc = mascot.strip().lower()
+        _master_profile_image_cache.pop(mc, None)
+        _static_image_index_cache.pop(mc, None)
+        evicted = [mc]
+    else:
+        evicted = list(_master_profile_image_cache.keys())
+        _master_profile_image_cache.clear()
+        _static_image_index_cache.clear()
+        _admin_account_id_cache = None
+    return {"ok": True, "evicted": evicted}
+
+
 @app.get("/api/admin/images/browse")
 async def browse_images_for_admin(
     token_info: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
@@ -21754,6 +22242,336 @@ async def button_symbol_search(
 _batch_search_cache: dict = {}
 _BATCH_SEARCH_CACHE_TTL = 300  # seconds (5 minutes)
 
+# Module-level image URL cache shared across all profile builds.
+# Key: (mascot_clean, original_label) → image_url or None
+# Survives the lifetime of the server process; common AAC words hit Firestore once
+# and are served from memory for every subsequent profile.
+_image_url_cache: dict = {}
+_IMAGE_URL_CACHE_MAX = 5000  # evict oldest half when full
+
+# Tracks in-flight image assignment tasks to prevent duplicate concurrent runs for the
+# same (account_id, aac_user_id) pair when the wizard schedules the task more than once.
+_image_assign_in_flight: set = set()
+
+# Cached admin account ID (resolved once from Firestore by email).
+_admin_account_id_cache: Optional[str] = None
+
+# In-memory master-profile image maps: mascot_clean → {label: image_url}
+# Populated by _load_master_profile_image_map(); survives server lifetime.
+_master_profile_image_cache: Dict[str, Dict[str, str]] = {}
+
+MASTER_PROFILE_PREFIX = "master_"  # profile IDs under admin account: master_bobby, etc.
+
+
+async def _get_admin_account_id() -> Optional[str]:
+    """Return the Firestore account ID for admin@talkwithbravo.com, cached after first call."""
+    global _admin_account_id_cache
+    if _admin_account_id_cache:
+        return _admin_account_id_cache
+    if not firestore_db:
+        return None
+    try:
+        docs = await asyncio.to_thread(
+            lambda: list(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+                .where("email", "==", "admin@talkwithbravo.com")
+                .limit(1)
+                .stream()
+            )
+        )
+        if docs:
+            _admin_account_id_cache = docs[0].id
+            logging.info(f"_get_admin_account_id: resolved admin account → {_admin_account_id_cache!r}")
+        return _admin_account_id_cache
+    except Exception as e:
+        logging.warning(f"_get_admin_account_id: lookup failed: {e}")
+        return None
+
+
+async def _find_master_profile_user_id(admin_id: str, mascot_clean: str) -> Optional[str]:
+    """
+    Find the real Firestore user document ID for a master profile.
+
+    Tries (in order):
+      1. The legacy string ID used by build_master_profiles_endpoint ("master_bobby")
+      2. Any user under the admin account whose display_name matches
+         "master {mascot}" or "master_{mascot}" (case-insensitive, stripped).
+
+    Returns the user_id string or None if not found.
+    """
+    if not firestore_db or not admin_id or not mascot_clean:
+        return None
+
+    # Fast path: legacy string user ID written by build_master_profiles_endpoint
+    legacy_id = f"{MASTER_PROFILE_PREFIX}{mascot_clean}"
+    try:
+        legacy_cfg = await load_tap_nav_config(admin_id, legacy_id)
+        if legacy_cfg and legacy_cfg.get('boards'):
+            logging.info(f"_find_master_profile_user_id: found legacy id={legacy_id!r} for mascot={mascot_clean!r}")
+            return legacy_id
+    except Exception:
+        pass
+
+    # Scan users subcollection for a display_name matching "master {mascot}" or "master_{mascot}"
+    target_names = {f"master {mascot_clean}", f"master_{mascot_clean}", mascot_clean}
+    try:
+        users_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(admin_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+        user_docs = await asyncio.to_thread(lambda: list(users_ref.stream()))
+        for doc in user_docs:
+            data = doc.to_dict() or {}
+            dn = str(data.get('display_name') or '').strip().lower()
+            if dn in target_names:
+                logging.info(
+                    f"_find_master_profile_user_id: found user {doc.id!r} "
+                    f"with display_name={dn!r} for mascot={mascot_clean!r}"
+                )
+                return doc.id
+        logging.info(
+            f"_find_master_profile_user_id: no user found for mascot={mascot_clean!r} "
+            f"under admin_id={admin_id!r} (searched {len(user_docs)} users)"
+        )
+    except Exception as e:
+        logging.warning(f"_find_master_profile_user_id: scan failed for {mascot_clean!r}: {e}")
+    return None
+
+
+async def _extract_label_map_from_config(master_config: Dict) -> Dict[str, str]:
+    """Return {label: image_url} from all buttons in a tap config."""
+    label_map: Dict[str, str] = {}
+    for board in (master_config.get('boards') or []):
+        if not isinstance(board, dict):
+            continue
+        for btn in (board.get('buttons') or []):
+            if not isinstance(btn, dict):
+                continue
+            lbl = str(btn.get('label') or '').strip()
+            url = str(btn.get('image_url') or '').strip()
+            if lbl and url and lbl not in label_map:
+                label_map[lbl] = url
+    return label_map
+
+
+async def _load_master_profile_image_map(mascot: str) -> Dict[str, str]:
+    """
+    Build {label: image_url} from the master profile's tap config buttons.
+    Checks in-memory cache first; loads from Firestore master profile on miss.
+
+    Searches both the legacy string user ID ("master_bobby") and any user
+    under the admin account whose display_name matches "master {mascot}".
+    Returns {} if no master profile with images exists.
+    """
+    mc = str(mascot or '').strip().lower()
+    if not mc:
+        return {}
+    if mc in _master_profile_image_cache:
+        return _master_profile_image_cache[mc]
+
+    admin_id = await _get_admin_account_id()
+    if not admin_id:
+        return {}
+
+    try:
+        master_user_id = await _find_master_profile_user_id(admin_id, mc)
+        if not master_user_id:
+            logging.info(f"_load_master_profile_image_map: no master profile found for mascot={mc!r}")
+            return {}
+
+        master_config = await load_tap_nav_config(admin_id, master_user_id)
+        if not master_config:
+            logging.info(f"_load_master_profile_image_map: load_tap_nav_config returned None for user={master_user_id!r}")
+            return {}
+
+        label_map = await _extract_label_map_from_config(master_config)
+        if label_map:
+            _master_profile_image_cache[mc] = label_map
+            logging.info(
+                f"_load_master_profile_image_map: loaded {len(label_map)} label→url "
+                f"entries from user={master_user_id!r} for mascot={mc!r}"
+            )
+        else:
+            logging.warning(
+                f"_load_master_profile_image_map: no buttons with image_url found in "
+                f"master profile user={master_user_id!r} for mascot={mc!r} — "
+                f"master profile may need image assignment (POST /api/admin/master-profiles/build)"
+            )
+        return label_map
+    except Exception as e:
+        logging.warning(f"_load_master_profile_image_map: failed for {mc!r}: {e}")
+        return {}
+
+
+# Pre-computed per-mascot image index for all CATEGORY_STATIC_POOLS labels.
+# Loaded from Firestore on first use; eliminates bulk Firestore queries during profile creation.
+# Key: mascot_clean → {original_label: image_url}
+_static_image_index_cache: Dict[str, Dict[str, str]] = {}
+# Labels per Firestore chunk doc — at ~200 bytes/entry, 800 entries ≈ 160 KB (safely under 1 MB).
+_STATIC_IMAGE_INDEX_CHUNK_SIZE = 800
+
+
+async def _load_static_image_index(mascot: str) -> Dict[str, str]:
+    """Load the pre-computed static-pool image index from Firestore.
+
+    Only trusts indexes that were built from a live aac_images query
+    (build_source='live_lookup' in the metadata doc).  Indexes written
+    by build_image_index.py (which uses dev-generated relative paths)
+    lack this metadata and are discarded so the system rebuilds from
+    the live aac_images collection automatically.
+    """
+    mc = str(mascot or '').strip().lower()
+    if not mc:
+        return {}
+    if mc in _static_image_index_cache:
+        return _static_image_index_cache[mc]
+    if not firestore_db:
+        return {}
+    try:
+        index_ref = firestore_db.collection('aac_image_index').document(mc)
+        meta_doc = await asyncio.to_thread(index_ref.get)
+        meta = (meta_doc.to_dict() or {}) if meta_doc.exists else {}
+        if meta.get('build_source') != 'live_lookup':
+            logging.info(
+                f"_load_static_image_index: index for {mc!r} has "
+                f"build_source={meta.get('build_source')!r} — discarding; will rebuild from aac_images"
+            )
+            return {}
+        chunks_ref = index_ref.collection('chunks')
+        chunk_docs = await asyncio.to_thread(lambda: list(chunks_ref.stream()))
+        merged: Dict[str, str] = {}
+        for doc in chunk_docs:
+            chunk_map = (doc.to_dict() or {}).get('labels') or {}
+            merged.update(chunk_map)
+        if merged:
+            _static_image_index_cache[mc] = merged
+            logging.info(f"_load_static_image_index: loaded {len(merged)} entries for mascot={mc!r}")
+        return merged
+    except Exception as e:
+        logging.warning(f"_load_static_image_index: Firestore error for {mc!r}: {e}")
+        return {}
+
+
+async def _save_static_image_index(mascot: str, label_map: Dict[str, str]) -> None:
+    """Chunk and save the static image index to Firestore, then update the in-memory cache."""
+    mc = str(mascot or '').strip().lower()
+    if not firestore_db or not mc or not label_map:
+        return
+    try:
+        meta_ref = firestore_db.collection('aac_image_index').document(mc)
+        chunks_ref = meta_ref.collection('chunks')
+        items = list(label_map.items())
+        chunk_size = _STATIC_IMAGE_INDEX_CHUNK_SIZE
+        num_chunks = (len(items) + chunk_size - 1) // chunk_size
+
+        async def _write_chunk(idx: int, chunk_items: list) -> None:
+            await asyncio.to_thread(
+                lambda: chunks_ref.document(str(idx)).set({'labels': dict(chunk_items)})
+            )
+
+        await asyncio.gather(*[
+            _write_chunk(i, items[start:start + chunk_size])
+            for i, start in enumerate(range(0, len(items), chunk_size))
+        ])
+        await asyncio.to_thread(lambda: meta_ref.set({
+            'mascot': mc,
+            'label_count': len(label_map),
+            'chunk_count': num_chunks,
+            'computed_at': firestore.SERVER_TIMESTAMP,
+            'build_source': 'live_lookup',  # marks this as built from live aac_images, not static file
+        }))
+        _static_image_index_cache[mc] = label_map
+        logging.info(
+            f"_save_static_image_index: saved {len(label_map)} entries "
+            f"in {num_chunks} chunks for mascot={mc!r}"
+        )
+    except Exception as e:
+        logging.warning(f"_save_static_image_index: failed for {mc!r}: {e}")
+
+
+async def _build_static_image_index(mascot: str) -> Dict[str, str]:
+    """Compute image URLs for every CATEGORY_STATIC_POOLS label and persist to Firestore.
+
+    Clears both per-label and per-mascot in-memory caches before querying so that
+    image updates in aac_images are always picked up fresh.
+    """
+    mc = str(mascot or '').strip().lower()
+
+    # Evict any stale entries from the per-label cache for this mascot so that
+    # changed images in aac_images are fetched fresh from Firestore.
+    stale_keys = [k for k in _image_url_cache if k[0] == mc]
+    for k in stale_keys:
+        del _image_url_cache[k]
+    _static_image_index_cache.pop(mc, None)
+
+    all_pool_labels: List[str] = []
+    for words in CATEGORY_STATIC_POOLS.values():
+        all_pool_labels.extend(str(w).strip() for w in words if str(w).strip())
+    unique_labels = list(dict.fromkeys(all_pool_labels))
+    logging.info(
+        f"_build_static_image_index: resolving {len(unique_labels)} unique "
+        f"pool labels for mascot={mc!r} (caches cleared)"
+    )
+    label_to_url = await _lookup_images_for_labels(
+        unique_labels, mc, '', '', source='static_image_index'
+    )
+    await _save_static_image_index(mc, label_to_url)
+    return label_to_url
+
+
+async def _ensure_static_image_index(mascot: str) -> Dict[str, str]:
+    """Return the static image index for the given mascot.
+
+    Priority order:
+      1. In-memory cache — zero cost.
+      2. Firestore aac_image_index — compact label→URL map written by build_master_profiles_endpoint.
+      3. Master profile tap config — read directly and save to aac_image_index for future calls.
+         URLs come from the master profile's own image_url fields, which were resolved against
+         this environment's aac_images collection, so they are guaranteed valid for this bucket.
+      4. Committed Python file (STATIC_IMAGE_ASSIGNMENTS) — last-resort fallback; dev-generated
+         paths may not exist in test/prod bucket.
+      5. Built from scratch via _lookup_images_for_labels — slow, one-time per mascot.
+    """
+    mc = str(mascot or '').strip().lower()
+    if not mc:
+        return {}
+
+    # 1. In-memory cache
+    if mc in _static_image_index_cache:
+        return _static_image_index_cache[mc]
+
+    # 2. Firestore aac_image_index — fast compact cache populated by master profile build.
+    idx = await _load_static_image_index(mc)
+    if idx:
+        return idx
+
+    # 3. Master profile — load button image_urls directly.  These are env-specific URLs
+    #    because build_master_profiles_endpoint resolves them against the live aac_images
+    #    collection in this environment.  Save the result to aac_image_index so step 2
+    #    wins on all future calls.
+    master_idx = await _load_master_profile_image_map(mc)
+    if master_idx:
+        logging.info(
+            f"_ensure_static_image_index: loaded {len(master_idx)} entries "
+            f"from master profile for mascot={mc!r}; saving to aac_image_index"
+        )
+        await _save_static_image_index(mc, master_idx)
+        return master_idx
+
+    # 4. Committed Python file — zero I/O fallback when neither index nor master profile
+    #    is available (first deploy or mascot not yet in master profiles).
+    file_paths = STATIC_IMAGE_ASSIGNMENTS.get(mc) or {}
+    if file_paths and AAC_IMAGES_BUCKET_NAME:
+        base = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
+        resolved = {label: base + path for label, path in file_paths.items() if path}
+        if resolved:
+            _static_image_index_cache[mc] = resolved
+            logging.info(
+                f"_ensure_static_image_index: loaded {len(resolved)} entries "
+                f"from static_image_assignments.py for mascot={mc!r}"
+            )
+            return resolved
+
+    # 5. Build from scratch (no master profile and no static file for this mascot)
+    return await _build_static_image_index(mc)
+
 
 def _make_pool_button_entry(
     pool_idx: int,
@@ -22103,6 +22921,25 @@ async def _lookup_images_for_labels(
 
     mascot_clean = str(mascot or '').strip().lower()
     unique_labels = list(dict.fromkeys(labels))  # preserve order, dedupe
+
+    # Fast path: serve any label already in the process-level image cache.
+    label_to_url: Dict[str, str] = {}
+    cache_hits: set = set()
+    for lbl in unique_labels:
+        cached_val = _image_url_cache.get((mascot_clean, lbl))
+        if cached_val is not None:  # None → cached miss; not in dict → unknown
+            if cached_val:  # non-empty string means a real URL was found
+                label_to_url[lbl] = cached_val
+            cache_hits.add(lbl)
+
+    uncached_labels = [lbl for lbl in unique_labels if lbl not in cache_hits]
+    if not uncached_labels:
+        logging.debug(f"_lookup_images_for_labels: all {len(unique_labels)} labels served from cache (mascot={mascot_clean!r})")
+        return label_to_url
+
+    # Continue with Firestore queries only for labels not in the cache.
+    unique_labels = uncached_labels
+
     norm_map = {lbl: _norm(lbl) for lbl in unique_labels}  # label → normalized
     key_term_map = {lbl: _key_term(norm_map[lbl]) for lbl in unique_labels if norm_map.get(lbl)}
 
@@ -22165,7 +23002,7 @@ async def _lookup_images_for_labels(
 
     # Run in small batches to avoid saturating the shared ThreadPoolExecutor and
     # blocking unrelated Firestore operations on other in-flight requests.
-    _BATCH = 5
+    _BATCH = 30
     streams: List[Any] = []
     try:
         asyncio.get_running_loop()
@@ -22312,8 +23149,9 @@ async def _lookup_images_for_labels(
                 score -= 1000   # no mascot when user has one: mild penalty vs correct-mascot image
         return score
 
-    # Score all pre-processed candidates for each label.
-    label_to_url: Dict[str, str] = {}
+    # Score all pre-processed candidates for each uncached label.
+    # label_to_url was pre-populated with cache hits above; merge new results in.
+    newly_resolved: Dict[str, str] = {}
     for lbl in unique_labels:
         norm_lbl = norm_map.get(lbl, '')
         if not norm_lbl:
@@ -22332,15 +23170,30 @@ async def _lookup_images_for_labels(
                 best_url = cand["url"]
 
         if best_url:
-            label_to_url[lbl] = best_url
+            newly_resolved[lbl] = best_url
 
-    logging.info(f"_lookup_images_for_labels: {len(label_to_url)}/{len(unique_labels)} labels resolved (mascot={mascot_clean!r}, source={source!r})")
+    label_to_url.update(newly_resolved)
+
+    logging.info(f"_lookup_images_for_labels: {len(newly_resolved)}/{len(unique_labels)} new labels resolved from Firestore, {len(cache_hits)} from cache (mascot={mascot_clean!r}, source={source!r})")
+
+    # Populate the process-level cache with results for this batch.
+    # Cache both hits (url string) and misses (empty string) so repeated lookups
+    # of unresolved labels skip Firestore too.
+    if len(_image_url_cache) >= _IMAGE_URL_CACHE_MAX:
+        # Evict the oldest half by reinserting only the newer half.
+        items = list(_image_url_cache.items())
+        _image_url_cache.clear()
+        for k, v in items[len(items) // 2:]:
+            _image_url_cache[k] = v
+    for lbl in unique_labels:
+        _image_url_cache[(mascot_clean, lbl)] = newly_resolved.get(lbl, '')
 
     # Log any labels that had no matching image so admins can track gaps.
+    # Only log for labels queried in this call (not cache hits — those were already logged).
     # Skip pure numbers — they display as text and are not expected to have images.
     missing_labels = [
         lbl for lbl in unique_labels
-        if lbl not in label_to_url and not _norm(lbl).replace(' ', '').isdigit()
+        if lbl not in newly_resolved and not _norm(lbl).replace(' ', '').isdigit()
     ]
     if missing_labels:
         context = {"source": source, "mascot": mascot_clean, "account_id": account_id, "aac_user_id": aac_user_id}
@@ -22484,6 +23337,8 @@ async def _assign_images_to_tap_config(
     mascot: str,
     account_id: str,
     aac_user_id: str,
+    skip_remaining_lookup: bool = False,
+    force_full_lookup: bool = False,
 ) -> Dict[str, Any]:
     """
     Resolve images for every static pool button in the tap config and save to Firestore.
@@ -22493,12 +23348,39 @@ async def _assign_images_to_tap_config(
     Uses config_data only to collect labels; reloads a fresh copy from Firestore
     before saving so concurrent writes (e.g. wizard boards-menu save) are not lost.
     """
+    import time as _t
+    _t0 = _t.perf_counter()
+    def _elapsed(label: str, since=None) -> float:
+        ms = round((_t.perf_counter() - (since or _t0)) * 1000)
+        logging.info(f"⏱ _assign_images [{account_id}/{aac_user_id}] {label}: {ms}ms")
+        return _t.perf_counter()
+
+    logging.info(
+        f"_assign_images_to_tap_config: START account={account_id} user={aac_user_id} "
+        f"mascot={mascot!r} skip_remaining={skip_remaining_lookup} force_full={force_full_lookup}"
+    )
     stats: Dict[str, Any] = {"labels_found": 0, "images_resolved": 0, "save_ok": False, "backfill_changed": False, "error": None}
     try:
         # Load a fresh copy from Firestore so we work with the latest state.
         fresh_config = await load_tap_nav_config(account_id, aac_user_id)
         if not fresh_config:
             fresh_config = config_data
+        _t1 = _elapsed("load_fresh_config")
+
+        # Race-condition guard: the background task now runs fast enough that a
+        # concurrent wizard save can land between our creation and this read.  If
+        # the fresh copy has FEWER boards than the config we were handed at task
+        # creation time, the fresh copy is stale/truncated — use the original
+        # board list to avoid silently dropping boards (e.g. the Actions board).
+        original_boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
+        fresh_boards = fresh_config.get('boards') if isinstance(fresh_config.get('boards'), list) else []
+        if len(original_boards) > len(fresh_boards):
+            logging.warning(
+                f"_assign_images_to_tap_config: fresh_config has {len(fresh_boards)} boards "
+                f"but config_data has {len(original_boards)}; using config_data boards to avoid "
+                f"data loss from a concurrent wizard save for {account_id}/{aac_user_id}"
+            )
+            fresh_config['boards'] = original_boards
 
         # --- Backfill missing pool buttons ---
         # Static boards created before the pool feature have no pool_index buttons.
@@ -22533,7 +23415,10 @@ async def _assign_images_to_tap_config(
             board['dynamic_rows'] = tap_dynamic_rows
             backfill_changed = True
 
-        # Collect all unique labels for image lookup (includes newly added pool buttons)
+        # Collect labels only for buttons that have no image_url yet.
+        # Buttons that already have an image_url are left untouched — re-querying
+        # Firestore for thousands of existing images is the main source of the
+        # 50-90 second lookup_remaining delay on profiles with many non-pool boards.
         all_labels: List[str] = []
         for board in (fresh_config.get('boards') or []):
             if not isinstance(board, dict):
@@ -22542,30 +23427,82 @@ async def _assign_images_to_tap_config(
                 if not isinstance(btn, dict):
                     continue
                 lbl = str(btn.get('label') or '').strip()
-                if lbl:
+                if lbl and not btn.get('image_url'):
                     all_labels.append(lbl)
 
-        # Also collect labels from boards_menu items (recursive tree structure)
+        # Collect boards_menu labels separately so we can apply the static index without
+        # running Firestore queries for AI-generated / category-name labels that aren't
+        # in the pool.  Running _lookup_images_for_labels on thousands of unique
+        # boards_menu labels causes 50-90 second delays.
+        menu_labels: List[str] = []
         def _walk_menu_labels(items: list) -> None:
             for item in (items or []):
                 if not isinstance(item, dict):
                     continue
                 lbl = str(item.get('label') or '').strip()
                 if lbl:
-                    all_labels.append(lbl)
+                    menu_labels.append(lbl)
                 _walk_menu_labels(item.get('children') or [])
 
         _walk_menu_labels(fresh_config.get('boards_menu') or [])
 
-        stats["labels_found"] = len(all_labels)
+        stats["labels_found"] = len(all_labels) + len(menu_labels)
         stats["backfill_changed"] = backfill_changed
+        _t2 = _elapsed("backfill+collect_labels", _t1)
 
-        if not all_labels and not backfill_changed:
+        logging.info(
+            f"_assign_images_to_tap_config [{account_id}/{aac_user_id}] "
+            f"boards={len(fresh_config.get('boards') or [])} all_labels={len(all_labels)} "
+            f"menu_labels={len(menu_labels)} backfill_changed={backfill_changed}"
+        )
+        if not all_labels and not menu_labels and not backfill_changed:
             return stats
 
         label_to_url: Dict[str, str] = {}
-        if all_labels:
-            label_to_url = await _lookup_images_for_labels(all_labels, mascot, account_id, aac_user_id, source="tap_config")
+
+        # --- Board button labels (static pool words) ---
+        # force_full_lookup=True skips the cached index so every label goes through
+        # _lookup_images_for_labels.  Used by build_master_profiles_endpoint to ensure
+        # master profiles contain environment-specific URLs from the live aac_images
+        # collection rather than dev-generated paths from the static index.
+        if not force_full_lookup:
+            static_idx = await _ensure_static_image_index(mascot)
+            _t3 = _elapsed("ensure_static_index", _t2)
+            all_labels_set = set(all_labels)
+            label_to_url = {lbl: url for lbl, url in static_idx.items() if lbl in all_labels_set}
+        else:
+            static_idx = {}
+            _t3 = _elapsed("ensure_static_index(skipped)", _t2)
+            all_labels_set = set(all_labels)
+
+        remaining_board_labels = [lbl for lbl in all_labels if lbl not in label_to_url]
+        if remaining_board_labels and not skip_remaining_lookup:
+            extra = await _lookup_images_for_labels(
+                remaining_board_labels, mascot, account_id, aac_user_id, source="tap_config"
+            )
+            label_to_url.update(extra)
+        elif remaining_board_labels:
+            logging.info(
+                f"_assign_images: skipping Firestore lookup for {len(remaining_board_labels)} "
+                f"remaining labels (skip_remaining_lookup=True) [{account_id}/{aac_user_id}]"
+            )
+        _elapsed("lookup_remaining", _t3)
+        _sample_url = next(iter(label_to_url.values()), None)
+        logging.info(
+            f"_assign_images [{account_id}/{aac_user_id}] "
+            f"images_resolved={len(label_to_url)}/{len(all_labels)} all_labels "
+            f"(backfill_changed={backfill_changed}, "
+            f"sample_url={(_sample_url or 'none')[:80]!r})"
+        )
+
+        # --- boards_menu labels ---
+        # Apply static index only.  Category names / AI-generated labels that miss
+        # the index are skipped here — running Firestore queries for thousands of
+        # unique menu labels adds 50-90 seconds per profile creation.
+        menu_labels_set = set(menu_labels)
+        for lbl, url in static_idx.items():
+            if lbl in menu_labels_set and lbl not in label_to_url:
+                label_to_url[lbl] = url
 
         stats["images_resolved"] = len(label_to_url)
 
@@ -22646,9 +23583,12 @@ async def _assign_images_to_tap_config(
         if menu_changed[0]:
             fresh_config['buttons'] = compose_legacy_buttons_from_boards_menu(fresh_config)
 
+        _t_presave = _t.perf_counter()
         if backfill_changed or img_changed or menu_changed[0]:
             save_ok = await save_tap_nav_config(account_id, aac_user_id, fresh_config)
             stats["save_ok"] = bool(save_ok)
+            _elapsed("save_tap_nav_config", _t_presave)
+            _elapsed("TOTAL", )
             logging.info(
                 f"✅ Pool/image assignment complete for {account_id}/{aac_user_id}: "
                 f"backfill={backfill_changed} images={len(label_to_url)} save_ok={save_ok}"
@@ -22686,7 +23626,22 @@ async def assign_all_board_images(
         if not config_data:
             raise HTTPException(status_code=404, detail='Board config not found')
 
-        # Run synchronously so the response confirms completion
+        # Guard against a background task from regenerate_boards still running.
+        # Wait up to 90s for it to finish, then run the full lookup ourselves.
+        _assign_key = (account_id, aac_user_id)
+        waited = 0.0
+        while _assign_key in _image_assign_in_flight and waited < 90.0:
+            await asyncio.sleep(1.0)
+            waited += 1.0
+        if waited:
+            logging.info(
+                f"assign_all_board_images: waited {waited:.0f}s for in-flight task to finish "
+                f"[{account_id}/{aac_user_id}]"
+            )
+            # Reload config so we get the version written by the background task
+            config_data = await load_tap_nav_config(account_id, aac_user_id) or config_data
+
+        # Run synchronously so the response confirms completion (full Firestore lookup)
         stats = await _assign_images_to_tap_config(config_data, mascot, account_id, aac_user_id)
 
         return JSONResponse(content={'success': True, 'mascot': mascot, 'debug': stats})
@@ -25001,23 +25956,25 @@ async def _clear_chunked_tap_boards(doc_ref) -> None:
 
 async def _save_chunked_tap_boards(doc_ref, boards: List[Dict[str, Any]]) -> int:
     chunks = _split_boards_into_chunks(boards)
-    for idx, chunk in enumerate(chunks):
+    now_iso = dt.now().isoformat()
+
+    # Write all chunks in parallel — previously sequential, which caused multi-minute
+    # delays for large configs (~2.8 MB with nav sub-board buttons).
+    async def _write_chunk(idx: int, chunk: list) -> None:
         chunk_ref = doc_ref.collection("boards_chunks").document(f"chunk_{idx:04d}")
         await asyncio.to_thread(
             chunk_ref.set,
-            {
-                "index": idx,
-                "boards": chunk,
-                "updated_at": dt.now().isoformat(),
-            },
+            {"index": idx, "boards": chunk, "updated_at": now_iso},
         )
 
-    # Remove stale chunk documents from previous larger saves.
+    await asyncio.gather(*[_write_chunk(i, c) for i, c in enumerate(chunks)])
+
+    # Remove stale chunk documents from previous larger saves (also in parallel).
     existing_docs = await asyncio.to_thread(lambda: list(doc_ref.collection("boards_chunks").stream()))
     valid_ids = {f"chunk_{i:04d}" for i in range(len(chunks))}
-    for existing in existing_docs:
-        if existing.id not in valid_ids:
-            await asyncio.to_thread(existing.reference.delete)
+    stale = [d for d in existing_docs if d.id not in valid_ids]
+    if stale:
+        await asyncio.gather(*[asyncio.to_thread(d.reference.delete) for d in stale])
 
     return len(chunks)
 
@@ -25091,21 +26048,6 @@ async def _save_split_tap_docs(account_id: str, aac_user_id: str, config_data: D
             'created_at': created_at,
         }
 
-        estimated_boards_size = _estimate_json_size_bytes({'boards': boards})
-        if estimated_boards_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
-            boards_payload['boards'] = boards
-            boards_payload.pop('boards_storage', None)
-            boards_payload.pop('boards_chunk_count', None)
-            boards_payload.pop('boards_count', None)
-            await asyncio.to_thread(boards_ref.set, boards_payload)
-            await _clear_chunked_tap_boards(boards_ref)
-        else:
-            chunk_count = await _save_chunked_tap_boards(boards_ref, boards)
-            boards_payload['boards_storage'] = 'chunked'
-            boards_payload['boards_chunk_count'] = chunk_count
-            boards_payload['boards_count'] = len(boards)
-            await asyncio.to_thread(boards_ref.set, boards_payload)
-
         boards_menu = config_data.get('boards_menu') if isinstance(config_data.get('boards_menu'), list) else []
         menu_payload = {
             'boards_menu': dedupe_boards_menu_tree(boards_menu),
@@ -25114,7 +26056,28 @@ async def _save_split_tap_docs(account_id: str, aac_user_id: str, config_data: D
             'updated_at': now_iso,
             'created_at': created_at,
         }
-        await asyncio.to_thread(menu_ref.set, menu_payload)
+
+        estimated_boards_size = _estimate_json_size_bytes({'boards': boards})
+        if estimated_boards_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+            boards_payload['boards'] = boards
+            boards_payload.pop('boards_storage', None)
+            boards_payload.pop('boards_chunk_count', None)
+            boards_payload.pop('boards_count', None)
+            await asyncio.gather(
+                asyncio.to_thread(boards_ref.set, boards_payload),
+                asyncio.to_thread(menu_ref.set, menu_payload),
+            )
+            await _clear_chunked_tap_boards(boards_ref)
+        else:
+            # Write chunks first (parallel), then the header + menu in parallel.
+            chunk_count = await _save_chunked_tap_boards(boards_ref, boards)
+            boards_payload['boards_storage'] = 'chunked'
+            boards_payload['boards_chunk_count'] = chunk_count
+            boards_payload['boards_count'] = len(boards)
+            await asyncio.gather(
+                asyncio.to_thread(boards_ref.set, boards_payload),
+                asyncio.to_thread(menu_ref.set, menu_payload),
+            )
 
         return True
     except Exception as e:
@@ -25194,36 +26157,37 @@ async def save_tap_nav_config(account_id: str, aac_user_id: str, config_data: Di
 
         doc_ref = _tap_config_doc_ref(account_id, aac_user_id)
         boards = working_config.get('boards') if isinstance(working_config.get('boards'), list) else []
-
-        split_saved = await _save_split_tap_docs(account_id, aac_user_id, working_config)
-        if not split_saved:
-            return False
-
-        legacy_doc = await asyncio.to_thread(doc_ref.get)
-        if not legacy_doc.exists:
-            return True
-
         estimated_size = _estimate_json_size_bytes(working_config)
-        combined_saved = False
-        if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
-            working_config.pop('boards_storage', None)
-            working_config.pop('boards_chunk_count', None)
-            working_config.pop('boards_count', None)
-            await asyncio.to_thread(doc_ref.set, working_config)
-            await _clear_chunked_tap_boards(doc_ref)
-            combined_saved = True
-        else:
-            # Firestore has a strict per-document limit; store large boards list in chunked sub-documents.
-            base_config = copy.deepcopy(working_config)
-            base_config.pop('boards', None)
-            chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
-            base_config['boards_storage'] = 'chunked'
-            base_config['boards_chunk_count'] = chunk_count
-            base_config['boards_count'] = len(boards)
-            await asyncio.to_thread(doc_ref.set, base_config)
-            combined_saved = True
 
-        return combined_saved
+        async def _save_legacy_doc() -> None:
+            """Mirror to legacy combined doc only if it already exists."""
+            legacy_doc = await asyncio.to_thread(doc_ref.get)
+            if not legacy_doc.exists:
+                return
+            if estimated_size <= TAP_CONFIG_DOC_SOFT_LIMIT_BYTES:
+                cfg = copy.deepcopy(working_config)
+                cfg.pop('boards_storage', None)
+                cfg.pop('boards_chunk_count', None)
+                cfg.pop('boards_count', None)
+                await asyncio.gather(
+                    asyncio.to_thread(doc_ref.set, cfg),
+                    _clear_chunked_tap_boards(doc_ref),
+                )
+            else:
+                base_config = copy.deepcopy(working_config)
+                base_config.pop('boards', None)
+                chunk_count = await _save_chunked_tap_boards(doc_ref, boards)
+                base_config['boards_storage'] = 'chunked'
+                base_config['boards_chunk_count'] = chunk_count
+                base_config['boards_count'] = len(boards)
+                await asyncio.to_thread(doc_ref.set, base_config)
+
+        # Run split-doc save and legacy-doc mirror in parallel.
+        split_saved, _ = await asyncio.gather(
+            _save_split_tap_docs(account_id, aac_user_id, working_config),
+            _save_legacy_doc(),
+        )
+        return bool(split_saved)
     except Exception as e:
         logging.error(f"Error saving tap navigation config: {e}")
         return False

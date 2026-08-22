@@ -4571,17 +4571,8 @@ registerForm.addEventListener('submit', async (e) => {
                     } catch (_) { /* non-fatal: menu visibility can be adjusted in admin settings */ }
                 }
 
-                // Assign images to tap interface boards (not needed for scan interface)
-                if (wizardState.interfaceMode === 'tap') {
-                    try {
-                        setWizardStatus('Assigning images to boards…', false);
-                        await fetch('/api/tap-interface/boards/assign-all-images', {
-                            method: 'POST',
-                            headers,
-                            body: JSON.stringify({ mascot: wizardState.mascot || '' })
-                        });
-                    } catch (_) { /* non-fatal: images will be assigned on first use */ }
-                }
+                // Image assignment is handled by the background task in regenerate_boards.
+                // No need to call assign-all-images here — it runs automatically and quickly.
 
                 closeSetupWizard();
 
