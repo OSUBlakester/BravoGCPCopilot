@@ -22362,7 +22362,20 @@ async def _load_master_profile_image_map(mascot: str) -> Dict[str, str]:
 
         master_config = await load_tap_nav_config(admin_id, master_user_id)
         if not master_config:
+            logging.info(f"_load_master_profile_image_map: load_tap_nav_config returned None for user={master_user_id!r}")
             return {}
+
+        boards = master_config.get('boards') or []
+        total_btns = sum(len(b.get('buttons') or []) for b in boards if isinstance(b, dict))
+        btns_with_url = sum(
+            1 for b in boards if isinstance(b, dict)
+            for btn in (b.get('buttons') or [])
+            if isinstance(btn, dict) and btn.get('image_url')
+        )
+        logging.info(
+            f"_load_master_profile_image_map: user={master_user_id!r} mascot={mc!r} "
+            f"boards={len(boards)} total_buttons={total_btns} buttons_with_image_url={btns_with_url}"
+        )
 
         label_map = await _extract_label_map_from_config(master_config)
         if label_map:
@@ -22370,6 +22383,12 @@ async def _load_master_profile_image_map(mascot: str) -> Dict[str, str]:
             logging.info(
                 f"_load_master_profile_image_map: loaded {len(label_map)} label→url "
                 f"entries from user={master_user_id!r} for mascot={mc!r}"
+            )
+        else:
+            logging.warning(
+                f"_load_master_profile_image_map: no buttons with image_url found in "
+                f"master profile user={master_user_id!r} for mascot={mc!r} — "
+                f"master profile may need image assignment (POST /api/admin/master-profiles/build)"
             )
         return label_map
     except Exception as e:
@@ -23332,6 +23351,10 @@ async def _assign_images_to_tap_config(
         logging.info(f"⏱ _assign_images [{account_id}/{aac_user_id}] {label}: {ms}ms")
         return _t.perf_counter()
 
+    logging.info(
+        f"_assign_images_to_tap_config: START account={account_id} user={aac_user_id} "
+        f"mascot={mascot!r} skip_remaining={skip_remaining_lookup} force_full={force_full_lookup}"
+    )
     stats: Dict[str, Any] = {"labels_found": 0, "images_resolved": 0, "save_ok": False, "backfill_changed": False, "error": None}
     try:
         # Load a fresh copy from Firestore so we work with the latest state.
@@ -23423,7 +23446,14 @@ async def _assign_images_to_tap_config(
         stats["backfill_changed"] = backfill_changed
         _t2 = _elapsed("backfill+collect_labels", _t1)
 
+        boards_summary = [(b.get('board_type'), b.get('id'), len(b.get('buttons') or [])) for b in (fresh_config.get('boards') or []) if isinstance(b, dict)]
+        logging.info(
+            f"_assign_images_to_tap_config [{account_id}/{aac_user_id}] "
+            f"boards={len(boards_summary)} all_labels={len(all_labels)} menu_labels={len(menu_labels)} backfill_changed={backfill_changed} "
+            f"board_summary={boards_summary[:5]}"
+        )
         if not all_labels and not menu_labels and not backfill_changed:
+            logging.info(f"_assign_images_to_tap_config: early exit — nothing to do for {account_id}/{aac_user_id}")
             return stats
 
         label_to_url: Dict[str, str] = {}
