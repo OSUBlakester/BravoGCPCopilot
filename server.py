@@ -22336,8 +22336,9 @@ async def _find_master_profile_user_id(admin_id: str, mascot_clean: str) -> Opti
 
 
 async def _extract_label_map_from_config(master_config: Dict) -> Dict[str, str]:
-    """Return {label: image_url} from all buttons in a tap config."""
+    """Return {label: image_url} from all buttons AND boards_menu items in a tap config."""
     label_map: Dict[str, str] = {}
+
     for board in (master_config.get('boards') or []):
         if not isinstance(board, dict):
             continue
@@ -22348,6 +22349,18 @@ async def _extract_label_map_from_config(master_config: Dict) -> Dict[str, str]:
             url = str(btn.get('image_url') or '').strip()
             if lbl and url and lbl not in label_map:
                 label_map[lbl] = url
+
+    def _walk_menu(items: list) -> None:
+        for item in (items or []):
+            if not isinstance(item, dict):
+                continue
+            lbl = str(item.get('label') or '').strip()
+            url = str(item.get('image_url') or '').strip()
+            if lbl and url and lbl not in label_map:
+                label_map[lbl] = url
+            _walk_menu(item.get('children') or [])
+
+    _walk_menu(master_config.get('boards_menu') or [])
     return label_map
 
 
