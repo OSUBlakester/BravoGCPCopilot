@@ -9133,7 +9133,6 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                 _assign_key = (account_id, aac_user_id)
                 if _assign_key not in _image_assign_in_flight:
                     _image_assign_in_flight.add(_assign_key)
-                    _index_is_hot = _mascot_for_assign in _static_image_index_cache
 
                     async def _run_assign_and_clear(_cfg=new_tap_config, _mc=_mascot_for_assign,
                                                     _aid=account_id, _uid=aac_user_id, _key=_assign_key):
@@ -9142,18 +9141,7 @@ async def save_settings_endpoint(settings_update: SettingsModel, current_ids: An
                         finally:
                             _image_assign_in_flight.discard(_key)
 
-                    if _index_is_hot:
-                        logging.info(
-                            f"Image index cached for mascot={_mascot_for_assign!r}; "
-                            f"running image assignment synchronously for {account_id}/{aac_user_id}"
-                        )
-                        await _run_assign_and_clear()
-                    else:
-                        logging.info(
-                            f"Image index cold for mascot={_mascot_for_assign!r}; "
-                            f"running image assignment as background task for {account_id}/{aac_user_id}"
-                        )
-                        asyncio.create_task(_run_assign_and_clear())
+                    await _run_assign_and_clear()
                 else:
                     logging.info(
                         f"_assign_images_to_tap_config already in flight for {account_id}/{aac_user_id}; skipping duplicate task"
@@ -23524,13 +23512,6 @@ async def _assign_images_to_tap_config(
 
         # --- boards_menu labels ---
         # Apply static index only.  Category names / AI-generated labels that miss
-        # the index are skipped here — running Firestore queries for thousands of
-        # unique menu labels adds 50-90 seconds per profile creation.
-        menu_labels_set = set(menu_labels)
-        for lbl, url in static_idx.items():
-            if lbl in menu_labels_set and lbl not in label_to_url:
-                label_to_url[lbl] = url
-
         stats["images_resolved"] = len(label_to_url)
 
         # Write image_url and fix after_selection onto every static pool button
@@ -23554,8 +23535,35 @@ async def _assign_images_to_tap_config(
                         btn['after_selection'] = 'use_ai'
                         img_changed = True
 
-        # Write image_url onto boards_menu items using the same lookup results
+        # Write image_url onto boards_menu items.
+        # Category labels ("Greetings", "Help", etc.) are not pool words so they are
+        # not in the static index.  Load the master profile's boards_menu directly and
+        # copy image_urls by matching label — no index/cache dependency.
         menu_changed = [False]
+        master_menu_map: Dict[str, str] = {}
+        try:
+            _admin_id = await _get_admin_account_id()
+            if _admin_id:
+                _master_uid = await _find_master_profile_user_id(_admin_id, mascot)
+                if _master_uid:
+                    _master_cfg = await load_tap_nav_config(_admin_id, _master_uid)
+                    if _master_cfg:
+                        def _collect_master_menu(items: list) -> None:
+                            for _item in (items or []):
+                                if not isinstance(_item, dict):
+                                    continue
+                                _lbl = str(_item.get('label') or '').strip()
+                                _url = str(_item.get('image_url') or '').strip()
+                                if _lbl and _url and _lbl not in master_menu_map:
+                                    master_menu_map[_lbl] = _url
+                                _collect_master_menu(_item.get('children') or [])
+                        _collect_master_menu(_master_cfg.get('boards_menu') or [])
+                        logging.info(
+                            f"_assign_images: loaded {len(master_menu_map)} menu label→url "
+                            f"entries from master profile {_master_uid!r} for mascot={mascot!r}"
+                        )
+        except Exception as _e:
+            logging.warning(f"_assign_images: could not load master menu images for {mascot!r}: {_e}")
 
         def _assign_menu_images(items: list) -> None:
             for item in (items or []):
@@ -23563,7 +23571,7 @@ async def _assign_images_to_tap_config(
                     continue
                 lbl = str(item.get('label') or '').strip()
                 if lbl:
-                    url = label_to_url.get(lbl)
+                    url = master_menu_map.get(lbl) or label_to_url.get(lbl)
                     if url and item.get('image_url') != url:
                         item['image_url'] = url
                         menu_changed[0] = True
