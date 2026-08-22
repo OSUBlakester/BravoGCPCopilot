@@ -20049,19 +20049,33 @@ async def clear_master_profile_cache_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
     mascot: Optional[str] = None,
 ):
-    """Evict the in-memory master profile image cache (one or all mascots)."""
+    """Evict in-memory caches AND delete Firestore aac_image_index for one or all mascots.
+
+    After this call the next profile creation triggers a fresh rebuild from the
+    master profiles (picking up any code changes to _extract_label_map_from_config).
+    """
     global _admin_account_id_cache
-    if mascot:
-        mc = mascot.strip().lower()
+    mascots_to_clear = [mascot.strip().lower()] if mascot else ["bobby", "bonnie", "buddy"]
+
+    for mc in mascots_to_clear:
         _master_profile_image_cache.pop(mc, None)
         _static_image_index_cache.pop(mc, None)
-        evicted = [mc]
-    else:
-        evicted = list(_master_profile_image_cache.keys())
-        _master_profile_image_cache.clear()
-        _static_image_index_cache.clear()
+        if firestore_db:
+            try:
+                idx_ref = firestore_db.collection('aac_image_index').document(mc)
+                chunk_docs = await asyncio.to_thread(lambda: list(idx_ref.collection('chunks').stream()))
+                await asyncio.gather(*[
+                    asyncio.to_thread(lambda d=d: d.reference.delete()) for d in chunk_docs
+                ])
+                await asyncio.to_thread(lambda: idx_ref.delete())
+                logging.info(f"clear_master_profile_cache: deleted aac_image_index/{mc} ({len(chunk_docs)} chunks)")
+            except Exception as e:
+                logging.warning(f"clear_master_profile_cache: could not delete Firestore index for {mc!r}: {e}")
+
+    if not mascot:
         _admin_account_id_cache = None
-    return {"ok": True, "evicted": evicted}
+
+    return {"ok": True, "evicted": mascots_to_clear}
 
 
 @app.get("/api/admin/images/browse")
