@@ -249,6 +249,27 @@ _BASE_TO_FORMS: dict[str, tuple[str, ...]] = {
     "relax":      ("relaxed", "relaxing", "relaxes"),
     "choose":     ("chose", "chosen", "choosing", "chooses"),
     "connect":    ("connected", "connecting", "connects"),
+    # Additional AAC-relevant verbs not covered above
+    "act":        ("acted", "acting", "acts"),
+    "show":       ("showed", "shown", "showing", "shows"),
+    "join":       ("joined", "joining", "joins"),
+    "greet":      ("greeted", "greeting", "greets"),
+    "apologize":  ("apologized", "apologizing", "apologizes"),
+    "thank":      ("thanked", "thanking", "thanks"),
+    "agree":      ("agreed", "agreeing", "agrees"),
+    "disagree":   ("disagreed", "disagreeing", "disagrees"),
+    "request":    ("requested", "requesting", "requests"),
+    "accept":     ("accepted", "accepting", "accepts"),
+    "refuse":     ("refused", "refusing", "refuses"),
+    "continue":   ("continued", "continuing", "continues"),
+    "offer":      ("offered", "offering", "offers"),
+    "dislike":    ("disliked", "disliking", "dislikes"),
+    "enjoy":      ("enjoyed", "enjoying", "enjoys"),
+    "notice":     ("noticed", "noticing", "notices"),
+    "understand": ("understood", "understanding", "understands"),
+    "know":       ("knew", "known", "knowing", "knows"),
+    "think":      ("thought", "thinking", "thinks"),
+    "hurt":       ("hurting", "hurts"),
 }
 
 # Build the reverse map: inflected → base (used to avoid adding duplicate base)

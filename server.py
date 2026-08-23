@@ -1,12 +1,6 @@
 import os
 import sys
 import warnings
-# Suppress the google-generativeai end-of-support notice (package still functional; migration is a larger project)
-warnings.filterwarnings("ignore", message=".*google.generativeai.*")
-warnings.filterwarnings("ignore", message=".*google-generativeai.*")
-warnings.filterwarnings("ignore", message=".*generativeai.*deprecated.*")
-warnings.filterwarnings("ignore", message=".*no longer receiving.*")
-warnings.filterwarnings("ignore", message=".*All support.*ended.*")
 from dotenv import load_dotenv
 
 # Load environment variables from .env file (if present)
@@ -110,8 +104,8 @@ from fastapi import FastAPI, Request, HTTPException, Body, Path, Response, Heade
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import google.generativeai as genai
-from google.generativeai import caching
+from google import genai
+from google.genai import types
 import json
 import logging
 import time
@@ -232,8 +226,8 @@ async def health_check():
             "firebase": firebase_app is not None,
             "firestore": firestore_db is not None,
             "sentence_transformer": sentence_transformer_model is not None,
-            "primary_llm": primary_llm_model_instance is not None,
-            "fallback_llm": fallback_llm_model_instance is not None,
+            "primary_llm": _gemini_client is not None and bool(_primary_model_name),
+            "fallback_llm": _gemini_client is not None and bool(_fallback_model_name),
             "openai": openai_client is not None,
             "tts": tts_client is not None
         }
@@ -2873,6 +2867,22 @@ DEFAULT_SCRAPING_CONFIG = {
 
 # New favorites structure - grid of topic buttons with scraping configs
 
+# System instruction passed separately to Vertex AI cache (must not be embedded in contents)
+_GEMINI_SYSTEM_INSTRUCTION = (
+    "You are Bravo, an AI communication assistant for AAC users. "
+    "Your role is to generate relevant response options based on the user's context.\n\n"
+    "IMPORTANT: Always prioritize the User Profile information as your PRIMARY source. "
+    "The user's personal details, family, interests, and disability information should be the foundation of your responses. "
+    "Use the current situation and recent activity as SECONDARY context to personalize responses, "
+    "but never let them overshadow the core user profile.\n\n"
+    "🔊 CRITICAL SPEECH RULE: When creating summary fields for response options, NEVER include the user's personal name. "
+    "The summary field is what gets spoken aloud to the user, so it should use generic language like "
+    "\"I am\", \"I feel\", \"I want\" instead of \"John is\", \"John feels\", \"John wants\". "
+    "Personal names should only appear in the full option text if necessary, never in summaries.\n\n"
+    "Format responses as a JSON array of objects, each with \"option\" and \"summary\" keys.\n"
+    "Analyze the provided context to create helpful, personalized suggestions."
+)
+
 # === CACHE MANAGER SERVICE ===
 class GeminiCacheManager:
     """
@@ -2994,7 +3004,7 @@ class GeminiCacheManager:
         if cache_name:
             try:
                 # Verify the cache still exists in Gemini API
-                await asyncio.to_thread(caching.CachedContent.get, cache_name)
+                await _gemini_client.aio.caches.get(name=cache_name)
                 self._validated_cache_refs[user_key] = {
                     "cache_name": cache_name,
                     "expires_at": cache_data.get('expires_at', now_ts + self.ttl_seconds),
@@ -3018,8 +3028,7 @@ class GeminiCacheManager:
         # Delete from Gemini if cache_name provided
         if cache_name:
             try:
-                cache_to_delete = caching.CachedContent(name=cache_name)
-                await asyncio.to_thread(cache_to_delete.delete)
+                await _gemini_client.aio.caches.delete(name=cache_name)
                 logging.info(f"Deleted expired Gemini cache: {cache_name}")
             except Exception as e:
                 logging.warning(f"Error deleting expired Gemini cache {cache_name}: {e}")
@@ -3545,15 +3554,16 @@ Undated Diary Entries (use cautiously, max 5):
             # Create the cache using the Gemini API (BASE context only)
             cache_display_name = f"user_cache_{user_key}_{int(dt.now().timestamp())}"
             created_at = dt.now().timestamp()
-            
-            # The model used for caching must match the model used for generation.
-            # NOTE: Chat history is NO LONGER cached (moved to DELTA for cost savings)
-            cached_content = await asyncio.to_thread(
-                caching.CachedContent.create,
-                model=GEMINI_PRIMARY_MODEL,
-                display_name=cache_display_name,
-                contents=[{'role': 'user', 'parts': [{'text': base_context}]}],
-                ttl=timedelta(seconds=self.ttl_seconds)
+
+            # system_instruction must be a separate field for Vertex AI caching
+            cached_content = await _gemini_client.aio.caches.create(
+                model=_primary_model_name,
+                config=types.CreateCachedContentConfig(
+                    display_name=cache_display_name,
+                    system_instruction=_GEMINI_SYSTEM_INSTRUCTION,
+                    contents=[{'role': 'user', 'parts': [{'text': base_context}]}],
+                    ttl=f"{self.ttl_seconds}s",
+                ),
             )
 
             # Save to Firestore (no message count since we don't cache chat anymore)
@@ -3604,8 +3614,7 @@ Undated Diary Entries (use cautiously, max 5):
             # Delete from Gemini
             if cache_name:
                 try:
-                    cache_to_delete = caching.CachedContent(name=cache_name)
-                    await asyncio.to_thread(cache_to_delete.delete)
+                    await _gemini_client.aio.caches.delete(name=cache_name)
                     logging.info(f"Successfully invalidated and deleted cache '{cache_name}' for user '{user_key}'.")
                 except Exception as e:
                     logging.error(f"Error deleting Gemini cache '{cache_name}': {e}", exc_info=True)
@@ -3776,16 +3785,16 @@ RoutingTarget = Literal["personal", "system", "default"] # 'default' for fallbac
 # chroma_client = None # Initialize client variable
 
 
-# Keep the global sentence_transformer_model, primary_llm_model_instance, fallback_llm_model_instance, tts_client.
-# NO, let's move the actual initialization of sentence_transformer, llm, tts into initialize_backend_services
+# Global model instances are initialized in initialize_backend_services
 # as they are large objects. Define them globally as None and initialize in lifespan.
 
 collection = None # (This will be removed later, still a global variable)
 chroma_client_global = None # NEW: Keep a global chroma client for static db if needed, but per-user client is key.
 sentence_transformer_model = None # DISABLED - not currently used
-primary_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
-fallback_llm_model_instance: Optional[genai.GenerativeModel] = None # Global instance
-fast_words_llm_model_instance: Optional[genai.GenerativeModel] = None # Lightweight fast model for category word lists
+_gemini_client: Optional[genai.Client] = None  # Vertex AI client singleton
+_primary_model_name: str = ""
+_fallback_model_name: str = ""
+_fast_words_model_name: str = ""
 openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
 tts_client: Optional[google_tts.TextToSpeechClient] = None # Global instance
 firestore_db: Optional[FirestoreClient] = None
@@ -3808,54 +3817,31 @@ logging.info("Sentence Transformer initialization disabled (not currently used f
 #     logging.error(f"Error initializing Sentence Transformer: {e}", exc_info=True)
 #     sentence_transformer_model = None # Ensure model is None if setup fails
 
-logging.info("Initializing Gemini API and models...")
-api_key = os.environ.get("GOOGLE_API_KEY")
-    
-# Add explicit check and log for the API key value *before* using it
-if not api_key:
-    logging.error("GOOGLE_API_KEY environment variable NOT set or is empty. Gemini initialization will fail.")
-    raise ValueError("GOOGLE_API_KEY environment variable not set.") # Re-raise immediately if critical
-else:
-    logging.info(f"DEBUG: GOOGLE_API_KEY successfully retrieved (first 5 chars): {api_key[:5]}*****") # Log partial key for security
-
-    try:
-        genai.configure(api_key=api_key)
-        logging.info("Gemini API configured successfully.") # NEW CONFIRMATION LOG
-
-        primary_model_name_from_settings = DEFAULT_PRIMARY_LLM_MODEL_NAME
-        try:
-            primary_llm_model_instance = genai.GenerativeModel(primary_model_name_from_settings)
-            logging.info(f"Primary Gemini model '{primary_llm_model_instance.model_name}' initialized.")
-        except Exception as e_primary:
-            logging.error(f"Error initializing primary Gemini model '{primary_model_name_from_settings}': {e_primary}", exc_info=True)
-            primary_llm_model_instance = None
-        
-        try:
-            fallback_llm_model_instance = genai.GenerativeModel(DEFAULT_FALLBACK_LLM_MODEL_NAME)
-            logging.info(f"Fallback Gemini model '{fallback_llm_model_instance.model_name}' initialized.")
-        except Exception as e_fallback:
-            logging.error(f"Error initializing fallback Gemini model '{DEFAULT_FALLBACK_LLM_MODEL_NAME}': {e_fallback}", exc_info=True)
-            fallback_llm_model_instance = None
-
-        try:
-            fast_words_model_name = GEMINI_FAST_WORDS_MODEL
-            if "2.0-flash-lite" in fast_words_model_name:
-                logging.warning(
-                    f"Configured fast words model '{fast_words_model_name}' is deprecated for many accounts; "
-                    f"using primary model '{GEMINI_PRIMARY_MODEL}' instead."
-                )
-                fast_words_model_name = GEMINI_PRIMARY_MODEL
-            fast_words_llm_model_instance = genai.GenerativeModel(fast_words_model_name)
-            logging.info(f"Fast words Gemini model '{fast_words_llm_model_instance.model_name}' initialized.")
-        except Exception as e_fast:
-            logging.error(f"Error initializing fast words model '{GEMINI_FAST_WORDS_MODEL}': {e_fast}", exc_info=True)
-            fast_words_llm_model_instance = None
-    except Exception as e_genai_config: # Catch any error from genai.configure itself
-        logging.error(f"Fatal error during Gemini API configuration: {e_genai_config}", exc_info=True)
-        # Ensure models are None if configuration fails
-        primary_llm_model_instance = None
-        fallback_llm_model_instance = None
-        fast_words_llm_model_instance = None
+logging.info("Initializing Gemini client (Vertex AI)...")
+try:
+    _gcp_project = os.environ.get("GCP_PROJECT_ID") or CONFIG.get("gcp_project_id", "bravo-dev-465400")
+    _gcp_location = os.environ.get("GCP_LOCATION", "us-central1")
+    _gemini_client = genai.Client(
+        vertexai=True,
+        project=_gcp_project,
+        location=_gcp_location,
+    )
+    _primary_model_name = DEFAULT_PRIMARY_LLM_MODEL_NAME
+    _fallback_model_name = DEFAULT_FALLBACK_LLM_MODEL_NAME
+    _fast_words_model_name = GEMINI_FAST_WORDS_MODEL
+    if "2.0-flash-lite" in _fast_words_model_name:
+        logging.warning(
+            f"Configured fast words model '{_fast_words_model_name}' is deprecated; "
+            f"using primary model '{GEMINI_PRIMARY_MODEL}' instead."
+        )
+        _fast_words_model_name = GEMINI_PRIMARY_MODEL
+    logging.info(
+        f"Gemini Vertex AI client initialized. project={_gcp_project} location={_gcp_location} "
+        f"primary={_primary_model_name} fallback={_fallback_model_name} fast={_fast_words_model_name}"
+    )
+except Exception as e_genai_config:
+    logging.error(f"Fatal error initializing Gemini Vertex AI client: {e_genai_config}", exc_info=True)
+    _gemini_client = None
 
 # --- Initialize OpenAI Client ---
 logging.info("Initializing OpenAI client...")
@@ -4595,7 +4581,7 @@ async def _execute_gemini_call_with_retry(
     attempt = 1
     while attempt <= max_attempts:
         try:
-            return await asyncio.to_thread(call_factory)
+            return await call_factory()
         except Exception as exc:
             is_retryable = _is_retryable_gemini_exception(exc)
             is_last_attempt = attempt >= max_attempts
@@ -4694,29 +4680,25 @@ async def _generate_gemini_content_with_caching(
                 try:
                     # Get the cached content reference
                     cached_content_name = cached_refs[0]
-                    
-                    # Get cached content object and create model with it
-                    cached_content = caching.CachedContent.get(cached_content_name)
-                    model = genai.GenerativeModel.from_cached_content(cached_content)
-                    
+
                     # Calculate token savings
-                    full_prompt_tokens = len(prompt_text.split()) if prompt_text else 100  # Rough estimate
-                    user_query_tokens = len(user_query_only.split())  # Rough estimate
+                    full_prompt_tokens = len(prompt_text.split()) if prompt_text else 100
+                    user_query_tokens = len(user_query_only.split())
                     token_savings = full_prompt_tokens - user_query_tokens
                     token_savings_percent = (token_savings / full_prompt_tokens) * 100 if full_prompt_tokens > 0 else 0
-                    
+
                     logging.info(f"TOKEN SAVINGS: Using cached content for {account_id}/{aac_user_id}")
                     logging.info(f"TOKEN SAVINGS: Full context would be ~{full_prompt_tokens} tokens, sending only ~{user_query_tokens} tokens")
                     logging.info(f"TOKEN SAVINGS: Estimated savings: ~{token_savings} tokens ({token_savings_percent:.1f}% reduction)")
-                    
-                    # Use the cached content reference in the generation config
-                    generation_config_with_cache = generation_config or {}
-                    
-                    # Try using the cached content name directly in the request
+
+                    _cfg_with_cache = dict(generation_config or {})
+                    _cfg_with_cache['cached_content'] = cached_content_name
+
                     response = await _execute_gemini_call_with_retry(
-                        lambda: model.generate_content(
-                            user_query_only,
-                            generation_config=generation_config_with_cache
+                        lambda: _gemini_client.aio.models.generate_content(
+                            model=_primary_model_name,
+                            contents=user_query_only,
+                            config=_cfg_with_cache,
                         ),
                         operation_label="gemini_cached_content_generate",
                         account_id=account_id,
@@ -4742,11 +4724,11 @@ async def _generate_gemini_content_with_caching(
 
 # --- Helper function for Gemini LLM content generation with fallback ---
 
-async def _generate_gemini_content_with_fallback(prompt_text: str, generation_config: Optional[Dict] = None, account_id: str = "unknown", aac_user_id: str = "unknown") -> str: # <--- THIS LINE IS CRITICAL
-    global primary_llm_model_instance, fallback_llm_model_instance
+async def _generate_gemini_content_with_fallback(prompt_text: str, generation_config: Optional[Dict] = None, account_id: str = "unknown", aac_user_id: str = "unknown") -> str:
+    global _gemini_client, _primary_model_name, _fallback_model_name
 
-    if not primary_llm_model_instance:
-        logging.error("Primary LLM model instance is not initialized.")
+    if not _gemini_client or not _primary_model_name:
+        logging.error("Gemini client is not initialized.")
         raise HTTPException(status_code=503, detail="Primary LLM not available.")
 
     async def get_text_from_response(response_obj):
@@ -4763,14 +4745,18 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
             logging.error("Empty or whitespace-only prompt provided to Gemini")
             raise HTTPException(status_code=400, detail="Empty prompt provided to LLM")
         
-        logging.info(f"Attempting LLM generation with primary model: {primary_llm_model_instance.model_name}")
+        logging.info(f"Attempting LLM generation with primary model: {_primary_model_name}")
         logging.info(f"Prompt length: {len(prompt_text)} characters")
         logging.info(f"📊 USER PROMPT (fallback path, first 500 chars): {prompt_text[:500]}")
         logging.info(f"⚙️ Generation config (fallback): {generation_config}")
-        
+
         response = await _execute_gemini_call_with_retry(
-            lambda: primary_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
-            operation_label=f"gemini_primary_generate:{primary_llm_model_instance.model_name}",
+            lambda: _gemini_client.aio.models.generate_content(
+                model=_primary_model_name,
+                contents=prompt_text,
+                config=generation_config,
+            ),
+            operation_label=f"gemini_primary_generate:{_primary_model_name}",
             account_id=account_id,
             aac_user_id=aac_user_id,
         )
@@ -4802,42 +4788,46 @@ async def _generate_gemini_content_with_fallback(prompt_text: str, generation_co
         
         return response_text
     except (google.api_core.exceptions.ResourceExhausted, google.api_core.exceptions.ServiceUnavailable, google.api_core.exceptions.InternalServerError) as e_primary:
-        logging.warning(f"Primary LLM ({primary_llm_model_instance.model_name}) failed with {type(e_primary).__name__}: {e_primary}. Attempting fallback.")
-        if fallback_llm_model_instance:
+        logging.warning(f"Primary LLM ({_primary_model_name}) failed with {type(e_primary).__name__}: {e_primary}. Attempting fallback.")
+        if _fallback_model_name:
             try:
-                logging.info(f"Attempting LLM generation with fallback model: {fallback_llm_model_instance.model_name}")
+                logging.info(f"Attempting LLM generation with fallback model: {_fallback_model_name}")
                 response_fallback = await _execute_gemini_call_with_retry(
-                    lambda: fallback_llm_model_instance.generate_content(prompt_text, generation_config=generation_config),
-                    operation_label=f"gemini_fallback_generate:{fallback_llm_model_instance.model_name}",
+                    lambda: _gemini_client.aio.models.generate_content(
+                        model=_fallback_model_name,
+                        contents=prompt_text,
+                        config=generation_config,
+                    ),
+                    operation_label=f"gemini_fallback_generate:{_fallback_model_name}",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
                 )
                 fallback_response_text = (await get_text_from_response(response_fallback)).strip()
-                
+
                 # Log detailed token usage for fallback requests
                 log_token_usage(response_fallback, "FALLBACK", account_id, aac_user_id)
-                
+
                 return fallback_response_text
             except Exception as e_fallback:
-                logging.error(f"Fallback LLM ({fallback_llm_model_instance.model_name}) also failed: {e_fallback}", exc_info=True)
+                logging.error(f"Fallback LLM ({_fallback_model_name}) also failed: {e_fallback}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"LLM generation failed with primary and fallback models: {e_fallback}")
         else:
             logging.error("Primary LLM failed and no fallback model configured.", exc_info=True)
             raise HTTPException(status_code=503, detail=f"Primary LLM failed and no fallback available: {e_primary}")
     except Exception as e_other_primary:
-        logging.error(f"An unexpected error occurred with primary LLM ({primary_llm_model_instance.model_name}): {e_other_primary}", exc_info=True)
+        logging.error(f"An unexpected error occurred with primary LLM ({_primary_model_name}): {e_other_primary}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"LLM generation failed: {e_other_primary}")
 
 
 async def _generate_fast_category_words_content(prompt_text: str, account_id: str = "unknown", aac_user_id: str = "unknown") -> str:
-    global fast_words_llm_model_instance, primary_llm_model_instance
+    global _gemini_client, _fast_words_model_name, _primary_model_name
 
     if not prompt_text or not prompt_text.strip():
         logging.error("Empty or whitespace-only prompt provided to fast category-words Gemini path")
         raise HTTPException(status_code=400, detail="Empty prompt provided to LLM")
 
-    model_instance = fast_words_llm_model_instance or primary_llm_model_instance
-    if not model_instance:
+    _fw_model = _fast_words_model_name or _primary_model_name
+    if not _fw_model or not _gemini_client:
         logging.warning("Fast category-words model unavailable; falling back to standard Gemini path")
         return await _generate_gemini_content_with_fallback(prompt_text, None, account_id, aac_user_id)
 
@@ -4850,15 +4840,19 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
 
     start_time = time.perf_counter()
     logging.info(
-        f"Attempting fast category-words generation with model: {model_instance.model_name} "
+        f"Attempting fast category-words generation with model: {_fw_model} "
         f"for {account_id}/{aac_user_id}"
     )
     logging.info(f"Fast category-words prompt length: {len(prompt_text)} characters")
 
     try:
         response = await _execute_gemini_call_with_retry(
-            lambda: model_instance.generate_content(prompt_text, generation_config=generation_config),
-            operation_label=f"gemini_fast_category_words:{model_instance.model_name}",
+            lambda: _gemini_client.aio.models.generate_content(
+                model=_fw_model,
+                contents=prompt_text,
+                config=generation_config,
+            ),
+            operation_label=f"gemini_fast_category_words:{_fw_model}",
             account_id=account_id,
             aac_user_id=aac_user_id,
             max_attempts=3,
@@ -4874,7 +4868,7 @@ async def _generate_fast_category_words_content(prompt_text: str, account_id: st
 
         elapsed_ms = round((time.perf_counter() - start_time) * 1000)
         logging.info(
-            f"Fast category-words Gemini completed in {elapsed_ms}ms using {model_instance.model_name} "
+            f"Fast category-words Gemini completed in {elapsed_ms}ms using {_fw_model} "
             f"for {account_id}/{aac_user_id}"
         )
 
@@ -5125,8 +5119,6 @@ async def get_llm_response_endpoint(
     global llm_quick_response_cache
     global llm_inflight_requests
     global llm_inflight_requests_lock
-    global fast_words_llm_model_instance
-    global primary_llm_model_instance
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     user_prompt_content = request_data.prompt
@@ -5387,9 +5379,9 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         # Starter question prompts are dynamic and short-lived. Avoid cache warm-up/drift checks and
         # generate directly to reduce latency variance caused by cache bookkeeping/fallback paths.
         logging.info(f"⚡ Starter-question fast path (cache bypass) [{log_context}]")
-        fast_model = fast_words_llm_model_instance or primary_llm_model_instance
+        _sq_model = _fast_words_model_name or _primary_model_name
 
-        if not fast_model:
+        if not _sq_model or not _gemini_client:
             logging.warning(f"Starter-question fast model unavailable; using standard fallback path [{log_context}]")
             llm_response_json_str = await _generate_gemini_content_with_fallback(
                 final_user_query,
@@ -5400,8 +5392,12 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
         else:
             try:
                 response = await _execute_gemini_call_with_retry(
-                    lambda: fast_model.generate_content(final_user_query, generation_config=generation_config),
-                    operation_label=f"gemini_starter_questions_fast:{fast_model.model_name}",
+                    lambda: _gemini_client.aio.models.generate_content(
+                        model=_sq_model,
+                        contents=final_user_query,
+                        config=generation_config,
+                    ),
+                    operation_label=f"gemini_starter_questions_fast:{_sq_model}",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
                     max_attempts=3,
@@ -5493,9 +5489,14 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                 logging.info(f"⚙️ Generation config: {generation_config}")
                 
                 # Use cached base context + pass delta as standard input
-                model = genai.GenerativeModel.from_cached_content(cached_content_ref)
+                _delta_cfg = dict(generation_config or {})
+                _delta_cfg['cached_content'] = cached_content_ref
                 response = await _execute_gemini_call_with_retry(
-                    lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                    lambda: _gemini_client.aio.models.generate_content(
+                        model=_primary_model_name,
+                        contents=combined_prompt,
+                        config=_delta_cfg,
+                    ),
                     operation_label="gemini_cached_base_plus_delta_generate",
                     account_id=account_id,
                     aac_user_id=aac_user_id,
@@ -5563,9 +5564,14 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     logging.info(f"📊 USER QUERY that triggered LLM (new cache path) [{log_context}]: {user_prompt_content[:500]}")
                     logging.info(f"⚙️ Generation config: {generation_config}")
                     
-                    model = genai.GenerativeModel.from_cached_content(cached_content_ref)
+                    _new_delta_cfg = dict(generation_config or {})
+                    _new_delta_cfg['cached_content'] = cached_content_ref
                     response = await _execute_gemini_call_with_retry(
-                        lambda: model.generate_content(combined_prompt, generation_config=generation_config),
+                        lambda: _gemini_client.aio.models.generate_content(
+                            model=_primary_model_name,
+                            contents=combined_prompt,
+                            config=_new_delta_cfg,
+                        ),
                         operation_label="gemini_new_cached_base_plus_delta_generate",
                         account_id=account_id,
                         aac_user_id=aac_user_id,
@@ -5943,7 +5949,7 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
 
 # --- Initialization Function (MODIFIED) ---
 def initialize_backend_services():
-    global sentence_transformer_model, primary_llm_model_instance, fallback_llm_model_instance, tts_client
+    global sentence_transformer_model, tts_client
     global firestore_db
     global firebase_app
 
@@ -9897,39 +9903,6 @@ async def get_admin_account_users(
         logging.error(f"Error getting admin account users: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get account users")
 
-@app.get("/api/available-llm-models")
-async def get_available_llm_models():
-    """Returns a list of available LLM models suitable for generateContent."""
-    try:
-        if not genai: # Check if genai is configured
-            raise HTTPException(status_code=503, detail="Generative AI service not configured.")
-        
-        models_list = []
-        filtered_models = []
-        # Regex to identify models we might want to exclude (e.g., specific old versions, some previews)
-        # This excludes models ending in -001, -002, etc., or -preview-MMDD
-        exclude_pattern = re.compile(r"(-[0-9]{3,}|-preview-[0-9]{4,})$")
-
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                model_name = m.name
-
-                # Filter out experimental models
-                if "exp" in model_name.lower():
-                    continue
-
-                # Filter out models matching the exclude pattern (unless it's a 'latest' model)
-                if exclude_pattern.search(model_name) and not model_name.endswith("-latest"):
-                    continue
-                
-                filtered_models.append(model_name)
-        
-        return JSONResponse(content={"models": sorted(list(set(filtered_models)))}) # Sort and unique
-                
-    except Exception as e:
-        logging.error(f"Error fetching available LLM models: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Could not retrieve LLM models: {str(e)}")
-
 
 
 # Azure child voices — hardcoded since Azure doesn't have a free listing API.
@@ -10135,26 +10108,24 @@ async def _translate_lines_with_models(
         f"LINES_JSON:\n{json.dumps(trimmed_lines, ensure_ascii=False)}"
     )
 
-    model_candidates: List[genai.GenerativeModel] = []
-    if primary_llm_model_instance:
-        model_candidates.append(primary_llm_model_instance)
-    if fallback_llm_model_instance and fallback_llm_model_instance is not primary_llm_model_instance:
-        model_candidates.append(fallback_llm_model_instance)
+    _translation_models: List[str] = []
+    if _primary_model_name:
+        _translation_models.append(_primary_model_name)
+    if _fallback_model_name and _fallback_model_name != _primary_model_name:
+        _translation_models.append(_fallback_model_name)
 
-    if not model_candidates:
+    if not _translation_models or not _gemini_client:
         raise HTTPException(status_code=503, detail="Translation model unavailable")
 
+    strict_cfg = types.GenerateContentConfig(temperature=0, response_mime_type="application/json")
+
     last_error: Optional[Exception] = None
-    for model in model_candidates:
+    for model_name in _translation_models:
         try:
-            strict_cfg = genai.GenerationConfig(
-                temperature=0,
-                response_mime_type="application/json"
-            )
-            response = await asyncio.to_thread(
-                model.generate_content,
-                prompt,
-                generation_config=strict_cfg
+            response = await _gemini_client.aio.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=strict_cfg,
             )
             response_text = (getattr(response, "text", "") or "").strip()
             logging.info(
@@ -10174,7 +10145,10 @@ async def _translate_lines_with_models(
             last_error = strict_error
 
         try:
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await _gemini_client.aio.models.generate_content(
+                model=model_name,
+                contents=prompt,
+            )
             response_text = (getattr(response, "text", "") or "").strip()
             logging.info(
                 "TRANSLATION BATCH RAW RESPONSE LENGTH (retry %s->%s): %s chars",
@@ -10210,16 +10184,12 @@ async def _translate_lines_with_models(
                 f"LINE:\n{json.dumps(source_line, ensure_ascii=False)}"
             )
 
-            for model in model_candidates:
+            for model_name in _translation_models:
                 try:
-                    strict_cfg = genai.GenerationConfig(
-                        temperature=0,
-                        response_mime_type="application/json"
-                    )
-                    response = await asyncio.to_thread(
-                        model.generate_content,
-                        single_line_prompt,
-                        generation_config=strict_cfg
+                    response = await _gemini_client.aio.models.generate_content(
+                        model=model_name,
+                        contents=single_line_prompt,
+                        config=strict_cfg,
                     )
                     response_text = (getattr(response, "text", "") or "").strip()
                     parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
@@ -10227,7 +10197,10 @@ async def _translate_lines_with_models(
                     break
                 except Exception:
                     try:
-                        response = await asyncio.to_thread(model.generate_content, single_line_prompt)
+                        response = await _gemini_client.aio.models.generate_content(
+                            model=model_name,
+                            contents=single_line_prompt,
+                        )
                         response_text = (getattr(response, "text", "") or "").strip()
                         parsed_line = _extract_translated_lines_from_model_text(response_text, 1)
                         translated_line = str(parsed_line[0] or "").strip() or source_line
@@ -18701,20 +18674,19 @@ async def ensure_aac_images_bucket():
 
 async def generate_subconcepts(concept: str, count: int) -> List[str]:
     """Use Gemini to generate subconcepts from a main concept"""
-    api_key = await get_gemini_api_key()
-    genai.configure(api_key=api_key)
+    global _gemini_client, _primary_model_name
+    if not _gemini_client or not _primary_model_name:
+        raise HTTPException(status_code=503, detail="Gemini client not available.")
 
-    model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
-    
     prompt = f"""
     Generate {count} specific subconcepts related to "{concept}" that would be useful for AAC (Augmentative and Alternative Communication) purposes.
-    
+
     Requirements:
     - Each subconcept should be 1-3 words maximum
     - Focus on common, everyday items/concepts that AAC users would communicate about
     - Make them diverse and representative of the broader concept
     - Return only the subconcepts, one per line, no numbering or formatting
-    
+
     Example: If concept is "animals", return things like:
     dog
     cat
@@ -18722,9 +18694,12 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
     fish
     rabbit
     """
-    
+
     try:
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        response = await _gemini_client.aio.models.generate_content(
+            model=_primary_model_name,
+            contents=prompt,
+        )
         subconcepts = [line.strip() for line in response.text.strip().split('\n') if line.strip()]
         return subconcepts[:count]  # Ensure we don't exceed requested count
     except Exception as e:
@@ -18974,12 +18949,11 @@ async def upload_image_to_storage(image_bytes: bytes, filename: str) -> str:
 
 async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> List[str]:
     """Use Gemini to analyze image and generate relevant tags"""
+    global _gemini_client, _primary_model_name
     try:
-        api_key = await get_gemini_api_key()
-        genai.configure(api_key=api_key)
+        if not _gemini_client or not _primary_model_name:
+            return [concept, subconcept, "aac", "communication"]
 
-        model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
-        
         prompt = f"""
         Analyze this image that represents the concept "{subconcept}" from the category "{concept}".
 
@@ -18998,26 +18972,26 @@ async def generate_image_tags(image_url: str, concept: str, subconcept: str) -> 
 
         Example format: dog, animal, pet, furry, four legs, companion, brown, sitting
         """
-        
+
         # Download image for analysis
         import requests
-        response = requests.get(image_url)
-        if response.status_code == 200:
-            # Convert to base64 for Gemini
-            image_data = base64.b64encode(response.content).decode()
-            
-            response = await asyncio.to_thread(
-                model.generate_content,
-                [prompt, {"mime_type": "image/png", "data": image_data}]
+        img_response = requests.get(image_url)
+        if img_response.status_code == 200:
+            image_part = types.Part.from_bytes(
+                data=img_response.content,
+                mime_type="image/png",
             )
-            
+            response = await _gemini_client.aio.models.generate_content(
+                model=_primary_model_name,
+                contents=[prompt, image_part],
+            )
             tags_text = response.text.strip()
             tags = [tag.strip() for tag in tags_text.split(',') if tag.strip()]
             return tags
         else:
-            # Fallback to basic tags if image analysis fails
+            # Fallback to basic tags if image download fails
             return [concept, subconcept, "aac", "communication"]
-            
+
     except Exception as e:
         logging.warning(f"Error generating image tags: {e}")
         # Return basic tags as fallback
@@ -20594,7 +20568,6 @@ async def repair_bravo_images_endpoint(
         # Import required libraries
         from google.cloud import firestore
         from google.cloud import storage as gcs
-        import google.generativeai as genai
         import time
         import re
         
@@ -20702,10 +20675,10 @@ The tags should help users find this image when searching. Consider:
 
 Return 8-12 relevant tags as a comma-separated list. Make tags specific and useful for AAC communication."""
 
-                    response = await asyncio.to_thread(
-                        primary_llm_model_instance.generate_content, 
-                        tag_prompt,
-                        generation_config={"temperature": 0.7}
+                    response = await _gemini_client.aio.models.generate_content(
+                        model=_primary_model_name,
+                        contents=tag_prompt,
+                        config={"temperature": 0.7},
                     )
                     
                     new_tags_text = response.text.strip()
@@ -24329,23 +24302,6 @@ async def analyze_image_tags(request: Request, token_info: Annotated[Dict[str, s
         
         # Use Gemini to analyze the image and generate tags
         try:
-            import google.generativeai as genai
-
-            genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            model = genai.GenerativeModel(GEMINI_PRIMARY_MODEL)
-            
-            # Analyze the image
-            analysis_prompt = f"""
-            Analyze this image for the word "{word}" and generate relevant tags.
-            
-            Please provide:
-            1. 5-10 descriptive tags that would help someone find this image
-            2. Tags should be single words or short phrases
-            3. Include the emotional tone, visual style, and subject matter
-            
-            Return the tags as a JSON array of strings.
-            """
-            
             # For now, generate some basic tags
             # In a real implementation, you'd analyze the actual image
             basic_tags = [
@@ -24356,7 +24312,7 @@ async def analyze_image_tags(request: Request, token_info: Annotated[Dict[str, s
                 "simple",
                 "descriptive"
             ]
-            
+
             return JSONResponse(content={
                 "success": True,
                 "tags": basic_tags,
