@@ -12,6 +12,7 @@ let favoritesData = { buttons: [] };
 let currentEditingButton = null; // {row, col} of button being edited
 let draggedButton = null;
 let currentScrapingConfig = null;
+let currentSourceMode = 'grounding'; // 'grounding' | 'scraping'
 
 function markAdminDirty() {
     window.adminUnsavedIndicator?.markDirty?.();
@@ -221,7 +222,9 @@ function createVisualButton(row, col) {
         addButtonIndicators(buttonDiv, buttonData);
         
         // Add visual styling
-        if (buttonData.scraping_config && buttonData.scraping_config.url) {
+        if (buttonData.search_query) {
+            buttonDiv.classList.add('has-grounding');
+        } else if (buttonData.scraping_config && buttonData.scraping_config.url) {
             buttonDiv.classList.add('has-scraping');
         }
     } else {
@@ -243,7 +246,13 @@ function createVisualButton(row, col) {
 }
 
 function addButtonIndicators(buttonDiv, buttonData) {
-    if (buttonData.scraping_config && buttonData.scraping_config.url) {
+    if (buttonData.search_query) {
+        const indicator = document.createElement('div');
+        indicator.className = 'button-indicator indicator-grounding';
+        indicator.textContent = '🔍';
+        indicator.title = `AI Web Search: ${buttonData.search_query}`;
+        buttonDiv.appendChild(indicator);
+    } else if (buttonData.scraping_config && buttonData.scraping_config.url) {
         const indicator = document.createElement('div');
         indicator.className = 'button-indicator indicator-scraping';
         indicator.textContent = '🌐';
@@ -280,30 +289,40 @@ function editButton(row, col) {
     if (buttonData) {
         // Editing existing button
         currentEditingButton = { row, col, isNew: false };
-        currentScrapingConfig = { ...buttonData.scraping_config };
-        
+        currentScrapingConfig = buttonData.scraping_config ? { ...buttonData.scraping_config } : { ...DEFAULT_SCRAPING_CONFIG };
+
         // Populate form
         document.getElementById('buttonText').value = buttonData.text;
         document.getElementById('speechPhrase').value = buttonData.speechPhrase || '';
+        document.getElementById('searchQuery').value = buttonData.search_query || '';
+
+        // Set source mode: prefer grounding if search_query is set, else scraping if config is set
+        const mode = buttonData.search_query ? 'grounding' : 'scraping';
+        setSourceMode(mode);
+
         updateScrapingConfigStatus();
-        
+
         // Show delete button for existing buttons
         document.getElementById('deleteButtonBtn').style.display = 'inline-block';
-        
+
         showButtonEditor();
     } else {
-        // Creating new button - open editor first
+        // Creating new button
         currentEditingButton = { row, col, isNew: true };
         currentScrapingConfig = { ...DEFAULT_SCRAPING_CONFIG };
-        
-        // Clear form
+
+        // Clear form, default to grounding mode for new buttons
         document.getElementById('buttonText').value = '';
         document.getElementById('speechPhrase').value = '';
+        document.getElementById('searchQuery').value = '';
+        document.getElementById('groundingStatus').textContent = '';
+        document.getElementById('groundingTestResults').classList.add('hidden');
+        setSourceMode('grounding');
         updateScrapingConfigStatus();
-        
+
         // Hide delete button for new buttons
         document.getElementById('deleteButtonBtn').style.display = 'none';
-        
+
         showButtonEditor();
     }
 }
@@ -439,47 +458,127 @@ function showWizardStep(stepNumber) {
     document.getElementById(`wizardStep${stepNumber}`).classList.add('active');
 }
 
+// --- Source Mode ---
+function setSourceMode(mode) {
+    currentSourceMode = mode;
+    const groundingBtn = document.getElementById('sourceGroundingBtn');
+    const scrapingBtn = document.getElementById('sourceScrapingBtn');
+    const groundingSection = document.getElementById('groundingSection');
+    const scrapingSection = document.getElementById('scrapingSection');
+
+    if (mode === 'grounding') {
+        groundingBtn.classList.add('active-source');
+        scrapingBtn.classList.remove('active-source');
+        groundingSection.classList.remove('hidden');
+        scrapingSection.classList.add('hidden');
+    } else {
+        scrapingBtn.classList.add('active-source');
+        groundingBtn.classList.remove('active-source');
+        scrapingSection.classList.remove('hidden');
+        groundingSection.classList.add('hidden');
+    }
+}
+
+async function testGroundingConfiguration() {
+    const searchQuery = document.getElementById('searchQuery').value.trim();
+    const topic = document.getElementById('buttonText').value.trim() || searchQuery;
+
+    if (!searchQuery) {
+        document.getElementById('groundingStatus').textContent = 'Enter a search query first';
+        return;
+    }
+
+    const statusEl = document.getElementById('groundingStatus');
+    const resultsEl = document.getElementById('groundingTestResults');
+    statusEl.textContent = 'Testing...';
+    resultsEl.classList.add('hidden');
+
+    try {
+        const response = await window.authenticatedFetch('/api/favorites/test-grounding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ search_query: searchQuery, topic }),
+        });
+        const result = await response.json();
+
+        if (result.success && result.sample && result.sample.length > 0) {
+            statusEl.textContent = `✅ ${result.sample.length} options generated`;
+            resultsEl.innerHTML = result.sample.map(s =>
+                `<div class="mb-2 pb-2 border-b border-gray-200 last:border-0">
+                    <div class="font-medium text-gray-800">${s.summary}</div>
+                    <div class="text-gray-600 text-xs mt-0.5">${s.option}</div>
+                </div>`
+            ).join('');
+            resultsEl.classList.remove('hidden');
+        } else {
+            statusEl.textContent = `❌ ${result.message || 'No results returned'}`;
+        }
+    } catch (err) {
+        statusEl.textContent = `❌ Test failed: ${err.message}`;
+    }
+}
+
 // --- Form Handling ---
 function saveButtonChanges(e) {
     e.preventDefault();
-    
+
     const text = document.getElementById('buttonText').value.trim();
     const speechPhrase = document.getElementById('speechPhrase').value.trim();
-    
+
     if (!text) {
         showStatus('Topic name is required', true);
         return;
     }
-    
+
+    if (currentSourceMode === 'grounding') {
+        const searchQuery = document.getElementById('searchQuery').value.trim();
+        if (!searchQuery) {
+            showStatus('Search query is required for AI Web Search mode', true);
+            return;
+        }
+        const buttonData = {
+            row: currentEditingButton.row,
+            col: currentEditingButton.col,
+            text,
+            speechPhrase: speechPhrase || null,
+            search_query: searchQuery,
+            scraping_config: null,
+            hidden: false,
+        };
+        _applyButtonSave(buttonData);
+        return;
+    }
+
+    // Scraping mode
     if (!currentScrapingConfig || !currentScrapingConfig.url) {
         showStatus('Web scraping configuration is required', true);
         return;
     }
-    
+
     const buttonData = {
         row: currentEditingButton.row,
         col: currentEditingButton.col,
         text: text,
         speechPhrase: speechPhrase || null,
+        search_query: null,
         scraping_config: { ...currentScrapingConfig },
         hidden: false
     };
-    
+    _applyButtonSave(buttonData);
+}
+
+function _applyButtonSave(buttonData) {
     if (currentEditingButton.isNew) {
-        // Add new button
         favoritesData.buttons.push(buttonData);
     } else {
-        // Update existing button
-        const index = favoritesData.buttons.findIndex(btn => 
+        const index = favoritesData.buttons.findIndex(btn =>
             btn.row === currentEditingButton.row && btn.col === currentEditingButton.col
         );
         if (index >= 0) {
             favoritesData.buttons[index] = buttonData;
         }
     }
-
     markAdminDirty();
-    
     closeButtonEditor();
     renderGrid();
     showStatus('Topic saved', false);
@@ -565,6 +664,7 @@ function getScrapingConfigFromForm() {
 
 function updateScrapingConfigStatus() {
     const statusEl = document.getElementById('scrapingConfigStatus');
+    if (!statusEl) return;
     if (currentScrapingConfig && currentScrapingConfig.url) {
         statusEl.textContent = `✅ Configured for: ${currentScrapingConfig.url}`;
         statusEl.className = 'mt-2 text-sm text-green-600';
