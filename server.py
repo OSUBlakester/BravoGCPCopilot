@@ -731,8 +731,9 @@ class FavoriteButton(BaseModel):
     row: int = Field(..., ge=0, description="Grid row position")
     col: int = Field(..., ge=0, description="Grid column position")
     text: str = Field(..., min_length=1, max_length=50, description="Button display text")
-    speechPhrase: Optional[str] = Field(None, description="Optional speech phrase before scraping")
-    scraping_config: ScrapingConfig = Field(..., description="Web scraping configuration")
+    speechPhrase: Optional[str] = Field(None, description="Optional speech phrase before fetching content")
+    search_query: Optional[str] = Field(None, description="Google search query for Gemini grounding")
+    scraping_config: Optional[ScrapingConfig] = Field(None, description="Legacy web scraping configuration")
     hidden: bool = Field(default=False, description="Whether button is hidden")
 
 class FavoritesData(BaseModel):
@@ -7442,9 +7443,35 @@ async def test_scraping_config(test_request: TestScrapingRequest, current_ids: A
             "message": "Failed to test scraping configuration"
         })
 
+@app.post("/api/favorites/test-grounding")
+async def test_grounding_config(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Test a grounding search query and return 3 sample conversation starters."""
+    try:
+        data = await request.json()
+        search_query = (data.get("search_query") or "").strip()
+        topic_name = (data.get("topic") or search_query).strip()
+
+        if not search_query:
+            raise HTTPException(status_code=400, detail="Missing search_query")
+
+        results = await _generate_topic_content_with_grounding(search_query, topic_name, count=3)
+        return JSONResponse(content={
+            "success": True,
+            "sample": results,
+            "message": f"Generated {len(results)} sample options"
+        })
+    except Exception as e:
+        logging.error(f"Error testing grounding config: {e}", exc_info=True)
+        return JSONResponse(content={
+            "success": False,
+            "error": str(e),
+            "message": "Failed to test grounding configuration"
+        })
+
+
 @app.post("/api/favorites/get-topic-content")
 async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
-    """Get content for a specific topic by scraping and processing with LLM"""
+    """Get content for a specific topic — uses Gemini grounding if configured, falls back to scraping."""
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     
@@ -7472,43 +7499,94 @@ async def get_topic_content(request: Request, current_ids: Annotated[Dict[str, s
         
         if not target_button:
             raise HTTPException(status_code=404, detail=f"No favorite topic found for '{topic_text}'")
-        
-        # Get scraping config
-        scraping_config = target_button.get("scraping_config", {})
-        
-        if not scraping_config:
-            raise HTTPException(status_code=400, detail="No scraping configuration found for this topic")
-        
-        # Scrape articles
+
+        # Prefer grounding (AI web search) over legacy scraping
+        search_query = target_button.get("search_query", "")
+        scraping_config = target_button.get("scraping_config") or {}
+
+        if search_query:
+            logging.info(f"Using grounding for topic '{topic_text}' with query: {search_query}")
+            results = await _generate_topic_content_with_grounding(search_query, topic_text)
+            return JSONResponse(content={"summaries": results, "topic": topic_text, "source": "grounding"})
+
+        if not scraping_config or not scraping_config.get("url"):
+            raise HTTPException(status_code=400, detail="No search query or scraping configuration found for this topic")
+
+        # Legacy scraping path
         articles = await scrape_website(scraping_config)
-        
+
         if not articles:
             return JSONResponse(content={
                 "summaries": [],
                 "message": "No articles found for this topic"
             })
-        
-        # Process with LLM (similar to get_current_events)
+
         import random
         random.shuffle(articles)
-        num_articles_to_process = 10
-        top_articles = articles[:num_articles_to_process]
-        
-        # Process articles with LLM
+        top_articles = articles[:10]
+
         llm_tasks = [_process_single_article(item, topic_text) for item in top_articles]
         llm_results = await asyncio.gather(*llm_tasks)
-        
-        # Filter successful results
-        successful_results = [result for result in llm_results if result is not None]
-        
+        successful_results = [r for r in llm_results if r is not None]
+
         return JSONResponse(content={
             "summaries": successful_results,
-            "topic": topic_text
+            "topic": topic_text,
+            "source": "scraping",
         })
         
     except Exception as e:
         logging.error(f"Error getting topic content for {topic_text}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get content for topic: {e}")
+
+
+async def _generate_topic_content_with_grounding(search_query: str, topic_name: str, count: int = 8) -> List[Dict]:
+    """Generate conversation starters for a topic using Gemini with Google Search grounding."""
+    global _gemini_client, _primary_model_name
+    if not _gemini_client or not _primary_model_name:
+        logging.error("Gemini client not available for grounding request.")
+        return []
+
+    prompt = f"""Search for the latest news and information about: {search_query}
+
+Based on what you find, generate {count} different conversation starter sentences that an AAC (Augmentative and Alternative Communication) user could say to someone nearby. Each should sound natural, personal, and engaging — as if the user is sharing something they genuinely care about.
+
+For each, also provide a very short 3-5 word button label summarizing the key point.
+
+Return ONLY a valid JSON array in this exact format, no other text:
+[
+  {{"option": "Did you hear about...", "summary": "Short label here"}},
+  {{"option": "I was just reading that...", "summary": "Another label"}}
+]
+
+Rules:
+- Each "option" should be a complete conversational sentence (or two) that invites a response
+- Each "summary" must be 3-5 words max, suitable for a small button
+- Make each option cover a different aspect or recent event about {topic_name}
+- Keep options energetic and conversational, not formal"""
+
+    try:
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0.7,
+        )
+        response = await _gemini_client.aio.models.generate_content(
+            model=_primary_model_name,
+            contents=prompt,
+            config=config,
+        )
+        text = response.text.strip()
+        match = re.search(r'(\[.*\])', text, re.DOTALL)
+        if match:
+            results = json.loads(match.group(1))
+            valid = [r for r in results if isinstance(r, dict) and "option" in r and "summary" in r]
+            logging.info(f"Grounding generated {len(valid)} options for topic '{topic_name}'")
+            return valid
+        logging.warning(f"Grounding response had no JSON array for topic '{topic_name}': {text[:200]}")
+        return []
+    except Exception as e:
+        logging.error(f"Error generating grounding content for '{topic_name}': {e}", exc_info=True)
+        return []
 
 
 async def scrape_website(config):
