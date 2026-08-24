@@ -7640,6 +7640,7 @@ Rules:
 - Make each option cover a different aspect or recent event about {topic_name}
 - Keep options energetic and conversational, not formal
 - NEVER start with "I read", "I saw an article", or any reading-based phrase
+"""
 
     try:
         config = types.GenerateContentConfig(
