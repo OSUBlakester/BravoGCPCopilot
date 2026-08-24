@@ -4036,7 +4036,16 @@ async def delete_user_account(
         if current_user_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last user account. At least one user must remain.")
 
-        # 3. Delete all data for this AAC user
+        # 3. Invalidate Gemini cache before deleting Firestore data.
+        # Invalidate-first: if Firestore is deleted first and invalidation then fails,
+        # the cache handle is gone and the orphaned cache cannot be found or retried.
+        if cache_manager:
+            try:
+                await cache_manager.invalidate_cache(account_id, request_data.aac_user_id)
+            except Exception as cache_err:
+                logging.warning(f"Cache invalidation failed for user '{request_data.aac_user_id}' during deletion (proceeding): {cache_err}")
+
+        # 4. Delete all data for this AAC user
         # Delete all subcollections under the AAC user document
         await asyncio.to_thread(_delete_collection, aac_user_doc_ref.collection('config'))
         await asyncio.to_thread(_delete_collection, aac_user_doc_ref.collection('info'))
@@ -4413,7 +4422,16 @@ async def delete_aac_user_profile_endpoint(current_ids: Annotated[Dict[str, str]
         raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
 
     try:
-        # 1. Delete ALL Firestore data for this AAC user
+        # 1. Invalidate Gemini cache before deleting Firestore data.
+        # Invalidate-first: if Firestore is deleted first and invalidation then fails,
+        # the cache handle is gone and the orphaned cache cannot be found or retried.
+        if cache_manager:
+            try:
+                await cache_manager.invalidate_cache(account_id, aac_user_id)
+            except Exception as cache_err:
+                logging.warning(f"Cache invalidation failed for user '{aac_user_id}' during profile deletion (proceeding): {cache_err}")
+
+        # 2. Delete ALL Firestore data for this AAC user
         # Path for this individual AAC user's data
         user_base_path_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
 
