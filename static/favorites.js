@@ -635,8 +635,8 @@ async function displayTopicContent(articles, topicName) {
             buttonElement.setAttribute('data-option', summary.option || ''); // Full conversation starter
             setButtonGridPosition(buttonElement, index + 2);
             
-            // Add click handler
-            buttonElement.addEventListener('click', () => handleSummarySelection(summary));
+            // Add click handler — pass topic name so follow-up has context
+            buttonElement.addEventListener('click', () => handleSummarySelection(summary, topicName));
             
             gridContainer.appendChild(buttonElement);
         });
@@ -657,22 +657,87 @@ async function displayTopicContent(articles, topicName) {
     }
 }
 
-// Handle summary selection
-async function handleSummarySelection(summary) {
+// Handle summary selection — announce, then generate follow-up options
+async function handleSummarySelection(summary, topicName = '') {
     try {
         console.log('Summary selected:', summary.summary);
-        
-        // Announce the full conversation starter using the announce function
+
+        // Announce the full conversation starter
         await announce(summary.option, "system", true);
-        
-        // Navigate back to favorites page after announcement completes
-        setTimeout(async () => {
-            await loadFavoritesButtons();
-        }, 1000); // Shorter delay since announce already waits for completion
-        
+
+        // Fetch follow-up options from dedicated endpoint
+        document.getElementById('loading-indicator').style.display = 'flex';
+        updateQuestionDisplay('Finding follow-up options...');
+
+        let followUpSummaries = [];
+        try {
+            const response = await authenticatedFetch('/api/favorites/get-followup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    selected_option: summary.option,
+                    topic: topicName || summary.summary,
+                }),
+            });
+            if (response.ok) {
+                const data = await response.json();
+                followUpSummaries = data.summaries || [];
+            } else {
+                console.warn('Follow-up fetch failed:', response.status);
+            }
+        } finally {
+            document.getElementById('loading-indicator').style.display = 'none';
+        }
+
+        await displayFavoritesFollowUp(followUpSummaries, summary, topicName);
+
     } catch (error) {
         console.error('Error handling summary selection:', error);
+        await loadFavoritesButtons();
     }
+}
+
+// Display follow-up options after a favorites option is selected
+async function displayFavoritesFollowUp(options, selectedSummary, topicName = '') {
+    stopAuditoryScanning();
+
+    const gridContainer = document.getElementById('gridContainer');
+    if (!gridContainer) return;
+    gridContainer.innerHTML = '';
+    updateGridLayout();
+
+    // First button: Go Back to Favorites
+    const backButton = document.createElement('button');
+    backButton.textContent = 'Go Back';
+    backButton.classList.add('back-button');
+    setButtonGridPosition(backButton, 1);
+    backButton.addEventListener('click', async () => {
+        await loadFavoritesButtons();
+    });
+    gridContainer.appendChild(backButton);
+
+    const validOptions = Array.isArray(options)
+        ? options.filter(o => o && typeof o.summary === 'string' && typeof o.option === 'string')
+        : [];
+
+    if (validOptions.length === 0) {
+        console.warn('No valid follow-up options returned for favorites.');
+        updateQuestionDisplay('What would you like to say next?');
+    } else {
+        validOptions.forEach((opt, index) => {
+            const btn = document.createElement('button');
+            btn.textContent = opt.summary;
+            btn.classList.add('article-button');
+            btn.setAttribute('data-option', opt.option);
+            setButtonGridPosition(btn, index + 2);
+            // Pass topicName through so subsequent follow-ups keep the topic context
+            btn.addEventListener('click', () => handleSummarySelection(opt, topicName));
+            gridContainer.appendChild(btn);
+        });
+        updateQuestionDisplay(`Follow-up: ${selectedSummary.summary}`);
+    }
+
+    setTimeout(() => startOrWaitForScanning({ allowPrompt: false, source: 'favoritesFollowUp' }), 500);
 }
 
 // Authenticated fetch function

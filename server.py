@@ -4036,7 +4036,16 @@ async def delete_user_account(
         if current_user_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot delete the last user account. At least one user must remain.")
 
-        # 3. Delete all data for this AAC user
+        # 3. Invalidate Gemini cache before deleting Firestore data.
+        # Invalidate-first: if Firestore is deleted first and invalidation then fails,
+        # the cache handle is gone and the orphaned cache cannot be found or retried.
+        if cache_manager:
+            try:
+                await cache_manager.invalidate_cache(account_id, request_data.aac_user_id)
+            except Exception as cache_err:
+                logging.warning(f"Cache invalidation failed for user '{request_data.aac_user_id}' during deletion (proceeding): {cache_err}")
+
+        # 4. Delete all data for this AAC user
         # Delete all subcollections under the AAC user document
         await asyncio.to_thread(_delete_collection, aac_user_doc_ref.collection('config'))
         await asyncio.to_thread(_delete_collection, aac_user_doc_ref.collection('info'))
@@ -4413,7 +4422,16 @@ async def delete_aac_user_profile_endpoint(current_ids: Annotated[Dict[str, str]
         raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
 
     try:
-        # 1. Delete ALL Firestore data for this AAC user
+        # 1. Invalidate Gemini cache before deleting Firestore data.
+        # Invalidate-first: if Firestore is deleted first and invalidation then fails,
+        # the cache handle is gone and the orphaned cache cannot be found or retried.
+        if cache_manager:
+            try:
+                await cache_manager.invalidate_cache(account_id, aac_user_id)
+            except Exception as cache_err:
+                logging.warning(f"Cache invalidation failed for user '{aac_user_id}' during profile deletion (proceeding): {cache_err}")
+
+        # 2. Delete ALL Firestore data for this AAC user
         # Path for this individual AAC user's data
         user_base_path_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id).collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION).document(aac_user_id)
 
@@ -7443,6 +7461,55 @@ async def test_scraping_config(test_request: TestScrapingRequest, current_ids: A
             "message": "Failed to test scraping configuration"
         })
 
+@app.post("/api/favorites/get-followup")
+async def get_favorites_followup(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Generate follow-up conversation options after a user selects a favorites topic option."""
+    try:
+        data = await request.json()
+        selected_option = (data.get("selected_option") or "").strip()
+        topic = (data.get("topic") or "").strip()
+        count = min(int(data.get("count", 8)), 12)
+
+        if not selected_option:
+            raise HTTPException(status_code=400, detail="Missing selected_option")
+
+        prompt = f"""An AAC (Augmentative and Alternative Communication) user just said out loud to someone nearby:
+"{selected_option}"
+
+This was part of a conversation about: {topic or 'a topic they care about'}
+
+Generate {count} natural follow-up things the USER could say next to continue THEIR side of the conversation. These are options for the user to select and speak — not responses from their partner.
+
+Each option should:
+- Be something the user says (first person), adding new information, asking a question, or expanding on what they just said
+- Feel energetic and conversational
+- Be a complete sentence
+- Invite the other person to respond or share their thoughts
+
+IMPORTANT — many AAC users cannot read, so NEVER use phrases like "I read that", "I read about", "I saw an article", or "I read online". Instead use spoken/heard/watched language:
+- "Did you hear...", "Did you see...", "I heard that...", "I watched...", "Can you believe...", "I heard about..."
+
+Return ONLY a valid JSON array, no other text:
+[
+  {{"option": "full sentence the user could say", "summary": "3-5 word label"}},
+  ...
+]"""
+
+        summary_text = await _generate_gemini_content_with_fallback(prompt)
+
+        match = re.search(r'(\[.*\])', summary_text, re.DOTALL)
+        if match:
+            results = json.loads(match.group(1))
+            valid = [r for r in results if isinstance(r, dict) and "option" in r and "summary" in r]
+        else:
+            valid = []
+
+        return JSONResponse(content={"summaries": valid, "topic": topic})
+    except Exception as e:
+        logging.error(f"Error generating favorites follow-up: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate follow-up: {str(e)}")
+
+
 @app.post("/api/favorites/test-grounding")
 async def test_grounding_config(request: Request, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     """Test a grounding search query and return 3 sample conversation starters."""
@@ -7551,19 +7618,29 @@ async def _generate_topic_content_with_grounding(search_query: str, topic_name: 
 
 Based on what you find, generate {count} different conversation starter sentences that an AAC (Augmentative and Alternative Communication) user could say to someone nearby. Each should sound natural, personal, and engaging — as if the user is sharing something they genuinely care about.
 
+IMPORTANT — many AAC users cannot read, so NEVER use phrases like "I read that", "I read about", "I saw an article", or "I read online". Instead use spoken/heard/watched language such as:
+- "Did you hear about..."
+- "Did you see..."
+- "I heard that..."
+- "I watched..."
+- "Can you believe..."
+- "I heard about..."
+
 For each, also provide a very short 3-5 word button label summarizing the key point.
 
 Return ONLY a valid JSON array in this exact format, no other text:
 [
   {{"option": "Did you hear about...", "summary": "Short label here"}},
-  {{"option": "I was just reading that...", "summary": "Another label"}}
+  {{"option": "I heard that...", "summary": "Another label"}}
 ]
 
 Rules:
 - Each "option" should be a complete conversational sentence (or two) that invites a response
 - Each "summary" must be 3-5 words max, suitable for a small button
 - Make each option cover a different aspect or recent event about {topic_name}
-- Keep options energetic and conversational, not formal"""
+- Keep options energetic and conversational, not formal
+- NEVER start with "I read", "I saw an article", or any reading-based phrase
+"""
 
     try:
         config = types.GenerateContentConfig(
@@ -7642,7 +7719,7 @@ Title: {title}
 URL: {url}
 
 Please perform the following two tasks based *only* on the provided Title and URL:
-1. Generate a natural-sounding, expressive, and engaging conversational starter sentence or two about this news story, suitable for initiating a discussion with someone nearby (e.g., "Did you hear about...", "I just saw..."). Do not use something obvious like "Did you see the article...". Keep it brief, energetic and focus on the main point indicated by the title. Add a question or prompt to encourage conversation.
+1. Generate a natural-sounding, expressive, and engaging conversational starter sentence or two about this news story, suitable for initiating a discussion with someone nearby. Use spoken/heard/watched language such as "Did you hear about...", "Did you see...", "I heard that...", "I watched...", "Can you believe...". NEVER use reading-based phrases like "I read that", "I read about", "I saw an article", or "I read online" — many AAC users cannot read. Keep it brief, energetic and focused on the main point. Add a question or prompt to encourage conversation.
 2. Generate a very short (3-5 word) phrase that captures the absolute key message or topic (suitable for displaying on a button).
 
 Format your response STRICTLY as a single JSON object with two keys:
@@ -22749,6 +22826,8 @@ async def _lookup_images_for_labels(
         'towards', 'down', 'going',
         # Conditional conjunction — "if you want"→"want"
         'if',
+        # Reporting verb — "said he was hungry"→"hungry"
+        'said',
     })
 
     # Words that appear at the END of a label but don't contribute to the image key term.
