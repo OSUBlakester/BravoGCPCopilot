@@ -20226,6 +20226,24 @@ async def prewarm_cache_endpoint(
         logging.error(f"Error prewarming cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/admin/migrate/recent-greetings")
+async def migrate_recent_greetings_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    account_id: str = "",
+    aac_user_id: str = "",
+):
+    """A40 migration: drop verbatim utterances from recent_greetings, keep canonical forms.
+    Pass account_id and aac_user_id to migrate one user. Safe to run repeatedly."""
+    if not account_id or not aac_user_id:
+        raise HTTPException(status_code=400, detail="account_id and aac_user_id are required.")
+    try:
+        changed = await migrate_recent_greetings(account_id, aac_user_id)
+        return {"success": True, "changed": changed, "account_id": account_id, "aac_user_id": aac_user_id}
+    except Exception as e:
+        logging.error(f"Error running migrate_recent_greetings for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/image-index/build")
 async def build_image_index_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
