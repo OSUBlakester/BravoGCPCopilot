@@ -14838,18 +14838,30 @@ _system_email_credentials: Optional[service_account.Credentials] = None
 def _get_system_email_credentials() -> Optional[service_account.Credentials]:
     """Service-account credentials delegated to the system sender mailbox.
     Cached at module level; the library refreshes the token itself.
+
+    Prefers SYSTEM_EMAIL_SA_KEY_JSON env var (Secret Manager mounted secret in
+    Cloud Run) over the key file on disk (used in local development).
     """
     global _system_email_credentials
     if _system_email_credentials is not None:
         return _system_email_credentials
     try:
-        if not os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
-            logging.error("System email: service account key not found at %s", SERVICE_ACCOUNT_KEY_PATH)
+        key_json = os.getenv("SYSTEM_EMAIL_SA_KEY_JSON", "").strip()
+        if key_json:
+            key_dict = json.loads(key_json)
+            creds = service_account.Credentials.from_service_account_info(
+                key_dict, scopes=[_GMAIL_SEND_SCOPE],
+            )
+        elif os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
+            creds = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_KEY_PATH, scopes=[_GMAIL_SEND_SCOPE],
+            )
+        else:
+            logging.error(
+                "System email: no credentials — set SYSTEM_EMAIL_SA_KEY_JSON "
+                "or ensure key file exists at %s", SERVICE_ACCOUNT_KEY_PATH,
+            )
             return None
-        creds = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_KEY_PATH,
-            scopes=[_GMAIL_SEND_SCOPE],
-        )
         _system_email_credentials = creds.with_subject(SYSTEM_EMAIL_SENDER)
         logging.info("System email credentials initialised for %s", SYSTEM_EMAIL_SENDER)
         return _system_email_credentials
