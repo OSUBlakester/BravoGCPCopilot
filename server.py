@@ -6348,8 +6348,9 @@ class UserCurrentState(BaseModel): location: Optional[str] = ""; people: Optiona
 
 # --- FastAPI Lifespan Context Manager (Replaces @app.on_event) ---
 
-# Background task for periodic cache cleanup
+# Background tasks
 cleanup_task = None
+consent_email_task = None
 
 async def periodic_cache_cleanup():
     """Periodic background task to clean up expired caches every hour."""
@@ -6364,9 +6365,90 @@ async def periodic_cache_cleanup():
         except Exception as e:
             logging.error(f"Error in periodic cache cleanup: {e}", exc_info=True)
 
+async def _send_pending_consent_second_emails() -> None:
+    """Find verified consent records whose 5-day window has elapsed and send the second email."""
+    if not firestore_db:
+        return
+    now = dt.utcnow()
+    query = (
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+        .where("second_email_due_at", "<=", now)
+        .where("second_email_sent_at", "==", None)
+    )
+    docs = await asyncio.to_thread(lambda: list(query.stream()))
+    if not docs:
+        return
+    logging.info("Consent second-email: %d pending", len(docs))
+    for snap in docs:
+        ref = snap.reference
+        data = snap.to_dict() or {}
+        token = data.get("token", "")
+        parent_email = data.get("parent_email", "")
+        account_id = data.get("account_id", "")
+        aac_user_id = data.get("aac_user_id", "")
+        if not (token and parent_email and account_id and aac_user_id):
+            logging.warning("Consent second-email: skipping incomplete record %s", snap.id)
+            continue
+        revoke_url = f"{APP_PUBLIC_BASE_URL}/revoke-consent?t={token}"
+        body_text = (
+            "Hi,\n\n"
+            "Five days ago you confirmed parental consent for Bravo to learn from "
+            "your child's conversations.\n\n"
+            "Bravo uses patterns from conversations — such as favourite foods, activities, "
+            "and topics — to personalise responses. No health, personal, or sensitive "
+            "information is ever stored.\n\n"
+            f"If you wish to withdraw consent at any time, use this link:\n{revoke_url}\n\n"
+            "You can also manage consent within the Bravo app.\n\n"
+            "— The Bravo team"
+        )
+        body_html = (
+            "<html><body style='font-family:sans-serif;max-width:540px;color:#1a1a1a'>"
+            "<p>Hi,</p>"
+            "<p>Five days ago you confirmed parental consent for Bravo to learn from "
+            "your child's conversations.</p>"
+            "<p>Bravo uses patterns from conversations — such as favourite foods, activities, "
+            "and topics — to personalise responses. No health, personal, or sensitive "
+            "information is ever stored.</p>"
+            "<p>If you wish to withdraw consent, click the button below:</p>"
+            f"<p style='margin:24px 0'><a href='{revoke_url}' "
+            "style='background:#1565c0;color:#fff;padding:12px 24px;border-radius:6px;"
+            "text-decoration:none'>Withdraw consent</a></p>"
+            "<p>You can also manage consent at any time from within the Bravo app.</p>"
+            "<p>— The Bravo team</p>"
+            "</body></html>"
+        )
+        sent = await send_system_email(
+            to_address=parent_email,
+            subject="Your Bravo parental consent confirmation",
+            body_text=body_text,
+            body_html=body_html,
+            purpose="consent_second_email",
+        )
+        if sent:
+            await asyncio.to_thread(ref.update, {"second_email_sent_at": dt.utcnow()})
+        else:
+            logging.error(
+                "Consent second-email: send failed for %s/%s — will retry next hour",
+                account_id, aac_user_id,
+            )
+
+
+async def periodic_consent_second_email() -> None:
+    """Background job: check hourly for verified consent records needing a second email."""
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            await _send_pending_consent_second_emails()
+        except asyncio.CancelledError:
+            logging.info("Consent second-email task cancelled.")
+            break
+        except Exception as e:
+            logging.error("Error in periodic_consent_second_email: %s", e, exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global cleanup_task
+    global cleanup_task, consent_email_task
     
     # Code to run on startup
     logging.info("Application startup: Initializing shared backend services...")
@@ -6379,6 +6461,8 @@ async def lifespan(app: FastAPI):
     # Start periodic cache cleanup task
     cleanup_task = asyncio.create_task(periodic_cache_cleanup())
     logging.info("✅ Started periodic cache cleanup task (runs every hour)")
+    consent_email_task = asyncio.create_task(periodic_consent_second_email())
+    logging.info("✅ Started periodic consent second-email task (runs every hour)")
 
     # Warm the static image index in the background so new profiles don't wait.
     # Runs automatically on every cold start; a no-op if the index is already valid.
@@ -6402,6 +6486,12 @@ async def lifespan(app: FastAPI):
         cleanup_task.cancel()
         try:
             await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    if consent_email_task:
+        consent_email_task.cancel()
+        try:
+            await consent_email_task
         except asyncio.CancelledError:
             pass
     logging.info("Application shutdown complete.")
@@ -12158,6 +12248,105 @@ async def run_a7_acceptance_tests() -> bool:
 # --- End A7 dormant block ---
 
 
+# =============================================================================
+# A44 — Parental consent management
+# =============================================================================
+
+_CONSENT_DOC_SUBPATH = "info/consent"
+_CONSENT_VERIFICATIONS_COLLECTION = "consent_verifications"
+_CONSENT_TOKEN_EXPIRY_DAYS = 30
+_CONSENT_SECOND_EMAIL_DELAY_DAYS = 5
+
+
+async def load_consent(account_id: str, aac_user_id: str) -> Dict[str, Any]:
+    """Load consent document. Returns empty dict (all flags default False) if absent."""
+    data = await load_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=_CONSENT_DOC_SUBPATH,
+        default_data={},
+    )
+    return data or {}
+
+
+async def save_consent(account_id: str, aac_user_id: str, data: Dict[str, Any]) -> None:
+    await save_firestore_document(
+        account_id=account_id,
+        aac_user_id=aac_user_id,
+        doc_subpath=_CONSENT_DOC_SUBPATH,
+        data_to_save=data,
+    )
+
+
+def is_learning_enabled(consent: Dict[str, Any]) -> bool:
+    return bool(consent.get("learn_from_history", False))
+
+
+async def record_parental_consent(account_id: str, aac_user_id: str) -> None:
+    """Mark parental consent given. Idempotent — safe to call on re-verify."""
+    consent = await load_consent(account_id, aac_user_id)
+    consent["learn_from_history"] = True
+    consent["consent_given_at"] = dt.utcnow().isoformat()
+    consent.pop("consent_withdrawn_at", None)
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("Parental consent recorded for %s/%s", account_id, aac_user_id)
+
+
+async def withdraw_consent(account_id: str, aac_user_id: str) -> None:
+    """Withdraw parental consent. Idempotent."""
+    consent = await load_consent(account_id, aac_user_id)
+    consent["learn_from_history"] = False
+    consent["consent_withdrawn_at"] = dt.utcnow().isoformat()
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("Parental consent withdrawn for %s/%s", account_id, aac_user_id)
+
+
+async def _a7_set_consent_control(account_id: str, aac_user_id: str, enabled: bool) -> None:
+    """Programmatic toggle without the email flow (used by POST /api/consent/control)."""
+    if enabled:
+        await record_parental_consent(account_id, aac_user_id)
+    else:
+        await withdraw_consent(account_id, aac_user_id)
+
+
+async def _consent_create_verification(account_id: str, aac_user_id: str,
+                                       parent_email: str) -> str:
+    """Create a fresh verification record in the top-level collection. Returns the token."""
+    if not firestore_db:
+        raise RuntimeError("Firestore not available")
+    token = secrets.token_hex(32)
+    doc: Dict[str, Any] = {
+        "account_id": account_id,
+        "aac_user_id": aac_user_id,
+        "parent_email": parent_email,
+        "token": token,
+        "created_at": dt.utcnow(),
+        "used_at": None,
+        "second_email_due_at": None,
+        "second_email_sent_at": None,
+    }
+    await asyncio.to_thread(
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION).document().set, doc
+    )
+    return token
+
+
+async def _consent_find_verification(token: str) -> Optional[Tuple[Any, Dict[str, Any]]]:
+    """Return (doc_ref, data) for the given token, or None."""
+    if not firestore_db or not token:
+        return None
+    query = (
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+        .where("token", "==", token)
+        .limit(1)
+    )
+    docs = await asyncio.to_thread(lambda: list(query.stream()))
+    if not docs:
+        return None
+    snap = docs[0]
+    return snap.reference, snap.to_dict() or {}
+
+
 def classify_message_category(message_text: str, message_type: str) -> str:
     """Classify message into semantic categories"""
     message_lower = message_text.lower()
@@ -14619,6 +14808,41 @@ EMAIL_PROVIDER_NAME = "gmail"
 EMAIL_OAUTH_STATE_TTL_SECONDS = 900
 EMAIL_CONNECT_SUCCESS_HTML = "<html><body><h2>Email connected</h2><p>You can close this tab and return to Bravo.</p></body></html>"
 EMAIL_CONNECT_CANCELED_HTML = "<html><body><h2>Email connection canceled</h2><p>You can close this tab and return to Bravo.</p></body></html>"
+
+_CONSENT_VERIFY_SUCCESS_HTML = (
+    "<html><head><meta charset='utf-8'><title>Consent confirmed — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "color:#1a1a1a;text-align:center}h2{color:#2e7d32}p{line-height:1.6;color:#444}"
+    "</style></head><body>"
+    "<h2>Consent confirmed</h2>"
+    "<p>Thank you. Bravo may now learn from your child&rsquo;s conversations to personalise their experience.</p>"
+    "<p>You will receive a follow-up email in 5 days. You can withdraw consent at any time using the link in that email or from within the Bravo app.</p>"
+    "</body></html>"
+)
+_CONSENT_ALREADY_VERIFIED_HTML = (
+    "<html><head><meta charset='utf-8'><title>Already confirmed — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "text-align:center}p{line-height:1.6;color:#444}</style></head><body>"
+    "<h2>Already confirmed</h2>"
+    "<p>This consent link has already been used. No further action is needed.</p>"
+    "</body></html>"
+)
+_CONSENT_TOKEN_INVALID_HTML = (
+    "<html><head><meta charset='utf-8'><title>Link not valid — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "text-align:center}h2{color:#c62828}p{line-height:1.6;color:#444}</style></head><body>"
+    "<h2>Link not valid</h2>"
+    "<p>This link has expired or is not recognised. Please request a new consent email from within the Bravo app.</p>"
+    "</body></html>"
+)
+_CONSENT_REVOKED_HTML = (
+    "<html><head><meta charset='utf-8'><title>Consent withdrawn — Bravo</title>"
+    "<style>body{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 24px;"
+    "text-align:center}h2{color:#1565c0}p{line-height:1.6;color:#444}</style></head><body>"
+    "<h2>Consent withdrawn</h2>"
+    "<p>Bravo will no longer learn from your child&rsquo;s conversations. Any preferences already learned remain on record unless you remove them from within the Bravo app.</p>"
+    "</body></html>"
+)
 GMAIL_OAUTH_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -15516,6 +15740,68 @@ async def email_oauth_callback(
     await _save_email_provider_state(account_id, aac_user_id, next_state)
 
     return HTMLResponse(content=EMAIL_CONNECT_SUCCESS_HTML, status_code=200)
+
+
+# --- Public consent verification / revocation pages ---
+
+@app.get("/verify-consent", include_in_schema=False)
+async def verify_consent_handler(t: str = ""):
+    """Public handler — parent clicks verify link from first consent email."""
+    if not t:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    result = await _consent_find_verification(t)
+    if result is None:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    ref, data = result
+    # Idempotent: already verified
+    if data.get("used_at") is not None:
+        return HTMLResponse(content=_CONSENT_ALREADY_VERIFIED_HTML, status_code=200)
+    # Expiry check (30 days from created_at)
+    created_at = data.get("created_at")
+    if created_at:
+        if isinstance(created_at, dt):
+            age = dt.utcnow() - created_at
+        else:
+            try:
+                age = dt.utcnow() - dt.fromisoformat(str(created_at))
+            except Exception:
+                age = None
+        if age and age.days > _CONSENT_TOKEN_EXPIRY_DAYS:
+            return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    account_id = data.get("account_id", "")
+    aac_user_id = data.get("aac_user_id", "")
+    if not (account_id and aac_user_id):
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    try:
+        await record_parental_consent(account_id, aac_user_id)
+        now = dt.utcnow()
+        second_due = now + timedelta(days=_CONSENT_SECOND_EMAIL_DELAY_DAYS)
+        await asyncio.to_thread(ref.update, {"used_at": now, "second_email_due_at": second_due})
+    except Exception as e:
+        logging.error("verify-consent: failed to record consent for %s/%s: %s", account_id, aac_user_id, e)
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=500)
+    return HTMLResponse(content=_CONSENT_VERIFY_SUCCESS_HTML, status_code=200)
+
+
+@app.get("/revoke-consent", include_in_schema=False)
+async def revoke_consent_handler(t: str = ""):
+    """Public handler — parent clicks revoke link from second consent email."""
+    if not t:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    result = await _consent_find_verification(t)
+    if result is None:
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    _, data = result
+    account_id = data.get("account_id", "")
+    aac_user_id = data.get("aac_user_id", "")
+    if not (account_id and aac_user_id):
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
+    try:
+        await withdraw_consent(account_id, aac_user_id)
+    except Exception as e:
+        logging.error("revoke-consent: failed for %s/%s: %s", account_id, aac_user_id, e)
+        return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=500)
+    return HTMLResponse(content=_CONSENT_REVOKED_HTML, status_code=200)
 
 
 @app.get("/api/email/inbox")
@@ -33631,6 +33917,259 @@ JSON response:"""
     except Exception as e:
         logging.error(f"Error checking picnic item: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to check item: {str(e)}")
+
+
+# =============================================================================
+# A44 — Consent & Learned Preferences API
+# =============================================================================
+
+class ConsentControlRequest(BaseModel):
+    enabled: bool
+
+
+class ConsentInitiateRequest(BaseModel):
+    parent_email: str
+
+
+class ApproveLearnedProposalRequest(BaseModel):
+    category: str
+    value: str
+    sentiment: str
+
+
+class DiscardLearnedProposalRequest(BaseModel):
+    category: str
+    value: str
+
+
+@app.get("/api/consent")
+async def get_consent_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Return the current consent state for this AAC user."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    consent = await load_consent(account_id, aac_user_id)
+    return {
+        "learn_from_history": is_learning_enabled(consent),
+        "consent_given_at": consent.get("consent_given_at"),
+        "consent_withdrawn_at": consent.get("consent_withdrawn_at"),
+    }
+
+
+@app.post("/api/consent/control")
+async def consent_control_endpoint(
+    request_data: ConsentControlRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Directly toggle learn_from_history without the email flow (admin / testing)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await _a7_set_consent_control(account_id, aac_user_id, request_data.enabled)
+    return {"success": True, "learn_from_history": request_data.enabled}
+
+
+@app.post("/api/consent/withdraw")
+async def consent_withdraw_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Withdraw parental consent for this AAC user."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await withdraw_consent(account_id, aac_user_id)
+    return {"success": True}
+
+
+@app.post("/api/consent/initiate")
+async def consent_initiate_endpoint(
+    request_data: ConsentInitiateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Send the first consent email to the parent. Creates a verification token."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    parent_email = (request_data.parent_email or "").strip()
+    if not parent_email or "@" not in parent_email:
+        raise HTTPException(status_code=400, detail="A valid parent_email is required.")
+    if not APP_PUBLIC_BASE_URL:
+        raise HTTPException(status_code=500, detail="APP_PUBLIC_BASE_URL is not configured.")
+    try:
+        token = await _consent_create_verification(account_id, aac_user_id, parent_email)
+    except Exception as e:
+        logging.error("consent initiate: failed to create verification for %s/%s: %s",
+                      account_id, aac_user_id, e)
+        raise HTTPException(status_code=500, detail="Could not create consent request.")
+    verify_url = f"{APP_PUBLIC_BASE_URL}/verify-consent?t={token}"
+    body_text = (
+        "Hi,\n\n"
+        "You are receiving this email because someone requested parental consent for "
+        "Bravo to learn from your child's conversations.\n\n"
+        "If this was you, click the link below to confirm:\n"
+        f"{verify_url}\n\n"
+        "Bravo learns everyday preferences — such as favourite foods, activities, and topics — "
+        "to personalise your child's experience. No health, personal, or sensitive information "
+        "is ever stored.\n\n"
+        f"This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days. If you did not request this, "
+        "you can ignore this email.\n\n"
+        "— The Bravo team"
+    )
+    body_html = (
+        "<html><body style='font-family:sans-serif;max-width:540px;color:#1a1a1a'>"
+        "<p>Hi,</p>"
+        "<p>You are receiving this email because someone requested parental consent for "
+        "Bravo to learn from your child&rsquo;s conversations.</p>"
+        "<p>If this was you, click the button below to confirm:</p>"
+        f"<p style='margin:24px 0'><a href='{verify_url}' "
+        "style='background:#2e7d32;color:#fff;padding:12px 24px;border-radius:6px;"
+        "text-decoration:none'>Confirm consent</a></p>"
+        "<p>Bravo learns everyday preferences &mdash; such as favourite foods, activities, "
+        "and topics &mdash; to personalise your child&rsquo;s experience. No health, personal, "
+        "or sensitive information is ever stored.</p>"
+        f"<p style='color:#888;font-size:12px'>This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days. "
+        "If you did not request this, you can ignore this email.</p>"
+        "<p>— The Bravo team</p>"
+        "</body></html>"
+    )
+    sent = await send_system_email(
+        to_address=parent_email,
+        subject="Action required: Bravo parental consent",
+        body_text=body_text,
+        body_html=body_html,
+        purpose="consent_first_email",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not send consent email — check server logs.")
+    return {"success": True, "parent_email": parent_email}
+
+
+@app.post("/api/consent/resend")
+async def consent_resend_endpoint(
+    request_data: ConsentInitiateRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Resend the consent email, reusing the existing unused token if one exists."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    parent_email = (request_data.parent_email or "").strip()
+    if not parent_email or "@" not in parent_email:
+        raise HTTPException(status_code=400, detail="A valid parent_email is required.")
+    if not APP_PUBLIC_BASE_URL:
+        raise HTTPException(status_code=500, detail="APP_PUBLIC_BASE_URL is not configured.")
+
+    # Look for an existing unused token for this user
+    token: Optional[str] = None
+    if firestore_db:
+        query = (
+            firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+            .where("account_id", "==", account_id)
+            .where("aac_user_id", "==", aac_user_id)
+            .where("used_at", "==", None)
+            .limit(1)
+        )
+        docs = await asyncio.to_thread(lambda: list(query.stream()))
+        if docs:
+            token = (docs[0].to_dict() or {}).get("token")
+
+    if not token:
+        try:
+            token = await _consent_create_verification(account_id, aac_user_id, parent_email)
+        except Exception as e:
+            logging.error("consent resend: failed to create verification for %s/%s: %s",
+                          account_id, aac_user_id, e)
+            raise HTTPException(status_code=500, detail="Could not create consent request.")
+
+    verify_url = f"{APP_PUBLIC_BASE_URL}/verify-consent?t={token}"
+    body_text = (
+        "Hi,\n\n"
+        "This is a resend of your Bravo parental consent request.\n\n"
+        "Click the link below to confirm:\n"
+        f"{verify_url}\n\n"
+        f"This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days.\n\n"
+        "— The Bravo team"
+    )
+    body_html = (
+        "<html><body style='font-family:sans-serif;max-width:540px;color:#1a1a1a'>"
+        "<p>This is a resend of your Bravo parental consent request.</p>"
+        f"<p style='margin:24px 0'><a href='{verify_url}' "
+        "style='background:#2e7d32;color:#fff;padding:12px 24px;border-radius:6px;"
+        "text-decoration:none'>Confirm consent</a></p>"
+        f"<p style='color:#888;font-size:12px'>This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days.</p>"
+        "<p>— The Bravo team</p>"
+        "</body></html>"
+    )
+    sent = await send_system_email(
+        to_address=parent_email,
+        subject="Bravo parental consent (resend)",
+        body_text=body_text,
+        body_html=body_html,
+        purpose="consent_resend_email",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not send consent email — check server logs.")
+    return {"success": True, "parent_email": parent_email}
+
+
+@app.get("/api/learned/pending")
+async def get_learned_pending_endpoint(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Return pending A7 preference proposals awaiting parent approval."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    return {"proposals": pending.get("proposals", []), "last_updated": pending.get("last_updated")}
+
+
+@app.post("/api/learned/approve")
+async def approve_learned_proposal_endpoint(
+    request_data: ApproveLearnedProposalRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Approve a pending A7 proposal — commits it to the profile and invalidates cache."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    category = (request_data.category or "").strip()
+    value = (request_data.value or "").strip()
+    sentiment = (request_data.sentiment or "").strip()
+    if not category or not value or sentiment not in ("likes", "dislikes"):
+        raise HTTPException(status_code=400, detail="category, value, and sentiment ('likes'/'dislikes') are required.")
+    if category not in _A7_EXTRACTION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {category!r}")
+    timestamp = dt.utcnow().isoformat()
+    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp)
+    # Remove from pending queue
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    proposals = pending.get("proposals", [])
+    pending["proposals"] = [
+        p for p in proposals
+        if not (p.get("category") == category and p.get("value", "").lower() == value.lower())
+    ]
+    await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    return {"success": True, "committed": committed}
+
+
+@app.post("/api/learned/discard")
+async def discard_learned_proposal_endpoint(
+    request_data: DiscardLearnedProposalRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Discard a pending A7 proposal without committing it."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    category = (request_data.category or "").strip()
+    value = (request_data.value or "").strip()
+    if not category or not value:
+        raise HTTPException(status_code=400, detail="category and value are required.")
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    proposals = pending.get("proposals", [])
+    before = len(proposals)
+    pending["proposals"] = [
+        p for p in proposals
+        if not (p.get("category") == category and p.get("value", "").lower() == value.lower())
+    ]
+    discarded = before - len(pending["proposals"])
+    await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    return {"success": True, "discarded": discarded}
 
 
 if __name__ == "__main__":
