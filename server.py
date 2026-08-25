@@ -6369,7 +6369,7 @@ async def _send_pending_consent_second_emails() -> None:
     """Find verified consent records whose 5-day window has elapsed and send the second email."""
     if not firestore_db:
         return
-    now = dt.utcnow()
+    now = dt.now(timezone.utc)
     query = (
         firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
         .where("second_email_due_at", "<=", now)
@@ -6425,7 +6425,7 @@ async def _send_pending_consent_second_emails() -> None:
             purpose="consent_second_email",
         )
         if sent:
-            await asyncio.to_thread(ref.update, {"second_email_sent_at": dt.utcnow()})
+            await asyncio.to_thread(ref.update, {"second_email_sent_at": dt.now(timezone.utc)})
         else:
             logging.error(
                 "Consent second-email: send failed for %s/%s — will retry next hour",
@@ -15757,15 +15757,20 @@ async def verify_consent_handler(t: str = ""):
     if data.get("used_at") is not None:
         return HTMLResponse(content=_CONSENT_ALREADY_VERIFIED_HTML, status_code=200)
     # Expiry check (30 days from created_at)
+    # Firestore returns tz-aware datetimes; normalize to UTC for comparison.
     created_at = data.get("created_at")
     if created_at:
-        if isinstance(created_at, dt):
-            age = dt.utcnow() - created_at
-        else:
-            try:
-                age = dt.utcnow() - dt.fromisoformat(str(created_at))
-            except Exception:
-                age = None
+        try:
+            if isinstance(created_at, dt):
+                if created_at.tzinfo is not None:
+                    now_cmp = dt.now(timezone.utc)
+                else:
+                    now_cmp = dt.utcnow()
+                age = now_cmp - created_at
+            else:
+                age = dt.now(timezone.utc) - dt.fromisoformat(str(created_at))
+        except Exception:
+            age = None
         if age and age.days > _CONSENT_TOKEN_EXPIRY_DAYS:
             return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
     account_id = data.get("account_id", "")
@@ -15774,7 +15779,7 @@ async def verify_consent_handler(t: str = ""):
         return HTMLResponse(content=_CONSENT_TOKEN_INVALID_HTML, status_code=200)
     try:
         await record_parental_consent(account_id, aac_user_id)
-        now = dt.utcnow()
+        now = dt.now(timezone.utc)
         second_due = now + timedelta(days=_CONSENT_SECOND_EMAIL_DELAY_DAYS)
         await asyncio.to_thread(ref.update, {"used_at": now, "second_email_due_at": second_due})
     except Exception as e:
