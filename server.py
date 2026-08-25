@@ -20226,6 +20226,24 @@ async def prewarm_cache_endpoint(
         logging.error(f"Error prewarming cache: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/admin/a7/acceptance-tests")
+async def a7_acceptance_tests_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Run the A7 preference extraction acceptance tests against the live model.
+
+    Validates deterministic layers (always) and model accuracy (requires _gemini_client).
+    Logs pass/fail counts only — no sensitive content is logged.
+    Returns passed=True only when zero sensitive leakage AND model accuracy >= 80%.
+    """
+    try:
+        passed = await run_a7_acceptance_tests()
+        return {"passed": passed}
+    except Exception as e:
+        logging.error(f"A7 acceptance test run failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/migrate/recent-greetings")
 async def migrate_recent_greetings_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
