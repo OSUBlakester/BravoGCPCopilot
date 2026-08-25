@@ -14810,6 +14810,123 @@ def _decrypt_email_token(encrypted_value: Optional[str]) -> Optional[str]:
     return decrypted.decode("utf-8")
 
 
+# =============================================================================
+# System email sender (server-acting-as-itself via Workspace DWD)
+#
+# Completely separate from the user OAuth email feature below. That sends mail
+# FROM the AAC user's own Gmail via their token. This sends FROM the application
+# mailbox (SYSTEM_EMAIL_SENDER) using a service-account credential that has been
+# granted domain-wide delegation for gmail.send only.
+#
+# Prerequisites (Workspace admin, one-time setup):
+#   1. Enable Gmail API on the GCP project.
+#   2. Workspace Admin → Security → API controls → Domain-wide delegation → Add:
+#        Client ID: <service account numeric client ID>
+#        Scopes:    https://www.googleapis.com/auth/gmail.send
+#   3. Verify SPF, DKIM, DMARC for talkwithbravo.com.
+#   4. Set env vars: SYSTEM_EMAIL_SENDER, APP_PUBLIC_BASE_URL.
+# =============================================================================
+
+SYSTEM_EMAIL_SENDER = os.getenv("SYSTEM_EMAIL_SENDER", "admin@talkwithbravo.com")
+APP_PUBLIC_BASE_URL = os.getenv("APP_PUBLIC_BASE_URL", "").rstrip("/")
+_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+_GMAIL_SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
+_system_email_credentials: Optional[service_account.Credentials] = None
+
+
+def _get_system_email_credentials() -> Optional[service_account.Credentials]:
+    """Service-account credentials delegated to the system sender mailbox.
+    Cached at module level; the library refreshes the token itself.
+    """
+    global _system_email_credentials
+    if _system_email_credentials is not None:
+        return _system_email_credentials
+    try:
+        if not os.path.exists(SERVICE_ACCOUNT_KEY_PATH):
+            logging.error("System email: service account key not found at %s", SERVICE_ACCOUNT_KEY_PATH)
+            return None
+        creds = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_KEY_PATH,
+            scopes=[_GMAIL_SEND_SCOPE],
+        )
+        _system_email_credentials = creds.with_subject(SYSTEM_EMAIL_SENDER)
+        logging.info("System email credentials initialised for %s", SYSTEM_EMAIL_SENDER)
+        return _system_email_credentials
+    except Exception as e:
+        logging.error("System email: failed to build credentials: %s", e, exc_info=True)
+        return None
+
+
+async def _get_system_email_token() -> Optional[str]:
+    creds = _get_system_email_credentials()
+    if creds is None:
+        return None
+    try:
+        if not creds.valid:
+            from google.auth.transport.requests import Request as GoogleAuthRequest
+            await asyncio.to_thread(creds.refresh, GoogleAuthRequest())
+        return creds.token
+    except Exception as e:
+        logging.error("System email: token refresh failed: %s", e, exc_info=True)
+        return None
+
+
+async def send_system_email(to_address: str, subject: str,
+                            body_text: str, body_html: Optional[str] = None,
+                            purpose: str = "unspecified") -> bool:
+    """Send mail as the application itself. Returns True on accepted send.
+
+    NEVER raises — callers decide what a failure means for their flow.
+    Failures are logged at ERROR with the purpose so they are loud in Cloud Run
+    logs; Workspace gives no bounce webhooks, so this log line is the only
+    signal that a send was attempted.
+    """
+    if not to_address or "@" not in to_address:
+        logging.error("System email [%s]: invalid recipient address", purpose)
+        return False
+
+    token = await _get_system_email_token()
+    if token is None:
+        logging.error("System email [%s]: no credentials — NOT SENT", purpose)
+        return False
+
+    message = EmailMessage()
+    message["From"] = SYSTEM_EMAIL_SENDER
+    message["To"] = to_address
+    message["Subject"] = subject
+    message["Reply-To"] = SYSTEM_EMAIL_SENDER
+    message.set_content(body_text)
+    if body_html:
+        message.add_alternative(body_html, subtype="html")
+
+    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                _GMAIL_SEND_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"raw": raw},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as resp:
+                if resp.status == 200:
+                    logging.info("System email [%s]: sent successfully", purpose)
+                    return True
+                detail = await resp.text()
+                logging.error(
+                    "System email [%s]: FAILED HTTP %s — %s",
+                    purpose, resp.status, detail[:300],
+                )
+                return False
+    except Exception as e:
+        logging.error("System email [%s]: FAILED — %s", purpose, e, exc_info=True)
+        return False
+
+
 def _ensure_email_security_configuration() -> None:
     enforce_config = _is_truthy_env(os.getenv("EMAIL_FEATURE_ENABLED", "true"))
     if not enforce_config:
@@ -20242,6 +20359,27 @@ async def a7_acceptance_tests_endpoint(
     except Exception as e:
         logging.error(f"A7 acceptance test run failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/test-system-email")
+async def test_system_email_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+    to_address: str = "",
+):
+    """Verify Workspace DWD is configured correctly before shipping consent email.
+    Remove this endpoint once send_system_email is confirmed working in production.
+    """
+    if not to_address or "@" not in to_address:
+        raise HTTPException(status_code=400, detail="to_address is required")
+    sent = await send_system_email(
+        to_address=to_address,
+        subject="Bravo system email test",
+        body_text="This is a test message from the Bravo server. If you received it, the system email sender is configured correctly.",
+        purpose="admin_test",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Send failed — check Cloud Run logs for details")
+    return {"sent": True, "from": SYSTEM_EMAIL_SENDER, "to": to_address}
 
 
 @app.post("/api/admin/migrate/recent-greetings")
