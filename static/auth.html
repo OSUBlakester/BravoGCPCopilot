@@ -3687,11 +3687,11 @@ registerForm.addEventListener('submit', async (e) => {
             const isLastStep = (wizardState.interfaceMode === 'tap' && step === 9) || step === 10;
 
             if (isConsentStep) {
-                titleEl.textContent = 'Personalised Learning';
+                titleEl.textContent = 'Personalized Learning';
                 const emailVisible = wizardState.consentEnabled;
                 contentEl.innerHTML = `
                     <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
-                        Bravo can learn everyday preferences from conversations — things like favourite foods,
+                        Bravo can learn everyday preferences from conversations — things like favorite foods,
                         activities, and topics — and use them to suggest more relevant options.
                         No health, personal, or sensitive information is ever stored or learned.
                     </p>
@@ -3699,7 +3699,7 @@ registerForm.addEventListener('submit', async (e) => {
                         <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${emailVisible ? '#eef2ff' : '#f9fafb'};border:2px solid ${emailVisible ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
                             <input type="radio" name="wizardConsentChoice" value="enable" ${emailVisible ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
                             <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Enable personalised learning</div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Enable personalized learning</div>
                                 <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">A consent email will be sent to a parent or guardian</div>
                             </div>
                         </label>
