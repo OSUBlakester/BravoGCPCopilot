@@ -20664,6 +20664,19 @@ async def a7_acceptance_tests_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/admin/consent/send-second-emails")
+async def trigger_consent_second_emails_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Manually trigger the consent second-email job. Safe to run at any time."""
+    try:
+        await _send_pending_consent_second_emails()
+        return {"success": True}
+    except Exception as e:
+        logging.error("Admin trigger consent second-email failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/admin/migrate/recent-greetings")
 async def migrate_recent_greetings_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
