@@ -20664,27 +20664,6 @@ async def a7_acceptance_tests_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/admin/test-system-email")
-async def test_system_email_endpoint(
-    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
-    to_address: str = "",
-):
-    """Verify Workspace DWD is configured correctly before shipping consent email.
-    Remove this endpoint once send_system_email is confirmed working in production.
-    """
-    if not to_address or "@" not in to_address:
-        raise HTTPException(status_code=400, detail="to_address is required")
-    sent = await send_system_email(
-        to_address=to_address,
-        subject="Bravo system email test",
-        body_text="This is a test message from the Bravo server. If you received it, the system email sender is configured correctly.",
-        purpose="admin_test",
-    )
-    if not sent:
-        raise HTTPException(status_code=502, detail="Send failed — check Cloud Run logs for details")
-    return {"sent": True, "from": SYSTEM_EMAIL_SENDER, "to": to_address}
-
-
 @app.post("/api/admin/migrate/recent-greetings")
 async def migrate_recent_greetings_endpoint(
     token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
