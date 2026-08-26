@@ -6373,9 +6373,10 @@ async def _send_pending_consent_second_emails() -> None:
     query = (
         firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
         .where("second_email_due_at", "<=", now)
-        .where("second_email_sent_at", "==", None)
     )
-    docs = await asyncio.to_thread(lambda: list(query.stream()))
+    all_docs = await asyncio.to_thread(lambda: list(query.stream()))
+    # Filter unsent in Python — avoids needing a composite index.
+    docs = [d for d in all_docs if (d.to_dict() or {}).get("second_email_sent_at") is None]
     if not docs:
         return
     logging.info("Consent second-email: %d pending", len(docs))
