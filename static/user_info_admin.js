@@ -1765,7 +1765,8 @@ async function loadPendingProposals() {
     try {
         const r = await window.authenticatedFetch('/api/learned/pending', { method: 'GET' });
         if (!r.ok) throw new Error(`${r.status}`);
-        const proposals = await r.json();
+        const data = await r.json();
+        const proposals = Array.isArray(data) ? data : (data.proposals || []);
         if (loadingEl) loadingEl.classList.add('hidden');
 
         if (!proposals || proposals.length === 0) {
