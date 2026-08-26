@@ -1491,9 +1491,10 @@ Write it as a cohesive portrait, not a list of facts. Use natural transitions be
 
 RESPONSE FORMAT: Return only the narrative text — no JSON, no lists, no additional formatting."""
 
-        # Generate the narrative using the same infrastructure as the /llm endpoint
-        full_prompt = await build_full_prompt_for_non_cached_llm(current_ids["account_id"], current_ids["aac_user_id"], narrative_prompt)
-        response_text = await _generate_gemini_content_with_fallback(full_prompt, None, current_ids["account_id"], current_ids["aac_user_id"])
+        # Call Gemini directly — do NOT use build_full_prompt_for_non_cached_llm here
+        # because that function prepends the AAC system prompt which forces {option,summary}
+        # JSON output format, corrupting the narrative.
+        response_text = await _generate_gemini_content_with_fallback(narrative_prompt, None, current_ids["account_id"], current_ids["aac_user_id"])
         
         if response_text:
             narrative = response_text.strip()

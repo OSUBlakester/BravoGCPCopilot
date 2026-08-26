@@ -361,12 +361,8 @@ class AudioInterviewSystem {
                         });
                     } catch (_) { /* non-fatal */ }
                 }
-                // Restore normal interview first screen and show Start button
-                if (this.currentQuestion) {
-                    this.currentQuestion.textContent = 'Welcome! I\'ll ask you some questions to learn about this user. Click "Start Interview" when you\'re ready.';
-                }
-                this.startInterviewBtn?.classList.remove('hidden');
-                this.updateProgress();
+                // Go straight into the interview — no intermediate welcome screen
+                await this.startInterview();
             });
         }
 
