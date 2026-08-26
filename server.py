@@ -3065,9 +3065,14 @@ class GeminiCacheManager:
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
             "chat_narrative": load_chat_derived_narrative(account_id, aac_user_id),
             "friends_family": load_firestore_document(account_id, aac_user_id, "info/friends_family", {"friends_family": []}),
+            "consent": load_consent(account_id, aac_user_id),
         }
         results = await asyncio.gather(*tasks.values())
         context_data = dict(zip(tasks.keys(), results))
+
+        _consent = context_data.get("consent") or {}
+        _use_entered = is_personalization_enabled(_consent)
+        _use_learned = is_learning_enabled(_consent)
 
         # System prompt providing instructions to the LLM
         system_prompt = """You are Bravo, an AI communication assistant for AAC users. Your role is to generate relevant response options based on the user's context.
@@ -3082,15 +3087,15 @@ Analyze the provided context to create helpful, personalized suggestions."""
         # Assemble the BASE context string
         context_parts = [f"--- SYSTEM PROMPT ---\n{system_prompt}\n"]
 
-        # PRIORITIZE USER PROFILE - This should be the PRIMARY focus for all responses
-        if context_data["user_info"]:
+        # PRIORITIZE USER PROFILE - gated on use_entered_details
+        if _use_entered and context_data["user_info"]:
             user_narrative = context_data['user_info'].get('narrative', 'Not available')
             context_parts.append(f"=== PRIMARY USER PROFILE (MOST IMPORTANT) ===\n{user_narrative}\n\n⚠️  REMEMBER: This user profile should be the foundation for ALL responses. Personal details, family, interests, and characteristics mentioned here are the most important context.\n")
             overrides = normalize_ai_option_overrides(context_data["user_info"].get("aiOptionOverrides", {}))
             context_parts.append(build_ai_option_overrides_prompt_block(overrides) + "\n")
-        
-        # Additional supporting context (stable data only)
-        if context_data["friends_family"]:
+
+        # Additional supporting context (stable data only) — also gated on use_entered_details
+        if _use_entered and context_data["friends_family"]:
             context_parts.append(f"--- Friends & Family (Supporting Context) ---\n{json.dumps(context_data['friends_family'], indent=2)}\n")
         if context_data["settings"]:
             context_parts.append(f"--- User Settings (Supporting Context) ---\n{json.dumps(context_data['settings'], indent=2)}\n")
@@ -3115,8 +3120,8 @@ Analyze the provided context to create helpful, personalized suggestions."""
                 if chat_narrative.get("narrative_text"):
                     chat_context_parts.append(f"Summary: {chat_narrative['narrative_text']}")
                 
-                # Add extracted facts
-                if chat_narrative.get("extracted_facts"):
+                # Extracted facts — gated on learn_from_history
+                if _use_learned and chat_narrative.get("extracted_facts"):
                     facts_text = []
                     for fact in chat_narrative["extracted_facts"]:
                         confidence = fact.get("confidence", "medium")
@@ -12161,7 +12166,11 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
         if proposal is None:
             _a7_record_metric("validation.rejected", f'reason="{reason}"')
             return
-        if await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
+        consent = await load_consent(account_id, aac_user_id)
+        if is_auto_approve_enabled(consent):
+            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp)
+            _a7_record_metric("auto_approved", f'category="{proposal["category"]}"')
+        elif await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
             _a7_record_metric("proposed", f'category="{proposal["category"]}"')
     except Exception as e:
         logging.error(f"Preference extraction pipeline error: {e}", exc_info=True)
@@ -12281,6 +12290,28 @@ async def save_consent(account_id: str, aac_user_id: str, data: Dict[str, Any]) 
 
 def is_learning_enabled(consent: Dict[str, Any]) -> bool:
     return bool(consent.get("learn_from_history", False))
+
+
+def is_personalization_enabled(consent: Dict[str, Any]) -> bool:
+    return bool(consent.get("use_entered_details", False))
+
+
+def is_auto_approve_enabled(consent: Dict[str, Any]) -> bool:
+    return bool(consent.get("auto_approve_learned", False))
+
+
+async def set_auto_approve(account_id: str, aac_user_id: str, enabled: bool) -> None:
+    consent = await load_consent(account_id, aac_user_id)
+    consent["auto_approve_learned"] = enabled
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("Auto-approve set to %s for %s/%s", enabled, account_id, aac_user_id)
+
+
+async def set_use_entered_details(account_id: str, aac_user_id: str, enabled: bool) -> None:
+    consent = await load_consent(account_id, aac_user_id)
+    consent["use_entered_details"] = enabled
+    await save_consent(account_id, aac_user_id, consent)
+    logging.info("use_entered_details set to %s for %s/%s", enabled, account_id, aac_user_id)
 
 
 async def record_parental_consent(account_id: str, aac_user_id: str) -> None:
@@ -33925,8 +33956,36 @@ class ConsentControlRequest(BaseModel):
     enabled: bool
 
 
+class ConsentPersonalizationRequest(BaseModel):
+    enabled: bool
+
+
+class ConsentAutoApproveRequest(BaseModel):
+    enabled: bool
+
+
 class ConsentInitiateRequest(BaseModel):
     parent_email: str
+
+
+class EditPendingProposalRequest(BaseModel):
+    old_category: str
+    old_value: str
+    new_category: str
+    new_value: str
+    new_sentiment: str
+
+
+class EditApprovedFactRequest(BaseModel):
+    old_category: str
+    old_fact: str
+    new_category: str
+    new_fact: str
+
+
+class DeleteApprovedFactRequest(BaseModel):
+    category: str
+    fact: str
 
 
 class ApproveLearnedProposalRequest(BaseModel):
@@ -33949,7 +34008,9 @@ async def get_consent_endpoint(
     aac_user_id = current_ids["aac_user_id"]
     consent = await load_consent(account_id, aac_user_id)
     return {
+        "use_entered_details": is_personalization_enabled(consent),
         "learn_from_history": is_learning_enabled(consent),
+        "auto_approve_learned": is_auto_approve_enabled(consent),
         "consent_given_at": consent.get("consent_given_at"),
         "consent_withdrawn_at": consent.get("consent_withdrawn_at"),
     }
@@ -33976,6 +34037,30 @@ async def consent_withdraw_endpoint(
     aac_user_id = current_ids["aac_user_id"]
     await withdraw_consent(account_id, aac_user_id)
     return {"success": True}
+
+
+@app.post("/api/consent/personalization")
+async def consent_personalization_endpoint(
+    request_data: ConsentPersonalizationRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Enable or disable use_entered_details (AI uses manually entered profile data)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await set_use_entered_details(account_id, aac_user_id, request_data.enabled)
+    return {"success": True, "use_entered_details": request_data.enabled}
+
+
+@app.post("/api/consent/auto-approve")
+async def consent_auto_approve_endpoint(
+    request_data: ConsentAutoApproveRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Enable or disable auto-approval of learned facts (skip guardian approval queue)."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    await set_auto_approve(account_id, aac_user_id, request_data.enabled)
+    return {"success": True, "auto_approve_learned": request_data.enabled}
 
 
 @app.post("/api/consent/initiate")
@@ -34168,6 +34253,99 @@ async def discard_learned_proposal_endpoint(
     discarded = before - len(pending["proposals"])
     await _a7_save_pending_proposals(account_id, aac_user_id, pending)
     return {"success": True, "discarded": discarded}
+
+
+@app.put("/api/learned/pending")
+async def edit_pending_proposal_endpoint(
+    request_data: EditPendingProposalRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Edit a pending proposal's category, value, or sentiment before approving."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    old_cat = (request_data.old_category or "").strip()
+    old_val = (request_data.old_value or "").strip()
+    new_cat = (request_data.new_category or "").strip()
+    new_val = (request_data.new_value or "").strip()
+    new_sent = (request_data.new_sentiment or "").strip()
+    if not all([old_cat, old_val, new_cat, new_val]) or new_sent not in ("likes", "dislikes"):
+        raise HTTPException(status_code=400, detail="old_category, old_value, new_category, new_value, and new_sentiment ('likes'/'dislikes') are required.")
+    if new_cat not in _A7_EXTRACTION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {new_cat!r}")
+    pending = await _a7_load_pending_proposals(account_id, aac_user_id)
+    proposals = pending.get("proposals", [])
+    updated = False
+    for p in proposals:
+        if p.get("category") == old_cat and p.get("value", "").lower() == old_val.lower():
+            p["category"] = new_cat
+            p["value"] = new_val
+            p["sentiment"] = new_sent
+            updated = True
+            break
+    if not updated:
+        raise HTTPException(status_code=404, detail="Proposal not found.")
+    await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    return {"success": True}
+
+
+@app.put("/api/learned/approved")
+async def edit_approved_fact_endpoint(
+    request_data: EditApprovedFactRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Edit a committed fact's category or text."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    old_cat = (request_data.old_category or "").strip()
+    old_fact = (request_data.old_fact or "").strip()
+    new_cat = (request_data.new_category or "").strip()
+    new_fact = (request_data.new_fact or "").strip()
+    if not all([old_cat, old_fact, new_cat, new_fact]):
+        raise HTTPException(status_code=400, detail="old_category, old_fact, new_category, and new_fact are required.")
+    if new_cat not in _A7_EXTRACTION_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Unknown category: {new_cat!r}")
+    narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+    facts: List[Dict[str, Any]] = narrative.get("extracted_facts", [])
+    updated = False
+    for f in facts:
+        if f.get("category") == old_cat and f.get("fact", "").lower() == old_fact.lower():
+            f["category"] = new_cat
+            f["fact"] = new_fact
+            updated = True
+            break
+    if not updated:
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    narrative["extracted_facts"] = facts
+    await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True}
+
+
+@app.delete("/api/learned/approved")
+async def delete_approved_fact_endpoint(
+    request_data: DeleteApprovedFactRequest,
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Delete a committed fact from the profile."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    category = (request_data.category or "").strip()
+    fact = (request_data.fact or "").strip()
+    if not category or not fact:
+        raise HTTPException(status_code=400, detail="category and fact are required.")
+    narrative = await load_chat_derived_narrative(account_id, aac_user_id)
+    facts: List[Dict[str, Any]] = narrative.get("extracted_facts", [])
+    before = len(facts)
+    narrative["extracted_facts"] = [
+        f for f in facts
+        if not (f.get("category") == category and f.get("fact", "").lower() == fact.lower())
+    ]
+    deleted = before - len(narrative["extracted_facts"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
+    return {"success": True, "deleted": deleted}
 
 
 if __name__ == "__main__":

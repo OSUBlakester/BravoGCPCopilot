@@ -280,9 +280,12 @@ class AudioInterviewSystem {
     }
 
     async openInterviewModal() {
-        // When launched from the setup wizard always start completely fresh
+        // When launched from the setup wizard show personalization consent first
         if (sessionStorage.getItem('wizardInterviewMode') === '1') {
             this._resetState();
+            this.modal.classList.remove('hidden');
+            this._showPersonalizationConsentScreen();
+            return;
         }
 
         this.modal.classList.remove('hidden');
@@ -296,6 +299,82 @@ class AudioInterviewSystem {
         if (this.interviewData.responses.length > 0) {
             this.currentQuestion.textContent = `Welcome back! You have ${this.interviewData.responses.length} responses saved. Click "Start Interview" to review and edit answers, or "Restart Interview" to start fresh.`;
             this.generateNarrativeBtn?.classList.remove('hidden');
+        }
+    }
+
+    _showPersonalizationConsentScreen() {
+        // Hide the normal interview controls
+        this.startInterviewBtn?.classList.add('hidden');
+        this.answerInputArea?.classList.add('hidden');
+        this.generateNarrativeBtn?.classList.add('hidden');
+
+        if (this.currentQuestion) {
+            this.currentQuestion.innerHTML = `
+                <div style="text-align:left">
+                    <div style="font-weight:700;font-size:1.05rem;margin-bottom:10px;color:#111827">Enable Personalization?</div>
+                    <p style="font-size:0.9rem;color:#374151;margin-bottom:16px;line-height:1.5">
+                        This interview collects information that Bravo can use to personalise AI suggestions —
+                        things like the user's interests, communication style, and personality.
+                        You can enable this now or skip the interview and configure it later from the User Information page.
+                    </p>
+                    <div style="display:flex;flex-direction:column;gap:10px">
+                        <button id="personalizationEnableBtn"
+                            style="padding:12px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;text-align:left">
+                            Enable Personalization &amp; Start Interview
+                        </button>
+                        <button id="personalizationSkipBtn"
+                            style="padding:12px 20px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:0.95rem;cursor:pointer;text-align:left">
+                            Skip Interview — I'll set this up later
+                        </button>
+                    </div>
+                </div>`;
+        }
+
+        const enableBtn = document.getElementById('personalizationEnableBtn');
+        const skipBtn = document.getElementById('personalizationSkipBtn');
+
+        if (enableBtn) {
+            enableBtn.addEventListener('click', async () => {
+                enableBtn.disabled = true;
+                enableBtn.textContent = 'Enabling…';
+                // Enable both use_entered_details and learn_from_history
+                const token = sessionStorage.getItem('firebaseIdToken');
+                const userId = sessionStorage.getItem('currentAacUserId');
+                if (token && userId) {
+                    const authHeaders = {
+                        'Authorization': `Bearer ${token}`,
+                        'X-User-ID': userId,
+                        'Content-Type': 'application/json',
+                    };
+                    try {
+                        await fetch('/api/consent/personalization', {
+                            method: 'POST',
+                            headers: authHeaders,
+                            body: JSON.stringify({ enabled: true }),
+                        });
+                    } catch (_) { /* non-fatal */ }
+                    try {
+                        await fetch('/api/consent/control', {
+                            method: 'POST',
+                            headers: authHeaders,
+                            body: JSON.stringify({ enabled: true }),
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
+                // Restore normal interview first screen and show Start button
+                if (this.currentQuestion) {
+                    this.currentQuestion.textContent = 'Welcome! I\'ll ask you some questions to learn about this user. Click "Start Interview" when you\'re ready.';
+                }
+                this.startInterviewBtn?.classList.remove('hidden');
+                this.updateProgress();
+            });
+        }
+
+        if (skipBtn) {
+            skipBtn.addEventListener('click', () => {
+                sessionStorage.removeItem('wizardInterviewMode');
+                this.modal.classList.add('hidden');
+            });
         }
     }
 
@@ -1083,19 +1162,21 @@ Write in third person as a cohesive, professional profile that caregivers and th
             console.warn('[Interview] No birthday response found in interviewData.responses');
         }
 
-        // Save name and birthday to backend so they persist regardless of which page we're on
+        // Save narrative, name, and birthday to backend so they persist regardless of which page we're on
         console.log('[Interview] window.authenticatedFetch defined:', typeof window.authenticatedFetch === 'function');
         if (typeof window.authenticatedFetch === 'function') {
-            if (nameResponse) {
-                try {
-                    await window.authenticatedFetch('/api/user-info', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: nameResponse.answer.trim() })
-                    });
-                } catch (e) {
-                    console.error('Failed to save user name to backend:', e);
-                }
+            // Always save the narrative; include name in the same call when available
+            try {
+                const savePayload = { userInfo: narrative };
+                if (nameResponse) savePayload.name = nameResponse.answer.trim();
+                await window.authenticatedFetch('/api/user-info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(savePayload)
+                });
+                console.log('[Interview] Narrative saved to backend successfully');
+            } catch (e) {
+                console.error('Failed to save narrative to backend:', e);
             }
             if (parsedDate) {
                 try {

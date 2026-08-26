@@ -229,6 +229,12 @@ async function initializePage() {
         if (refreshChatNarrativeBtn) {
             refreshChatNarrativeBtn.addEventListener('click', loadChatDerivedNarrative);
         }
+
+        // Pending proposals refresh button
+        const refreshPendingBtn = document.getElementById('refreshPendingBtn');
+        if (refreshPendingBtn) {
+            refreshPendingBtn.addEventListener('click', loadPendingProposals);
+        }
         
         // Interview button event listeners
         if (startInterviewButton) {
@@ -313,23 +319,115 @@ async function initializePage() {
     }
 }
 
+// --- Feature Flags ---
+let _consentFlags = { use_entered_details: false, learn_from_history: false, auto_approve_learned: false };
+
+function _applyConsentFlags(flags) {
+    _consentFlags = flags;
+    const useEntered = !!flags.use_entered_details;
+    const learn = !!flags.learn_from_history;
+    const autoApprove = !!flags.auto_approve_learned;
+
+    const useEnteredContent = document.getElementById('use-entered-content');
+    const learnHistoryContent = document.getElementById('learn-history-content');
+    const friendsFamilyPanel = document.getElementById('friends-family-panel');
+    const autoApproveRow = document.getElementById('flag-auto-approve-row');
+
+    if (useEnteredContent) useEnteredContent.classList.toggle('hidden', !useEntered);
+    if (learnHistoryContent) learnHistoryContent.classList.toggle('hidden', !learn);
+    if (friendsFamilyPanel) friendsFamilyPanel.classList.toggle('hidden', !useEntered);
+    if (autoApproveRow) autoApproveRow.classList.toggle('hidden', !learn);
+
+    const cbEntered = document.getElementById('flag-use-entered-details');
+    const cbLearn = document.getElementById('flag-learn-from-history');
+    const cbAuto = document.getElementById('flag-auto-approve');
+    if (cbEntered) cbEntered.checked = useEntered;
+    if (cbLearn) cbLearn.checked = learn;
+    if (cbAuto) cbAuto.checked = autoApprove;
+}
+
+async function loadConsentFlags() {
+    const flagsLoading = document.getElementById('flags-loading');
+    const flagsContent = document.getElementById('flags-content');
+    try {
+        const resp = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+        if (!resp.ok) throw new Error(`${resp.status}`);
+        const data = await resp.json();
+        _applyConsentFlags(data);
+        if (flagsLoading) flagsLoading.classList.add('hidden');
+        if (flagsContent) flagsContent.classList.remove('hidden');
+        _wireConsentToggles();
+    } catch (err) {
+        console.error('Failed to load consent flags:', err);
+        if (flagsLoading) flagsLoading.textContent = 'Could not load settings.';
+    }
+}
+
+function _wireConsentToggles() {
+    const cbEntered = document.getElementById('flag-use-entered-details');
+    const cbLearn = document.getElementById('flag-learn-from-history');
+    const cbAuto = document.getElementById('flag-auto-approve');
+    const status = document.getElementById('flags-save-status');
+
+    async function _postFlag(url, enabled) {
+        if (status) { status.textContent = 'Saving…'; status.className = 'text-sm h-4 text-gray-500'; }
+        try {
+            const r = await window.authenticatedFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled }),
+            });
+            if (!r.ok) throw new Error(`${r.status}`);
+            if (status) { status.textContent = 'Saved'; status.className = 'text-sm h-4 text-green-600'; setTimeout(() => { status.textContent = ''; }, 2000); }
+        } catch (e) {
+            if (status) { status.textContent = 'Save failed'; status.className = 'text-sm h-4 text-red-600'; }
+            console.error('Flag save failed:', e);
+        }
+    }
+
+    if (cbEntered && !cbEntered._wired) {
+        cbEntered._wired = true;
+        cbEntered.addEventListener('change', () => {
+            _applyConsentFlags({ ..._consentFlags, use_entered_details: cbEntered.checked });
+            _postFlag('/api/consent/personalization', cbEntered.checked);
+        });
+    }
+    if (cbLearn && !cbLearn._wired) {
+        cbLearn._wired = true;
+        cbLearn.addEventListener('change', () => {
+            _applyConsentFlags({ ..._consentFlags, learn_from_history: cbLearn.checked });
+            _postFlag('/api/consent/control', cbLearn.checked);
+            if (cbLearn.checked) loadPendingProposals();
+        });
+    }
+    if (cbAuto && !cbAuto._wired) {
+        cbAuto._wired = true;
+        cbAuto.addEventListener('change', () => {
+            _applyConsentFlags({ ..._consentFlags, auto_approve_learned: cbAuto.checked });
+            _postFlag('/api/consent/auto-approve', cbAuto.checked);
+        });
+    }
+}
+
 // --- Initial Data Loading ---
 async function loadInitialData() {
     if (initialDataLoaded) {
         console.log("Initial data already loaded, skipping...");
         return;
     }
-    
+
     console.log("Loading initial data...");
     initialDataLoaded = true;
-    
+
     try {
+        await loadConsentFlags();
         await loadUserInfo();
         await loadFriendsFamily();
         await loadMoodOptions();
         await loadCurrentMood();
         await loadCustomImages();
         await loadChatDerivedNarrative();
+        if (_consentFlags.learn_from_history) await loadPendingProposals();
         console.log("All initial data loaded successfully");
     } catch (error) {
         console.error("Error loading initial data:", error);
@@ -607,20 +705,35 @@ async function loadChatDerivedNarrative() {
         if (data.extracted_facts && data.extracted_facts.length > 0) {
             document.getElementById('chat-facts-section').classList.remove('hidden');
             document.getElementById('facts-count').textContent = data.extracted_facts.length;
-            
+
             const factsList = document.getElementById('chat-facts-list');
-            factsList.innerHTML = data.extracted_facts.map(fact => `
-                <div class="bg-white border border-gray-200 rounded px-3 py-2">
-                    <div class="text-sm text-gray-800">${fact.fact}</div>
-                    <div class="text-xs text-gray-500 mt-1">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-${fact.category === 'preference' ? 'purple' : 'blue'}-100 text-${fact.category === 'preference' ? 'purple' : 'blue'}-800">
-                            ${fact.category}
-                        </span>
-                        <span class="ml-2">Confidence: ${fact.confidence}</span>
-                        ${fact.mention_count > 1 ? `<span class="ml-2">(mentioned ${fact.mention_count}x)</span>` : ''}
+            factsList.innerHTML = data.extracted_facts.map((fact, idx) => {
+                const escapedFact = fact.fact.replace(/"/g, '&quot;');
+                const escapedCat = (fact.category || '').replace(/"/g, '&quot;');
+                const colorCls = fact.category === 'preference' ? 'purple' : 'blue';
+                return `
+                <div class="bg-white border border-gray-200 rounded px-3 py-2" id="approved-fact-${idx}">
+                    <div class="flex items-start gap-2">
+                        <div class="flex-1">
+                            <div class="text-sm text-gray-800 fact-display-text">${fact.fact}</div>
+                            <input type="text" class="fact-edit-input hidden text-sm border rounded px-1 py-0.5 w-full" value="${escapedFact}">
+                            <div class="text-xs text-gray-500 mt-1">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-${colorCls}-100 text-${colorCls}-800">${fact.category}</span>
+                                <span class="ml-2">Confidence: ${fact.confidence}</span>
+                                ${fact.mention_count > 1 ? `<span class="ml-2">(mentioned ${fact.mention_count}x)</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-1 flex-shrink-0">
+                            <button onclick="editApprovedFact(${idx}, '${escapedCat}', '${escapedFact}')"
+                                class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded fact-edit-btn">Edit</button>
+                            <button onclick="saveApprovedFact(${idx}, '${escapedCat}', '${escapedFact}')"
+                                class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded fact-save-btn hidden">Save</button>
+                            <button onclick="deleteApprovedFact(${idx}, '${escapedCat}', '${escapedFact}')"
+                                class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded">Delete</button>
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }).join('');
         }
         
         // Display answered questions
@@ -1589,6 +1702,168 @@ async function removeProfileImage() {
     } catch (error) {
         console.error("Error removing profile image:", error);
         showStatus(profileImageStatus, `Remove failed: ${error.message}`, true, 5000);
+    }
+}
+
+// --- Approved Fact Edit / Delete ---
+function editApprovedFact(idx, category, oldValue) {
+    const row = document.getElementById(`approved-fact-${idx}`);
+    if (!row) return;
+    row.querySelector('.fact-display-text').classList.add('hidden');
+    row.querySelector('.fact-edit-input').classList.remove('hidden');
+    row.querySelector('.fact-edit-btn').classList.add('hidden');
+    row.querySelector('.fact-save-btn').classList.remove('hidden');
+}
+
+async function saveApprovedFact(idx, category, oldValue) {
+    const row = document.getElementById(`approved-fact-${idx}`);
+    if (!row) return;
+    const newValue = row.querySelector('.fact-edit-input').value.trim();
+    if (!newValue) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/approved', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, old_value: oldValue, new_value: newValue }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadChatDerivedNarrative();
+    } catch (e) {
+        console.error('Save approved fact failed:', e);
+        alert('Save failed: ' + e.message);
+    }
+}
+
+async function deleteApprovedFact(idx, category, value) {
+    if (!confirm('Delete this fact permanently?')) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/approved', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, value }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadChatDerivedNarrative();
+    } catch (e) {
+        console.error('Delete approved fact failed:', e);
+        alert('Delete failed: ' + e.message);
+    }
+}
+
+// --- Pending Proposals ---
+async function loadPendingProposals() {
+    const listEl = document.getElementById('pending-proposals-list');
+    const loadingEl = document.getElementById('pending-loading');
+    const emptyEl = document.getElementById('pending-empty');
+    const badge = document.getElementById('pending-count-badge');
+    if (!listEl) return;
+
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+    listEl.innerHTML = '';
+
+    try {
+        const r = await window.authenticatedFetch('/api/learned/pending', { method: 'GET' });
+        if (!r.ok) throw new Error(`${r.status}`);
+        const proposals = await r.json();
+        if (loadingEl) loadingEl.classList.add('hidden');
+
+        if (!proposals || proposals.length === 0) {
+            if (emptyEl) emptyEl.classList.remove('hidden');
+            if (badge) badge.classList.add('hidden');
+            return;
+        }
+
+        if (badge) { badge.textContent = proposals.length; badge.classList.remove('hidden'); }
+
+        listEl.innerHTML = proposals.map((p, idx) => {
+            const escapedVal = (p.value || '').replace(/"/g, '&quot;');
+            const escapedCat = (p.category || '').replace(/"/g, '&quot;');
+            return `
+            <div class="bg-white border border-yellow-200 rounded px-3 py-2" id="pending-proposal-${idx}">
+                <div class="flex items-start gap-2">
+                    <div class="flex-1">
+                        <div class="text-sm text-gray-800 pending-display-text">${p.value}</div>
+                        <input type="text" class="pending-edit-input hidden text-sm border rounded px-1 py-0.5 w-full" value="${escapedVal}">
+                        <div class="text-xs text-gray-500 mt-1">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800">${p.category}</span>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-1 flex-shrink-0">
+                        <button onclick="approvePendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                            class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded">Approve</button>
+                        <button onclick="editPendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                            class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded pending-edit-btn">Edit</button>
+                        <button onclick="savePendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                            class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded pending-save-btn hidden">Save</button>
+                        <button onclick="discardPendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                            class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded">Discard</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        console.error('Load pending proposals failed:', e);
+        if (loadingEl) { loadingEl.textContent = 'Error loading proposals'; loadingEl.classList.remove('hidden'); }
+    }
+}
+
+async function approvePendingProposal(idx, category, value) {
+    try {
+        const r = await window.authenticatedFetch('/api/learned/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, value }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await Promise.all([loadPendingProposals(), loadChatDerivedNarrative()]);
+    } catch (e) {
+        console.error('Approve proposal failed:', e);
+        alert('Approve failed: ' + e.message);
+    }
+}
+
+function editPendingProposal(idx, category, oldValue) {
+    const row = document.getElementById(`pending-proposal-${idx}`);
+    if (!row) return;
+    row.querySelector('.pending-display-text').classList.add('hidden');
+    row.querySelector('.pending-edit-input').classList.remove('hidden');
+    row.querySelector('.pending-edit-btn').classList.add('hidden');
+    row.querySelector('.pending-save-btn').classList.remove('hidden');
+}
+
+async function savePendingProposal(idx, category, oldValue) {
+    const row = document.getElementById(`pending-proposal-${idx}`);
+    if (!row) return;
+    const newValue = row.querySelector('.pending-edit-input').value.trim();
+    if (!newValue) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/pending', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_category: category, old_value: oldValue, new_category: category, new_value: newValue }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadPendingProposals();
+    } catch (e) {
+        console.error('Save pending proposal failed:', e);
+        alert('Save failed: ' + e.message);
+    }
+}
+
+async function discardPendingProposal(idx, category, value) {
+    if (!confirm('Discard this learned fact?')) return;
+    try {
+        const r = await window.authenticatedFetch('/api/learned/discard', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, value }),
+        });
+        if (!r.ok) throw new Error(`${r.status}`);
+        await loadPendingProposals();
+    } catch (e) {
+        console.error('Discard proposal failed:', e);
+        alert('Discard failed: ' + e.message);
     }
 }
 
