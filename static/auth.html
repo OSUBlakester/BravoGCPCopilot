@@ -3496,7 +3496,9 @@ registerForm.addEventListener('submit', async (e) => {
             // menuItemVisibility: { sourceButtonId: true/false } — true = visible
             menuItemVisibility: null,   // null = not yet loaded; populated in openSetupWizard
             menuItemsLoaded: [],        // ordered list {id, label} for the step UI
-            runInterviewAfter: false
+            runInterviewAfter: false,
+            consentEnabled: false,
+            parentEmail: ''
         };
 
         // Menu items the admin can show/hide (system items like Spell/Games are always visible)
@@ -3517,9 +3519,9 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
-            // tap: 8 steps (Button Action step removed; do_nothing is hardcoded)
-            // scan: 9 steps
-            return wizardState.interfaceMode === 'tap' ? 8 : 9;
+            // tap: 9 steps (consent added before interview; Button Action still hardcoded)
+            // scan: 10 steps
+            return wizardState.interfaceMode === 'tap' ? 9 : 10;
         }
 
         // For tap mode, display step 5+ maps to content step 6+ (skipping Button Action).
@@ -3680,10 +3682,57 @@ registerForm.addEventListener('submit', async (e) => {
             const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
                     : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
                     : step;
-            // Last step: scan display 9, tap display 8
-            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
+            // Second-to-last: consent (tap 8, scan 9). Last: interview (tap 9, scan 10).
+            const isConsentStep = (wizardState.interfaceMode === 'tap' && step === 8) || step === 9;
+            const isLastStep = (wizardState.interfaceMode === 'tap' && step === 9) || step === 10;
 
-            if (isLastStep) {
+            if (isConsentStep) {
+                titleEl.textContent = 'Personalised Learning';
+                const emailVisible = wizardState.consentEnabled;
+                contentEl.innerHTML = `
+                    <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
+                        Bravo can learn everyday preferences from conversations — things like favourite foods,
+                        activities, and topics — and use them to suggest more relevant options.
+                        No health, personal, or sensitive information is ever stored or learned.
+                    </p>
+                    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px;">
+                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${emailVisible ? '#eef2ff' : '#f9fafb'};border:2px solid ${emailVisible ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardConsentChoice" value="enable" ${emailVisible ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Enable personalised learning</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">A consent email will be sent to a parent or guardian</div>
+                            </div>
+                        </label>
+                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:${!emailVisible ? '#eef2ff' : '#f9fafb'};border:2px solid ${!emailVisible ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                            <input type="radio" name="wizardConsentChoice" value="skip" ${!emailVisible ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for now</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Learning can be enabled later from the User Information page</div>
+                            </div>
+                        </label>
+                    </div>
+                    <div id="wizardConsentEmailRow" style="display:${emailVisible ? 'block' : 'none'};margin-top:4px;">
+                        <label style="display:block;font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:6px;">Parent / guardian email address</label>
+                        <input id="wizardParentEmail" type="email" value="${wizardState.parentEmail || ''}"
+                            placeholder="parent@example.com"
+                            style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;outline:none;">
+                        <p style="font-size:0.78rem;color:#6b7280;margin-top:6px;">We will send a verification link. No email is sent if you skip.</p>
+                    </div>`;
+                contentEl.querySelectorAll('input[name="wizardConsentChoice"]').forEach(radio => {
+                    radio.addEventListener('change', () => {
+                        wizardState.consentEnabled = radio.value === 'enable';
+                        const emailRow = document.getElementById('wizardConsentEmailRow');
+                        if (emailRow) emailRow.style.display = wizardState.consentEnabled ? 'block' : 'none';
+                        contentEl.querySelectorAll('label').forEach(lbl => {
+                            const inp = lbl.querySelector('input[type=radio]');
+                            if (!inp) return;
+                            lbl.style.borderColor = inp.checked ? '#6366f1' : '#e5e7eb';
+                            lbl.style.background = inp.checked ? '#eef2ff' : '#f9fafb';
+                        });
+                    });
+                });
+
+            } else if (isLastStep) {
                 // Last step for both tap and scan — optional User Profile Interview
                 titleEl.textContent = 'User Profile Interview';
                 contentEl.innerHTML = `
@@ -4362,8 +4411,14 @@ registerForm.addEventListener('submit', async (e) => {
             const s = wizardState.interfaceMode === 'scan' && step >= 2 ? step + 1
                     : wizardState.interfaceMode === 'tap' && step >= 5 ? step + 1
                     : step;
-            const isLastStep = step === 9 || (wizardState.interfaceMode === 'tap' && step === 8);
-            if (isLastStep) {
+            const isConsentStep = (wizardState.interfaceMode === 'tap' && step === 8) || step === 9;
+            const isLastStep = (wizardState.interfaceMode === 'tap' && step === 9) || step === 10;
+            if (isConsentStep) {
+                const choiceEl = document.querySelector('input[name="wizardConsentChoice"]:checked');
+                if (choiceEl) wizardState.consentEnabled = choiceEl.value === 'enable';
+                const emailEl = document.getElementById('wizardParentEmail');
+                if (emailEl) wizardState.parentEmail = emailEl.value.trim();
+            } else if (isLastStep) {
                 // Last step (both modes) — optional interview
                 const runEl = document.querySelector('input[name="wizardInterviewChoice"]:checked');
                 if (runEl) wizardState.runInterviewAfter = runEl.value === 'run';
@@ -4573,6 +4628,18 @@ registerForm.addEventListener('submit', async (e) => {
 
                 // Image assignment is handled by the background task in regenerate_boards.
                 // No need to call assign-all-images here — it runs automatically and quickly.
+
+                // Send consent email if parent opted in. Non-blocking — wizard completes regardless.
+                if (wizardState.consentEnabled && wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
+                    setWizardStatus('Sending consent email…', false);
+                    try {
+                        await fetch('/api/consent/initiate', {
+                            method: 'POST',
+                            headers,
+                            body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
 
                 closeSetupWizard();
 
