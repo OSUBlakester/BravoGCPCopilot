@@ -3740,30 +3740,25 @@ registerForm.addEventListener('submit', async (e) => {
 
             } else if (isConsentStep) {
                 titleEl.textContent = 'Personalized Learning';
-                const learningOn = wizardState.consentEnabled;
-                const emailNote = wizardState.isMinorUnder13
-                    ? 'A verification email will be sent to the parent or guardian entered in the previous step.'
-                    : 'Bravo will learn preferences from conversations and suggest more relevant options.';
-                contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:20px;font-size:0.9rem;">
-                        Bravo can learn everyday preferences from conversations — things like favourite foods,
-                        activities, and topics — and use them to suggest more relevant options.
-                        No health, personal, or sensitive information is ever stored or learned.
-                    </p>
-                    <div style="display:flex;align-items:center;justify-content:space-between;background:${learningOn ? '#eef2ff' : '#f9fafb'};border:2px solid ${learningOn ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:background 0.15s,border-color 0.15s;" id="wizardLearningToggleCard">
-                        <div>
-                            <div style="font-weight:600;color:#111827;font-size:0.95rem;">Enable personalized learning</div>
-                            <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">${emailNote}</div>
+                if (wizardState.isMinorUnder13 === true) {
+                    // Under-13: toggle is irrelevant — learning is enabled automatically on consent.
+                    // Just collect the auto-approve preference for when that happens.
+                    wizardState.consentEnabled = false; // handled by COPPA consent flow, not the toggle
+                    contentEl.innerHTML = `
+                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+                            <div style="font-weight:600;color:#9a3412;margin-bottom:6px;">Requires parental consent</div>
+                            <p style="color:#7c3d12;font-size:0.875rem;line-height:1.5;margin:0">
+                                Personalized learning will be enabled automatically once the parent or guardian
+                                confirms consent via email. You cannot enable it manually until consent is verified.
+                            </p>
                         </div>
-                        <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;margin-left:16px;">
-                            <input type="checkbox" id="wizardLearningToggle" ${learningOn ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0;">
-                            <div id="wizardLearningTrack" style="width:44px;height:24px;background:${learningOn ? '#6366f1' : '#d1d5db'};border-radius:12px;transition:background 0.2s;position:relative;">
-                                <div id="wizardLearningThumb" style="position:absolute;top:2px;left:${learningOn ? '22px' : '2px'};width:20px;height:20px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></div>
-                            </div>
-                        </label>
-                    </div>
-                    <div id="wizardAutoApproveRow" style="display:${learningOn ? 'block' : 'none'};margin-top:16px;border-top:1px solid #e5e7eb;padding-top:14px;">
-                        <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">When facts are learned, how should they be added to the profile?</div>
+                        <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
+                            Bravo can learn everyday preferences from conversations — things like favourite foods,
+                            activities, and topics — and use them to suggest more relevant options.
+                        </p>
+                        <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">
+                            Once consent is confirmed, how should learned facts be added to the profile?
+                        </div>
                         <div style="display:flex;flex-direction:column;gap:8px;">
                             <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
                                 <input type="radio" name="wizardAutoApprove" value="auto" ${wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
@@ -3779,21 +3774,61 @@ registerForm.addEventListener('submit', async (e) => {
                                     <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Review and approve each fact before it's added</div>
                                 </div>
                             </label>
+                        </div>`;
+                } else {
+                    // 13 or older — show the enable toggle + auto-approve options
+                    const learningOn = wizardState.consentEnabled;
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:20px;font-size:0.9rem;">
+                            Bravo can learn everyday preferences from conversations — things like favourite foods,
+                            activities, and topics — and use them to suggest more relevant options.
+                            No health, personal, or sensitive information is ever stored or learned.
+                        </p>
+                        <div style="display:flex;align-items:center;justify-content:space-between;background:${learningOn ? '#eef2ff' : '#f9fafb'};border:2px solid ${learningOn ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:background 0.15s,border-color 0.15s;" id="wizardLearningToggleCard">
+                            <div>
+                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Enable personalized learning</div>
+                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Bravo will learn preferences from conversations and suggest more relevant options.</div>
+                            </div>
+                            <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;margin-left:16px;">
+                                <input type="checkbox" id="wizardLearningToggle" ${learningOn ? 'checked' : ''} style="position:absolute;opacity:0;width:0;height:0;">
+                                <div id="wizardLearningTrack" style="width:44px;height:24px;background:${learningOn ? '#6366f1' : '#d1d5db'};border-radius:12px;transition:background 0.2s;position:relative;">
+                                    <div id="wizardLearningThumb" style="position:absolute;top:2px;left:${learningOn ? '22px' : '2px'};width:20px;height:20px;background:#fff;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></div>
+                                </div>
+                            </label>
                         </div>
-                    </div>`;
-                const toggle = document.getElementById('wizardLearningToggle');
-                if (toggle) {
-                    toggle.addEventListener('change', () => {
-                        wizardState.consentEnabled = toggle.checked;
-                        const card = document.getElementById('wizardLearningToggleCard');
-                        const track = document.getElementById('wizardLearningTrack');
-                        const thumb = document.getElementById('wizardLearningThumb');
-                        const approveRow = document.getElementById('wizardAutoApproveRow');
-                        if (card) { card.style.background = toggle.checked ? '#eef2ff' : '#f9fafb'; card.style.borderColor = toggle.checked ? '#6366f1' : '#e5e7eb'; }
-                        if (track) track.style.background = toggle.checked ? '#6366f1' : '#d1d5db';
-                        if (thumb) thumb.style.left = toggle.checked ? '22px' : '2px';
-                        if (approveRow) approveRow.style.display = toggle.checked ? 'block' : 'none';
-                    });
+                        <div id="wizardAutoApproveRow" style="display:${learningOn ? 'block' : 'none'};margin-top:16px;border-top:1px solid #e5e7eb;padding-top:14px;">
+                            <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">When facts are learned, how should they be added to the profile?</div>
+                            <div style="display:flex;flex-direction:column;gap:8px;">
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="auto" ${wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Auto-approve</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Learned facts are added to the profile automatically</div>
+                                    </div>
+                                </label>
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${!wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${!wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="manual" ${!wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Require approval</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Review and approve each fact before it's added</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>`;
+                    const toggle = document.getElementById('wizardLearningToggle');
+                    if (toggle) {
+                        toggle.addEventListener('change', () => {
+                            wizardState.consentEnabled = toggle.checked;
+                            const card = document.getElementById('wizardLearningToggleCard');
+                            const track = document.getElementById('wizardLearningTrack');
+                            const thumb = document.getElementById('wizardLearningThumb');
+                            const approveRow = document.getElementById('wizardAutoApproveRow');
+                            if (card) { card.style.background = toggle.checked ? '#eef2ff' : '#f9fafb'; card.style.borderColor = toggle.checked ? '#6366f1' : '#e5e7eb'; }
+                            if (track) track.style.background = toggle.checked ? '#6366f1' : '#d1d5db';
+                            if (thumb) thumb.style.left = toggle.checked ? '22px' : '2px';
+                            if (approveRow) approveRow.style.display = toggle.checked ? 'block' : 'none';
+                        });
+                    }
                 }
                 contentEl.querySelectorAll('input[name="wizardAutoApprove"]').forEach(radio => {
                     radio.addEventListener('change', () => {
@@ -4614,8 +4649,13 @@ registerForm.addEventListener('submit', async (e) => {
                 const emailEl = document.getElementById('wizardParentEmail');
                 if (emailEl) wizardState.parentEmail = emailEl.value.trim();
             } else if (isConsentStep) {
-                const toggleEl = document.getElementById('wizardLearningToggle');
-                if (toggleEl) wizardState.consentEnabled = toggleEl.checked;
+                if (wizardState.isMinorUnder13 === true) {
+                    // No toggle for under-13 — consent flow controls learning, not the wizard toggle
+                    wizardState.consentEnabled = false;
+                } else {
+                    const toggleEl = document.getElementById('wizardLearningToggle');
+                    if (toggleEl) wizardState.consentEnabled = toggleEl.checked;
+                }
                 const approveEl = document.querySelector('input[name="wizardAutoApprove"]:checked');
                 if (approveEl) wizardState.autoApproveLearned = approveEl.value === 'auto';
             } else if (isLastStep) {
@@ -4848,29 +4888,36 @@ registerForm.addEventListener('submit', async (e) => {
                     try {
                         setWizardStatus('Sending consent email…', false);
                         await fetch('/api/consent/initiate', {
-                            method: 'POST', headers,
+                            method: 'POST',
+                            headers: { ...headers, 'Content-Type': 'application/json' },
                             body: JSON.stringify({ parent_email: wizardState.parentEmail })
                         });
-                    } catch (_) { /* non-fatal */ }
-                }
-
-                // Learning feature flags — non-blocking, wizard completes regardless.
-                if (wizardState.consentEnabled) {
-                    try {
+                        // Set auto-approve preference now so it takes effect when consent lands
                         if (wizardState.autoApproveLearned) {
                             await fetch('/api/consent/auto-approve', {
-                                method: 'POST', headers,
+                                method: 'POST',
+                                headers: { ...headers, 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ enabled: true })
                             });
                         }
-                        if (!wizardState.isMinorUnder13) {
-                            // 13 or older: enable learning directly without email verification
-                            await fetch('/api/consent/control', {
-                                method: 'POST', headers,
-                                body: JSON.stringify({ enabled: true, is_minor_under_13: false })
+                    } catch (_) { /* non-fatal */ }
+                }
+
+                // Learning feature flags (13+ only) — non-blocking, wizard completes regardless.
+                if (wizardState.consentEnabled && !wizardState.isMinorUnder13) {
+                    try {
+                        if (wizardState.autoApproveLearned) {
+                            await fetch('/api/consent/auto-approve', {
+                                method: 'POST',
+                                headers: { ...headers, 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ enabled: true })
                             });
                         }
-                        // Under-13: learning enabled only after parent clicks link — no action here
+                        await fetch('/api/consent/control', {
+                            method: 'POST',
+                            headers: { ...headers, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: true, is_minor_under_13: false })
+                        });
                     } catch (_) { /* non-fatal */ }
                 }
 
