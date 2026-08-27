@@ -4747,7 +4747,7 @@ registerForm.addEventListener('submit', async (e) => {
                 wizardCollectCurrentStep();
                 if (wizardState.currentStep > 1) showWizardStep(wizardState.currentStep - 1);
             };
-            nextBtn.onclick = () => {
+            nextBtn.onclick = async () => {
                 wizardCollectCurrentStep();
                 // Age step validation: require email when user is under 13
                 const _step = wizardState.currentStep;
@@ -4767,6 +4767,40 @@ registerForm.addEventListener('submit', async (e) => {
                 if (wizardState.currentStep >= total) {
                     executeWizard();
                 } else {
+                    // COPPA: send consent email the moment the under-13 user advances past the
+                    // consent step, so "A consent email has been sent" on the next screen is true.
+                    const _isConsentStepNow = (_tap && _step === 9) || (_scan && _step === 10);
+                    if (_isConsentStepNow && wizardState.isMinorUnder13 === true &&
+                            wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
+                        nextBtn.disabled = true;
+                        setWizardStatus('Sending consent email…', false);
+                        const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
+                                          sessionStorage.getItem('adminSelectedAccountId');
+                        const _h = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId,
+                            'Content-Type': 'application/json'
+                        };
+                        if (_adminAcc) _h['X-Admin-Target-Account'] = _adminAcc;
+                        try {
+                            const _r = await fetch('/api/consent/initiate', {
+                                method: 'POST', headers: _h,
+                                body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                            });
+                            if (!_r.ok) {
+                                const _e = await _r.json().catch(() => ({}));
+                                setWizardStatus(
+                                    (_e.detail || 'Email could not be sent') + ' — use Resend on the next screen.',
+                                    true
+                                );
+                            } else {
+                                setWizardStatus('', false);
+                            }
+                        } catch (_) {
+                            setWizardStatus('Email could not be sent — use Resend on the next screen.', true);
+                        }
+                        nextBtn.disabled = false;
+                    }
                     showWizardStep(wizardState.currentStep + 1);
                 }
             };
@@ -4883,23 +4917,15 @@ registerForm.addEventListener('submit', async (e) => {
                 // Image assignment is handled by the background task in regenerate_boards.
                 // No need to call assign-all-images here — it runs automatically and quickly.
 
-                // COPPA: always send consent email for under-13 regardless of learning preference
-                if (wizardState.isMinorUnder13 === true && wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
+                // COPPA: consent email was already sent when user advanced from consent step.
+                // Just set the auto-approve preference for when consent lands.
+                if (wizardState.isMinorUnder13 === true && wizardState.autoApproveLearned) {
                     try {
-                        setWizardStatus('Sending consent email…', false);
-                        await fetch('/api/consent/initiate', {
+                        await fetch('/api/consent/auto-approve', {
                             method: 'POST',
                             headers: { ...headers, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                            body: JSON.stringify({ enabled: true })
                         });
-                        // Set auto-approve preference now so it takes effect when consent lands
-                        if (wizardState.autoApproveLearned) {
-                            await fetch('/api/consent/auto-approve', {
-                                method: 'POST',
-                                headers: { ...headers, 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ enabled: true })
-                            });
-                        }
                     } catch (_) { /* non-fatal */ }
                 }
 
