@@ -327,7 +327,7 @@ function _applyConsentFlags(flags) {
     const useEntered = !!flags.use_entered_details;
     const learn = !!flags.learn_from_history;
     const autoApprove = !!flags.auto_approve_learned;
-    const isMinor = flags.is_minor_under_13 === true;
+    const isMinor = flags.is_minor_under_13 !== false;  // fail-closed: unset → minor, matching server
     const consentVerified = !!flags.consent_given_at;
     const profileLocked = isMinor && !consentVerified;
 
