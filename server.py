@@ -11875,16 +11875,11 @@ async def migrate_recent_greetings(account_id: str, aac_user_id: str) -> bool:
 
 
 # =============================================================================
-# A7 — PREFERENCE EXTRACTION PIPELINE (DORMANT — NOT YET WIRED IN)
+# A7 — PREFERENCE EXTRACTION PIPELINE
 #
 # Five-layer approach: input gate → model extraction → output validation →
 # pending queue → adult approval → profile write.
-#
-# NOT called from process_metadata_async yet.  Before enabling:
-#   1. Decide where learning_enabled lives (per-user Firestore setting recommended).
-#   2. Run run_a7_acceptance_tests() against the production model and verify ≥80%.
-#   3. Wire maybe_propose_preference into process_metadata_async.
-#   4. Build an admin UI for approve_proposal / pending queue review.
+# Called from process_metadata_async for every AAC user response.
 # =============================================================================
 
 _A7_EXTRACTION_CATEGORIES: List[str] = [
@@ -12151,9 +12146,8 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
                                    learning_enabled: bool) -> None:
     """A7 orchestration — run all five layers for one utterance.
 
-    DORMANT: not yet called from process_metadata_async.
-    Wire in only after: (1) learning_enabled source is defined, (2) acceptance
-    tests pass against production model, (3) admin approval UI is ready.
+    Called from process_metadata_async for every AAC user response.
+    Skips silently when learning_enabled is False.
     """
     try:
         if not learning_enabled:
@@ -13689,12 +13683,21 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
                         # A40: only canonical greeting forms are stored, not verbatim utterances.
                         if message_type == "greeting":
                             await _update_recent_greetings(account_id, aac_user_id, response, timestamp)
-                        
+
                         break
-                
+
                 # Save updated history with metadata
                 await save_chat_history(account_id, aac_user_id, history)
                 logging.info(f"Chat history metadata processed for {account_id}/{aac_user_id}")
+
+                # A7: extract preference from the AAC user's utterance if learning is enabled
+                if response and response.strip():
+                    consent = await load_consent(account_id, aac_user_id)
+                    await maybe_propose_preference(
+                        account_id, aac_user_id,
+                        response.strip(), timestamp,
+                        is_learning_enabled(consent)
+                    )
             except Exception as e:
                 logging.error(f"Error processing chat metadata in background: {e}", exc_info=True)
         
