@@ -448,9 +448,15 @@
                 <div class="mb-6 border-b pb-4">
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">User Information</h2>
                     <p class="text-sm text-gray-600 mb-4">Use the optional Interview feature below or input information manually</p>
-                    <button type="button" id="startInterviewButton" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center">
-                        <i class="fas fa-microphone mr-2"></i> Start Interview
-                    </button>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <button type="button" id="startInterviewButton" class="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center">
+                            <i class="fas fa-microphone mr-2"></i> Start Interview
+                        </button>
+                        <button type="button" id="checkConsentButton" class="hidden bg-orange-500 hover:bg-orange-600 text-white font-semibold px-4 py-3 rounded-lg shadow-md transition-colors duration-200 flex items-center text-sm">
+                            <i class="fas fa-sync-alt mr-2"></i> Check for Consent
+                        </button>
+                        <span id="checkConsentStatus" class="text-sm text-gray-600 hidden"></span>
+                    </div>
                 </div>
                 <form id="user-info-form">
                     <div class="space-y-6">

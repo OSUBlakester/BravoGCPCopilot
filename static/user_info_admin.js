@@ -355,6 +355,42 @@ function _applyConsentFlags(flags) {
             ? 'Parental consent must be verified before running the interview'
             : '';
     }
+
+    // Show/hide the Check for Consent button
+    const checkConsentBtn = document.getElementById('checkConsentButton');
+    const checkConsentStatus = document.getElementById('checkConsentStatus');
+    if (checkConsentBtn) {
+        if (profileLocked) {
+            checkConsentBtn.classList.remove('hidden');
+            if (!checkConsentBtn._wired) {
+                checkConsentBtn._wired = true;
+                checkConsentBtn.addEventListener('click', async () => {
+                    checkConsentBtn.disabled = true;
+                    checkConsentBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin mr-2"></i> Checking…';
+                    if (checkConsentStatus) { checkConsentStatus.textContent = ''; checkConsentStatus.classList.remove('hidden'); }
+                    try {
+                        const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+                        const data = r.ok ? await r.json() : {};
+                        if (data.consent_given_at) {
+                            _applyConsentFlags(data);
+                            if (checkConsentStatus) { checkConsentStatus.textContent = 'Consent confirmed — interview is now available.'; checkConsentStatus.className = 'text-sm text-green-600'; }
+                        } else {
+                            checkConsentBtn.disabled = false;
+                            checkConsentBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Check for Consent';
+                            if (checkConsentStatus) { checkConsentStatus.textContent = 'Not confirmed yet. Ask the parent to click the link in the email.'; checkConsentStatus.className = 'text-sm text-orange-600'; }
+                        }
+                    } catch (e) {
+                        checkConsentBtn.disabled = false;
+                        checkConsentBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Check for Consent';
+                        if (checkConsentStatus) { checkConsentStatus.textContent = 'Check failed — please try again.'; checkConsentStatus.className = 'text-sm text-red-600'; }
+                    }
+                });
+            }
+        } else {
+            checkConsentBtn.classList.add('hidden');
+            if (checkConsentStatus) checkConsentStatus.classList.add('hidden');
+        }
+    }
 }
 
 async function loadConsentFlags() {

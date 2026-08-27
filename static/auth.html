@@ -3817,18 +3817,83 @@ registerForm.addEventListener('submit', async (e) => {
                         ? `<strong>${wizardState.parentEmail}</strong>`
                         : 'the parent or guardian';
                     contentEl.innerHTML = `
-                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:16px;margin-bottom:14px;">
+                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:16px;margin-bottom:14px;" id="wizardConsentPendingBox">
                             <div style="font-weight:600;color:#9a3412;margin-bottom:8px;">Waiting for parental consent</div>
-                            <p style="color:#7c3d12;font-size:0.9rem;line-height:1.5;margin:0">
+                            <p style="color:#7c3d12;font-size:0.9rem;line-height:1.5;margin:0 0 12px 0">
                                 A consent email has been sent to ${emailDisplay}.
-                                Once they confirm, the setup interview will be available from the
-                                <strong>User Information</strong> page.
+                                Ask the parent to click the link in that email, then tap the button below.
                             </p>
+                            <button id="wizardCheckConsentBtn" style="padding:8px 16px;background:#9a3412;color:#fff;border:none;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                Check for Consent
+                            </button>
+                            <span id="wizardConsentCheckStatus" style="margin-left:10px;font-size:0.8rem;color:#9a3412;"></span>
                         </div>
-                        <p style="color:#6b7280;font-size:0.85rem;line-height:1.5">
-                            Click <strong>Finish</strong> to complete setup. In the common case where
-                            the parent is present, this takes only a minute or two.
-                        </p>`;
+                        <div id="wizardConsentGrantedBox" style="display:none;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:16px;margin-bottom:14px;">
+                            <div style="font-weight:600;color:#166534;margin-bottom:6px;">Consent confirmed!</div>
+                            <p style="color:#166534;font-size:0.9rem;margin:0">You can now run the setup interview.</p>
+                        </div>
+                        <div id="wizardPostConsentInterviewChoice" style="display:none;flex-direction:column;gap:10px;margin-top:4px;">
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid #c7d2fe;border-radius:10px;padding:14px 16px;">
+                                <input type="radio" name="wizardInterviewChoice" value="run" style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go directly to the interview</div>
+                                </div>
+                            </label>
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid #6366f1;border-radius:10px;padding:14px 16px;">
+                                <input type="radio" name="wizardInterviewChoice" value="skip" checked style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Run it later from User Information</div>
+                                </div>
+                            </label>
+                        </div>`;
+                    // Wire the Check for Consent button
+                    const checkBtn = document.getElementById('wizardCheckConsentBtn');
+                    if (checkBtn) {
+                        checkBtn.addEventListener('click', async () => {
+                            const statusEl = document.getElementById('wizardConsentCheckStatus');
+                            checkBtn.disabled = true;
+                            checkBtn.textContent = 'Checking…';
+                            if (statusEl) statusEl.textContent = '';
+                            try {
+                                const token = sessionStorage.getItem('firebaseIdToken') || wizardState._idToken;
+                                const userId = wizardState.userId;
+                                const r = await fetch('/api/consent', {
+                                    headers: { 'Authorization': `Bearer ${token}`, 'X-User-ID': userId }
+                                });
+                                const data = r.ok ? await r.json() : {};
+                                if (data.consent_given_at) {
+                                    // Consent is confirmed — swap UI
+                                    document.getElementById('wizardConsentPendingBox').style.display = 'none';
+                                    document.getElementById('wizardConsentGrantedBox').style.display = 'block';
+                                    const choiceDiv = document.getElementById('wizardPostConsentInterviewChoice');
+                                    choiceDiv.style.display = 'flex';
+                                    // Wire the radio buttons
+                                    choiceDiv.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
+                                        radio.addEventListener('change', () => {
+                                            wizardState.runInterviewAfter = radio.value === 'run';
+                                            choiceDiv.querySelectorAll('label').forEach(lbl => {
+                                                const inp = lbl.querySelector('input[type=radio]');
+                                                lbl.style.borderColor = inp && inp.checked ? '#6366f1' : '#e5e7eb';
+                                                if (inp && inp.value === 'run') lbl.style.background = inp.checked ? '#eef2ff' : '#f9fafb';
+                                            });
+                                        });
+                                    });
+                                    // Also lift the safety guard — consent is now verified
+                                    wizardState.isMinorUnder13 = false;
+                                } else {
+                                    checkBtn.disabled = false;
+                                    checkBtn.textContent = 'Check for Consent';
+                                    if (statusEl) statusEl.textContent = 'Not confirmed yet — try again after the parent clicks the link.';
+                                }
+                            } catch (e) {
+                                checkBtn.disabled = false;
+                                checkBtn.textContent = 'Check for Consent';
+                                if (statusEl) statusEl.textContent = 'Check failed — please try again.';
+                            }
+                        });
+                    }
                 } else {
                     // 13 or older — offer the interview immediately
                     contentEl.innerHTML = `
