@@ -942,26 +942,81 @@ function sanitizeFilenamePart(value, fallback = 'profile') {
     return cleaned || fallback;
 }
 
+// Fields considered personal profile content — excluded from config-only exports.
+const PERSONAL_EXPORT_FIELDS = [
+    'user_narrative', 'current_state', 'diary_entries',
+    'friends_family', 'birthdays', 'favorites_config',
+];
+
 async function exportProfileSettings() {
     if (!window.authenticatedFetch) {
         showTemporaryStatus(settingsStatus, 'Authentication is not ready. Please refresh.', true, 4000);
         return;
     }
 
-    showTemporaryStatus(settingsStatus, 'Exporting profile settings...', false, 0);
+    // Show the export options modal and wait for the admin's choice.
+    const includePersonal = await new Promise((resolve) => {
+        const modal = document.getElementById('export-options-modal');
+        const checkbox = document.getElementById('export-include-personal');
+        const label = document.getElementById('export-personal-label');
+        const confirmBtn = document.getElementById('export-modal-confirm');
+        const cancelBtn = document.getElementById('export-modal-cancel');
+        const closeBtn = document.getElementById('export-modal-close');
+
+        checkbox.checked = false;
+        label.style.borderColor = '';
+        modal.classList.remove('hidden');
+
+        const cleanup = (result) => {
+            modal.classList.add('hidden');
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            resolve(result);
+        };
+        const onConfirm = () => cleanup(checkbox.checked);
+        const onCancel = () => cleanup(null);
+
+        // Highlight card border when checked
+        checkbox.onchange = () => {
+            label.style.borderColor = checkbox.checked ? '#6366f1' : '';
+        };
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+    });
+
+    if (includePersonal === null) {
+        showTemporaryStatus(settingsStatus, 'Export cancelled.', false, 2500);
+        return;
+    }
+
+    showTemporaryStatus(settingsStatus, 'Exporting profile settings…', false, 0);
     try {
-        const response = await window.authenticatedFetch('/api/profile-settings/export', {
-            method: 'GET'
-        });
+        const response = await window.authenticatedFetch('/api/profile-settings/export', { method: 'GET' });
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Export failed: ${response.status} ${errorText}`);
         }
 
-        const exportData = await response.json();
-        const profileName = sanitizeFilenamePart(exportData?.profile?.display_name, 'profile');
+        let exportData = await response.json();
         const dateStamp = new Date().toISOString().slice(0, 10);
-        const filename = `bravo_profile_settings_${profileName}_${dateStamp}.json`;
+
+        let filename;
+        if (includePersonal) {
+            // Personal content included — omit the user's name from the filename to protect privacy.
+            filename = `bravo_personalised_profile_${dateStamp}.json`;
+        } else {
+            // Strip personal fields before saving.
+            exportData = Object.fromEntries(
+                Object.entries(exportData).filter(([k]) => !PERSONAL_EXPORT_FIELDS.includes(k))
+            );
+            // Also strip display_name so the recipient's profile name isn't leaked.
+            delete exportData.display_name;
+            const profileName = sanitizeFilenamePart(exportData?.profile?.display_name, 'config');
+            filename = `bravo_config_${dateStamp}.json`;
+        }
 
         const jsonText = JSON.stringify(exportData, null, 2);
         const blob = new Blob([jsonText], { type: 'application/json' });
@@ -996,21 +1051,133 @@ async function importProfileSettingsFromText(fileText) {
         return;
     }
 
-    const sourceName = parsed?.profile?.display_name || parsed?.profile?.aac_user_id || 'unknown profile';
-    const confirmed = window.confirm(
-        `Import settings from "${sourceName}" into the currently selected profile? This will overwrite matching settings sections.`
-    );
-    if (!confirmed) {
+    // Show the import consent modal — admin must configure age/consent for the destination
+    // profile regardless of what was in the source file (consent is never exported).
+    const modalResult = await new Promise((resolve) => {
+        const modal = document.getElementById('import-consent-modal');
+        const ageRadios = modal.querySelectorAll('input[name="importAgeGroup"]');
+        const ageError = document.getElementById('import-age-error');
+        const emailRow = document.getElementById('import-parent-email-row');
+        const emailInput = document.getElementById('import-parent-email');
+        const sendBtn = document.getElementById('import-send-consent-btn');
+        const sendStatus = document.getElementById('import-consent-send-status');
+        const confirmBtn = document.getElementById('import-modal-confirm');
+        const cancelBtn = document.getElementById('import-modal-cancel');
+        const closeBtn = document.getElementById('import-modal-close');
+
+        // Reset state
+        ageRadios.forEach(r => { r.checked = false; r.closest('label').style.borderColor = ''; });
+        ageError.classList.add('hidden');
+        emailRow.classList.add('hidden');
+        emailInput.value = '';
+        sendBtn.textContent = 'Send Email';
+        sendBtn.disabled = false;
+        sendBtn.style.background = '';
+        sendStatus.textContent = '';
+        sendStatus.className = 'text-xs hidden';
+        let consentEmailSent = false;
+
+        modal.classList.remove('hidden');
+
+        // Show/hide email row based on age selection
+        ageRadios.forEach(r => r.addEventListener('change', () => {
+            ageError.classList.add('hidden');
+            ageRadios.forEach(radio => {
+                radio.closest('label').style.borderColor = radio.checked ? '#6366f1' : '';
+            });
+            emailRow.classList.toggle('hidden', r.value !== 'minor' || !r.checked);
+        }));
+
+        // Send consent email button
+        sendBtn.addEventListener('click', async () => {
+            const email = emailInput.value.trim();
+            if (!email || !email.includes('@')) {
+                sendStatus.textContent = 'Please enter a valid email address.';
+                sendStatus.className = 'text-xs text-red-600';
+                sendStatus.classList.remove('hidden');
+                return;
+            }
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending…';
+            sendStatus.classList.add('hidden');
+            try {
+                const r = await window.authenticatedFetch('/api/consent/initiate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ parent_email: email }),
+                });
+                if (r.ok) {
+                    consentEmailSent = true;
+                    sendBtn.textContent = 'Sent ✓';
+                    sendBtn.style.background = '#166534';
+                    sendStatus.textContent = `Consent email sent to ${email}. Ask the parent to check their inbox.`;
+                    sendStatus.className = 'text-xs text-green-700';
+                    sendStatus.classList.remove('hidden');
+                } else {
+                    const e = await r.json().catch(() => ({}));
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Retry';
+                    sendStatus.textContent = e.detail || 'Email could not be sent — please try again.';
+                    sendStatus.className = 'text-xs text-red-600';
+                    sendStatus.classList.remove('hidden');
+                }
+            } catch (_) {
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Retry';
+                sendStatus.textContent = 'Email could not be sent — please try again.';
+                sendStatus.className = 'text-xs text-red-600';
+                sendStatus.classList.remove('hidden');
+            }
+        });
+
+        const cleanup = (result) => {
+            modal.classList.add('hidden');
+            confirmBtn.removeEventListener('click', onConfirm);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            resolve(result);
+        };
+
+        const onConfirm = () => {
+            const selected = modal.querySelector('input[name="importAgeGroup"]:checked');
+            if (!selected) {
+                ageError.classList.remove('hidden');
+                return;
+            }
+            cleanup({
+                ageValue: selected.value,
+                parentEmail: emailInput.value.trim(),
+                consentEmailSent,
+            });
+        };
+        const onCancel = () => cleanup(null);
+
+        confirmBtn.addEventListener('click', onConfirm);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+    });
+
+    if (!modalResult) {
         showTemporaryStatus(settingsStatus, 'Import cancelled.', false, 2500);
         return;
     }
 
-    showTemporaryStatus(settingsStatus, 'Importing profile settings...', false, 0);
+    // Persist age/consent flag for the destination profile before importing settings.
+    const isMinor = modalResult.ageValue === 'minor';
+    try {
+        await window.authenticatedFetch('/api/consent/control', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: false, is_minor_under_13: isMinor }),
+        });
+    } catch (_) {}
+
+    showTemporaryStatus(settingsStatus, 'Importing profile settings…', false, 0);
     try {
         const response = await window.authenticatedFetch('/api/profile-settings/import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(parsed)
+            body: JSON.stringify(parsed),
         });
         if (!response.ok) {
             const errorText = await response.text();
@@ -1020,13 +1187,16 @@ async function importProfileSettingsFromText(fileText) {
         const result = await response.json();
         const importedSections = Array.isArray(result.imported_sections) ? result.imported_sections : [];
         await loadSettings();
+        const consentNote = isMinor && !modalResult.consentEmailSent
+            ? ' — remember to send the parental consent email from User Info Admin'
+            : '';
         showTemporaryStatus(
             settingsStatus,
-            importedSections.length > 0
+            (importedSections.length > 0
                 ? `Import complete: ${importedSections.join(', ')}`
-                : 'Import complete.',
+                : 'Import complete.') + consentNote,
             false,
-            5000
+            6000
         );
     } catch (error) {
         console.error('Error importing profile settings:', error);
