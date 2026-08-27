@@ -12294,9 +12294,11 @@ def _is_minor(consent: Dict[str, Any]) -> bool:
 
 
 async def _require_profile_write_allowed(account_id: str, aac_user_id: str) -> None:
-    """Raise 403 when writing profile data is blocked for an unverified minor."""
+    """Raise 403 when writing profile data for a confirmed-minor without verified consent.
+    Uses explicit True check (not fail-closed) so new/unknown-age profiles are never blocked.
+    """
     consent = await load_consent(account_id, aac_user_id)
-    if _is_minor(consent) and not consent.get("consent_given_at"):
+    if consent.get("is_minor_under_13") is True and not consent.get("consent_given_at"):
         raise HTTPException(
             status_code=403,
             detail="Parental consent must be verified before storing profile data for a user under 13.",

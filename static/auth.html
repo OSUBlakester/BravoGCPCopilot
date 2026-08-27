@@ -3823,10 +3823,15 @@ registerForm.addEventListener('submit', async (e) => {
                                 A consent email has been sent to ${emailDisplay}.
                                 Ask the parent to click the link in that email, then tap the button below.
                             </p>
-                            <button id="wizardCheckConsentBtn" style="padding:8px 16px;background:#9a3412;color:#fff;border:none;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;">
-                                Check for Consent
-                            </button>
-                            <span id="wizardConsentCheckStatus" style="margin-left:10px;font-size:0.8rem;color:#9a3412;"></span>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                                <button id="wizardCheckConsentBtn" style="padding:8px 16px;background:#9a3412;color:#fff;border:none;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                    Check for Consent
+                                </button>
+                                <button id="wizardResendConsentBtn" style="padding:8px 16px;background:transparent;color:#9a3412;border:1.5px solid #9a3412;border-radius:6px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+                                    Resend Email
+                                </button>
+                            </div>
+                            <span id="wizardConsentCheckStatus" style="display:block;margin-top:6px;font-size:0.8rem;color:#9a3412;"></span>
                         </div>
                         <div id="wizardConsentGrantedBox" style="display:none;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:16px;margin-bottom:14px;">
                             <div style="font-weight:600;color:#166534;margin-bottom:6px;">Consent confirmed!</div>
@@ -3848,6 +3853,31 @@ registerForm.addEventListener('submit', async (e) => {
                                 </div>
                             </label>
                         </div>`;
+                    // Wire the Resend Email button
+                    const resendBtn = document.getElementById('wizardResendConsentBtn');
+                    if (resendBtn) {
+                        resendBtn.addEventListener('click', async () => {
+                            const statusEl = document.getElementById('wizardConsentCheckStatus');
+                            resendBtn.disabled = true;
+                            resendBtn.textContent = 'Sending…';
+                            try {
+                                const token = sessionStorage.getItem('firebaseIdToken') || wizardState._idToken;
+                                const userId = wizardState.userId;
+                                const r = await fetch('/api/consent/resend', {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${token}`, 'X-User-ID': userId, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                                });
+                                if (statusEl) statusEl.textContent = r.ok ? 'Email resent successfully.' : 'Resend failed — please try again.';
+                            } catch (e) {
+                                if (statusEl) statusEl.textContent = 'Resend failed — please try again.';
+                            } finally {
+                                resendBtn.disabled = false;
+                                resendBtn.textContent = 'Resend Email';
+                            }
+                        });
+                    }
+
                     // Wire the Check for Consent button
                     const checkBtn = document.getElementById('wizardCheckConsentBtn');
                     if (checkBtn) {
@@ -4813,6 +4843,17 @@ registerForm.addEventListener('submit', async (e) => {
                 // Image assignment is handled by the background task in regenerate_boards.
                 // No need to call assign-all-images here — it runs automatically and quickly.
 
+                // COPPA: always send consent email for under-13 regardless of learning preference
+                if (wizardState.isMinorUnder13 === true && wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
+                    try {
+                        setWizardStatus('Sending consent email…', false);
+                        await fetch('/api/consent/initiate', {
+                            method: 'POST', headers,
+                            body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
+
                 // Learning feature flags — non-blocking, wizard completes regardless.
                 if (wizardState.consentEnabled) {
                     try {
@@ -4822,20 +4863,14 @@ registerForm.addEventListener('submit', async (e) => {
                                 body: JSON.stringify({ enabled: true })
                             });
                         }
-                        if (wizardState.isMinorUnder13 && wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
-                            // Under-13: COPPA email-plus flow (verify → 5-day wait → second email)
-                            setWizardStatus('Sending consent email…', false);
-                            await fetch('/api/consent/initiate', {
-                                method: 'POST', headers,
-                                body: JSON.stringify({ parent_email: wizardState.parentEmail })
-                            });
-                        } else if (!wizardState.isMinorUnder13) {
+                        if (!wizardState.isMinorUnder13) {
                             // 13 or older: enable learning directly without email verification
                             await fetch('/api/consent/control', {
                                 method: 'POST', headers,
                                 body: JSON.stringify({ enabled: true, is_minor_under_13: false })
                             });
                         }
+                        // Under-13: learning enabled only after parent clicks link — no action here
                     } catch (_) { /* non-fatal */ }
                 }
 
