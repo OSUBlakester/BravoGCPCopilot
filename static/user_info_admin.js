@@ -348,6 +348,13 @@ function _applyConsentFlags(flags) {
     if (cbLearn) cbLearn.checked = learn;
     if (cbAuto) cbAuto.checked = autoApprove;
 
+    const ageSelect = document.getElementById('flag-age-group');
+    if (ageSelect) {
+        if (flags.is_minor_under_13 === true) ageSelect.value = 'minor';
+        else if (flags.is_minor_under_13 === false) ageSelect.value = 'adult';
+        else ageSelect.value = 'null';
+    }
+
     // Disable the interview button until parental consent is verified for under-13 profiles
     if (startInterviewButton) {
         startInterviewButton.disabled = profileLocked;
@@ -416,18 +423,23 @@ function _wireConsentToggles() {
     const cbAuto = document.getElementById('flag-auto-approve');
     const status = document.getElementById('flags-save-status');
 
-    async function _postFlag(url, enabled) {
+    async function _postFlag(url, enabled, extra = {}) {
         if (status) { status.textContent = 'Saving…'; status.className = 'text-sm h-4 text-gray-500'; }
         try {
             const r = await window.authenticatedFetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled }),
+                body: JSON.stringify({ enabled, ...extra }),
             });
             if (!r.ok) {
-                const msg = r.status === 403
-                    ? 'Parental consent required for this user'
-                    : 'Save failed';
+                let msg = 'Save failed';
+                if (r.status === 403) {
+                    const ageKnown = _consentFlags.is_minor_under_13 !== null &&
+                                     _consentFlags.is_minor_under_13 !== undefined;
+                    msg = ageKnown
+                        ? 'Parental consent required — use Check for Consent above'
+                        : 'Age group is not set — select Under 13 or 13 or older above first';
+                }
                 if (status) { status.textContent = msg; status.className = 'text-sm h-4 text-red-600'; }
                 // Revert UI to the actual server state
                 await loadConsentFlags();
@@ -460,6 +472,19 @@ function _wireConsentToggles() {
         cbAuto.addEventListener('change', () => {
             _applyConsentFlags({ ..._consentFlags, auto_approve_learned: cbAuto.checked });
             _postFlag('/api/consent/auto-approve', cbAuto.checked);
+        });
+    }
+    const ageSelect = document.getElementById('flag-age-group');
+    if (ageSelect && !ageSelect._wired) {
+        ageSelect._wired = true;
+        ageSelect.addEventListener('change', () => {
+            const val = ageSelect.value;
+            const isMinor = val === 'minor' ? true : val === 'adult' ? false : null;
+            _applyConsentFlags({ ..._consentFlags, is_minor_under_13: isMinor });
+            // POST to /api/consent/control — pass is_minor_under_13 alongside the current
+            // learn_from_history value so it's preserved.
+            const currentLearn = _consentFlags.learn_from_history || false;
+            _postFlag('/api/consent/control', currentLearn, { is_minor_under_13: isMinor });
         });
     }
 }

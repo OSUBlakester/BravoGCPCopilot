@@ -411,6 +411,20 @@
                     </label>
                 </div>
 
+                <!-- is_minor_under_13 -->
+                <div class="flex items-start gap-4">
+                    <div class="flex-1">
+                        <div class="font-semibold text-gray-800">Age Group</div>
+                        <p class="text-sm text-gray-600">Whether this user is under 13. Determines COPPA consent requirements for personalized learning.</p>
+                    </div>
+                    <select id="flag-age-group"
+                            class="mt-1 flex-shrink-0 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        <option value="null">Not set / unknown</option>
+                        <option value="minor">Under 13</option>
+                        <option value="adult">13 or older</option>
+                    </select>
+                </div>
+
                 <div id="flags-save-status" class="text-sm h-4"></div>
             </div>
         </div>
