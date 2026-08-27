@@ -772,7 +772,21 @@
                     <label for="newUserDisplayName" class="sr-only">New User Display Name</label>
                     <input type="text" id="newUserDisplayName" class="w-full p-3 border border-gray-300 rounded-md" placeholder="Enter new user's display name" required>
                 </div>
-                <button id="add-user-button" class="w-full mt-2 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
+                <div class="mt-3">
+                    <p class="text-sm font-medium text-gray-700 mb-2">Is this user under 13 years old?</p>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="newUserAgeGroup" value="minor" class="accent-indigo-500">
+                            <span class="text-sm text-gray-700">Yes, under 13</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="newUserAgeGroup" value="adult" class="accent-indigo-500">
+                            <span class="text-sm text-gray-700">No, 13 or older</span>
+                        </label>
+                    </div>
+                    <p id="newUserAgeError" class="text-xs text-red-600 mt-1 hidden">Please select whether the user is under 13.</p>
+                </div>
+                <button id="add-user-button" class="w-full mt-3 p-3 font-semibold text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors">Add New Profile</button>
                 <p id="add-user-status" class="text-sm text-center mt-2 h-4"></p>
             </div>
 
@@ -2572,6 +2586,15 @@
                     return;
                 }
 
+                const ageRadio = document.querySelector('input[name="newUserAgeGroup"]:checked');
+                const ageError = document.getElementById('newUserAgeError');
+                if (!ageRadio) {
+                    if (ageError) ageError.classList.remove('hidden');
+                    return;
+                }
+                if (ageError) ageError.classList.add('hidden');
+                const isMinorUnder13 = ageRadio.value === 'minor';
+
                 addUserStatus.textContent = 'Adding user...';
                 addUserStatus.className = 'text-sm text-center mt-2 h-4 text-blue-500';
                 addUserButton.disabled = true;
@@ -2580,17 +2603,17 @@
                 try {
                     // Check if admin has selected a target account
                     const adminSelectedAccountId = sessionStorage.getItem('adminSelectedAccountId');
-                    
+
                     const headers = {
                         'Authorization': `Bearer ${idToken}`,
                         'Content-Type': 'application/json'
                     };
-                    
+
                     // Add admin target account header if applicable
                     if (adminSelectedAccountId) {
                         headers['X-Admin-Target-Account'] = adminSelectedAccountId;
                     }
-                    
+
                     const response = await fetch('/api/account/add-aac-user', {
                         method: 'POST',
                         headers: headers,
@@ -2603,8 +2626,19 @@
                     }
 
                     const newProfile = await response.json();
-                    
+
+                    // Persist is_minor_under_13 immediately so the COPPA gate
+                    // uses the correct value from the first request onward.
+                    try {
+                        await fetch('/api/consent/control', {
+                            method: 'POST',
+                            headers: { ...headers, 'X-User-ID': newProfile.aac_user_id },
+                            body: JSON.stringify({ enabled: false, is_minor_under_13: isMinorUnder13 })
+                        });
+                    } catch (_) { /* non-fatal: age flag will be captured in the setup wizard */ }
+
                     newUserNameInput.value = '';
+                    document.querySelectorAll('input[name="newUserAgeGroup"]').forEach(r => r.checked = false);
                     addUserStatus.textContent = `User "${newName}" added successfully!`;
                     addUserStatus.className = 'text-sm text-center mt-2 h-4 text-green-600';
 

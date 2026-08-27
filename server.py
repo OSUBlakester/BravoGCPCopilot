@@ -12294,11 +12294,16 @@ def _is_minor(consent: Dict[str, Any]) -> bool:
 
 
 async def _require_profile_write_allowed(account_id: str, aac_user_id: str) -> None:
-    """Raise 403 when writing profile data for a confirmed-minor without verified consent.
-    Uses explicit True check (not fail-closed) so new/unknown-age profiles are never blocked.
+    """Raise 403 when writing profile data without verified consent.
+
+    Fails closed: profiles with unknown age (is_minor_under_13 unset) are treated
+    as minors until the age question is explicitly answered. This covers every profile
+    created via Add New Profile (which doesn't ask age) and all pre-feature profiles.
+    The remedy is to answer the age question, at which point the gate opens for adults
+    and stays until consent is verified for confirmed minors.
     """
     consent = await load_consent(account_id, aac_user_id)
-    if consent.get("is_minor_under_13") is True and not consent.get("consent_given_at"):
+    if _is_minor(consent) and not consent.get("consent_given_at"):
         raise HTTPException(
             status_code=403,
             detail="Parental consent must be verified before storing profile data for a user under 13.",
@@ -13648,9 +13653,11 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         account_id = current_ids["account_id"]
         question = payload.question or ""
         response = payload.response or ""
-        if not question.strip() and not response.strip(): 
+        if not question.strip() and not response.strip():
             raise HTTPException(status_code=400, detail="Either question or response must be provided.")
-        
+
+        await _require_profile_write_allowed(account_id, aac_user_id)
+
         timestamp = dt.now().isoformat()
         
         # Save basic entry immediately (fast - no classification needed)
