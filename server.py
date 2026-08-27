@@ -12293,6 +12293,16 @@ def _is_minor(consent: Dict[str, Any]) -> bool:
     return v is None or bool(v)
 
 
+async def _require_profile_write_allowed(account_id: str, aac_user_id: str) -> None:
+    """Raise 403 when writing profile data is blocked for an unverified minor."""
+    consent = await load_consent(account_id, aac_user_id)
+    if _is_minor(consent) and not consent.get("consent_given_at"):
+        raise HTTPException(
+            status_code=403,
+            detail="Parental consent must be verified before storing profile data for a user under 13.",
+        )
+
+
 def is_personalization_enabled(consent: Dict[str, Any]) -> bool:
     return bool(consent.get("use_entered_details", False))
 
@@ -12534,6 +12544,7 @@ async def get_birthdays(current_ids: Annotated[Dict[str, str], Depends(get_curre
 async def save_birthdays(birthday_data: BirthdayData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
+    await _require_profile_write_allowed(account_id, aac_user_id)
     logging.info(f"POST /api/birthdays request received for account {account_id} and user {aac_user_id} with data: {birthday_data}")
     data_to_save = birthday_data.model_dump(mode='json')
     
@@ -12562,6 +12573,7 @@ async def get_friends_family(current_ids: Annotated[Dict[str, str], Depends(get_
 async def save_friends_family(friends_family_data: FriendsFamilyData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
+    await _require_profile_write_allowed(account_id, aac_user_id)
     logging.info(f"POST /api/friends-family request received for account {account_id} and user {aac_user_id} with data: {friends_family_data}")
     data_to_save = friends_family_data.model_dump(mode='json')
     
@@ -12748,7 +12760,8 @@ async def get_cache_debug_info(
 async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
-    
+    await _require_profile_write_allowed(account_id, aac_user_id)
+
     # The request body can have 'narrative' or 'userInfo'. Let's handle both for compatibility.
     user_info = request.get("narrative", request.get("userInfo", ""))
     current_mood = request.get("currentMood")
@@ -34022,6 +34035,7 @@ async def get_consent_endpoint(
         "use_entered_details": is_personalization_enabled(consent),
         "learn_from_history": is_learning_enabled(consent),
         "auto_approve_learned": is_auto_approve_enabled(consent),
+        "is_minor_under_13": consent.get("is_minor_under_13"),
         "consent_given_at": consent.get("consent_given_at"),
         "consent_withdrawn_at": consent.get("consent_withdrawn_at"),
     }

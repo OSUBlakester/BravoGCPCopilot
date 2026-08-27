@@ -327,6 +327,9 @@ function _applyConsentFlags(flags) {
     const useEntered = !!flags.use_entered_details;
     const learn = !!flags.learn_from_history;
     const autoApprove = !!flags.auto_approve_learned;
+    const isMinor = flags.is_minor_under_13 === true;
+    const consentVerified = !!flags.consent_given_at;
+    const profileLocked = isMinor && !consentVerified;
 
     const useEnteredContent = document.getElementById('use-entered-content');
     const learnHistoryContent = document.getElementById('learn-history-content');
@@ -344,6 +347,14 @@ function _applyConsentFlags(flags) {
     if (cbEntered) cbEntered.checked = useEntered;
     if (cbLearn) cbLearn.checked = learn;
     if (cbAuto) cbAuto.checked = autoApprove;
+
+    // Disable the interview button until parental consent is verified for under-13 profiles
+    if (startInterviewButton) {
+        startInterviewButton.disabled = profileLocked;
+        startInterviewButton.title = profileLocked
+            ? 'Parental consent must be verified before running the interview'
+            : '';
+    }
 }
 
 async function loadConsentFlags() {
@@ -377,7 +388,15 @@ function _wireConsentToggles() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled }),
             });
-            if (!r.ok) throw new Error(`${r.status}`);
+            if (!r.ok) {
+                const msg = r.status === 403
+                    ? 'Parental consent required for this user'
+                    : 'Save failed';
+                if (status) { status.textContent = msg; status.className = 'text-sm h-4 text-red-600'; }
+                // Revert UI to the actual server state
+                await loadConsentFlags();
+                return;
+            }
             if (status) { status.textContent = 'Saved'; status.className = 'text-sm h-4 text-green-600'; setTimeout(() => { status.textContent = ''; }, 2000); }
         } catch (e) {
             if (status) { status.textContent = 'Save failed'; status.className = 'text-sm h-4 text-red-600'; }

@@ -3810,44 +3810,66 @@ registerForm.addEventListener('submit', async (e) => {
             } else if (isLastStep) {
                 // Last step for both tap and scan — optional User Profile Interview
                 titleEl.textContent = 'User Profile Interview';
-                contentEl.innerHTML = `
-                    <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
-                        The User Profile Interview asks a caregiver or family member 15 short questions
-                        about the user's personality, interests, and communication style. The answers
-                        help the AI generate more personal and relevant communication options.
-                    </p>
-                    <p style="color:#6b7280;margin-bottom:16px;font-size:0.85rem;">
-                        The interview takes about 5–10 minutes and can be run at any time from the
-                        User Information page. You can skip it now and run it later.
-                    </p>
-                    <div style="display:flex;flex-direction:column;gap:10px;">
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid ${wizardState.runInterviewAfter ? '#6366f1' : '#c7d2fe'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardInterviewChoice" value="run" ${wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
-                            <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">After saving the profile, go directly to the interview</div>
-                            </div>
-                        </label>
-                        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid ${!wizardState.runInterviewAfter ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
-                            <input type="radio" name="wizardInterviewChoice" value="skip" ${!wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
-                            <div>
-                                <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
-                                <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go to the app — the interview can be run later from User Information</div>
-                            </div>
-                        </label>
-                    </div>`;
-                contentEl.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
-                    radio.addEventListener('change', () => {
-                        wizardState.runInterviewAfter = radio.value === 'run';
-                        contentEl.querySelectorAll('label').forEach(lbl => {
-                            const input = lbl.querySelector('input[type=radio]');
-                            lbl.style.borderColor = input && input.checked ? '#6366f1' : '#e5e7eb';
-                            if (input && input.value === 'run') {
-                                lbl.style.background = input.checked ? '#eef2ff' : '#f9fafb';
-                            }
+                if (wizardState.isMinorUnder13 === true) {
+                    // Under-13: interview is blocked until parental consent is verified
+                    wizardState.runInterviewAfter = false;
+                    const emailDisplay = wizardState.parentEmail
+                        ? `<strong>${wizardState.parentEmail}</strong>`
+                        : 'the parent or guardian';
+                    contentEl.innerHTML = `
+                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:16px;margin-bottom:14px;">
+                            <div style="font-weight:600;color:#9a3412;margin-bottom:8px;">Waiting for parental consent</div>
+                            <p style="color:#7c3d12;font-size:0.9rem;line-height:1.5;margin:0">
+                                A consent email has been sent to ${emailDisplay}.
+                                Once they confirm, the setup interview will be available from the
+                                <strong>User Information</strong> page.
+                            </p>
+                        </div>
+                        <p style="color:#6b7280;font-size:0.85rem;line-height:1.5">
+                            Click <strong>Finish</strong> to complete setup. In the common case where
+                            the parent is present, this takes only a minute or two.
+                        </p>`;
+                } else {
+                    // 13 or older — offer the interview immediately
+                    contentEl.innerHTML = `
+                        <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
+                            The User Profile Interview asks a caregiver or family member 15 short questions
+                            about the user's personality, interests, and communication style. The answers
+                            help the AI generate more personal and relevant communication options.
+                        </p>
+                        <p style="color:#6b7280;margin-bottom:16px;font-size:0.85rem;">
+                            The interview takes about 5–10 minutes and can be run at any time from the
+                            User Information page. You can skip it now and run it later.
+                        </p>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#eef2ff;border:2px solid ${wizardState.runInterviewAfter ? '#6366f1' : '#c7d2fe'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                                <input type="radio" name="wizardInterviewChoice" value="run" ${wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">After saving the profile, go directly to the interview</div>
+                                </div>
+                            </label>
+                            <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid ${!wizardState.runInterviewAfter ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
+                                <input type="radio" name="wizardInterviewChoice" value="skip" ${!wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
+                                <div>
+                                    <div style="font-weight:600;color:#111827;font-size:0.95rem;">Skip for Now</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Go to the app — the interview can be run later from User Information</div>
+                                </div>
+                            </label>
+                        </div>`;
+                    contentEl.querySelectorAll('input[name="wizardInterviewChoice"]').forEach(radio => {
+                        radio.addEventListener('change', () => {
+                            wizardState.runInterviewAfter = radio.value === 'run';
+                            contentEl.querySelectorAll('label').forEach(lbl => {
+                                const input = lbl.querySelector('input[type=radio]');
+                                lbl.style.borderColor = input && input.checked ? '#6366f1' : '#e5e7eb';
+                                if (input && input.value === 'run') {
+                                    lbl.style.background = input.checked ? '#eef2ff' : '#f9fafb';
+                                }
+                            });
                         });
                     });
-                });
+                }
 
             } else if (s === 1) {
                 titleEl.textContent = 'Interface Mode';
@@ -4766,6 +4788,8 @@ registerForm.addEventListener('submit', async (e) => {
 
                 setTimeout(async () => {
                     await checkScheduledFavoritesOnAuth();
+                    // Under-13 profiles must wait for parental consent before interview
+                    if (wizardState.isMinorUnder13 === true) wizardState.runInterviewAfter = false;
                     if (wizardState.runInterviewAfter) {
                         closeSetupWizard();
                         sessionStorage.setItem('wizardInterviewMode', '1');
