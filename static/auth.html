@@ -3500,7 +3500,8 @@ registerForm.addEventListener('submit', async (e) => {
             isMinorUnder13: null,   // null = not yet answered; true/false after age step
             consentEnabled: false,
             parentEmail: '',
-            autoApproveLearned: false
+            autoApproveLearned: false,
+            _consentEmailSent: false
         };
 
         // Menu items the admin can show/hide (system items like Spell/Games are always visible)
@@ -3543,6 +3544,7 @@ registerForm.addEventListener('submit', async (e) => {
             wizardState.userId = dropdown.value;
             wizardState.displayName = selectedOption.dataset.displayName || selectedOption.text || '';
             wizardState.currentStep = 1;
+            wizardState._consentEmailSent = false;
 
             const modal = document.getElementById('setupWizardModal');
             modal.classList.add('active');
@@ -3744,13 +3746,26 @@ registerForm.addEventListener('submit', async (e) => {
                     // Under-13: toggle is irrelevant — learning is enabled automatically on consent.
                     // Just collect the auto-approve preference for when that happens.
                     wizardState.consentEnabled = false; // handled by COPPA consent flow, not the toggle
+                    const _parentEmailDisplay = wizardState.parentEmail
+                        ? `<strong>${wizardState.parentEmail.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong>`
+                        : 'the parent or guardian';
                     contentEl.innerHTML = `
                         <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
                             <div style="font-weight:600;color:#9a3412;margin-bottom:6px;">Requires parental consent</div>
-                            <p style="color:#7c3d12;font-size:0.875rem;line-height:1.5;margin:0">
+                            <p style="color:#7c3d12;font-size:0.875rem;line-height:1.5;margin:0 0 10px 0">
                                 Personalized learning will be enabled automatically once the parent or guardian
                                 confirms consent via email. You cannot enable it manually until consent is verified.
                             </p>
+                            <p style="color:#7c3d12;font-size:0.85rem;margin:0 0 10px 0">
+                                Send the consent email to ${_parentEmailDisplay}:
+                            </p>
+                            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                <button type="button" id="wizardSendConsentEmailBtn"
+                                        style="background:#9a3412;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:0.85rem;cursor:pointer;font-weight:600;">
+                                    Send Consent Email
+                                </button>
+                                <span id="wizardSendConsentStatus" style="font-size:0.8rem;display:none;"></span>
+                            </div>
                         </div>
                         <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
                             Bravo can learn everyday preferences from conversations — things like favourite foods,
@@ -3841,6 +3856,58 @@ registerForm.addEventListener('submit', async (e) => {
                         });
                     });
                 });
+
+                // Wire the Send Consent Email button (under-13 only)
+                const _sendEmailBtn = document.getElementById('wizardSendConsentEmailBtn');
+                if (_sendEmailBtn) {
+                    _sendEmailBtn.addEventListener('click', async () => {
+                        const _statusEl = document.getElementById('wizardSendConsentStatus');
+                        _sendEmailBtn.disabled = true;
+                        _sendEmailBtn.textContent = 'Sending…';
+                        if (_statusEl) { _statusEl.style.display = 'none'; _statusEl.textContent = ''; }
+                        const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
+                                          sessionStorage.getItem('adminSelectedAccountId');
+                        const _h = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId,
+                            'Content-Type': 'application/json'
+                        };
+                        if (_adminAcc) _h['X-Admin-Target-Account'] = _adminAcc;
+                        try {
+                            const _r = await fetch('/api/consent/initiate', {
+                                method: 'POST', headers: _h,
+                                body: JSON.stringify({ parent_email: wizardState.parentEmail })
+                            });
+                            if (_r.ok) {
+                                wizardState._consentEmailSent = true;
+                                _sendEmailBtn.textContent = 'Email Sent ✓';
+                                _sendEmailBtn.style.background = '#166534';
+                                if (_statusEl) {
+                                    _statusEl.textContent = 'Consent email sent — ask the parent to check their inbox.';
+                                    _statusEl.style.color = '#15803d';
+                                    _statusEl.style.display = 'inline';
+                                }
+                            } else {
+                                const _e = await _r.json().catch(() => ({}));
+                                _sendEmailBtn.disabled = false;
+                                _sendEmailBtn.textContent = 'Retry Send';
+                                if (_statusEl) {
+                                    _statusEl.textContent = _e.detail || 'Email could not be sent — please try again.';
+                                    _statusEl.style.color = '#dc2626';
+                                    _statusEl.style.display = 'inline';
+                                }
+                            }
+                        } catch (_) {
+                            _sendEmailBtn.disabled = false;
+                            _sendEmailBtn.textContent = 'Retry Send';
+                            if (_statusEl) {
+                                _statusEl.textContent = 'Email could not be sent — please try again.';
+                                _statusEl.style.color = '#dc2626';
+                                _statusEl.style.display = 'inline';
+                            }
+                        }
+                    });
+                }
 
             } else if (isLastStep) {
                 // Last step for both tap and scan — optional User Profile Interview
@@ -4767,10 +4834,11 @@ registerForm.addEventListener('submit', async (e) => {
                 if (wizardState.currentStep >= total) {
                     executeWizard();
                 } else {
-                    // COPPA: send consent email the moment the under-13 user advances past the
-                    // consent step, so "A consent email has been sent" on the next screen is true.
+                    // COPPA: if the user didn't use the Send button on the consent step,
+                    // auto-send the email now as a fallback when advancing to the last step.
                     const _isConsentStepNow = (_tap && _step === 9) || (_scan && _step === 10);
-                    if (_isConsentStepNow && wizardState.isMinorUnder13 === true &&
+                    if (_isConsentStepNow && !wizardState._consentEmailSent &&
+                            wizardState.isMinorUnder13 === true &&
                             wizardState.parentEmail && wizardState.parentEmail.includes('@')) {
                         nextBtn.disabled = true;
                         setWizardStatus('Sending consent email…', false);
