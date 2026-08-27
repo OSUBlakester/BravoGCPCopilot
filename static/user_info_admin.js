@@ -1780,6 +1780,10 @@ async function loadPendingProposals() {
         listEl.innerHTML = proposals.map((p, idx) => {
             const escapedVal = (p.value || '').replace(/"/g, '&quot;');
             const escapedCat = (p.category || '').replace(/"/g, '&quot;');
+            const sentiment = (p.sentiment || 'likes');
+            const sentimentLabel = sentiment === 'dislikes'
+                ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-red-100 text-red-700 ml-1">dislikes</span>'
+                : '<span class="inline-flex items-center px-2 py-0.5 rounded-full bg-green-100 text-green-700 ml-1">likes</span>';
             return `
             <div class="bg-white border border-yellow-200 rounded px-3 py-2" id="pending-proposal-${idx}">
                 <div class="flex items-start gap-2">
@@ -1788,14 +1792,15 @@ async function loadPendingProposals() {
                         <input type="text" class="pending-edit-input hidden text-sm border rounded px-1 py-0.5 w-full" value="${escapedVal}">
                         <div class="text-xs text-gray-500 mt-1">
                             <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800">${p.category}</span>
+                            ${sentimentLabel}
                         </div>
                     </div>
                     <div class="flex flex-col gap-1 flex-shrink-0">
-                        <button onclick="approvePendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                        <button onclick="approvePendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
                             class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded">Approve</button>
-                        <button onclick="editPendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                        <button onclick="editPendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
                             class="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded pending-edit-btn">Edit</button>
-                        <button onclick="savePendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
+                        <button onclick="savePendingProposal(${idx}, '${escapedCat}', '${escapedVal}', '${sentiment}')"
                             class="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded pending-save-btn hidden">Save</button>
                         <button onclick="discardPendingProposal(${idx}, '${escapedCat}', '${escapedVal}')"
                             class="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded">Discard</button>
@@ -1809,12 +1814,12 @@ async function loadPendingProposals() {
     }
 }
 
-async function approvePendingProposal(idx, category, value) {
+async function approvePendingProposal(idx, category, value, sentiment) {
     try {
         const r = await window.authenticatedFetch('/api/learned/approve', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, value }),
+            body: JSON.stringify({ category, value, sentiment: sentiment || 'likes' }),
         });
         if (!r.ok) throw new Error(`${r.status}`);
         await Promise.all([loadPendingProposals(), loadChatDerivedNarrative()]);
@@ -1824,7 +1829,7 @@ async function approvePendingProposal(idx, category, value) {
     }
 }
 
-function editPendingProposal(idx, category, oldValue) {
+function editPendingProposal(idx, category, oldValue, sentiment) {
     const row = document.getElementById(`pending-proposal-${idx}`);
     if (!row) return;
     row.querySelector('.pending-display-text').classList.add('hidden');
@@ -1833,7 +1838,7 @@ function editPendingProposal(idx, category, oldValue) {
     row.querySelector('.pending-save-btn').classList.remove('hidden');
 }
 
-async function savePendingProposal(idx, category, oldValue) {
+async function savePendingProposal(idx, category, oldValue, sentiment) {
     const row = document.getElementById(`pending-proposal-${idx}`);
     if (!row) return;
     const newValue = row.querySelector('.pending-edit-input').value.trim();
@@ -1842,7 +1847,11 @@ async function savePendingProposal(idx, category, oldValue) {
         const r = await window.authenticatedFetch('/api/learned/pending', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ old_category: category, old_value: oldValue, new_category: category, new_value: newValue }),
+            body: JSON.stringify({
+                old_category: category, old_value: oldValue,
+                new_category: category, new_value: newValue,
+                new_sentiment: sentiment || 'likes',
+            }),
         });
         if (!r.ok) throw new Error(`${r.status}`);
         await loadPendingProposals();
