@@ -1724,7 +1724,7 @@ async function saveApprovedFact(idx, category, oldValue) {
         const r = await window.authenticatedFetch('/api/learned/approved', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, old_value: oldValue, new_value: newValue }),
+            body: JSON.stringify({ old_category: category, old_fact: oldValue, new_category: category, new_fact: newValue }),
         });
         if (!r.ok) throw new Error(`${r.status}`);
         await loadChatDerivedNarrative();
@@ -1740,7 +1740,7 @@ async function deleteApprovedFact(idx, category, value) {
         const r = await window.authenticatedFetch('/api/learned/approved', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ category, value }),
+            body: JSON.stringify({ category, fact: value }),
         });
         if (!r.ok) throw new Error(`${r.status}`);
         await loadChatDerivedNarrative();

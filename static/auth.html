@@ -4746,7 +4746,7 @@ registerForm.addEventListener('submit', async (e) => {
                             // 13 or older: enable learning directly without email verification
                             await fetch('/api/consent/control', {
                                 method: 'POST', headers,
-                                body: JSON.stringify({ enabled: true })
+                                body: JSON.stringify({ enabled: true, is_minor_under_13: false })
                             });
                         }
                     } catch (_) { /* non-fatal */ }

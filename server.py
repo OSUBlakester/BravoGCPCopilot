@@ -12287,6 +12287,12 @@ def is_learning_enabled(consent: Dict[str, Any]) -> bool:
     return bool(consent.get("learn_from_history", False))
 
 
+def _is_minor(consent: Dict[str, Any]) -> bool:
+    """Fail closed — unset is treated as under-13 for COPPA safety."""
+    v = consent.get("is_minor_under_13")
+    return v is None or bool(v)
+
+
 def is_personalization_enabled(consent: Dict[str, Any]) -> bool:
     return bool(consent.get("use_entered_details", False))
 
@@ -33958,6 +33964,7 @@ JSON response:"""
 
 class ConsentControlRequest(BaseModel):
     enabled: bool
+    is_minor_under_13: Optional[bool] = None
 
 
 class ConsentPersonalizationRequest(BaseModel):
@@ -34025,9 +34032,22 @@ async def consent_control_endpoint(
     request_data: ConsentControlRequest,
     current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
 ):
-    """Directly toggle learn_from_history without the email flow (admin / testing)."""
+    """Toggle learn_from_history. Stores is_minor_under_13 when provided.
+    Enabling is blocked for unverified under-13 profiles.
+    """
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
+    consent = await load_consent(account_id, aac_user_id)
+    # Persist age flag whenever the caller supplies it
+    if request_data.is_minor_under_13 is not None:
+        consent["is_minor_under_13"] = request_data.is_minor_under_13
+        await save_consent(account_id, aac_user_id, consent)
+    # COPPA guard: can't enable learning for a minor without verified parental consent
+    if request_data.enabled and _is_minor(consent) and not consent.get("consent_given_at"):
+        raise HTTPException(
+            status_code=403,
+            detail="Parental consent must be verified before enabling learning for a user under 13.",
+        )
     await _a7_set_consent_control(account_id, aac_user_id, request_data.enabled)
     return {"success": True, "learn_from_history": request_data.enabled}
 
@@ -34080,6 +34100,11 @@ async def consent_initiate_endpoint(
         raise HTTPException(status_code=400, detail="A valid parent_email is required.")
     if not APP_PUBLIC_BASE_URL:
         raise HTTPException(status_code=500, detail="APP_PUBLIC_BASE_URL is not configured.")
+    # COPPA: the initiate flow always means the user is under 13 — persist the flag
+    consent = await load_consent(account_id, aac_user_id)
+    if not consent.get("is_minor_under_13"):
+        consent["is_minor_under_13"] = True
+        await save_consent(account_id, aac_user_id, consent)
     try:
         token = await _consent_create_verification(account_id, aac_user_id, parent_email)
     except Exception as e:

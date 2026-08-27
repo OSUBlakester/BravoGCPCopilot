@@ -303,78 +303,6 @@ class AudioInterviewSystem {
         }
     }
 
-    _showPersonalizationConsentScreen() {
-        // Hide the normal interview controls
-        this.startInterviewBtn?.classList.add('hidden');
-        this.answerInputArea?.classList.add('hidden');
-        this.generateNarrativeBtn?.classList.add('hidden');
-
-        if (this.currentQuestion) {
-            this.currentQuestion.innerHTML = `
-                <div style="text-align:left">
-                    <div style="font-weight:700;font-size:1.05rem;margin-bottom:10px;color:#111827">Enable Personalization?</div>
-                    <p style="font-size:0.9rem;color:#374151;margin-bottom:16px;line-height:1.5">
-                        This interview collects information that Bravo can use to personalise AI suggestions —
-                        things like the user's interests, communication style, and personality.
-                        You can enable this now or skip the interview and configure it later from the User Information page.
-                    </p>
-                    <div style="display:flex;flex-direction:column;gap:10px">
-                        <button id="personalizationEnableBtn"
-                            style="padding:12px 20px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:0.95rem;font-weight:600;cursor:pointer;text-align:left">
-                            Enable Personalization &amp; Start Interview
-                        </button>
-                        <button id="personalizationSkipBtn"
-                            style="padding:12px 20px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:0.95rem;cursor:pointer;text-align:left">
-                            Skip Interview — I'll set this up later
-                        </button>
-                    </div>
-                </div>`;
-        }
-
-        const enableBtn = document.getElementById('personalizationEnableBtn');
-        const skipBtn = document.getElementById('personalizationSkipBtn');
-
-        if (enableBtn) {
-            enableBtn.addEventListener('click', async () => {
-                enableBtn.disabled = true;
-                enableBtn.textContent = 'Enabling…';
-                // Enable both use_entered_details and learn_from_history
-                const token = sessionStorage.getItem('firebaseIdToken');
-                const userId = sessionStorage.getItem('currentAacUserId');
-                if (token && userId) {
-                    const authHeaders = {
-                        'Authorization': `Bearer ${token}`,
-                        'X-User-ID': userId,
-                        'Content-Type': 'application/json',
-                    };
-                    try {
-                        await fetch('/api/consent/personalization', {
-                            method: 'POST',
-                            headers: authHeaders,
-                            body: JSON.stringify({ enabled: true }),
-                        });
-                    } catch (_) { /* non-fatal */ }
-                    try {
-                        await fetch('/api/consent/control', {
-                            method: 'POST',
-                            headers: authHeaders,
-                            body: JSON.stringify({ enabled: true }),
-                        });
-                    } catch (_) { /* non-fatal */ }
-                }
-                // Go straight into the interview — no intermediate welcome screen
-                await this.startInterview();
-            });
-        }
-
-        if (skipBtn) {
-            skipBtn.addEventListener('click', () => {
-                sessionStorage.removeItem('wizardInterviewMode');
-                this.modal.classList.add('hidden');
-            });
-        }
-    }
-
     _resetState() {
         this.isActive = false;
         this.isPaused = false;
@@ -1204,11 +1132,11 @@ Write in third person as a cohesive, professional profile that caregivers and th
 
     async parseBirthdayFromResponse(birthdayText) {
         try {
-            const prompt = `Extract a date from this text and return it in YYYY-MM-DD format. If no year is mentioned, use 2000 as default.
+            const prompt = `Extract a date from this text and return it in YYYY-MM-DD format. If no year is mentioned, return "NONE" — do not guess a year.
 
 Text: "${birthdayText}"
 
-Return only the date in YYYY-MM-DD format or "NONE" if no valid date can be extracted.`;
+Return only the date in YYYY-MM-DD format or "NONE" if the year is missing or no valid date can be extracted.`;
             
             const response = await this.callLLM(prompt);
             const dateMatch = response.match(/\d{4}-\d{2}-\d{2}/);
