@@ -942,11 +942,9 @@ function sanitizeFilenamePart(value, fallback = 'profile') {
     return cleaned || fallback;
 }
 
-// Fields considered personal profile content — excluded from config-only exports.
-const PERSONAL_EXPORT_FIELDS = [
-    'user_narrative', 'current_state', 'diary_entries',
-    'friends_family', 'birthdays', 'favorites_config',
-];
+// PERSONAL_EXPORT_FIELDS is defined and enforced on the server.
+// The client passes include_personal as a query param; the server
+// strips personal sections before transmitting when it is false.
 
 async function exportProfileSettings() {
     if (!window.authenticatedFetch) {
@@ -994,29 +992,22 @@ async function exportProfileSettings() {
 
     showTemporaryStatus(settingsStatus, 'Exporting profile settings…', false, 0);
     try {
-        const response = await window.authenticatedFetch('/api/profile-settings/export', { method: 'GET' });
+        // Personal sections are stripped server-side so they are never transmitted
+        // when include_personal is false — the checkbox is UX, not enforcement.
+        const exportUrl = `/api/profile-settings/export?include_personal=${includePersonal}`;
+        const response = await window.authenticatedFetch(exportUrl, { method: 'GET' });
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Export failed: ${response.status} ${errorText}`);
         }
 
-        let exportData = await response.json();
+        const exportData = await response.json();
         const dateStamp = new Date().toISOString().slice(0, 10);
-
-        let filename;
-        if (includePersonal) {
-            // Personal content included — omit the user's name from the filename to protect privacy.
-            filename = `bravo_personalised_profile_${dateStamp}.json`;
-        } else {
-            // Strip personal fields before saving.
-            exportData = Object.fromEntries(
-                Object.entries(exportData).filter(([k]) => !PERSONAL_EXPORT_FIELDS.includes(k))
-            );
-            // Also strip display_name so the recipient's profile name isn't leaked.
-            delete exportData.display_name;
-            const profileName = sanitizeFilenamePart(exportData?.profile?.display_name, 'config');
-            filename = `bravo_config_${dateStamp}.json`;
-        }
+        // When personal content is included the server omits display_name; use
+        // a generic filename so the source user's name is never in the file.
+        const filename = includePersonal
+            ? `bravo_personalised_profile_${dateStamp}.json`
+            : `bravo_config_${dateStamp}.json`;
 
         const jsonText = JSON.stringify(exportData, null, 2);
         const blob = new Blob([jsonText], { type: 'application/json' });
@@ -1186,17 +1177,21 @@ async function importProfileSettingsFromText(fileText) {
 
         const result = await response.json();
         const importedSections = Array.isArray(result.imported_sections) ? result.imported_sections : [];
+        const skippedSections = Array.isArray(result.skipped_sections) ? result.skipped_sections : [];
         await loadSettings();
         const consentNote = isMinor && !modalResult.consentEmailSent
             ? ' — remember to send the parental consent email from User Info Admin'
+            : '';
+        const skippedNote = skippedSections.length > 0
+            ? ` (personal sections skipped — consent not yet verified: ${skippedSections.join(', ')})`
             : '';
         showTemporaryStatus(
             settingsStatus,
             (importedSections.length > 0
                 ? `Import complete: ${importedSections.join(', ')}`
-                : 'Import complete.') + consentNote,
+                : 'Import complete.') + skippedNote + consentNote,
             false,
-            6000
+            8000
         );
     } catch (error) {
         console.error('Error importing profile settings:', error);

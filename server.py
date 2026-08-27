@@ -9481,6 +9481,18 @@ PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS = (
     "guess_what_categories",
     "hangman_categories",
 )
+# Sections that contain personal user content (narrative, relationships, diary…).
+# Used in both directions:
+#   Export: omitted unless include_personal=true is requested.
+#   Import: skipped if the destination profile has not passed the consent gate.
+PROFILE_SETTINGS_PERSONAL_FIELDS = frozenset({
+    "user_narrative",
+    "current_state",
+    "diary_entries",
+    "friends_family",
+    "birthdays",
+    "favorites_config",
+})
 
 
 async def _load_profile_settings_bundle(account_id: str, aac_user_id: str) -> Dict[str, Any]:
@@ -9805,22 +9817,36 @@ async def _apply_profile_settings_bundle(account_id: str, aac_user_id: str, bund
 
 @app.get("/api/profile-settings/export")
 async def export_profile_settings(
-    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+    include_personal: bool = False,
 ):
-    """Export profile settings/configuration for transfer to another account/profile."""
+    """Export profile settings/configuration for transfer to another account/profile.
+
+    When include_personal=false (default) the personal content sections
+    (PROFILE_SETTINGS_PERSONAL_FIELDS) are omitted from the bundle so that
+    personal data is never transmitted for a config-only export.
+    """
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
 
     try:
         bundle = await _load_profile_settings_bundle(account_id, aac_user_id)
+
+        if not include_personal:
+            bundle = {k: v for k, v in bundle.items() if k not in PROFILE_SETTINGS_PERSONAL_FIELDS}
+
+        # When personal content is included, omit the display_name so the source
+        # user's name is not embedded in a file that may be shared.
+        profile_meta: Dict[str, Any] = {"aac_user_id": aac_user_id}
+        if not include_personal:
+            profile_meta["display_name"] = bundle.get("display_name")
+
         export_payload = {
             "export_type": PROFILE_SETTINGS_EXPORT_TYPE,
             "schema_version": PROFILE_SETTINGS_SCHEMA_VERSION,
             "exported_at": dt.now(timezone.utc).isoformat(),
-            "profile": {
-                "aac_user_id": aac_user_id,
-                "display_name": bundle.get("display_name"),
-            },
+            "include_personal": include_personal,
+            "profile": profile_meta,
             "payload": bundle,
         }
         return JSONResponse(content=export_payload)
@@ -9868,6 +9894,23 @@ async def import_profile_settings(
     if not isinstance(bundle, dict):
         raise HTTPException(status_code=400, detail="Import payload missing valid 'payload' object.")
 
+    # Gate personal-content sections against the consent check.
+    # Rather than rejecting the whole import, we silently strip the personal
+    # sections and report them in skipped_sections so the caller can explain.
+    skipped_sections: List[str] = []
+    consent_allows_personal = False
+    try:
+        consent = await load_consent(account_id, aac_user_id)
+        consent_allows_personal = not _is_minor(consent) or bool(consent.get("consent_given_at"))
+    except Exception:
+        pass  # fail closed: treat as minor without consent
+
+    if not consent_allows_personal:
+        personal_present = [k for k in PROFILE_SETTINGS_PERSONAL_FIELDS if k in bundle]
+        if personal_present:
+            bundle = {k: v for k, v in bundle.items() if k not in PROFILE_SETTINGS_PERSONAL_FIELDS}
+            skipped_sections = personal_present
+
     imported_sections = await _apply_profile_settings_bundle(account_id, aac_user_id, bundle)
 
     # Imported settings affect user context and option generation; clear cache.
@@ -9882,6 +9925,7 @@ async def import_profile_settings(
             "success": True,
             "message": "Profile settings imported successfully.",
             "imported_sections": imported_sections,
+            "skipped_sections": skipped_sections,
         }
     )
 
