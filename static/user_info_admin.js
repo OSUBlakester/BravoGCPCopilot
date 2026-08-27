@@ -487,6 +487,48 @@ function _wireConsentToggles() {
             _postFlag('/api/consent/control', currentLearn, { is_minor_under_13: isMinor });
         });
     }
+
+    const saveBtn = document.getElementById('flags-save-btn');
+    if (saveBtn && !saveBtn._wired) {
+        saveBtn._wired = true;
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            // Read current UI state
+            const learnChecked = cbLearn ? cbLearn.checked : (_consentFlags.learn_from_history || false);
+            const enteredChecked = cbEntered ? cbEntered.checked : (_consentFlags.use_entered_details || false);
+            const autoChecked = cbAuto ? cbAuto.checked : (_consentFlags.auto_approve_learned || false);
+            const ageVal = ageSelect ? ageSelect.value : 'null';
+            const isMinor = ageVal === 'minor' ? true : ageVal === 'adult' ? false : null;
+
+            // Fire all three endpoints; show combined status
+            if (status) { status.textContent = 'Saving…'; status.className = 'text-sm h-4 text-gray-500'; }
+            try {
+                await Promise.all([
+                    window.authenticatedFetch('/api/consent/control', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: learnChecked, is_minor_under_13: isMinor }),
+                    }),
+                    window.authenticatedFetch('/api/consent/personalization', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: enteredChecked }),
+                    }),
+                    window.authenticatedFetch('/api/consent/auto-approve', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enabled: autoChecked }),
+                    }),
+                ]);
+                if (status) { status.textContent = 'Saved'; status.className = 'text-sm h-4 text-green-600'; setTimeout(() => { status.textContent = ''; }, 2000); }
+                if (learnChecked) loadPendingProposals();
+            } catch (e) {
+                if (status) { status.textContent = 'Save failed'; status.className = 'text-sm h-4 text-red-600'; }
+                console.error('Flags save failed:', e);
+            }
+            saveBtn.disabled = false;
+        });
+    }
 }
 
 // --- Initial Data Loading ---
