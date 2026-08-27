@@ -280,11 +280,12 @@ class AudioInterviewSystem {
     }
 
     async openInterviewModal() {
-        // When launched from the setup wizard show personalization consent first
+        // When launched from the setup wizard, consent was already handled by the
+        // Personalized Learning wizard step — go straight into the interview.
         if (sessionStorage.getItem('wizardInterviewMode') === '1') {
             this._resetState();
             this.modal.classList.remove('hidden');
-            this._showPersonalizationConsentScreen();
+            await this.startInterview();
             return;
         }
 
