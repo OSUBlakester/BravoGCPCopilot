@@ -3721,10 +3721,16 @@ registerForm.addEventListener('submit', async (e) => {
                     </div>
                     <div id="wizardAgeEmailRow" style="display:${isMinor === true ? 'block' : 'none'};margin-top:4px;">
                         <label style="display:block;font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:6px;">Parent / guardian email address</label>
-                        <input id="wizardParentEmail" type="email" value="${emailVal}"
-                            placeholder="parent@example.com"
-                            style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;outline:none;">
-                        <p style="font-size:0.78rem;color:#6b7280;margin-top:6px;">A verification link will be emailed to this address when learning is enabled in the next step.</p>
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <input id="wizardParentEmail" type="email" value="${emailVal}"
+                                placeholder="parent@example.com"
+                                style="flex:1;min-width:180px;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:0.9rem;outline:none;">
+                            <button type="button" id="wizardSendConsentEmailBtn"
+                                    style="background:#9a3412;color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:0.875rem;cursor:pointer;font-weight:600;white-space:nowrap;">
+                                Send Email
+                            </button>
+                        </div>
+                        <div id="wizardSendConsentStatus" style="display:none;font-size:0.78rem;margin-top:6px;"></div>
                     </div>`;
                 contentEl.querySelectorAll('input[name="wizardAgeGroup"]').forEach(radio => {
                     radio.addEventListener('change', () => {
@@ -3739,6 +3745,68 @@ registerForm.addEventListener('submit', async (e) => {
                         });
                     });
                 });
+                // Wire the Send Consent Email button (under-13 age step)
+                const _ageEmailBtn = document.getElementById('wizardSendConsentEmailBtn');
+                if (_ageEmailBtn) {
+                    _ageEmailBtn.addEventListener('click', async () => {
+                        const _emailInput = document.getElementById('wizardParentEmail');
+                        const _emailVal = (_emailInput ? _emailInput.value.trim() : wizardState.parentEmail) || '';
+                        const _statusEl = document.getElementById('wizardSendConsentStatus');
+                        if (!_emailVal || !_emailVal.includes('@')) {
+                            if (_statusEl) {
+                                _statusEl.textContent = 'Please enter a valid email address first.';
+                                _statusEl.style.color = '#dc2626';
+                                _statusEl.style.display = 'block';
+                            }
+                            return;
+                        }
+                        wizardState.parentEmail = _emailVal;
+                        _ageEmailBtn.disabled = true;
+                        _ageEmailBtn.textContent = 'Sending…';
+                        if (_statusEl) { _statusEl.style.display = 'none'; }
+                        const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
+                                          sessionStorage.getItem('adminSelectedAccountId');
+                        const _h = {
+                            'Authorization': `Bearer ${window.currentIdToken}`,
+                            'X-User-ID': wizardState.userId,
+                            'Content-Type': 'application/json'
+                        };
+                        if (_adminAcc) _h['X-Admin-Target-Account'] = _adminAcc;
+                        try {
+                            const _r = await fetch('/api/consent/initiate', {
+                                method: 'POST', headers: _h,
+                                body: JSON.stringify({ parent_email: _emailVal })
+                            });
+                            if (_r.ok) {
+                                wizardState._consentEmailSent = true;
+                                _ageEmailBtn.textContent = 'Sent ✓';
+                                _ageEmailBtn.style.background = '#166534';
+                                if (_statusEl) {
+                                    _statusEl.textContent = `Consent email sent to ${_emailVal}. Ask the parent to check their inbox.`;
+                                    _statusEl.style.color = '#15803d';
+                                    _statusEl.style.display = 'block';
+                                }
+                            } else {
+                                const _e = await _r.json().catch(() => ({}));
+                                _ageEmailBtn.disabled = false;
+                                _ageEmailBtn.textContent = 'Retry';
+                                if (_statusEl) {
+                                    _statusEl.textContent = _e.detail || 'Email could not be sent — please try again.';
+                                    _statusEl.style.color = '#dc2626';
+                                    _statusEl.style.display = 'block';
+                                }
+                            }
+                        } catch (_) {
+                            _ageEmailBtn.disabled = false;
+                            _ageEmailBtn.textContent = 'Retry';
+                            if (_statusEl) {
+                                _statusEl.textContent = 'Email could not be sent — please try again.';
+                                _statusEl.style.color = '#dc2626';
+                                _statusEl.style.display = 'block';
+                            }
+                        }
+                    });
+                }
 
             } else if (isConsentStep) {
                 titleEl.textContent = 'Personalized Learning';
@@ -3746,49 +3814,56 @@ registerForm.addEventListener('submit', async (e) => {
                     // Under-13: toggle is irrelevant — learning is enabled automatically on consent.
                     // Just collect the auto-approve preference for when that happens.
                     wizardState.consentEnabled = false; // handled by COPPA consent flow, not the toggle
-                    const _parentEmailDisplay = wizardState.parentEmail
+                    const _pEmail = wizardState.parentEmail
                         ? `<strong>${wizardState.parentEmail.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</strong>`
                         : 'the parent or guardian';
                     contentEl.innerHTML = `
-                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:16px;">
-                            <div style="font-weight:600;color:#9a3412;margin-bottom:6px;">Requires parental consent</div>
+                        <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:14px 16px;margin-bottom:14px;" id="wizardConsentStepPendingBox">
+                            <div style="font-weight:600;color:#9a3412;margin-bottom:6px;">Waiting for parental consent</div>
                             <p style="color:#7c3d12;font-size:0.875rem;line-height:1.5;margin:0 0 10px 0">
-                                Personalized learning will be enabled automatically once the parent or guardian
-                                confirms consent via email. You cannot enable it manually until consent is verified.
-                            </p>
-                            <p style="color:#7c3d12;font-size:0.85rem;margin:0 0 10px 0">
-                                Send the consent email to ${_parentEmailDisplay}:
+                                ${wizardState._consentEmailSent
+                                    ? `A consent email was sent to ${_pEmail}. Once the parent clicks the link, tap <strong>Check for Consent</strong> below.`
+                                    : `A consent email will be sent when you proceed. Once the parent clicks the link, come back and tap <strong>Check for Consent</strong> below.`
+                                }
                             </p>
                             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                                <button type="button" id="wizardSendConsentEmailBtn"
-                                        style="background:#9a3412;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:0.85rem;cursor:pointer;font-weight:600;">
-                                    Send Consent Email
+                                <button type="button" id="wizardConsentStepCheckBtn"
+                                        style="background:#92400e;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-size:0.85rem;cursor:pointer;font-weight:600;">
+                                    Check for Consent
                                 </button>
-                                <span id="wizardSendConsentStatus" style="font-size:0.8rem;display:none;"></span>
+                                <span id="wizardConsentStepCheckStatus" style="font-size:0.8rem;color:#374151;display:none;"></span>
                             </div>
+                        </div>
+                        <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:14px 16px;margin-bottom:14px;display:none;" id="wizardConsentStepGrantedBox">
+                            <div style="font-weight:600;color:#166534;margin-bottom:4px;">✓ Consent confirmed</div>
+                            <p style="color:#15803d;font-size:0.875rem;margin:0">
+                                Parental consent has been verified. Configure learning options below.
+                            </p>
                         </div>
                         <p style="color:#374151;margin-bottom:14px;font-size:0.9rem;">
                             Bravo can learn everyday preferences from conversations — things like favourite foods,
                             activities, and topics — and use them to suggest more relevant options.
                         </p>
-                        <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">
-                            Once consent is confirmed, how should learned facts be added to the profile?
-                        </div>
-                        <div style="display:flex;flex-direction:column;gap:8px;">
-                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
-                                <input type="radio" name="wizardAutoApprove" value="auto" ${wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
-                                <div>
-                                    <div style="font-weight:600;color:#111827;font-size:0.875rem;">Auto-approve</div>
-                                    <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Learned facts are added to the profile automatically</div>
-                                </div>
-                            </label>
-                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${!wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${!wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
-                                <input type="radio" name="wizardAutoApprove" value="manual" ${!wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
-                                <div>
-                                    <div style="font-weight:600;color:#111827;font-size:0.875rem;">Require approval</div>
-                                    <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Review and approve each fact before it's added</div>
-                                </div>
-                            </label>
+                        <div id="wizardConsentStepAutoApproveRow" style="display:none;">
+                            <div style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:8px;">
+                                How should learned facts be added to the profile?
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:8px;">
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="auto" ${wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Auto-approve</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Learned facts are added to the profile automatically</div>
+                                    </div>
+                                </label>
+                                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:${!wizardState.autoApproveLearned ? '#eef2ff' : '#f9fafb'};border:2px solid ${!wizardState.autoApproveLearned ? '#6366f1' : '#e5e7eb'};border-radius:8px;padding:10px 12px;transition:border-color 0.15s;">
+                                    <input type="radio" name="wizardAutoApprove" value="manual" ${!wizardState.autoApproveLearned ? 'checked' : ''} style="margin-top:2px;accent-color:#6366f1;flex-shrink:0;">
+                                    <div>
+                                        <div style="font-weight:600;color:#111827;font-size:0.875rem;">Require approval</div>
+                                        <div style="font-size:0.78rem;color:#4b5563;margin-top:2px;">Review and approve each fact before it's added</div>
+                                    </div>
+                                </label>
+                            </div>
                         </div>`;
                 } else {
                     // 13 or older — show the enable toggle + auto-approve options
@@ -3857,53 +3932,47 @@ registerForm.addEventListener('submit', async (e) => {
                     });
                 });
 
-                // Wire the Send Consent Email button (under-13 only)
-                const _sendEmailBtn = document.getElementById('wizardSendConsentEmailBtn');
-                if (_sendEmailBtn) {
-                    _sendEmailBtn.addEventListener('click', async () => {
-                        const _statusEl = document.getElementById('wizardSendConsentStatus');
-                        _sendEmailBtn.disabled = true;
-                        _sendEmailBtn.textContent = 'Sending…';
-                        if (_statusEl) { _statusEl.style.display = 'none'; _statusEl.textContent = ''; }
+                // Wire Check for Consent button (under-13, consent step only)
+                const _csCheckBtn = document.getElementById('wizardConsentStepCheckBtn');
+                if (_csCheckBtn) {
+                    _csCheckBtn.addEventListener('click', async () => {
+                        const _csStatus = document.getElementById('wizardConsentStepCheckStatus');
+                        _csCheckBtn.disabled = true;
+                        _csCheckBtn.textContent = 'Checking…';
+                        if (_csStatus) { _csStatus.style.display = 'none'; }
                         const _adminAcc = sessionStorage.getItem('adminTargetAccountId') ||
                                           sessionStorage.getItem('adminSelectedAccountId');
-                        const _h = {
+                        const _h2 = {
                             'Authorization': `Bearer ${window.currentIdToken}`,
-                            'X-User-ID': wizardState.userId,
-                            'Content-Type': 'application/json'
+                            'X-User-ID': wizardState.userId
                         };
-                        if (_adminAcc) _h['X-Admin-Target-Account'] = _adminAcc;
+                        if (_adminAcc) _h2['X-Admin-Target-Account'] = _adminAcc;
                         try {
-                            const _r = await fetch('/api/consent/initiate', {
-                                method: 'POST', headers: _h,
-                                body: JSON.stringify({ parent_email: wizardState.parentEmail })
-                            });
-                            if (_r.ok) {
-                                wizardState._consentEmailSent = true;
-                                _sendEmailBtn.textContent = 'Email Sent ✓';
-                                _sendEmailBtn.style.background = '#166534';
-                                if (_statusEl) {
-                                    _statusEl.textContent = 'Consent email sent — ask the parent to check their inbox.';
-                                    _statusEl.style.color = '#15803d';
-                                    _statusEl.style.display = 'inline';
-                                }
+                            const _r2 = await fetch('/api/consent', { headers: _h2 });
+                            const _d = _r2.ok ? await _r2.json() : {};
+                            if (_d.consent_given_at) {
+                                // Consent confirmed — swap panels and reveal auto-approve options
+                                wizardState.isMinorUnder13 = false; // allow learning to be enabled
+                                const _pendingBox = document.getElementById('wizardConsentStepPendingBox');
+                                const _grantedBox = document.getElementById('wizardConsentStepGrantedBox');
+                                const _approveRow = document.getElementById('wizardConsentStepAutoApproveRow');
+                                if (_pendingBox) _pendingBox.style.display = 'none';
+                                if (_grantedBox) _grantedBox.style.display = 'block';
+                                if (_approveRow) _approveRow.style.display = 'block';
                             } else {
-                                const _e = await _r.json().catch(() => ({}));
-                                _sendEmailBtn.disabled = false;
-                                _sendEmailBtn.textContent = 'Retry Send';
-                                if (_statusEl) {
-                                    _statusEl.textContent = _e.detail || 'Email could not be sent — please try again.';
-                                    _statusEl.style.color = '#dc2626';
-                                    _statusEl.style.display = 'inline';
+                                _csCheckBtn.disabled = false;
+                                _csCheckBtn.textContent = 'Check for Consent';
+                                if (_csStatus) {
+                                    _csStatus.textContent = 'Consent not yet received — ask the parent to check their email.';
+                                    _csStatus.style.display = 'inline';
                                 }
                             }
                         } catch (_) {
-                            _sendEmailBtn.disabled = false;
-                            _sendEmailBtn.textContent = 'Retry Send';
-                            if (_statusEl) {
-                                _statusEl.textContent = 'Email could not be sent — please try again.';
-                                _statusEl.style.color = '#dc2626';
-                                _statusEl.style.display = 'inline';
+                            _csCheckBtn.disabled = false;
+                            _csCheckBtn.textContent = 'Check for Consent';
+                            if (_csStatus) {
+                                _csStatus.textContent = 'Check failed — please try again.';
+                                _csStatus.style.display = 'inline';
                             }
                         }
                     });
