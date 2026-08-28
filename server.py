@@ -12381,18 +12381,25 @@ def _is_minor(consent: Dict[str, Any]) -> bool:
 async def _check_audit_consent_and_purge(account_id: str, aac_user_id: str) -> bool:
     """Return True when the profile is allowed to surface activity data.
 
-    If the profile is a minor without verified parental consent the stored log is
-    cleared (purged rather than merely hidden — data collected before the gate
-    landed should not be held). Returns False so callers can return an empty result.
+    Fails closed: any error reading consent denies access. If the profile is a
+    minor without verified parental consent the stored log is purged (not merely
+    hidden). A purge failure is logged loudly and still denies — the data stays
+    but the caller is never served it, and the error surface makes the stuck state
+    discoverable.
     """
     try:
         consent = await load_consent(account_id, aac_user_id)
-        if _is_minor(consent) and not consent.get("consent_given_at"):
-            # Purge: clear the log so data is not just hidden, it is removed.
+    except Exception as e:
+        logging.error(f"Audit consent read failed for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        return False  # fail closed — can't determine consent state
+
+    if _is_minor(consent) and not consent.get("consent_given_at"):
+        try:
             await save_button_activity_log(account_id, aac_user_id, [])
-            return False
-    except Exception:
-        pass  # fail open for reads — return True and let the caller surface what it has
+        except Exception as e:
+            logging.error(f"Audit log purge FAILED for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        return False  # deny regardless of purge outcome
+
     return True
 
 
