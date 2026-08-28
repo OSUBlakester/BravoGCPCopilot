@@ -2190,6 +2190,7 @@
             html += `
                         </select>
                         <button id="editUserBtn" class="control-btn edit-btn">Edit</button>
+                        <button id="downloadMyDataBtn" class="control-btn" title="Download a full copy of this user's data before deleting">Download Data</button>
                         <button id="deleteUserBtn" class="control-btn delete-btn">Delete</button>
                         <button id="copyUserBtn" class="control-btn copy-btn">Copy</button>
                         <button id="setDefaultBtn" class="set-default-btn">Set as Default</button>
@@ -2209,6 +2210,7 @@
             const dropdown = document.getElementById('userDropdown');
             const editBtn = document.getElementById('editUserBtn');
             const deleteBtn = document.getElementById('deleteUserBtn');
+            const downloadDataBtn = document.getElementById('downloadMyDataBtn');
             const copyBtn = document.getElementById('copyUserBtn');
             const setDefaultBtn = document.getElementById('setDefaultBtn');
             const selectBtn = document.getElementById('selectUserBtn');
@@ -2217,9 +2219,10 @@
             dropdown.addEventListener('change', function() {
                 const selected = this.value;
                 const hasSelection = selected !== '';
-                
+
                 editBtn.disabled = !hasSelection;
                 deleteBtn.disabled = !hasSelection;
+                if (downloadDataBtn) downloadDataBtn.disabled = !hasSelection;
                 copyBtn.disabled = !hasSelection;
                 setDefaultBtn.disabled = !hasSelection;
                 selectBtn.disabled = !hasSelection;
@@ -2227,6 +2230,7 @@
 
             editBtn.addEventListener('click', handleEditUser);
             deleteBtn.addEventListener('click', handleDeleteUser);
+            if (downloadDataBtn) downloadDataBtn.addEventListener('click', handleDownloadMyData);
             copyBtn.addEventListener('click', handleCopyUser);
             setDefaultBtn.addEventListener('click', handleSetDefaultUser);
             selectBtn.addEventListener('click', handleUserSelection);
@@ -2407,6 +2411,35 @@
             const modal = document.getElementById('copyUserModal');
             if (modal) {
                 modal.remove();
+            }
+        }
+
+        async function handleDownloadMyData() {
+            const dropdown = document.getElementById('userDropdown');
+            const selectedOption = dropdown.options[dropdown.selectedIndex];
+            if (!selectedOption || !selectedOption.value) return;
+
+            const userId = selectedOption.value;
+            const displayName = selectedOption.dataset.displayName;
+
+            try {
+                const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                const headers = { 'Authorization': `Bearer ${window.currentIdToken}`, 'X-User-ID': userId };
+                if (adminTargetAccountId) headers['X-Admin-Target-Account'] = adminTargetAccountId;
+
+                const res = await fetch('/api/my-data/export', { headers });
+                if (!res.ok) throw new Error(await res.text());
+
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                a.download = `bravo_my_data_${(displayName || userId).replace(/\s+/g, '_')}_${today}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Download failed: ' + e.message);
             }
         }
 
@@ -2886,7 +2919,7 @@
             form['edit-phone'].value = accountData.phone || '';
             form['edit-therapist-email'].value = accountData.therapist_email || '';
             form['edit-is-therapist'].checked = accountData.is_therapist || false;
-            form['edit-allow-admin-access'].checked = accountData.allow_admin_access !== false; // Default to true
+            form['edit-allow-admin-access'].checked = accountData.allow_admin_access === true; // Default to false
             
             // Reset password change fields
             changePasswordCheckbox.checked = false;

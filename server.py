@@ -9882,6 +9882,70 @@ async def export_profile_settings(
         raise HTTPException(status_code=500, detail="Failed to export profile settings.")
 
 
+@app.get("/api/my-data/export")
+async def export_my_data(
+    current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)],
+):
+    """Full data export for right-to-access / COPPA guardian requests.
+
+    Loads every store that holds personal data and returns one JSON file.
+    This is intentionally not importable — profile-settings/export handles
+    portability; this one handles transparency.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    try:
+        (
+            profile_settings,
+            learned_facts,
+            chat_history,
+            activity_log_raw,
+            consent,
+        ) = await asyncio.gather(
+            _load_profile_settings_bundle(account_id, aac_user_id),
+            load_chat_derived_narrative(account_id, aac_user_id),
+            load_chat_history(account_id, aac_user_id),
+            load_button_activity_log(account_id, aac_user_id),
+            load_consent(account_id, aac_user_id),
+        )
+
+        interview_responses = await load_firestore_document(
+            account_id=account_id,
+            aac_user_id=aac_user_id,
+            doc_subpath="info/interview_responses",
+            default_data={},
+        )
+
+        export = {
+            "export_version": 1,
+            "exported_at": dt.now(timezone.utc).isoformat(),
+            "aac_user_id": aac_user_id,
+            "profile_settings": profile_settings,
+            "learned_facts": learned_facts,
+            "interview_responses": interview_responses,
+            "chat_history": chat_history,
+            "activity_log": _prune_old_activity_entries(activity_log_raw),
+            "consent_record": {
+                k: v for k, v in consent.items()
+                if k in {"learn_from_history", "use_entered_details", "auto_approve_learned",
+                         "is_minor_under_13", "consent_given_at", "consent_withdrawn_at"}
+            },
+        }
+
+        filename = f"bravo_my_data_{aac_user_id[:8]}_{dt.now(timezone.utc).strftime('%Y%m%d')}.json"
+        return Response(
+            content=json.dumps(export, indent=2, default=str),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logging.error(
+            f"Failed to export my-data for {account_id}/{aac_user_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="Failed to export data.")
+
+
 @app.post("/api/profile-settings/import")
 async def import_profile_settings(
     request: Request,

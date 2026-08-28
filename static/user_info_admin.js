@@ -559,6 +559,34 @@ function _wireConsentToggles() {
             saveBtn.disabled = false;
         });
     }
+
+    const downloadDataBtn = document.getElementById('download-my-data-btn');
+    if (downloadDataBtn && !downloadDataBtn._wired) {
+        downloadDataBtn._wired = true;
+        downloadDataBtn.addEventListener('click', async () => {
+            downloadDataBtn.disabled = true;
+            const origHTML = downloadDataBtn.innerHTML;
+            downloadDataBtn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs mr-1"></i>Downloading…';
+            try {
+                const res = await window.authenticatedFetch('/api/my-data/export', { method: 'GET' });
+                if (!res.ok) throw new Error(await res.text());
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const name = (document.getElementById('userName')?.value || 'user').replace(/\s+/g, '_');
+                a.download = `bravo_my_data_${name}_${today}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('Download failed: ' + e.message);
+            } finally {
+                downloadDataBtn.disabled = false;
+                downloadDataBtn.innerHTML = origHTML;
+            }
+        });
+    }
 }
 
 // --- Initial Data Loading ---
