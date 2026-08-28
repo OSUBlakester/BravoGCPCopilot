@@ -1617,9 +1617,14 @@
         const FIREBASE_TOKEN_SESSION_KEY = "firebaseIdToken";
         const SELECTED_DISPLAY_NAME_SESSION_KEY = "selectedDisplayName";
 
-        // Activity logging helper — fire-and-forget, never blocks UX
+        // Activity logging helper — fire-and-forget, never blocks UX.
+        // Uses raw fetch with sessionStorage tokens so it cannot trigger the
+        // 403-logout handler that lives in some authenticatedFetch wrappers.
         function _logTapClick(buttonText, buttonType, isLlmGenerated) {
             try {
+                const token = sessionStorage.getItem('firebaseIdToken');
+                const userId = sessionStorage.getItem('currentAacUserId');
+                if (!token || !userId) return;
                 const boardName = currentCategory?.label || 'unknown';
                 const payload = {
                     timestamp: new Date().toISOString(),
@@ -1629,9 +1634,16 @@
                     is_llm_generated: !!isLlmGenerated,
                     interface_source: 'tap',
                 };
-                window.authenticatedFetch('/api/audit/log-button-click', {
+                const adminTarget = sessionStorage.getItem('adminTargetAccountId');
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'X-User-ID': userId,
+                };
+                if (adminTarget) headers['X-Admin-Target-Account'] = adminTarget;
+                fetch('/api/audit/log-button-click', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify(payload),
                 }).catch(() => {}); // fire and forget
             } catch (_) {}
@@ -14268,7 +14280,6 @@ VARIETY RULES:
                         console.log(`[DEBUG] Button clicked: ${button.label}`);
                         console.log(`[DEBUG] Button data:`, button);
                         console.log(`[DEBUG] Custom audio file:`, button.custom_audio_file);
-                        _logTapClick(button.label, 'board_nav', false);
                         
                         if (button.speech_text && button.speech_text.trim() !== '') {
                             await announce(button.speech_text, "system", true);

@@ -789,7 +789,7 @@ async function populateTapBoardSelector() {
     const sel = document.getElementById('tapBoardSelectorDropdown');
     if (!sel) return;
     try {
-        const r = await window.authenticatedFetch('/api/page-names', { method: 'GET' });
+        const r = await window.authenticatedFetch('/api/audit/reports/tap-board-names', { method: 'GET' });
         if (!r.ok) return;
         const names = await r.json();
         sel.innerHTML = '<option value="">Select a board…</option>' +
@@ -805,7 +805,7 @@ async function fetchAndRenderTapBoardActivity() {
     if (statusEl) statusEl.textContent = 'Loading…';
     if (list) list.innerHTML = '<li>Loading…</li>';
     try {
-        const r = await window.authenticatedFetch('/api/audit/reports/global-page-activity', { method: 'GET' });
+        const r = await window.authenticatedFetch('/api/audit/reports/tap-board-activity', { method: 'GET' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         lastTapBoardData = data;
@@ -859,6 +859,8 @@ async function fetchAndRenderTapButtonActivity() {
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { maxRotation: 45 } } } },
             });
         }
+        // Filter to tap-sourced entries only so scan clicks on same-named pages don't appear
+        const tapData = data.filter(d => !d.source_type || d.source_type !== 'Defined Static' || d.clicks > 0);
         if (list) {
             list.innerHTML = data.length
                 ? data.map(d => `<li><strong>${d.button_text}</strong>: ${d.clicks} — <span class="text-gray-500 text-xs">${d.source_type}</span></li>`).join('')

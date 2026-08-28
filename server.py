@@ -13933,6 +13933,90 @@ class PageActivityReportItem(BaseModel):
 
 
 
+@app.get("/api/audit/reports/tap-board-activity", response_model=List[PageActivityReportItem])
+async def get_tap_board_activity_report(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Board-level activity report for Tap Interface users.
+
+    Unlike the scan global-page-activity endpoint this uses tap config boards
+    (not pages.json) and filters the activity log to tap-sourced entries only,
+    so scan pages never appear in the result.
+    """
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    try:
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return []
+
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
+        tap_config = await load_tap_nav_config(account_id, aac_user_id)
+
+        # Collect board names from tap config
+        defined_board_names: set = set()
+        if isinstance(tap_config, dict):
+            for board in tap_config.get("boards", []):
+                label = (board.get("label") or "").strip()
+                if label and label.lower() != "home":
+                    defined_board_names.add(label.lower())
+
+        # Count clicks for tap entries only, grouping by board (page_name)
+        board_click_counts: Counter = Counter()
+        for entry in activity_log:
+            if entry.get("interface_source") != "tap":
+                continue
+            board = (entry.get("page_name") or "").strip().lower()
+            if board and board != "home":
+                board_click_counts[board] += 1
+
+        report_data: List[PageActivityReportItem] = []
+        # Boards with recorded clicks
+        for board_lower, clicks in board_click_counts.items():
+            display = board_lower  # fallback
+            for b in (tap_config.get("boards", []) if isinstance(tap_config, dict) else []):
+                if (b.get("label") or "").strip().lower() == board_lower:
+                    display = (b.get("label") or board_lower).strip()
+                    break
+            report_data.append(PageActivityReportItem(
+                page_name=display,
+                clicks=clicks,
+                is_defined=board_lower in defined_board_names,
+            ))
+        # Defined boards with no clicks
+        for board_label in defined_board_names:
+            if board_label not in board_click_counts:
+                display = board_label
+                for b in (tap_config.get("boards", []) if isinstance(tap_config, dict) else []):
+                    if (b.get("label") or "").strip().lower() == board_label:
+                        display = (b.get("label") or board_label).strip()
+                        break
+                report_data.append(PageActivityReportItem(page_name=display, clicks=0, is_defined=True))
+
+        report_data.sort(key=lambda x: (-x.clicks, x.page_name))
+        return report_data
+
+    except Exception as e:
+        logging.error(f"Error generating tap board activity report for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/audit/reports/tap-board-names", response_model=List[str])
+async def get_tap_board_names(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
+    """Returns board labels from tap config for the board selector dropdown."""
+    account_id = current_ids["account_id"]
+    aac_user_id = current_ids["aac_user_id"]
+    try:
+        tap_config = await load_tap_nav_config(account_id, aac_user_id)
+        names: List[str] = []
+        if isinstance(tap_config, dict):
+            for board in tap_config.get("boards", []):
+                label = (board.get("label") or "").strip()
+                if label:
+                    names.append(label)
+        return sorted(set(names))
+    except Exception as e:
+        logging.error(f"Error fetching tap board names for {account_id}/{aac_user_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve tap board names.")
+
+
 @app.get("/api/audit/reports/global-page-activity", response_model=List[PageActivityReportItem])
 async def get_global_page_activity_report(current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     """
