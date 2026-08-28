@@ -14123,8 +14123,9 @@ class ButtonClickData(BaseModel):
     button_text: str
     button_summary: Optional[str] = None
     is_llm_generated: bool
-    originating_button_text: Optional[str] = None # Changed to Optional
-    # session_id: Optional[str] = None # Optional: To track user sessions if implemented
+    originating_button_text: Optional[str] = None
+    button_type: Optional[str] = None  # 'static' | 'dynamic' | 'something_else' | 'phrase' (tap interface)
+    interface_source: Optional[str] = None  # 'tap' | 'scan' — set by the client to distinguish modes
 
 
 

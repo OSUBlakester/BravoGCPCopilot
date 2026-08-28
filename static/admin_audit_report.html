@@ -285,6 +285,94 @@
             </div>
         </div>
 
+        <!-- ── Tap Interface Reports (hidden for scan users) ─────────────────── -->
+        <div id="tap-reports-section" class="hidden">
+
+            <!-- Board Activity Report -->
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-8">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-0.5">Tap Interface</span>
+                    <h2 class="text-xl font-semibold text-gray-700">Board Activity Report</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Shows how many button clicks occurred on each board. A board with zero clicks is shown if at least one button on it is defined.</p>
+                <div class="flex gap-2 mb-4">
+                    <button id="fetchTapBoardReportButton" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md text-sm">Generate Board Report</button>
+                    <button id="toggleTapBoardChartTypeButton" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-md text-sm">Show Pie Chart</button>
+                </div>
+                <div id="tapBoardReportStatus" class="mb-4 text-sm"></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="h-96">
+                        <h3 class="text-lg font-medium mb-2 text-gray-600">Board Clicks Chart</h3>
+                        <canvas id="tapBoardActivityChart"></canvas>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium mb-2 text-gray-600">Board Clicks List</h3>
+                        <div class="max-h-96 overflow-y-auto border border-gray-200 rounded-md p-3 bg-gray-50">
+                            <ul id="tapBoardActivityList" class="list-disc pl-5 text-sm text-gray-700"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Button Activity per Board -->
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-8">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-0.5">Tap Interface</span>
+                    <h2 class="text-xl font-semibold text-gray-700">Button Activity per Board</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Select a board to see which buttons were used and how often. Includes static, dynamic, and "Something Else" clicks.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 items-end">
+                    <div>
+                        <label for="tapBoardSelectorDropdown" class="block text-sm font-medium text-gray-700">Select Board:</label>
+                        <select id="tapBoardSelectorDropdown" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                            <option value="">Loading boards…</option>
+                        </select>
+                    </div>
+                    <button id="fetchTapButtonReportButton" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-md text-sm h-10 self-end">Generate Board Button Report</button>
+                </div>
+                <div id="tapButtonReportStatus" class="mb-4 text-sm"></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="h-96">
+                        <h3 class="text-lg font-medium mb-2 text-gray-600">Button Clicks Chart</h3>
+                        <canvas id="tapButtonActivityChart"></canvas>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium mb-2 text-gray-600">Button Clicks List</h3>
+                        <div class="max-h-96 overflow-y-auto border border-gray-200 rounded-md p-3 bg-gray-50">
+                            <ul id="tapButtonActivityList" class="list-disc pl-5 text-sm text-gray-700"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dynamic + Something Else breakdown -->
+            <div class="bg-white p-6 rounded-lg shadow-lg mb-8">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-0.5">Tap Interface</span>
+                    <h2 class="text-xl font-semibold text-gray-700">Dynamic &amp; Something Else Activity</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Shows how often AI-generated phrases and the "Something Else" cycling button are used, broken down by board. Requires raw data to be fetched first using the date range below.</p>
+                <button id="fetchTapSpecialReportButton" class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded-md text-sm mb-4">Generate Dynamic &amp; Something Else Report</button>
+                <div id="tapSpecialReportStatus" class="mb-4 text-sm"></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="text-lg font-medium mb-2 text-gray-600">Dynamic / Phrase Clicks by Board</h3>
+                        <div class="max-h-72 overflow-y-auto border border-gray-200 rounded-md p-3 bg-gray-50">
+                            <ul id="tapDynamicList" class="list-disc pl-5 text-sm text-gray-700"></ul>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-medium mb-2 text-gray-600">"Something Else" Clicks by Board</h3>
+                        <div class="max-h-72 overflow-y-auto border border-gray-200 rounded-md p-3 bg-gray-50">
+                            <ul id="tapSomethingElseList" class="list-disc pl-5 text-sm text-gray-700"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        <!-- ── End Tap Interface Reports ───────────────────────────────────── -->
+
         <div class="bg-white p-6 rounded-lg shadow-lg">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 items-end">
                 <div>
@@ -310,12 +398,13 @@
                     <thead class="bg-gray-50">
                         <tr>
                             <th class="table-cell table-header">Timestamp</th>
-                            <th class="table-cell table-header">Page Name</th>
+                            <th class="table-cell table-header">Page / Board</th>
                             <th class="table-cell table-header">Button Text</th>
                             <th class="table-cell table-header">Button Summary</th>
+                            <th class="table-cell table-header">Type</th>
                             <th class="table-cell table-header">LLM Generated?</th>
                             <th class="table-cell table-header">Originating Button</th>
-                            <th class="table-cell table-header">Page Context/Prompt</th>
+                            <th class="table-cell table-header">Source</th>
                         </tr>
                     </thead>
                     <tbody id="reportTableBody" class="bg-white divide-y divide-gray-200">
