@@ -5245,8 +5245,8 @@ registerForm.addEventListener('submit', async (e) => {
                 }
 
                 // Choosing to run the interview means choosing to have Bravo use what's shared —
-                // enable personalization now so the narrative enters context once saved.
-                // The server's own gate keeps this inert for under-13 profiles until consent_given_at is set.
+                // enable personalization now. is_personalization_enabled() on the server gates on
+                // _consent_ok(), so the flag records intent and takes effect the moment consent lands.
                 if (wizardState.runInterviewAfter) {
                     try {
                         await fetch('/api/consent/personalization', {

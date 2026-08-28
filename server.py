@@ -12368,14 +12368,19 @@ async def save_consent(account_id: str, aac_user_id: str, data: Dict[str, Any]) 
     )
 
 
-def is_learning_enabled(consent: Dict[str, Any]) -> bool:
-    return bool(consent.get("learn_from_history", False))
-
-
 def _is_minor(consent: Dict[str, Any]) -> bool:
     """Fail closed — unset is treated as under-13 for COPPA safety."""
     v = consent.get("is_minor_under_13")
     return v is None or bool(v)
+
+
+def _consent_ok(consent: Dict[str, Any]) -> bool:
+    """True when the profile is not a gated minor (adult, or minor with verified consent)."""
+    return not (_is_minor(consent) and not consent.get("consent_given_at"))
+
+
+def is_learning_enabled(consent: Dict[str, Any]) -> bool:
+    return _consent_ok(consent) and bool(consent.get("learn_from_history", False))
 
 
 async def _check_audit_consent_and_purge(account_id: str, aac_user_id: str) -> bool:
@@ -12421,7 +12426,7 @@ async def _require_profile_write_allowed(account_id: str, aac_user_id: str) -> N
 
 
 def is_personalization_enabled(consent: Dict[str, Any]) -> bool:
-    return bool(consent.get("use_entered_details", False))
+    return _consent_ok(consent) and bool(consent.get("use_entered_details", False))
 
 
 def is_auto_approve_enabled(consent: Dict[str, Any]) -> bool:
