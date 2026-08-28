@@ -13835,7 +13835,9 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
         if not question.strip() and not response.strip():
             raise HTTPException(status_code=400, detail="Either question or response must be provided.")
 
-        await _require_profile_write_allowed(account_id, aac_user_id)
+        consent = await load_consent(account_id, aac_user_id)
+        if _is_minor(consent) and not consent.get("consent_given_at"):
+            return JSONResponse(content={"message": "Chat history recording skipped — parental consent required."})
 
         timestamp = dt.now().isoformat()
         

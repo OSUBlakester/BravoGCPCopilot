@@ -779,8 +779,12 @@ async function detectInterfaceModeAndConfigureReports() {
         if (!r.ok) return;
         const settings = await r.json();
         const isTap = !!settings.useTapInterface;
-        const section = document.getElementById('tap-reports-section');
-        if (section) section.classList.toggle('hidden', !isTap);
+        const tapSection = document.getElementById('tap-reports-section');
+        if (tapSection) tapSection.classList.toggle('hidden', !isTap);
+        const scanGlobal = document.getElementById('scan-global-activity-section');
+        if (scanGlobal) scanGlobal.classList.toggle('hidden', isTap);
+        const scanPageButton = document.getElementById('scan-page-button-section');
+        if (scanPageButton) scanPageButton.classList.toggle('hidden', isTap);
         if (isTap) populateTapBoardSelector();
     } catch (_) {}
 }
