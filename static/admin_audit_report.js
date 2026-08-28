@@ -112,8 +112,101 @@ async function initializePage() {
 
     // Initial Data Load
     populatePageSelector(); // Populate dropdown on load
-
+    checkAuditConsent();   // Show banner and disable buttons if consent is missing
 }
+}
+
+// --- Consent gate for audit reporting ---
+async function checkAuditConsent() {
+    const banner = document.getElementById('audit-consent-banner');
+    const emailInput = document.getElementById('audit-consent-email');
+    const sendBtn = document.getElementById('audit-send-consent-btn');
+    const checkBtn = document.getElementById('audit-check-consent-btn');
+    const statusEl = document.getElementById('audit-consent-status');
+
+    if (!banner) return;
+
+    let consentData = {};
+    try {
+        const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+        if (r.ok) consentData = await r.json();
+    } catch (_) {}
+
+    const isMinor = consentData.is_minor_under_13 !== false; // fail-closed: unset → minor
+    const consentVerified = !!consentData.consent_given_at;
+
+    if (isMinor && !consentVerified) {
+        // Show banner and disable report buttons
+        banner.classList.remove('hidden');
+        [fetchReportButton, fetchGlobalActivityReportButton, fetchPageButtonReportButton].forEach(btn => {
+            if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+        });
+
+        // Pre-fill email if already known from a prior wizard run
+        if (consentData.parent_email && emailInput) emailInput.value = consentData.parent_email;
+
+        // Wire Send Email button
+        if (sendBtn) {
+            sendBtn.addEventListener('click', async () => {
+                const email = emailInput ? emailInput.value.trim() : '';
+                if (!email || !email.includes('@')) {
+                    if (statusEl) { statusEl.textContent = 'Please enter a valid email address.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    return;
+                }
+                sendBtn.disabled = true;
+                sendBtn.textContent = 'Sending…';
+                try {
+                    const r = await window.authenticatedFetch('/api/consent/initiate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ parent_email: email }),
+                    });
+                    if (r.ok) {
+                        sendBtn.textContent = 'Sent ✓';
+                        sendBtn.style.background = '#166534';
+                        if (statusEl) { statusEl.textContent = `Consent email sent to ${email}. Ask the parent to check their inbox, then click Check for Consent.`; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                    } else {
+                        const e = await r.json().catch(() => ({}));
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'Retry';
+                        if (statusEl) { statusEl.textContent = e.detail || 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    }
+                } catch (_) {
+                    sendBtn.disabled = false;
+                    sendBtn.textContent = 'Retry';
+                    if (statusEl) { statusEl.textContent = 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                }
+            });
+        }
+
+        // Wire Check for Consent button
+        if (checkBtn) {
+            checkBtn.addEventListener('click', async () => {
+                checkBtn.disabled = true;
+                checkBtn.textContent = 'Checking…';
+                try {
+                    const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
+                    const d = r.ok ? await r.json() : {};
+                    if (d.consent_given_at) {
+                        // Consent confirmed — hide banner, re-enable buttons, refresh
+                        banner.classList.add('hidden');
+                        [fetchReportButton, fetchGlobalActivityReportButton, fetchPageButtonReportButton].forEach(btn => {
+                            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+                        });
+                        if (statusEl) { statusEl.textContent = 'Consent confirmed — activity reporting is now active.'; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                    } else {
+                        checkBtn.disabled = false;
+                        checkBtn.textContent = 'Check for Consent';
+                        if (statusEl) { statusEl.textContent = 'Consent not yet received — ask the parent to check their email and click the link.'; statusEl.className = 'text-xs text-amber-700'; statusEl.classList.remove('hidden'); }
+                    }
+                } catch (_) {
+                    checkBtn.disabled = false;
+                    checkBtn.textContent = 'Check for Consent';
+                    if (statusEl) { statusEl.textContent = 'Check failed — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                }
+            });
+        }
+    }
 }
 
 

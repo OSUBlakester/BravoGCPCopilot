@@ -9473,6 +9473,28 @@ async def update_toolbar_pin(
         raise HTTPException(status_code=500, detail=f"Failed to update toolbar PIN: {str(e)}")
 
 
+ACTIVITY_LOG_RETENTION_DAYS = 180  # 6-month rolling retention for button activity logs
+
+
+def _prune_old_activity_entries(entries: List[Dict]) -> List[Dict]:
+    """Return only entries within the rolling retention window; drop malformed/missing timestamps."""
+    cutoff = dt.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_RETENTION_DAYS)
+    kept = []
+    for entry in entries:
+        ts = entry.get("timestamp")
+        if not ts:
+            continue
+        try:
+            entry_dt = dt.fromisoformat(ts.replace("Z", "+00:00"))
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+            if entry_dt >= cutoff:
+                kept.append(entry)
+        except ValueError:
+            pass
+    return kept
+
+
 PROFILE_SETTINGS_EXPORT_TYPE = "bravo_profile_settings"
 PROFILE_SETTINGS_SCHEMA_VERSION = 1
 PROFILE_SETTINGS_CUSTOM_CATEGORY_FIELDS = (
@@ -13808,7 +13830,7 @@ async def get_global_page_activity_report(current_ids: Annotated[Dict[str, str],
         aac_user_id = current_ids["aac_user_id"]
         account_id = current_ids["account_id"]
 
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # This loads the raw data
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         logging.info(f"DEBUG: Loaded activity_log for account {account_id} and  user {aac_user_id}. Number of entries: {len(activity_log)}")
         for i, entry in enumerate(activity_log):
             logging.info(f"DEBUG: Activity_log entry {i}: {entry.get('page_name')=}, {entry.get('button_text')=}")
@@ -13901,7 +13923,7 @@ async def get_page_button_activity_report(current_ids: Annotated[Dict[str, str],
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     try:
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # Pass user_id
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         all_pages_data = await load_pages_from_file(account_id, aac_user_id)
 
         target_page_data = next((p for p in all_pages_data if p.get("name") == page_name), None)
@@ -13990,30 +14012,36 @@ class ButtonClickData(BaseModel):
 
 # /api/audit/log-button-click
 @app.post("/api/audit/log-button-click")
-async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]): # ADD user_id
+async def log_button_click_endpoint(click_data: ButtonClickData, current_ids: Annotated[Dict[str, str], Depends(get_current_account_and_user_ids)]):
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
-    
+
+    # Consent gate — silently skip logging for minors without verified parental consent.
+    # Returns 200 so fire-and-forget callers are not disrupted.
+    try:
+        consent = await load_consent(account_id, aac_user_id)
+        if _is_minor(consent) and not consent.get("consent_given_at"):
+            return JSONResponse(content={"message": "Activity logging skipped — parental consent required."})
+    except Exception:
+        pass  # fail closed: skip logging if consent state cannot be determined
+
     # Log the click asynchronously (fire and forget)
     async def save_click_async():
         try:
             log_entry = click_data.model_dump()
             activity_log = await load_button_activity_log(account_id, aac_user_id)
+            # Prune entries outside the retention window before appending the new entry.
+            activity_log = _prune_old_activity_entries(activity_log)
             activity_log.append(log_entry)
-            print(f"Button click logged for account {account_id} and user {aac_user_id}: {log_entry}")
             success = await save_button_activity_log(account_id, aac_user_id, activity_log)
             if success:
-                logging.info(f"Button click logged for account {account_id} and user {aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}...'")
+                logging.info(f"Button click logged for {account_id}/{aac_user_id}: Page '{click_data.page_name}', Button '{click_data.button_text[:50]}'")
             else:
                 logging.error(f"Failed to save button click log for {account_id}/{aac_user_id}")
         except Exception as e:
-            logging.error(f"Error logging button click in background for account {account_id} and user {aac_user_id}: {e}", exc_info=True)
-    
-    # Fire and forget
-    import asyncio
+            logging.error(f"Error logging button click for {account_id}/{aac_user_id}: {e}", exc_info=True)
+
     asyncio.create_task(save_click_async())
-    
-    # Return immediately
     return JSONResponse(content={"message": "Button click queued for logging."})
     
 
@@ -14027,7 +14055,7 @@ async def get_activity_report_endpoint(start_date: str, end_date: str, current_i
     try:
         start_dt = dt.fromisoformat(start_date.replace("Z", "+00:00"))
         end_dt = dt.fromisoformat(end_date.replace("Z", "+00:00"))
-        activity_log = await load_button_activity_log(account_id, aac_user_id) # Pass user_id
+        activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         filtered_log = []
         for entry in activity_log:
             timestamp_str = entry.get("timestamp")
