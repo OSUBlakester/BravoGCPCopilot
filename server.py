@@ -34328,6 +34328,7 @@ async def get_consent_endpoint(
         "is_minor_under_13": consent.get("is_minor_under_13"),
         "consent_given_at": consent.get("consent_given_at"),
         "consent_withdrawn_at": consent.get("consent_withdrawn_at"),
+        "parent_email": consent.get("parent_email", ""),
     }
 
 

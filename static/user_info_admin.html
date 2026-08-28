@@ -366,6 +366,30 @@
 
     <div class="container mx-auto mt-6 p-4 space-y-6">
 
+        <!-- COPPA Consent Banner -->
+        <div id="coppa-consent-banner" class="hidden bg-amber-50 border border-amber-300 rounded-lg p-5">
+            <div class="flex items-start gap-3">
+                <i class="fas fa-exclamation-triangle text-amber-600 mt-1 text-lg flex-shrink-0"></i>
+                <div class="flex-1">
+                    <p class="font-semibold text-amber-800 mb-1">Parental consent required</p>
+                    <p class="text-sm text-amber-700 mb-3">This profile is marked as under 13. Personalized learning and activity reporting are locked until a parent or guardian verifies consent by clicking the link in the email.</p>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <input type="email" id="coppa-consent-email" placeholder="parent@example.com"
+                               class="rounded-md border border-amber-300 px-3 py-1.5 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400 w-64">
+                        <button type="button" id="coppa-send-consent-btn"
+                                class="bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
+                            Send Consent Email
+                        </button>
+                        <button type="button" id="coppa-check-consent-btn"
+                                class="bg-white border border-amber-400 hover:bg-amber-50 text-amber-800 text-sm font-semibold px-4 py-1.5 rounded-md transition-colors">
+                            Check for Consent
+                        </button>
+                    </div>
+                    <p id="coppa-consent-status" class="text-xs mt-2 hidden"></p>
+                </div>
+            </div>
+        </div>
+
         <!-- Feature Flags / Personalization Settings -->
         <div id="feature-flags-panel" class="bg-indigo-50 p-6 rounded-lg shadow-lg border-l-4 border-indigo-500">
             <h2 class="text-2xl font-bold text-gray-800 mb-4 border-b pb-2 flex items-center">

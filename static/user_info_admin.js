@@ -393,39 +393,79 @@ function _applyConsentFlags(flags) {
 
     _updateNarrativePersonalizationPrompt();
 
-    // Show/hide the Check for Consent button
+    // Show/hide the old inline check button (kept for fallback; banner is primary)
     const checkConsentBtn = document.getElementById('checkConsentButton');
-    const checkConsentStatus = document.getElementById('checkConsentStatus');
-    if (checkConsentBtn) {
-        if (profileLocked) {
-            checkConsentBtn.classList.remove('hidden');
-            if (!checkConsentBtn._wired) {
-                checkConsentBtn._wired = true;
-                checkConsentBtn.addEventListener('click', async () => {
-                    checkConsentBtn.disabled = true;
-                    checkConsentBtn.innerHTML = '<i class="fas fa-sync-alt fa-spin mr-2"></i> Checking…';
-                    if (checkConsentStatus) { checkConsentStatus.textContent = ''; checkConsentStatus.classList.remove('hidden'); }
+    if (checkConsentBtn) checkConsentBtn.classList.toggle('hidden', !profileLocked);
+
+    // COPPA consent banner with email send + check flow
+    const banner = document.getElementById('coppa-consent-banner');
+    if (banner) {
+        banner.classList.toggle('hidden', !profileLocked);
+        if (profileLocked && !banner._wired) {
+            banner._wired = true;
+            const emailInput = document.getElementById('coppa-consent-email');
+            const sendBtn = document.getElementById('coppa-send-consent-btn');
+            const checkBtn = document.getElementById('coppa-check-consent-btn');
+            const statusEl = document.getElementById('coppa-consent-status');
+
+            // Pre-fill email if already stored from a prior send
+            if (flags.parent_email && emailInput) emailInput.value = flags.parent_email;
+
+            if (sendBtn) {
+                sendBtn.addEventListener('click', async () => {
+                    const email = emailInput ? emailInput.value.trim() : '';
+                    if (!email || !email.includes('@')) {
+                        if (statusEl) { statusEl.textContent = 'Please enter a valid email address.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                        return;
+                    }
+                    sendBtn.disabled = true;
+                    sendBtn.textContent = 'Sending…';
+                    try {
+                        const r = await window.authenticatedFetch('/api/consent/initiate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ parent_email: email }),
+                        });
+                        if (r.ok) {
+                            sendBtn.textContent = 'Sent ✓';
+                            sendBtn.style.background = '#166534';
+                            if (statusEl) { statusEl.textContent = `Consent email sent to ${email}. Ask the parent to check their inbox, then click Check for Consent.`; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
+                        } else {
+                            const err = await r.json().catch(() => ({}));
+                            sendBtn.disabled = false;
+                            sendBtn.textContent = 'Retry';
+                            if (statusEl) { statusEl.textContent = err.detail || 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                        }
+                    } catch (_) {
+                        sendBtn.disabled = false;
+                        sendBtn.textContent = 'Retry';
+                        if (statusEl) { statusEl.textContent = 'Email could not be sent — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
+                    }
+                });
+            }
+
+            if (checkBtn) {
+                checkBtn.addEventListener('click', async () => {
+                    checkBtn.disabled = true;
+                    checkBtn.textContent = 'Checking…';
                     try {
                         const r = await window.authenticatedFetch('/api/consent', { method: 'GET' });
                         const data = r.ok ? await r.json() : {};
                         if (data.consent_given_at) {
                             _applyConsentFlags(data);
-                            if (checkConsentStatus) { checkConsentStatus.textContent = 'Consent confirmed — interview is now available.'; checkConsentStatus.className = 'text-sm text-green-600'; }
+                            if (statusEl) { statusEl.textContent = 'Consent confirmed — learning features are now available.'; statusEl.className = 'text-xs text-green-700'; statusEl.classList.remove('hidden'); }
                         } else {
-                            checkConsentBtn.disabled = false;
-                            checkConsentBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Check for Consent';
-                            if (checkConsentStatus) { checkConsentStatus.textContent = 'Not confirmed yet. Ask the parent to click the link in the email.'; checkConsentStatus.className = 'text-sm text-orange-600'; }
+                            checkBtn.disabled = false;
+                            checkBtn.textContent = 'Check for Consent';
+                            if (statusEl) { statusEl.textContent = 'Not confirmed yet — ask the parent to click the link in the email.'; statusEl.className = 'text-xs text-amber-700'; statusEl.classList.remove('hidden'); }
                         }
-                    } catch (e) {
-                        checkConsentBtn.disabled = false;
-                        checkConsentBtn.innerHTML = '<i class="fas fa-sync-alt mr-2"></i> Check for Consent';
-                        if (checkConsentStatus) { checkConsentStatus.textContent = 'Check failed — please try again.'; checkConsentStatus.className = 'text-sm text-red-600'; }
+                    } catch (_) {
+                        checkBtn.disabled = false;
+                        checkBtn.textContent = 'Check for Consent';
+                        if (statusEl) { statusEl.textContent = 'Check failed — please try again.'; statusEl.className = 'text-xs text-red-600'; statusEl.classList.remove('hidden'); }
                     }
                 });
             }
-        } else {
-            checkConsentBtn.classList.add('hidden');
-            if (checkConsentStatus) checkConsentStatus.classList.add('hidden');
         }
     }
 }
