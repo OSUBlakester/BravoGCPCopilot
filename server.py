@@ -34029,7 +34029,7 @@ JSON response:"""
 # =============================================================================
 
 class ConsentControlRequest(BaseModel):
-    enabled: bool
+    enabled: Optional[bool] = None  # None = age-only update; omits learn_from_history write
     is_minor_under_13: Optional[bool] = None
 
 
@@ -34109,6 +34109,10 @@ async def consent_control_endpoint(
     if request_data.is_minor_under_13 is not None:
         consent["is_minor_under_13"] = request_data.is_minor_under_13
         await save_consent(account_id, aac_user_id, consent)
+    # If enabled is omitted the caller only wants to persist the age flag — skip the
+    # learn_from_history write entirely so we don't clobber an existing value.
+    if request_data.enabled is None:
+        return {"success": True, "learn_from_history": consent.get("learn_from_history", False)}
     # COPPA guard: can't enable learning for a minor without verified parental consent
     if request_data.enabled and _is_minor(consent) and not consent.get("consent_given_at"):
         raise HTTPException(

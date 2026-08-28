@@ -2633,7 +2633,7 @@
                         await fetch('/api/consent/control', {
                             method: 'POST',
                             headers: { ...headers, 'X-User-ID': newProfile.aac_user_id },
-                            body: JSON.stringify({ enabled: false, is_minor_under_13: isMinorUnder13 })
+                            body: JSON.stringify({ is_minor_under_13: isMinorUnder13 })
                         });
                     } catch (_) { /* non-fatal: age flag will be captured in the setup wizard */ }
 

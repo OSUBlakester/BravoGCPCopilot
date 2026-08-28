@@ -1159,7 +1159,7 @@ async function importProfileSettingsFromText(fileText) {
         await window.authenticatedFetch('/api/consent/control', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: false, is_minor_under_13: isMinor }),
+            body: JSON.stringify({ is_minor_under_13: isMinor }),
         });
     } catch (_) {}
 
@@ -1179,20 +1179,44 @@ async function importProfileSettingsFromText(fileText) {
         const importedSections = Array.isArray(result.imported_sections) ? result.imported_sections : [];
         const skippedSections = Array.isArray(result.skipped_sections) ? result.skipped_sections : [];
         await loadSettings();
+
+        // Transient toast for the overall result
         const consentNote = isMinor && !modalResult.consentEmailSent
-            ? ' — remember to send the parental consent email from User Info Admin'
-            : '';
-        const skippedNote = skippedSections.length > 0
-            ? ` (personal sections skipped — consent not yet verified: ${skippedSections.join(', ')})`
+            ? ' — send the parental consent email from User Info Admin to unlock personalised content'
             : '';
         showTemporaryStatus(
             settingsStatus,
             (importedSections.length > 0
                 ? `Import complete: ${importedSections.join(', ')}`
-                : 'Import complete.') + skippedNote + consentNote,
+                : 'Import complete.') + consentNote,
             false,
-            8000
+            6000
         );
+
+        // Persistent panel when personal sections were skipped — important enough to stay visible
+        const skippedPanel = document.getElementById('import-skipped-panel');
+        const skippedDetail = document.getElementById('import-skipped-detail');
+        const skippedDismiss = document.getElementById('import-skipped-dismiss');
+        if (skippedSections.length > 0 && skippedPanel && skippedDetail) {
+            const sectionNames = {
+                user_narrative: 'user narrative',
+                current_state: 'current state',
+                diary_entries: 'diary entries',
+                friends_family: 'friends & family',
+                birthdays: 'birthdays',
+                favorites_config: 'favourites',
+            };
+            const readable = skippedSections.map(s => sectionNames[s] || s).join(', ');
+            skippedDetail.textContent =
+                `Parental consent has not been verified for this profile, so the following sections were not imported: ${readable}.`;
+            skippedPanel.classList.remove('hidden');
+            if (skippedDismiss && !skippedDismiss._wired) {
+                skippedDismiss._wired = true;
+                skippedDismiss.addEventListener('click', () => skippedPanel.classList.add('hidden'));
+            }
+        } else if (skippedPanel) {
+            skippedPanel.classList.add('hidden');
+        }
     } catch (error) {
         console.error('Error importing profile settings:', error);
         showTemporaryStatus(settingsStatus, `Import failed: ${error.message}`, true, 6000);
