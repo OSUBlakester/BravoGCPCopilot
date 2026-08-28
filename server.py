@@ -12329,18 +12329,37 @@ _CONSENT_TOKEN_EXPIRY_DAYS = 30
 _CONSENT_SECOND_EMAIL_DELAY_DAYS = 5
 
 
+_CONSENT_CACHE_TTL_SECONDS = 45
+_consent_cache: Dict[tuple, tuple] = {}  # (account_id, aac_user_id) -> (consent_dict, expiry_monotonic)
+
+
 async def load_consent(account_id: str, aac_user_id: str) -> Dict[str, Any]:
-    """Load consent document. Returns empty dict (all flags default False) if absent."""
+    """Load consent document. Returns empty dict (all flags default False) if absent.
+
+    Results are cached in-process for up to 45 s to avoid a Firestore read on every
+    button-click log call. save_consent() busts the cache so newly-granted consent
+    takes effect immediately rather than waiting out the TTL.
+    """
+    key = (account_id, aac_user_id)
+    cached = _consent_cache.get(key)
+    if cached:
+        cached_data, expiry = cached
+        if time.monotonic() < expiry:
+            return cached_data
+
     data = await load_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
         doc_subpath=_CONSENT_DOC_SUBPATH,
         default_data={},
     )
-    return data or {}
+    result = data or {}
+    _consent_cache[key] = (result, time.monotonic() + _CONSENT_CACHE_TTL_SECONDS)
+    return result
 
 
 async def save_consent(account_id: str, aac_user_id: str, data: Dict[str, Any]) -> None:
+    _consent_cache.pop((account_id, aac_user_id), None)  # bust cache on write
     await save_firestore_document(
         account_id=account_id,
         aac_user_id=aac_user_id,
@@ -12357,6 +12376,24 @@ def _is_minor(consent: Dict[str, Any]) -> bool:
     """Fail closed — unset is treated as under-13 for COPPA safety."""
     v = consent.get("is_minor_under_13")
     return v is None or bool(v)
+
+
+async def _check_audit_consent_and_purge(account_id: str, aac_user_id: str) -> bool:
+    """Return True when the profile is allowed to surface activity data.
+
+    If the profile is a minor without verified parental consent the stored log is
+    cleared (purged rather than merely hidden — data collected before the gate
+    landed should not be held). Returns False so callers can return an empty result.
+    """
+    try:
+        consent = await load_consent(account_id, aac_user_id)
+        if _is_minor(consent) and not consent.get("consent_given_at"):
+            # Purge: clear the log so data is not just hidden, it is removed.
+            await save_button_activity_log(account_id, aac_user_id, [])
+            return False
+    except Exception:
+        pass  # fail open for reads — return True and let the caller surface what it has
+    return True
 
 
 async def _require_profile_write_allowed(account_id: str, aac_user_id: str) -> None:
@@ -13830,6 +13867,9 @@ async def get_global_page_activity_report(current_ids: Annotated[Dict[str, str],
         aac_user_id = current_ids["aac_user_id"]
         account_id = current_ids["account_id"]
 
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return []
+
         activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         logging.info(f"DEBUG: Loaded activity_log for account {account_id} and  user {aac_user_id}. Number of entries: {len(activity_log)}")
         for i, entry in enumerate(activity_log):
@@ -13923,6 +13963,9 @@ async def get_page_button_activity_report(current_ids: Annotated[Dict[str, str],
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     try:
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return []
+
         activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
         all_pages_data = await load_pages_from_file(account_id, aac_user_id)
 
@@ -14053,6 +14096,9 @@ async def get_activity_report_endpoint(start_date: str, end_date: str, current_i
     aac_user_id = current_ids["aac_user_id"]
     account_id = current_ids["account_id"]
     try:
+        if not await _check_audit_consent_and_purge(account_id, aac_user_id):
+            return JSONResponse(content=[])
+
         start_dt = dt.fromisoformat(start_date.replace("Z", "+00:00"))
         end_dt = dt.fromisoformat(end_date.replace("Z", "+00:00"))
         activity_log = _prune_old_activity_entries(await load_button_activity_log(account_id, aac_user_id))
