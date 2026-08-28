@@ -517,7 +517,7 @@ async def get_current_account_and_user_ids(
             
             # Check permissions
             has_access = False
-            if is_admin and target_account_data.get("allow_admin_access", True):
+            if is_admin and target_account_data.get("allow_admin_access", False):
                 has_access = True
             elif is_therapist:
                 # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -658,7 +658,7 @@ async def get_target_account_id(
             target_account_data = target_account_doc.to_dict()
 
             # Check access permissions
-            if is_admin and target_account_data.get("allow_admin_access", True):
+            if is_admin and target_account_data.get("allow_admin_access", False):
                 pass  # Admin access allowed
             elif is_therapist:
                 # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -9968,7 +9968,7 @@ async def get_account_details(current_account: Annotated[Dict[str, str], Depends
             "phone": account_data.get("phone", ""),
             "therapist_email": account_data.get("therapist_email", ""),
             "is_therapist": account_data.get("is_therapist", False),
-            "allow_admin_access": account_data.get("allow_admin_access", True)
+            "allow_admin_access": account_data.get("allow_admin_access", False)
         }
     except HTTPException:
         raise
@@ -10051,7 +10051,7 @@ async def get_accessible_accounts(current_account: Annotated[Dict[str, str], Dep
             
             # Admin can access all accounts that allow admin access
             if is_admin:
-                if account_data.get("allow_admin_access", True):  # Default to True if not set
+                if account_data.get("allow_admin_access", False):  # Default to False if not set
                     accessible_accounts.append({
                         "account_id": account_doc.id,
                         "account_name": account_data.get("account_name", ""),
@@ -10122,7 +10122,7 @@ async def select_account_for_access(
         
         # Verify access permissions
         has_access = False
-        if is_admin and target_account_data.get("allow_admin_access", True):
+        if is_admin and target_account_data.get("allow_admin_access", False):
             has_access = True
         elif is_therapist:
             # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -10185,7 +10185,7 @@ async def get_admin_account_users(
         
         # Verify access permissions
         has_access = False
-        if is_admin and target_account_data.get("allow_admin_access", True):
+        if is_admin and target_account_data.get("allow_admin_access", False):
             has_access = True
         elif is_therapist:
             # Therapists can access their own account or client accounts where they're listed as therapist_email
@@ -14056,7 +14056,7 @@ class CreateAccountRequest(BaseModel):
     phone: Optional[str] = None
     therapist_email: Optional[str] = None
     is_therapist: Optional[bool] = False  # NEW: Flag to indicate if this account is a therapist
-    allow_admin_access: Optional[bool] = True  # NEW: Flag to allow Bravo admin access (default True)
+    allow_admin_access: Optional[bool] = False  # Flag to allow Bravo admin access (default False)
 
     # --- NEW: Email is derived from token, not provided here
     # email: str = Field(..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$") # Email will be derived from token
