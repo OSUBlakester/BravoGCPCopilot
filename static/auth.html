@@ -112,6 +112,7 @@
 
         .dropdown-controls {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 10px;
             margin: 10px 0;
@@ -161,6 +162,15 @@
 
         .copy-btn:hover:not(:disabled) {
             background-color: #218838;
+        }
+
+        .download-btn {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .download-btn:hover:not(:disabled) {
+            background-color: #545b62;
         }
 
         .control-btn:disabled {
@@ -747,7 +757,7 @@
                 </div>
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="register-allow-admin-access" name="allow_admin_access" checked>
+                        <input type="checkbox" id="register-allow-admin-access" name="allow_admin_access">
                         <label for="register-allow-admin-access">Allow Bravo Admin access to this account (for support purposes, data is kept confidential and NEVER shared)</label>
                     </div>
                 </div>
@@ -2190,10 +2200,10 @@
             html += `
                         </select>
                         <button id="editUserBtn" class="control-btn edit-btn">Edit</button>
-                        <button id="downloadMyDataBtn" class="control-btn" title="Download a full copy of this user's data before deleting">Download Data</button>
-                        <button id="deleteUserBtn" class="control-btn delete-btn">Delete</button>
                         <button id="copyUserBtn" class="control-btn copy-btn">Copy</button>
                         <button id="setDefaultBtn" class="set-default-btn">Set as Default</button>
+                        <button id="downloadMyDataBtn" class="control-btn download-btn" title="Download a full copy of this user's data">Download Data</button>
+                        <button id="deleteUserBtn" class="control-btn delete-btn">Delete</button>
                     </div>
                     <div style="display:flex;gap:8px;margin-top:15px;">
                         <button id="selectUserBtn" style="margin-top:0;flex:1;">Continue with Selected User</button>
