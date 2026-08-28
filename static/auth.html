@@ -3556,11 +3556,19 @@ registerForm.addEventListener('submit', async (e) => {
         ];
 
         function wizardTotalSteps() {
+            // Returns the actual last internal step number — used for navigation.
             // tap: 10 steps (age, learning, interview at end; Button Action hardcoded/skipped)
             // scan: 11 steps
-            // When isMinorUnder13 is already known (set at Add New Profile time), the age step is
-            // skipped — one fewer step to show.
-            const base = wizardState.interfaceMode === 'tap' ? 10 : 11;
+            // NOTE: do NOT subtract 1 when the age step is skipped. The internal step numbers
+            // stay fixed; only the display label shifts. Subtracting here causes the consent
+            // step to satisfy currentStep >= total and fires executeWizard() prematurely.
+            return wizardState.interfaceMode === 'tap' ? 10 : 11;
+        }
+
+        function wizardDisplayTotal() {
+            // The number shown to the user in "Step X of Y".
+            // One fewer than the internal total when the age step is skipped.
+            const base = wizardTotalSteps();
             return wizardState.isMinorUnder13 !== null ? base - 1 : base;
         }
 
@@ -3716,13 +3724,14 @@ registerForm.addEventListener('submit', async (e) => {
         function showWizardStep(step) {
             wizardState.currentStep = step;
             const total = wizardTotalSteps();
+            const displayTotal = wizardDisplayTotal();
 
             // When the age step is skipped, display sequential numbers to the user (no gap).
             const _ageStepNum = wizardState.interfaceMode === 'tap' ? 8 : 9;
             const displayStep = (wizardState.isMinorUnder13 !== null && step > _ageStepNum)
                 ? step - 1 : step;
-            document.getElementById('wizardStepIndicator').textContent = `Step ${displayStep} of ${total}`;
-            document.getElementById('wizardProgressBar').style.width = `${(displayStep / total) * 100}%`;
+            document.getElementById('wizardStepIndicator').textContent = `Step ${displayStep} of ${displayTotal}`;
+            document.getElementById('wizardProgressBar').style.width = `${(displayStep / displayTotal) * 100}%`;
 
             const backBtn = document.getElementById('wizardBackBtn');
             const nextBtn = document.getElementById('wizardNextBtn');
