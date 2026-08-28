@@ -322,6 +322,34 @@ async function initializePage() {
 // --- Feature Flags ---
 let _consentFlags = { use_entered_details: false, learn_from_history: false, auto_approve_learned: false };
 
+function _updateNarrativePersonalizationPrompt() {
+    const banner = document.getElementById('narrative-personalization-prompt');
+    if (!banner) return;
+    const hasNarrative = !!(currentUserInfo && currentUserInfo.trim());
+    const personalizationOff = !_consentFlags.use_entered_details;
+    banner.classList.toggle('hidden', !(hasNarrative && personalizationOff));
+
+    const enableBtn = document.getElementById('narrative-personalization-enable-btn');
+    if (enableBtn && !enableBtn._wired) {
+        enableBtn._wired = true;
+        enableBtn.addEventListener('click', async () => {
+            enableBtn.disabled = true;
+            enableBtn.textContent = 'Enabling…';
+            try {
+                await window.authenticatedFetch('/api/consent/personalization', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: true }),
+                });
+                _applyConsentFlags({ ..._consentFlags, use_entered_details: true });
+            } catch (_) {
+                enableBtn.disabled = false;
+                enableBtn.textContent = 'Enable';
+            }
+        });
+    }
+}
+
 function _applyConsentFlags(flags) {
     _consentFlags = flags;
     const useEntered = !!flags.use_entered_details;
@@ -362,6 +390,8 @@ function _applyConsentFlags(flags) {
             ? 'Parental consent must be verified before running the interview'
             : '';
     }
+
+    _updateNarrativePersonalizationPrompt();
 
     // Show/hide the Check for Consent button
     const checkConsentBtn = document.getElementById('checkConsentButton');
@@ -742,6 +772,7 @@ async function loadUserInfo() {
             userName.value = currentUserName;
         }
         renderAiOverridesToForm();
+        _updateNarrativePersonalizationPrompt();
 
         // Load birthdate
         const birthdayResponse = await window.authenticatedFetch('/api/birthdays', {

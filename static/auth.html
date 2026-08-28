@@ -4259,7 +4259,7 @@ registerForm.addEventListener('submit', async (e) => {
                                 <input type="radio" name="wizardInterviewChoice" value="run" ${wizardState.runInterviewAfter ? 'checked' : ''} style="margin-top:3px;accent-color:#6366f1;flex-shrink:0;width:16px;height:16px;">
                                 <div>
                                     <div style="font-weight:600;color:#111827;font-size:0.95rem;">Run Interview Now</div>
-                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">After saving the profile, go directly to the interview</div>
+                                    <div style="font-size:0.8rem;color:#4b5563;margin-top:3px;">Bravo will use what you share to make suggestions fit ${wizardState.displayName || 'this user'} — after saving the profile, go directly to the interview</div>
                                 </div>
                             </label>
                             <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:#f9fafb;border:2px solid ${!wizardState.runInterviewAfter ? '#6366f1' : '#e5e7eb'};border-radius:10px;padding:14px 16px;transition:border-color 0.15s;">
@@ -5240,6 +5240,19 @@ registerForm.addEventListener('submit', async (e) => {
                             method: 'POST',
                             headers: { ...headers, 'Content-Type': 'application/json' },
                             body: JSON.stringify({ enabled: true, is_minor_under_13: false })
+                        });
+                    } catch (_) { /* non-fatal */ }
+                }
+
+                // Choosing to run the interview means choosing to have Bravo use what's shared —
+                // enable personalization now so the narrative enters context once saved.
+                // The server's own gate keeps this inert for under-13 profiles until consent_given_at is set.
+                if (wizardState.runInterviewAfter) {
+                    try {
+                        await fetch('/api/consent/personalization', {
+                            method: 'POST',
+                            headers: { ...headers, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enabled: true })
                         });
                     } catch (_) { /* non-fatal */ }
                 }
