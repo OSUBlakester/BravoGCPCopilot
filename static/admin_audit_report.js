@@ -813,13 +813,14 @@ async function fetchAndRenderTapBoardActivity() {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const data = await r.json();
         lastTapBoardData = data;
-        renderTapBoardChart(data, tapBoardChartType);
+        const active = data.filter(d => d.clicks > 0);
+        renderTapBoardChart(active, tapBoardChartType);
         if (list) {
-            list.innerHTML = data.length
-                ? data.map(d => `<li><strong>${d.page_name}</strong>: ${d.clicks} click${d.clicks !== 1 ? 's' : ''}${d.is_defined ? '' : ' <span class="text-gray-400">(not defined)</span>'}</li>`).join('')
+            list.innerHTML = active.length
+                ? active.map(d => `<li><strong>${d.page_name}</strong>: ${d.clicks} click${d.clicks !== 1 ? 's' : ''}</li>`).join('')
                 : '<li class="text-gray-500">No activity recorded yet.</li>';
         }
-        if (statusEl) statusEl.textContent = `${data.length} board(s) found.`;
+        if (statusEl) statusEl.textContent = `${active.length} board(s) with activity (${data.length} total).`;
     } catch (e) {
         if (statusEl) { statusEl.textContent = `Error: ${e.message}`; statusEl.className = 'mb-4 text-sm text-red-600'; }
     }
