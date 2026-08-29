@@ -12252,6 +12252,7 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
     for fact in facts:
         if fact.get("category") == category and fact.get("fact", "").lower() == value.lower():
             if fact.get("sentiment") == sentiment:
+                _a7_record_metric("approve.duplicate", f'category="{category}"')
                 return False  # exact duplicate
             # Sentiment changed (user reversed preference) — update in place
             fact["sentiment"] = sentiment
@@ -12260,6 +12261,7 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
             narrative["last_updated"] = timestamp
             await save_chat_derived_narrative(account_id, aac_user_id, narrative)
             await cache_manager.invalidate_cache(account_id, aac_user_id)
+            _a7_record_metric("approve.sentiment_updated", f'category="{category}"')
             return True
     facts.append({
         "fact": value,
@@ -12274,6 +12276,7 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
     await save_chat_derived_narrative(account_id, aac_user_id, narrative)
     await cache_manager.invalidate_cache(account_id, aac_user_id)
     logging.info(f"Approved learned fact ({category}) for {account_id}/{aac_user_id}")
+    _a7_record_metric("approved", f'category="{category}"')
     return True
 
 
@@ -34603,6 +34606,8 @@ async def discard_learned_proposal_endpoint(
     ]
     discarded = before - len(pending["proposals"])
     await _a7_save_pending_proposals(account_id, aac_user_id, pending)
+    if discarded:
+        _a7_record_metric("discarded", f'category="{category}"')
     return {"success": True, "discarded": discarded}
 
 
