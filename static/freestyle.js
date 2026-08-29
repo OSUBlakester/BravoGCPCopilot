@@ -776,7 +776,8 @@ async function speakDisplayText() {
     // Record to speech history and learning pipeline only when not in compose mode
     if (!isComposeFlowRequested()) {
         recordToSpeechHistory(textToSpeak);
-        recordChatHistory(textToSpeak, null).catch(e => console.error('Failed to record freestyle utterance:', e));
+        console.log('🎯 Freestyle Speak Display — recording for learning:', textToSpeak);
+        recordChatHistory("", textToSpeak).catch(e => console.error('Failed to record freestyle utterance:', e));
     }
     
     // Pause scanning for the scanning interval duration, then reset to Go Back button
@@ -2504,8 +2505,9 @@ async function announce(textToAnnounce, announcementType = "system", recordHisto
 }
 
 async function recordChatHistory(question, response) {
+    console.log('🎯 Freestyle recordChatHistory:', { question, response });
     try {
-        await authenticatedFetch('/record_chat_history', {
+        const result = await authenticatedFetch('/record_chat_history', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -2515,6 +2517,8 @@ async function recordChatHistory(question, response) {
                 response: response || ""
             })
         });
+        const data = await result.json().catch(() => ({}));
+        console.log('🎯 Freestyle recordChatHistory response:', data);
     } catch (error) {
         console.error('Failed to record chat history:', error);
     }

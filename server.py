@@ -13837,6 +13837,7 @@ async def record_chat_history_endpoint(payload: ChatHistoryPayload, current_ids:
 
         consent = await load_consent(account_id, aac_user_id)
         if _is_minor(consent) and not consent.get("consent_given_at"):
+            logging.info(f"record_chat_history: skipped for {account_id}/{aac_user_id} — minor without verified consent (is_minor_under_13={consent.get('is_minor_under_13')})")
             return JSONResponse(content={"message": "Chat history recording skipped — parental consent required."})
 
         timestamp = dt.now().isoformat()
