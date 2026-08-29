@@ -771,11 +771,12 @@ async function speakDisplayText() {
         console.log('Compose session updated directly from Speak Display:', textToSpeak);
     }
     
-    await announce(textToSpeak, "personal", !isComposeFlowRequested());
-    
-    // Record to speech history only when compose flow is not active
+    await announce(textToSpeak, "system", false);
+
+    // Record to speech history and learning pipeline only when not in compose mode
     if (!isComposeFlowRequested()) {
         recordToSpeechHistory(textToSpeak);
+        recordChatHistory(textToSpeak, null).catch(e => console.error('Failed to record freestyle utterance:', e));
     }
     
     // Pause scanning for the scanning interval duration, then reset to Go Back button
