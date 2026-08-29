@@ -3125,10 +3125,11 @@ Analyze the provided context to create helpful, personalized suggestions."""
                 if _use_learned and chat_narrative.get("extracted_facts"):
                     facts_text = []
                     for fact in chat_narrative["extracted_facts"]:
-                        confidence = fact.get("confidence", "medium")
                         fact_text = fact.get("fact", "")
                         mention_count = fact.get("mention_count", 1)
-                        facts_text.append(f"  • {fact_text} [{confidence} confidence, mentioned {mention_count}x]")
+                        sentiment = fact.get("sentiment", "likes")
+                        direction = "Likes" if sentiment == "likes" else "Does NOT like"
+                        facts_text.append(f"  • {direction}: {fact_text} (mentioned {mention_count}x)")
                     chat_context_parts.append("Extracted Facts:\n" + "\n".join(facts_text))
                 
                 # Add common greetings (to help avoid repetition)
@@ -12240,7 +12241,8 @@ async def _a7_queue_proposal(account_id: str, aac_user_id: str,
 
 
 async def a7_approve_proposal(account_id: str, aac_user_id: str,
-                               category: str, value: str, timestamp: Any) -> bool:
+                               category: str, value: str, timestamp: Any,
+                               sentiment: str = "likes") -> bool:
     """A7 Layer 5 — adult approval commits to profile and invalidates cache (A34).
 
     This is the ONLY path that writes to extracted_facts.
@@ -12249,10 +12251,20 @@ async def a7_approve_proposal(account_id: str, aac_user_id: str,
     facts: List[Dict[str, Any]] = narrative.get("extracted_facts", [])
     for fact in facts:
         if fact.get("category") == category and fact.get("fact", "").lower() == value.lower():
-            return False
+            if fact.get("sentiment") == sentiment:
+                return False  # exact duplicate
+            # Sentiment changed (user reversed preference) — update in place
+            fact["sentiment"] = sentiment
+            fact["first_mentioned"] = timestamp
+            narrative["extracted_facts"] = facts
+            narrative["last_updated"] = timestamp
+            await save_chat_derived_narrative(account_id, aac_user_id, narrative)
+            await cache_manager.invalidate_cache(account_id, aac_user_id)
+            return True
     facts.append({
         "fact": value,
         "category": category,
+        "sentiment": sentiment,
         "source": "learned",
         "first_mentioned": timestamp,
         "mention_count": 1,
@@ -12293,7 +12305,7 @@ async def maybe_propose_preference(account_id: str, aac_user_id: str,
             return
         consent = await load_consent(account_id, aac_user_id)
         if is_auto_approve_enabled(consent):
-            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp)
+            await a7_approve_proposal(account_id, aac_user_id, proposal["category"], proposal["value"], timestamp, proposal.get("sentiment", "likes"))
             _a7_record_metric("auto_approved", f'category="{proposal["category"]}"')
         elif await _a7_queue_proposal(account_id, aac_user_id, proposal, timestamp):
             _a7_record_metric("proposed", f'category="{proposal["category"]}"')
@@ -34558,7 +34570,7 @@ async def approve_learned_proposal_endpoint(
     if category not in _A7_EXTRACTION_CATEGORIES:
         raise HTTPException(status_code=400, detail=f"Unknown category: {category!r}")
     timestamp = dt.utcnow().isoformat()
-    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp)
+    committed = await a7_approve_proposal(account_id, aac_user_id, category, value, timestamp, sentiment)
     # Remove from pending queue
     pending = await _a7_load_pending_proposals(account_id, aac_user_id)
     proposals = pending.get("proposals", [])
