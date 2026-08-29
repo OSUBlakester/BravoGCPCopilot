@@ -771,7 +771,7 @@ async function speakDisplayText() {
         console.log('Compose session updated directly from Speak Display:', textToSpeak);
     }
     
-    await announce(textToSpeak, "system", false);
+    await announce(textToSpeak, "personal", !isComposeFlowRequested());
     
     // Record to speech history only when compose flow is not active
     if (!isComposeFlowRequested()) {
