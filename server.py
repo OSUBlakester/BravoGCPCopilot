@@ -2930,12 +2930,13 @@ class GeminiCacheManager:
         created_at: float,
         message_count: int = 0,
         chat_history_cached: bool = True,
+        consent_fingerprint: str = "",
     ):
         """Save cache info to Firestore with enough metadata to decide if drift checks apply."""
         try:
             expires_at = created_at + self.ttl_seconds
             doc_ref = self.db.collection(self.CACHE_COLLECTION).document(user_key)
-            
+
             await asyncio.to_thread(
                 doc_ref.set,
                 {
@@ -2946,6 +2947,7 @@ class GeminiCacheManager:
                     "ttl_seconds": self.ttl_seconds,
                     "message_count": message_count,
                     "chat_history_cached": bool(chat_history_cached),
+                    "consent_fingerprint": consent_fingerprint,
                 }
             )
             logging.info(
@@ -3548,6 +3550,13 @@ Undated Diary Entries (use cautiously, max 5):
         logging.warning(f"Cache for user '{user_key}' is cold or invalid. Warming up...")
         print(f"DEBUG: About to build BASE context", flush=True)
         try:
+            # Load consent before building so we can stamp the fingerprint on the cache record.
+            _warmup_consent = await load_consent(account_id, aac_user_id)
+            _warmup_fingerprint = (
+                f"e={int(is_personalization_enabled(_warmup_consent))},"
+                f"l={int(is_learning_enabled(_warmup_consent))}"
+            )
+
             # Build BASE context only - stable data for caching
             base_context = await self._build_base_context(account_id, aac_user_id)
 
@@ -3586,6 +3595,7 @@ Undated Diary Entries (use cautiously, max 5):
                 created_at,
                 message_count=0,
                 chat_history_cached=False,
+                consent_fingerprint=_warmup_fingerprint,
             )
             logging.warning(f"✅ Successfully warmed up cache for user '{user_key}'. Cache: {cached_content.name} (chat history NOT cached - in DELTA)")
 
@@ -3704,10 +3714,25 @@ Undated Diary Entries (use cautiously, max 5):
         """
         user_key = self._get_user_key(account_id, aac_user_id)
         cache_data = await self._load_cache_from_firestore(user_key)
-        
+
         if not cache_data:
             return {"should_rebuild": True, "reason": "no_cache", "drift": 0}
-        
+
+        # Consent fingerprint check: rebuild if personalization/learning flags have changed
+        # since the cache was built, or if the cache predates fingerprint tracking.
+        stored_fingerprint = cache_data.get("consent_fingerprint", "")
+        current_consent = await load_consent(account_id, aac_user_id)
+        current_fingerprint = (
+            f"e={int(is_personalization_enabled(current_consent))},"
+            f"l={int(is_learning_enabled(current_consent))}"
+        )
+        if stored_fingerprint != current_fingerprint:
+            logging.info(
+                f"Consent fingerprint mismatch for '{user_key}': "
+                f"cached={stored_fingerprint!r} current={current_fingerprint!r} — rebuilding."
+            )
+            return {"should_rebuild": True, "reason": "consent_changed", "drift": 0}
+
         messages_in_cache = cache_data.get('message_count', 0)
         chat_history_cached = cache_data.get('chat_history_cached')
 
