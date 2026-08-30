@@ -5327,24 +5327,38 @@ CREATIVITY BOOSTERS:
     )
 
     if use_fast_generation_profile:
-        estimated_max_output_tokens = min(768, max(320, requested_options_count * 28 + 120))
         temperature_value = 0.75
 
         if is_starter_question_prompt:
-            # Starter question prompts (What/Who/Where/When/Why/How) should be short and stable.
-            # Lowering output budget and temperature reduces long-tail generation latency variance.
-            estimated_max_output_tokens = min(estimated_max_output_tokens, max(240, requested_options_count * 14 + 60))
+            # Starter question prompts (What/Who/Where/When/Why/How) are short and stable.
+            # Return plain strings — they display as-is and don't need button summaries.
+            estimated_max_output_tokens = min(480, max(240, requested_options_count * 14 + 60))
             temperature_value = 0.45
-
-        json_format_instructions = f"""
+            json_format_instructions = f"""
 {vocab_instruction}
 
 CRITICAL FORMAT: Return ONLY a valid JSON array of strings with exactly {requested_options_count} items. Nothing else.
-Each string element must be a complete, natural-sounding spoken option (e.g., "Hello, how are you?", "I'm having a great day!").
-For jokes, include the punchline in the same string (e.g., "Why did the chicken cross the road? To get to the other side!").
-Do NOT return objects, do NOT include keys like "option", "summary", or "keywords" - the server will handle those automatically.
+Each string must be a complete, natural-sounding spoken option (e.g., "Hello, how are you?", "I'm having a great day!").
 No markdown, no code blocks, no commentary. Return ONLY the JSON array.
 Example: ["hello everyone", "good to see you", "what's going on"]"""
+        else:
+            # Standard fast path: include option + summary so buttons show meaningful labels.
+            estimated_max_output_tokens = min(1024, max(400, requested_options_count * 42 + 120))
+            json_format_instructions = f"""
+{vocab_instruction}
+
+CRITICAL FORMAT: Return ONLY a valid JSON array where each item has "option" and "summary" keys. Exactly {requested_options_count} items.
+The "option" key contains the FULL spoken option text.
+The "summary" key is a 3-5 word button label that captures the CORE TOPIC — not the first few words. Ask yourself: what is this option ABOUT?
+Good examples:
+- option: "Hello, how are you doing today?" → summary: "Hello today"
+- option: "I am feeling very happy today." → summary: "Feeling very happy"
+- option: "I want to go to the park." → summary: "Go to park"
+- option: "Let us go play a fun game." → summary: "Play a game"
+- option: "Have a wonderful day and goodbye!" → summary: "Wonderful goodbye"
+Bad: summary: "Hello, how are you" — just copies the start, not a useful label.
+For jokes, include question AND punchline in the same "option".
+No markdown, no code blocks. Return ONLY the JSON array."""
     else:
         estimated_max_output_tokens = max(768, min(2048, int(llm_options_value) * 140))
         temperature_value = 0.9
