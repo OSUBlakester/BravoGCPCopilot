@@ -3102,7 +3102,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
             context_parts.append(f"--- Friends & Family (Supporting Context) ---\n{json.dumps(context_data['friends_family'], indent=2)}\n")
         if context_data["settings"]:
             context_parts.append(f"--- User Settings (Supporting Context) ---\n{json.dumps(context_data['settings'], indent=2)}\n")
-        if context_data["birthdays"] and (context_data["birthdays"].get("userBirthdate") or context_data["birthdays"].get("friendsFamily")):
+        if _use_entered and context_data["birthdays"] and (context_data["birthdays"].get("userBirthdate") or context_data["birthdays"].get("friendsFamily")):
             context_parts.append(f"--- Birthdays (Supporting Context) ---\n{json.dumps(context_data['birthdays'], indent=2)}\n")
         
         # Vocabulary level instruction (replaces sending full pages/vocabulary lists)
