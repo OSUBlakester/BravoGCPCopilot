@@ -34379,6 +34379,7 @@ async def consent_control_endpoint(
             detail="Parental consent must be verified before enabling learning for a user under 13.",
         )
     await _a7_set_consent_control(account_id, aac_user_id, request_data.enabled)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
     return {"success": True, "learn_from_history": request_data.enabled}
 
 
@@ -34390,6 +34391,7 @@ async def consent_withdraw_endpoint(
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     await withdraw_consent(account_id, aac_user_id)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
     return {"success": True}
 
 
@@ -34402,6 +34404,7 @@ async def consent_personalization_endpoint(
     account_id = current_ids["account_id"]
     aac_user_id = current_ids["aac_user_id"]
     await set_use_entered_details(account_id, aac_user_id, request_data.enabled)
+    await cache_manager.invalidate_cache(account_id, aac_user_id)
     return {"success": True, "use_entered_details": request_data.enabled}
 
 
