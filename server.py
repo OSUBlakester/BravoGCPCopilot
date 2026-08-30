@@ -14722,22 +14722,26 @@ async def get_freestyle_word_prediction(
         freestyle_options = settings.get("FreestyleOptions", 20)  # Default to 20 if not set
         
         # Load user context for better predictions
-        user_info = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data={"narrative": ""}
+        user_info, _wp_consent = await asyncio.gather(
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data={"narrative": ""}
+            ),
+            load_consent(account_id, aac_user_id),
         )
-        
+        _wp_use_entered = is_personalization_enabled(_wp_consent)
+
         # Determine what we're predicting
         context_text = request.text.strip() if request.text else ""
         partial_word = request.spelling_word.strip() if request.spelling_word else ""
-        
+
         if not partial_word:
             return JSONResponse(content={"predictions": []})
-        
+
         # Create prompt for full word prediction with user context
-        user_context = user_info.get("narrative", "")
+        user_context = user_info.get("narrative", "") if _wp_use_entered else ""
         
         if context_text:
             prompt = f"Given the user context: '{user_context}' and the existing text: '{context_text}', provide up to {freestyle_options} complete words that start with '{partial_word}'. If '{partial_word}' is already a complete, common word that an AAC user might intend to say, include that exact word as the first line. Then include other longer completions that start with '{partial_word}'. Return only the words, one per line."
@@ -14801,13 +14805,17 @@ async def get_freestyle_word_options(
         configured_user_language = _normalize_locale_tag(str(settings.get("userLanguage", "en-US") or "en-US").strip()) or "en-US"
         
         # Load user context
-        user_info = await load_firestore_document(
-            account_id=account_id,
-            aac_user_id=aac_user_id,
-            doc_subpath="info/user_narrative",
-            default_data={"narrative": ""}
+        user_info, _wo_consent = await asyncio.gather(
+            load_firestore_document(
+                account_id=account_id,
+                aac_user_id=aac_user_id,
+                doc_subpath="info/user_narrative",
+                default_data={"narrative": ""}
+            ),
+            load_consent(account_id, aac_user_id),
         )
-        
+        _wo_use_entered = is_personalization_enabled(_wo_consent)
+
         user_current = await load_firestore_document(
             account_id=account_id,
             aac_user_id=aac_user_id,
@@ -14827,7 +14835,7 @@ async def get_freestyle_word_options(
         # Create context-aware prompt
         context_parts = []
         live_context_parts = []
-        if user_info.get("narrative"):
+        if _wo_use_entered and user_info.get("narrative"):
             context_parts.append(f"User info: {user_info['narrative']}")
         if user_current.get("location"):
             location_value = str(user_current['location']).strip()
@@ -19419,7 +19427,7 @@ async def generate_category_words(
     request_start_time = time.perf_counter()
 
     try:
-        settings, user_info, user_current = await asyncio.gather(
+        settings, user_info, user_current, _cw_consent = await asyncio.gather(
             load_settings_from_file(account_id, aac_user_id),
             load_firestore_document(
                 account_id=account_id,
@@ -19432,8 +19440,10 @@ async def generate_category_words(
                 aac_user_id=aac_user_id,
                 doc_subpath="info/current_state",
                 default_data=DEFAULT_USER_CURRENT.copy()
-            )
+            ),
+            load_consent(account_id, aac_user_id),
         )
+        _cw_use_entered = is_personalization_enabled(_cw_consent)
 
         configured_freestyle_options = settings.get("FreestyleOptions", 6)
         requested_freestyle_options = request.max_options if request.max_options is not None else configured_freestyle_options
@@ -19504,7 +19514,7 @@ async def generate_category_words(
         is_adjective_category = any(adj_cat in category_lower for adj_cat in adjective_only_categories)
 
         user_context_parts = []
-        if user_info.get("narrative"):
+        if _cw_use_entered and user_info.get("narrative"):
             user_context_parts.append(f"user={user_info['narrative']}")
         if user_current.get("location"):
             user_context_parts.append(f"location={user_current['location']}")
