@@ -12478,6 +12478,8 @@ _CONSENT_DOC_SUBPATH = "info/consent"
 _CONSENT_VERIFICATIONS_COLLECTION = "consent_verifications"
 _CONSENT_TOKEN_EXPIRY_DAYS = 7
 _CONSENT_SECOND_EMAIL_DELAY_DAYS = 5
+_MAX_CONSENT_TOKENS_PER_USER_PER_DAY = 5
+_MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_DAY = 3
 
 
 _CONSENT_CACHE_TTL_SECONDS = 45
@@ -12645,6 +12647,34 @@ async def _consent_create_verification(account_id: str, aac_user_id: str,
         firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION).document().set, doc
     )
     return token
+
+
+async def _count_recent_consent_tokens(
+    account_id: str,
+    aac_user_id: str,
+    parent_email: Optional[str] = None,
+    window_hours: int = 24,
+) -> int:
+    """Count consent tokens created in the last window_hours for this user (and optionally recipient).
+
+    Raises on any Firestore error — callers must treat an exception as fail-closed (enforce the limit).
+    Uses a datetime object for the >= comparison so it works against Firestore Timestamp fields.
+    Requires a composite index on (account_id, aac_user_id, created_at) [+ parent_email for
+    the recipient variant] in consent_verifications.
+    """
+    if not firestore_db:
+        raise RuntimeError("Firestore not available")
+    cutoff = dt.utcnow() - timedelta(hours=window_hours)
+    query = (
+        firestore_db.collection(_CONSENT_VERIFICATIONS_COLLECTION)
+        .where("account_id", "==", account_id)
+        .where("aac_user_id", "==", aac_user_id)
+        .where("created_at", ">=", cutoff)
+    )
+    if parent_email:
+        query = query.where("parent_email", "==", parent_email)
+    docs = await asyncio.to_thread(lambda: list(query.stream()))
+    return len(docs)
 
 
 async def _consent_find_verification(token: str) -> Optional[Tuple[Any, Dict[str, Any]]]:
@@ -34607,6 +34637,18 @@ async def consent_initiate_endpoint(
         await save_consent(account_id, aac_user_id, consent)
     child = (user_info_doc.get("name") or "your child").strip() or "your child"
     try:
+        user_count = await _count_recent_consent_tokens(account_id, aac_user_id)
+        if user_count >= _MAX_CONSENT_TOKENS_PER_USER_PER_DAY:
+            raise HTTPException(status_code=429, detail="Too many consent emails sent today. Please try again tomorrow.")
+        recipient_count = await _count_recent_consent_tokens(account_id, aac_user_id, parent_email=parent_email)
+        if recipient_count >= _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_DAY:
+            raise HTTPException(status_code=429, detail="Too many consent emails sent to this address today. Please try again tomorrow.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error("consent initiate: rate-limit check failed for %s/%s: %s", account_id, aac_user_id, e)
+        raise HTTPException(status_code=429, detail="Could not verify consent email rate limit.")
+    try:
         token = await _consent_create_verification(account_id, aac_user_id, parent_email)
     except Exception as e:
         logging.error("consent initiate: failed to create verification for %s/%s: %s",
@@ -34656,6 +34698,18 @@ async def consent_resend_endpoint(
             token = (docs[0].to_dict() or {}).get("token")
 
     if not token:
+        try:
+            user_count = await _count_recent_consent_tokens(account_id, aac_user_id)
+            if user_count >= _MAX_CONSENT_TOKENS_PER_USER_PER_DAY:
+                raise HTTPException(status_code=429, detail="Too many consent emails sent today. Please try again tomorrow.")
+            recipient_count = await _count_recent_consent_tokens(account_id, aac_user_id, parent_email=parent_email)
+            if recipient_count >= _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_DAY:
+                raise HTTPException(status_code=429, detail="Too many consent emails sent to this address today. Please try again tomorrow.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error("consent resend: rate-limit check failed for %s/%s: %s", account_id, aac_user_id, e)
+            raise HTTPException(status_code=429, detail="Could not verify consent email rate limit.")
         try:
             token = await _consent_create_verification(account_id, aac_user_id, parent_email)
         except Exception as e:
