@@ -2347,13 +2347,35 @@ def _build_option_search_text(item: Any) -> str:
 
 def _derive_llm_option_summary(option_text: str, summary: Optional[str] = None) -> str:
     summary_text = re.sub(r"\s+", " ", str(summary or "").strip())
+    lm_provided = bool(summary_text)
     if not summary_text:
         summary_text = re.sub(r"[.!?]+$", "", option_text.strip())
 
     words = [word for word in summary_text.split() if word]
     if len(words) <= 5:
         return " ".join(words)
-    return " ".join(words[:5])
+
+    # LLM gave a summary longer than 5 words — just truncate it.
+    if lm_provided:
+        return " ".join(words[:5])
+
+    # Server-generated fallback: skip leading filler words so the label
+    # reflects the topic rather than the grammatical opening of the sentence.
+    _FILLER = {
+        "i", "a", "an", "the", "my", "we", "you", "do", "did",
+        "am", "is", "are", "was", "were", "have", "has", "had",
+        "will", "would", "can", "could", "it", "this", "that",
+        "love", "like", "enjoy", "want", "need", "use",
+    }
+    content_words: List[str] = []
+    for word in words:
+        clean = re.sub(r"[^a-z0-9']", "", word.lower())
+        if clean not in _FILLER or content_words:
+            content_words.append(word)
+        if len(content_words) >= 5:
+            break
+
+    return " ".join(content_words) if content_words else " ".join(words[:5])
 
 
 def _derive_llm_option_keywords(
@@ -5330,8 +5352,14 @@ Example: ["hello everyone", "good to see you", "what's going on"]"""
 {vocab_instruction}
 
 CRITICAL: Format your response as a JSON list where each item has "option", "summary", and "keywords" keys.
-If the generated option is more than 5 words, the "summary" key should be a 3-5 word abbreviation of each option, including the exact key words from the option. If the option is 5 words or less, the "summary" key should contain the exact same FULL text as the "option" key.
 The "option" key should contain the FULL option text.
+The "summary" key must capture the CORE TOPIC or MEANING of the option — NOT just the first few words. Think: what is this option ABOUT? What distinctive words make it recognizable as a button label?
+- "I love to go to the park, what is your favorite place?" → summary: "Love the park"
+- "I am feeling happy today, how about you?" → summary: "Feeling happy today"
+- "My favorite food is pizza, what do you like to eat?" → summary: "Favorite food pizza"
+- "I use a wheelchair to get around, how do you get around?" → summary: "Use a wheelchair"
+- BAD: "I love to go to" — this just copies the start, tells the user nothing
+Keep summaries 3-5 words. If the option is 5 words or fewer, use the full option text.
 The "keywords" key should be a list of 3-5 keywords that include BOTH the specific descriptive words from the generated option AND relevant emotional/contextual terms for image matching. Always include the key descriptive words from your generated text (like "fantastic", "delightful", "cloud", "bursting", etc.) along with relevant emotional terms. For example: ["fantastic", "amazing", "positive", "excited"], ["delightful", "wonderful", "happy", "joyful"], or ["cloud", "nine", "elated", "high"].
 IMPORTANT FOR JOKES: If generating jokes, ALWAYS include both the question AND punchline in the SAME "option". Format them as: "Question? Punchline!"
 
