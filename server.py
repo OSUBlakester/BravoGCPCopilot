@@ -34497,6 +34497,90 @@ async def consent_auto_approve_endpoint(
     return {"success": True, "auto_approve_learned": request_data.enabled}
 
 
+def _build_consent_email_text(child: str, verify_url: str, ttl_days: int) -> str:
+    return (
+        f"Hi,\n\n"
+        f"Someone has set up a Bravo profile for {child} and listed you as the parent or guardian.\n\n"
+        "Bravo is a communication app. Before we collect anything about "
+        f"{child}, the law says we need your permission — and we would want it anyway.\n\n"
+        "WHAT WE COLLECT\n"
+        f"Only what you or {child} choose to enter: their preferred name, favourite topics\n"
+        "and interests, names of family and friends, places they go and things they do,\n"
+        "and words you add. All of it is optional. Bravo works without any of it.\n\n"
+        "WHAT WE DO WITH IT\n"
+        f"One thing: suggesting words and phrases that fit {child}, so communicating takes\n"
+        "less effort. Bravo offers suggestions either way — what these details change is\n"
+        f"whether the suggestions fit {child} in particular.\n\n"
+        "A RECORD OF WHAT'S USED AND WHAT'S SAID\n"
+        f"Bravo keeps a record of the buttons and pages {child} uses AND the words and\n"
+        "phrases they speak through the app, with the time of each. This lets you — or a\n"
+        f"speech therapist you give access to — see how {child}'s communication is\n"
+        "developing, and whether the pages you set up are actually being used.\n\n"
+        "We are being plain about this because it is more than most apps keep: it is a\n"
+        f"record of what {child} said, not a count of button presses. You can switch it off\n"
+        "at any time in Settings.\n\n"
+        "LEARNING — OFF UNLESS YOU TURN IT ON\n"
+        f"Bravo can also notice preferences from what {child} says — a favourite food, a\n"
+        "favourite place — and offer to remember them. This starts switched off. If you\n"
+        "turn it on, Bravo asks before saving anything, every time. It saves short notes,\n"
+        "never recordings or transcripts.\n\n"
+        "WHAT WE NEVER DO\n"
+        "We never sell your child's information. We never use it to train AI models. We\n"
+        "never show ads. We never share it with anyone except the providers that run our\n"
+        "service.\n\n"
+        "YOUR RIGHTS\n"
+        f"At any time you can see everything we hold about {child}, correct it, download\n"
+        "it, delete it, or withdraw this consent.\n\n"
+        "To give your permission, open this link:\n"
+        f"{verify_url}\n\n"
+        "You are agreeing to what is described above. Nothing is switched on\n"
+        f"automatically — after you confirm, personalization and learning both start off,\n"
+        "and whoever sets Bravo up can turn them on in Settings.\n\n"
+        f"This link works for {ttl_days} days. If you did not expect this\n"
+        "email, you can ignore it — nothing will be collected.\n\n"
+        "Questions? Just reply to this message.\n\n"
+        "— The Bravo team\n"
+        "talkwithbravo.com"
+    )
+
+
+def _build_consent_email_html(child: str, verify_url: str, ttl_days: int, inner_only: bool = False) -> str:
+    c = child
+    sections = (
+        f"<p>Hi,</p>"
+        f"<p>Someone has set up a Bravo profile for <strong>{c}</strong> and listed you as the parent or guardian.</p>"
+        f"<p>Bravo is a communication app. Before we collect anything about {c}, the law says we need your permission — and we would want it anyway.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>What we collect</h3>"
+        f"<p>Only what you or {c} choose to enter: their preferred name, favourite topics and interests, names of family and friends, places they go and things they do, and words you add. All of it is optional. Bravo works without any of it.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>What we do with it</h3>"
+        f"<p>One thing: suggesting words and phrases that fit {c}, so communicating takes less effort. Bravo offers suggestions either way — what these details change is whether the suggestions fit {c} in particular.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>A record of what&rsquo;s used and what&rsquo;s said</h3>"
+        f"<p>Bravo keeps a record of the buttons and pages {c} uses <strong>and</strong> the words and phrases they speak through the app, with the time of each. This lets you — or a speech therapist you give access to — see how {c}&rsquo;s communication is developing, and whether the pages you set up are actually being used.</p>"
+        f"<p>We are being plain about this because it is more than most apps keep: it is a record of what {c} said, not a count of button presses. You can switch it off at any time in Settings.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>Learning — off unless you turn it on</h3>"
+        f"<p>Bravo can also notice preferences from what {c} says — a favourite food, a favourite place — and offer to remember them. This starts switched off. If you turn it on, Bravo asks before saving anything, every time. It saves short notes, never recordings or transcripts.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>What we never do</h3>"
+        "<p>We never sell your child&rsquo;s information. We never use it to train AI models. We never show ads. We never share it with anyone except the providers that run our service.</p>"
+        "<h3 style='font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#444;margin:28px 0 6px'>Your rights</h3>"
+        f"<p>At any time you can see everything we hold about {c}, correct it, download it, delete it, or withdraw this consent.</p>"
+        "<p style='margin:32px 0 8px'>To give your permission:</p>"
+        f"<p style='margin:0 0 32px'><a href='{verify_url}' "
+        "style='background:#2e7d32;color:#fff;padding:14px 28px;border-radius:6px;"
+        "text-decoration:none;font-weight:600;display:inline-block'>Confirm consent</a></p>"
+        "<p>You are agreeing to what is described above. Nothing is switched on automatically — after you confirm, personalization and learning both start off, and whoever sets Bravo up can turn them on in Settings.</p>"
+        f"<p style='color:#888;font-size:12px;margin-top:32px'>This link works for {ttl_days} days. If you did not expect this email, you can ignore it — nothing will be collected.</p>"
+        "<p style='color:#888;font-size:12px'>Questions? Just reply to this message.</p>"
+        "<p>— The Bravo team<br><a href='https://talkwithbravo.com' style='color:#888;font-size:12px'>talkwithbravo.com</a></p>"
+    )
+    if inner_only:
+        return sections
+    return (
+        "<html><body style='font-family:sans-serif;max-width:600px;color:#1a1a1a;line-height:1.6'>"
+        + sections
+        + "</body></html>"
+    )
+
+
 @app.post("/api/consent/initiate")
 async def consent_initiate_endpoint(
     request_data: ConsentInitiateRequest,
@@ -34511,10 +34595,14 @@ async def consent_initiate_endpoint(
     if not APP_PUBLIC_BASE_URL:
         raise HTTPException(status_code=500, detail="APP_PUBLIC_BASE_URL is not configured.")
     # COPPA: the initiate flow always means the user is under 13 — persist the flag
-    consent = await load_consent(account_id, aac_user_id)
+    consent, user_info_doc = await asyncio.gather(
+        load_consent(account_id, aac_user_id),
+        load_firestore_document(account_id, aac_user_id, "info/user_narrative", {"name": ""}),
+    )
     if not consent.get("is_minor_under_13"):
         consent["is_minor_under_13"] = True
         await save_consent(account_id, aac_user_id, consent)
+    child = (user_info_doc.get("name") or "your child").strip() or "your child"
     try:
         token = await _consent_create_verification(account_id, aac_user_id, parent_email)
     except Exception as e:
@@ -34522,39 +34610,11 @@ async def consent_initiate_endpoint(
                       account_id, aac_user_id, e)
         raise HTTPException(status_code=500, detail="Could not create consent request.")
     verify_url = f"{APP_PUBLIC_BASE_URL}/verify-consent?t={token}"
-    body_text = (
-        "Hi,\n\n"
-        "You are receiving this email because someone requested parental consent for "
-        "Bravo to learn from your child's conversations.\n\n"
-        "If this was you, click the link below to confirm:\n"
-        f"{verify_url}\n\n"
-        "Bravo learns everyday preferences — such as favorite foods, activities, and topics — "
-        "to personalize your child's experience. No health, personal, or sensitive information "
-        "is ever stored.\n\n"
-        f"This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days. If you did not request this, "
-        "you can ignore this email.\n\n"
-        "— The Bravo team"
-    )
-    body_html = (
-        "<html><body style='font-family:sans-serif;max-width:540px;color:#1a1a1a'>"
-        "<p>Hi,</p>"
-        "<p>You are receiving this email because someone requested parental consent for "
-        "Bravo to learn from your child&rsquo;s conversations.</p>"
-        "<p>If this was you, click the button below to confirm:</p>"
-        f"<p style='margin:24px 0'><a href='{verify_url}' "
-        "style='background:#2e7d32;color:#fff;padding:12px 24px;border-radius:6px;"
-        "text-decoration:none'>Confirm consent</a></p>"
-        "<p>Bravo learns everyday preferences &mdash; such as favorite foods, activities, "
-        "and topics &mdash; to personalize your child's experience. No health, personal, "
-        "or sensitive information is ever stored.</p>"
-        f"<p style='color:#888;font-size:12px'>This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days. "
-        "If you did not request this, you can ignore this email.</p>"
-        "<p>— The Bravo team</p>"
-        "</body></html>"
-    )
+    body_text = _build_consent_email_text(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS)
+    body_html = _build_consent_email_html(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS)
     sent = await send_system_email(
         to_address=parent_email,
-        subject="Action required: Bravo parental consent",
+        subject=f"Action required: Bravo parental consent for {child}",
         body_text=body_text,
         body_html=body_html,
         purpose="consent_first_email",
@@ -34600,28 +34660,19 @@ async def consent_resend_endpoint(
                           account_id, aac_user_id, e)
             raise HTTPException(status_code=500, detail="Could not create consent request.")
 
+    user_info_doc = await load_firestore_document(account_id, aac_user_id, "info/user_narrative", {"name": ""})
+    child = (user_info_doc.get("name") or "your child").strip() or "your child"
     verify_url = f"{APP_PUBLIC_BASE_URL}/verify-consent?t={token}"
-    body_text = (
-        "Hi,\n\n"
-        "This is a resend of your Bravo parental consent request.\n\n"
-        "Click the link below to confirm:\n"
-        f"{verify_url}\n\n"
-        f"This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days.\n\n"
-        "— The Bravo team"
-    )
+    body_text = "This is a follow-up to your Bravo parental consent request.\n\n" + _build_consent_email_text(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS)
     body_html = (
-        "<html><body style='font-family:sans-serif;max-width:540px;color:#1a1a1a'>"
-        "<p>This is a resend of your Bravo parental consent request.</p>"
-        f"<p style='margin:24px 0'><a href='{verify_url}' "
-        "style='background:#2e7d32;color:#fff;padding:12px 24px;border-radius:6px;"
-        "text-decoration:none'>Confirm consent</a></p>"
-        f"<p style='color:#888;font-size:12px'>This link expires in {_CONSENT_TOKEN_EXPIRY_DAYS} days.</p>"
-        "<p>— The Bravo team</p>"
-        "</body></html>"
+        "<html><body style='font-family:sans-serif;max-width:600px;color:#1a1a1a'>"
+        "<p style='color:#555;font-size:13px;margin-bottom:24px'>This is a follow-up to your Bravo parental consent request.</p>"
+        + _build_consent_email_html(child, verify_url, _CONSENT_TOKEN_EXPIRY_DAYS, inner_only=True)
+        + "</body></html>"
     )
     sent = await send_system_email(
         to_address=parent_email,
-        subject="Bravo parental consent (resend)",
+        subject=f"Bravo parental consent for {child} (resend)",
         body_text=body_text,
         body_html=body_html,
         purpose="consent_resend_email",
