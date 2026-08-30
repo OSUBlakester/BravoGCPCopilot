@@ -3112,9 +3112,10 @@ Analyze the provided context to create helpful, personalized suggestions."""
             logging.info(f"📚 Using vocabulary level: {vocabulary_level} (instruction-based, not full pages)")
         
         # AI-extracted chat narrative (replaces old chat history to save tokens)
-        if context_data["chat_narrative"]:
+        if _use_learned and context_data["chat_narrative"]:
             chat_narrative = context_data["chat_narrative"]
-            if chat_narrative.get("narrative_text") or chat_narrative.get("extracted_facts"):
+            if (chat_narrative.get("narrative_text") or chat_narrative.get("extracted_facts")
+                    or chat_narrative.get("recent_greetings") or chat_narrative.get("answered_questions")):
                 chat_context_parts = ["--- User Communication Patterns (from Chat History) ---"]
                 
                 # Add narrative summary
@@ -3203,6 +3204,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
         tasks = {
             "user_current": load_firestore_document(account_id, aac_user_id, "info/current_state", DEFAULT_USER_CURRENT),
             "chat_history": load_recent_chat_history(account_id, aac_user_id, days=CHAT_HISTORY_ACTIVE_DAYS),
+            "consent": load_consent(account_id, aac_user_id),
         }
         if include_rich_context:
             tasks["birthdays"] = load_birthdays_from_file(account_id, aac_user_id)
@@ -3215,11 +3217,14 @@ Analyze the provided context to create helpful, personalized suggestions."""
         context_data.setdefault("birthdays", {})
         context_data.setdefault("friends_family", {})
         context_data.setdefault("diary", [])
-        
+
+        _consent = context_data.get("consent") or {}
+        _use_entered = is_personalization_enabled(_consent)
+
         delta_parts = ["=== DYNAMIC CONTEXT (Current Session Data) ==="]
         
         # CURRENT MOOD - High Priority, changes frequently
-        if context_data["user_info"]:
+        if _use_entered and context_data["user_info"]:
             current_mood = context_data['user_info'].get('currentMood', 'Not set')
             logging.info(f"🎭 MOOD DEBUG: Retrieved mood value = '{current_mood}' from user_info for {account_id}/{aac_user_id}")
             
@@ -3271,7 +3276,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
         
         # Current situation - location, people, activity
         if context_data["user_current"]:
-            if not compose_mode:
+            if not compose_mode and _use_entered:
                 current_parts = []
                 current_parts.extend([
                     f"Location: {context_data['user_current'].get('location', 'Unknown')}",
@@ -3318,8 +3323,8 @@ Analyze the provided context to create helpful, personalized suggestions."""
         today_date = dt.now().date()
         current_date_str = today_date.strftime('%Y-%m-%d')
         celebrations_context = _build_upcoming_celebrations_context(
-            birthday_data=context_data.get("birthdays") or {},
-            friends_family_data=context_data.get("friends_family") or {},
+            birthday_data=context_data.get("birthdays") if _use_entered else {},
+            friends_family_data=context_data.get("friends_family") if _use_entered else {},
             settings_data=context_data.get("settings") or {},
             today_date=today_date,
             days_ahead=60,
@@ -3331,7 +3336,7 @@ Analyze the provided context to create helpful, personalized suggestions."""
             "⚠️ IMPORTANT: Use this date to determine if diary entries are recent (past), current (today), or future events.\n"
         )
 
-        if include_rich_context and context_data["diary"]:
+        if _use_entered and include_rich_context and context_data["diary"]:
             def parse_diary_date(entry: Dict) -> Optional[date]:
                 if not isinstance(entry, dict):
                     return None
@@ -3458,7 +3463,7 @@ Undated Diary Entries (use cautiously, max 5):
             "greeting", "hello", "hi", "good morning", "good afternoon", "good evening",
             "plan", "plans", "upcoming", "going on", "birthday", "holiday", "celebrate", "celebration"
         ]
-        if include_rich_context and any(keyword in query_hint_lower for keyword in celebration_keywords):
+        if _use_entered and include_rich_context and any(keyword in query_hint_lower for keyword in celebration_keywords):
             celebrations_context += (
                 "\n⚠️ HIGH PRIORITY FOR THIS REQUEST: The prompt indicates greetings/plans/celebrations. "
                 "Prefer options that reference relevant upcoming birthdays/holidays naturally and in first person."
