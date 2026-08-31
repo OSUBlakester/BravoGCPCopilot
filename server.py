@@ -12478,8 +12478,8 @@ _CONSENT_DOC_SUBPATH = "info/consent"
 _CONSENT_VERIFICATIONS_COLLECTION = "consent_verifications"
 _CONSENT_TOKEN_EXPIRY_DAYS = 7
 _CONSENT_SECOND_EMAIL_DELAY_DAYS = 5
-_MAX_CONSENT_TOKENS_PER_USER_PER_DAY = 5
-_MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_DAY = 3
+_MAX_CONSENT_TOKENS_PER_USER_PER_DAY = 10
+_MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_HOUR = 3
 
 
 _CONSENT_CACHE_TTL_SECONDS = 45
@@ -34640,9 +34640,9 @@ async def consent_initiate_endpoint(
         user_count = await _count_recent_consent_tokens(account_id, aac_user_id)
         if user_count >= _MAX_CONSENT_TOKENS_PER_USER_PER_DAY:
             raise HTTPException(status_code=429, detail="Too many consent emails sent today. Please try again tomorrow.")
-        recipient_count = await _count_recent_consent_tokens(account_id, aac_user_id, parent_email=parent_email)
-        if recipient_count >= _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_DAY:
-            raise HTTPException(status_code=429, detail="Too many consent emails sent to this address today. Please try again tomorrow.")
+        recipient_count = await _count_recent_consent_tokens(account_id, aac_user_id, parent_email=parent_email, window_hours=1)
+        if recipient_count >= _MAX_CONSENT_TOKENS_PER_RECIPIENT_PER_HOUR:
+            raise HTTPException(status_code=429, detail="Too many consent emails sent to this address. Please wait an hour before trying again.")
     except HTTPException:
         raise
     except Exception as e:
