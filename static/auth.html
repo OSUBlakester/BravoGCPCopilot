@@ -2779,13 +2779,16 @@
 
             editAccountButton.addEventListener('click', async () => {
                 try {
-                    // Fetch current account data
+                    // Fetch current account data (admin fetches target account's data)
+                    const adminTargetAccountId = sessionStorage.getItem('adminTargetAccountId') || sessionStorage.getItem('adminSelectedAccountId');
+                    const detailsHeaders = {
+                        'Authorization': `Bearer ${idToken}`,
+                        'Content-Type': 'application/json'
+                    };
+                    if (adminTargetAccountId) detailsHeaders['X-Admin-Target-Account'] = adminTargetAccountId;
                     const response = await fetch('/api/account/details', {
                         method: 'GET',
-                        headers: {
-                            'Authorization': `Bearer ${idToken}`,
-                            'Content-Type': 'application/json'
-                        }
+                        headers: detailsHeaders
                     });
 
                     if (response.ok) {

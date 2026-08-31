@@ -10103,23 +10103,48 @@ class SelectAccountRequest(BaseModel):
 
 # NEW: Get account details for editing
 @app.get("/api/account/details")
-async def get_account_details(current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)]):
-    """Get account details for editing."""
+async def get_account_details(
+    current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
+    x_admin_target_account: str = Header(None, alias="X-Admin-Target-Account"),
+):
+    """Get account details for editing. Admins may pass X-Admin-Target-Account to read a target account."""
     global firestore_db
     if not firestore_db:
         raise HTTPException(status_code=503, detail="Firestore DB client not initialized.")
-    
+
     try:
-        account_id = current_account["account_id"]
-        account_doc_ref = firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(account_id)
-        account_doc = await asyncio.to_thread(account_doc_ref.get)
-        
-        if not account_doc.exists:
-            raise HTTPException(status_code=404, detail="Account not found")
-        
-        account_data = account_doc.to_dict()
-        
-        # Return only the fields that can be edited
+        caller_account_id = current_account["account_id"]
+
+        # Resolve which account's details to return.
+        if x_admin_target_account:
+            # Verify the caller is the admin before exposing another account's data.
+            caller_doc = await asyncio.to_thread(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(caller_account_id).get
+            )
+            caller_data = caller_doc.to_dict() if caller_doc.exists else {}
+            caller_email = caller_data.get("email") or current_account.get("email", "")
+            if caller_email != "admin@talkwithbravo.com":
+                raise HTTPException(status_code=403, detail="Access denied: admin privileges required.")
+
+            target_doc = await asyncio.to_thread(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(x_admin_target_account).get
+            )
+            if not target_doc.exists:
+                raise HTTPException(status_code=404, detail="Target account not found")
+
+            target_data = target_doc.to_dict() or {}
+            if not target_data.get("allow_admin_access", False):
+                raise HTTPException(status_code=403, detail="Access denied to target account")
+
+            account_data = target_data
+        else:
+            account_doc = await asyncio.to_thread(
+                firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).document(caller_account_id).get
+            )
+            if not account_doc.exists:
+                raise HTTPException(status_code=404, detail="Account not found")
+            account_data = account_doc.to_dict()
+
         return {
             "email": account_data.get("email", ""),
             "account_name": account_data.get("account_name", ""),
@@ -10127,7 +10152,7 @@ async def get_account_details(current_account: Annotated[Dict[str, str], Depends
             "phone": account_data.get("phone", ""),
             "therapist_email": account_data.get("therapist_email", ""),
             "is_therapist": account_data.get("is_therapist", False),
-            "allow_admin_access": account_data.get("allow_admin_access", False)
+            "allow_admin_access": account_data.get("allow_admin_access", False),
         }
     except HTTPException:
         raise
