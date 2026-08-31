@@ -6430,6 +6430,7 @@ class UserCurrentState(BaseModel): location: Optional[str] = ""; people: Optiona
 # Background tasks
 cleanup_task = None
 consent_email_task = None
+activity_sweep_task = None
 
 async def periodic_cache_cleanup():
     """Periodic background task to clean up expired caches every hour."""
@@ -6526,9 +6527,90 @@ async def periodic_consent_second_email() -> None:
             logging.error("Error in periodic_consent_second_email: %s", e, exc_info=True)
 
 
+async def _sweep_stale_activity_for_user(account_id: str, aac_user_id: str) -> int:
+    """Delete activity log documents older than ACTIVITY_LOG_RETENTION_DAYS for one user.
+
+    Returns the number of documents deleted.
+    """
+    if not firestore_db:
+        return 0
+    cutoff = dt.now(timezone.utc) - timedelta(days=ACTIVITY_LOG_RETENTION_DAYS)
+    collection_ref = firestore_db.collection(
+        f"{FIRESTORE_ACCOUNTS_COLLECTION}/{account_id}"
+        f"/{FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION}/{aac_user_id}/button_activity_log"
+    )
+    docs = await asyncio.to_thread(lambda: list(collection_ref.stream()))
+    to_delete = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        ts_raw = data.get("timestamp")
+        if not ts_raw:
+            to_delete.append(doc.reference)
+            continue
+        try:
+            entry_dt = dt.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+            if entry_dt < cutoff:
+                to_delete.append(doc.reference)
+        except (ValueError, TypeError):
+            to_delete.append(doc.reference)
+
+    for ref in to_delete:
+        await asyncio.to_thread(ref.delete)
+    return len(to_delete)
+
+
+async def _sweep_all_stale_activity() -> None:
+    """Iterate every account/user and delete activity log entries outside the retention window."""
+    if not firestore_db:
+        return
+    try:
+        accounts = await asyncio.to_thread(
+            lambda: list(firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION).stream())
+        )
+        total_deleted = 0
+        for account_doc in accounts:
+            account_id = account_doc.id
+            try:
+                users_ref = (
+                    firestore_db.collection(FIRESTORE_ACCOUNTS_COLLECTION)
+                    .document(account_id)
+                    .collection(FIRESTORE_ACCOUNT_USERS_SUBCOLLECTION)
+                )
+                users = await asyncio.to_thread(lambda: list(users_ref.stream()))
+                for user_doc in users:
+                    try:
+                        deleted = await _sweep_stale_activity_for_user(account_id, user_doc.id)
+                        total_deleted += deleted
+                    except Exception as e:
+                        logging.warning(
+                            "Activity sweep: error for %s/%s: %s", account_id, user_doc.id, e
+                        )
+            except Exception as e:
+                logging.warning("Activity sweep: error listing users for account %s: %s", account_id, e)
+        if total_deleted:
+            logging.info("Activity sweep: deleted %d stale entries across all profiles", total_deleted)
+        else:
+            logging.info("Activity sweep: no stale entries found")
+    except Exception as e:
+        logging.error("Activity sweep: unexpected error: %s", e, exc_info=True)
+
+
+async def periodic_activity_sweep() -> None:
+    """Background job: sweep stale activity log entries once per day."""
+    await asyncio.sleep(60)  # short initial delay so startup settles first
+    while True:
+        try:
+            await _sweep_all_stale_activity()
+        except Exception as e:
+            logging.error("periodic_activity_sweep: unexpected error: %s", e, exc_info=True)
+        await asyncio.sleep(24 * 60 * 60)  # run once per day
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global cleanup_task, consent_email_task
+    global cleanup_task, consent_email_task, activity_sweep_task
     
     # Code to run on startup
     logging.info("Application startup: Initializing shared backend services...")
@@ -6543,6 +6625,8 @@ async def lifespan(app: FastAPI):
     logging.info("✅ Started periodic cache cleanup task (runs every hour)")
     consent_email_task = asyncio.create_task(periodic_consent_second_email())
     logging.info("✅ Started periodic consent second-email task (runs every hour)")
+    activity_sweep_task = asyncio.create_task(periodic_activity_sweep())
+    logging.info("✅ Started periodic activity log sweep task (runs once per day)")
 
     # Warm the static image index in the background so new profiles don't wait.
     # Runs automatically on every cold start; a no-op if the index is already valid.
@@ -6572,6 +6656,12 @@ async def lifespan(app: FastAPI):
         consent_email_task.cancel()
         try:
             await consent_email_task
+        except asyncio.CancelledError:
+            pass
+    if activity_sweep_task:
+        activity_sweep_task.cancel()
+        try:
+            await activity_sweep_task
         except asyncio.CancelledError:
             pass
     logging.info("Application shutdown complete.")
@@ -21172,6 +21262,19 @@ async def trigger_consent_second_emails_endpoint(
         return {"success": True}
     except Exception as e:
         logging.error("Admin trigger consent second-email failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/activity/sweep-stale")
+async def trigger_activity_sweep_endpoint(
+    token_info: Annotated[Dict[str, str], Depends(verify_admin_user)],
+):
+    """Manually trigger the activity log retention sweep across all profiles."""
+    try:
+        await _sweep_all_stale_activity()
+        return {"success": True}
+    except Exception as e:
+        logging.error("Admin trigger activity sweep failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
