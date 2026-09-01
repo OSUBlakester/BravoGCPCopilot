@@ -7574,6 +7574,8 @@ function setupKeyboardListener() {
         }
 
         if (isSpaceKey) {
+            const tag = document.activeElement?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
             event.preventDefault();
             handleSpacebarPress();
         }
