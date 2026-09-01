@@ -13179,6 +13179,18 @@ def _display_image_url(image_url: str | None = None, storage_path: str | None = 
         return f"/api/image-proxy?path={quote(path, safe='')}"
 
 
+def _rewrite_image_urls(obj):
+    """Recursively rewrite all image_url fields in dicts/lists through _display_image_url."""
+    if isinstance(obj, dict):
+        if "image_url" in obj and obj["image_url"]:
+            obj["image_url"] = _display_image_url(obj["image_url"], obj.get("storage_path"))
+        for v in obj.values():
+            _rewrite_image_urls(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _rewrite_image_urls(item)
+
+
 @app.get("/api/image-proxy")
 async def proxy_custom_image(
     path: str,
@@ -23253,7 +23265,7 @@ async def button_symbol_search(
                         # Convert image format to symbol format for compatibility
                         symbol_data = {
                             'id': image_id,
-                            'url': image.get('image_url'),
+                            'url': _display_image_url(image.get('image_url'), image.get('storage_path')),
                             'name': image.get('subconcept', image.get('concept', 'BravoImage')),
                             'description': f"Bravo Image: {image.get('subconcept', '')}",
                             'tags': tags,
@@ -23462,7 +23474,7 @@ async def button_symbol_search(
                         # Convert to symbol format for compatibility
                         symbol_data = {
                             'id': custom_image_id,
-                            'url': custom_image.get('image_url'),
+                            'url': _display_image_url(custom_image.get('image_url'), custom_image.get('storage_path')),
                             'name': custom_image.get('subconcept', custom_image.get('concept', 'Custom Image')),
                             'description': f"Custom Image: {custom_image.get('subconcept', '')}",
                             'tags': tags,
@@ -29417,6 +29429,7 @@ async def get_tap_interface_config(
 
         config_response = dict(config_data)
         config_response['buttons'] = compose_legacy_buttons_from_boards_menu(config_data)
+        _rewrite_image_urls(config_response)
         return JSONResponse(content=config_response)
     except Exception as e:
         logging.error(f"Error getting tap interface config: {e}")
@@ -29736,9 +29749,11 @@ async def list_tap_boards(
 
         boards = config_data.get('boards') if isinstance(config_data.get('boards'), list) else []
         board_settings = config_data.get('board_settings') if isinstance(config_data.get('board_settings'), dict) else {}
+        boards_out = [b for b in boards if isinstance(b, dict)]
+        _rewrite_image_urls(boards_out)
         return JSONResponse(content={
-            'boards': [b for b in boards if isinstance(b, dict)],
-            'count': len(boards),
+            'boards': boards_out,
+            'count': len(boards_out),
             'board_settings': {
                 'max_columns': int(board_settings.get('max_columns', 12) or 12),
                 'max_rows': int(board_settings.get('max_rows', 7) or 7),
@@ -29777,6 +29792,7 @@ async def get_tap_board(
         if not board:
             raise HTTPException(status_code=404, detail='Board not found')
 
+        _rewrite_image_urls(board)
         return JSONResponse(content={'board': board, 'board_settings': board_settings})
     except HTTPException:
         raise
