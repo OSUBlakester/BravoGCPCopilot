@@ -46,6 +46,7 @@ steps:
       - '300'
       - '--port'
       - '8080'
+      - '--cpu-boost'
 
 # Images to be pushed to Google Container Registry
 images:
