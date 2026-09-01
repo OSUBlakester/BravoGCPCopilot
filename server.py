@@ -13141,23 +13141,25 @@ def _gcs_storage_path_from_url(image_url: str) -> str | None:
 def _display_image_url(image_url: str | None = None, storage_path: str | None = None) -> str | None:
     """Return a browser-loadable URL for a GCS image.
 
-    Cloud Run uses Compute Engine credentials that cannot sign blobs without
-    extra IAM setup, so we always route through the authenticated image-proxy
-    endpoint rather than attempting signed URLs.
-    """
-    from urllib.parse import quote
+    The main AAC images bucket has legacyObjectReader for allUsers (objects are
+    readable by anyone with the URL, but the bucket is not listable), so we
+    return the raw public storage.googleapis.com URL. <img> tags can load it
+    directly without any auth header.
 
+    Custom-images in a future private bucket will need signed URLs here;
+    branch on storage_path prefix when that bucket is introduced.
+    """
     if storage_path:
-        return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+        if not AAC_IMAGES_BUCKET_NAME:
+            return image_url
+        return f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
 
     if not image_url:
         return image_url
 
-    path = _gcs_storage_path_from_url(image_url)
-    if path is None:
-        return image_url  # not a GCS URL we own — return as-is
-
-    return f"/api/image-proxy?path={quote(path, safe='')}"
+    # Already a public GCS URL — return as-is (includes both our bucket URLs
+    # and any other public image URLs stored before the path-based approach).
+    return image_url
 
 
 def _rewrite_image_urls(obj):
