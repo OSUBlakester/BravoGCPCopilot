@@ -1306,38 +1306,6 @@
         contactModal.classList.add('hidden');
     });
 
-    // Handle contact form submission
-    contactForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        supportSuccess.classList.add('hidden');
-        supportError.classList.add('hidden');
-        
-        try {
-            const formData = new FormData(contactForm);
-            const response = await fetch(contactForm.action, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
-            
-            if (response.ok) {
-                supportSuccess.classList.remove('hidden');
-                contactForm.reset();
-                setTimeout(() => {
-                    contactModal.classList.add('hidden');
-                    supportSuccess.classList.add('hidden');
-                }, 3000);
-            } else {
-                supportError.classList.remove('hidden');
-            }
-        } catch (error) {
-            console.error('Error submitting form:', error);
-            supportError.classList.remove('hidden');
-        }
-    });
-
     // --- Contact Support Form ---
     if (contactForm) {
         contactForm.addEventListener('submit', async function(e) {
