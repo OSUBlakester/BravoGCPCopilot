@@ -42,8 +42,6 @@ steps:
       - '1'
       - '--max-instances'
       - '10'
-      - '--min-instances'
-      - '1'
       - '--timeout'
       - '300'
       - '--port'
