@@ -13130,26 +13130,78 @@ async def save_user_info_api(request: Dict, current_ids: Annotated[Dict[str, str
 # Custom Images helpers
 # ---------------------------------------------------------------------------
 
-def _gcs_storage_path_from_url(image_url: str) -> str | None:
-    """Extract the GCS object path from a storage.googleapis.com URL."""
-    prefix = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/"
-    if image_url and image_url.startswith(prefix):
-        return image_url[len(prefix):]
+def _gcs_storage_path_from_url(image_url: str) -> tuple[str, str] | None:
+    """Extract (bucket_name, object_path) from a storage.googleapis.com URL.
+
+    Returns None if the URL is not a GCS URL for either of our buckets.
+    """
+    for bucket in (AAC_IMAGES_BUCKET_NAME, CUSTOM_IMAGES_BUCKET_NAME):
+        if not bucket:
+            continue
+        prefix = f"https://storage.googleapis.com/{bucket}/"
+        if image_url and image_url.startswith(prefix):
+            return bucket, image_url[len(prefix):]
     return None
+
+
+def _signed_url_for_custom_image(storage_path: str) -> str:
+    """Generate a V4 signed URL for an object in the private custom-images bucket.
+
+    Requires the Cloud Run service account to have roles/iam.serviceAccountTokenCreator
+    on itself so the IAM SignBlob API can be used without a private key file.
+    Falls back to /api/image-proxy on failure.
+    """
+    from datetime import timedelta
+    from urllib.parse import quote
+
+    if not storage_client or not CUSTOM_IMAGES_BUCKET_NAME:
+        return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+
+    try:
+        import google.auth
+        import google.auth.transport.requests
+        from google.auth import iam as google_iam
+        from google.oauth2 import service_account
+
+        credentials, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        auth_req = google.auth.transport.requests.Request()
+        credentials.refresh(auth_req)
+
+        sa_email = getattr(credentials, "service_account_email", None)
+        if not sa_email:
+            raise ValueError("No service account email available")
+
+        signer = google_iam.Signer(auth_req, credentials, sa_email)
+        signing_credentials = service_account.Credentials(
+            signer=signer,
+            service_account_email=sa_email,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+
+        from google.cloud import storage as gcs_storage
+        signing_client = gcs_storage.Client(
+            project=CONFIG.get("gcp_project_id"), credentials=signing_credentials
+        )
+        blob = signing_client.bucket(CUSTOM_IMAGES_BUCKET_NAME).blob(storage_path)
+        return blob.generate_signed_url(
+            version="v4", expiration=timedelta(hours=6), method="GET"
+        )
+    except Exception as e:
+        logging.warning(f"Failed to sign custom image URL for '{storage_path}': {e}")
+        return f"/api/image-proxy?path={quote(storage_path, safe='')}"
 
 
 def _display_image_url(image_url: str | None = None, storage_path: str | None = None) -> str | None:
     """Return a browser-loadable URL for a GCS image.
 
-    The main AAC images bucket has legacyObjectReader for allUsers (objects are
-    readable by anyone with the URL, but the bucket is not listable), so we
-    return the raw public storage.googleapis.com URL. <img> tags can load it
-    directly without any auth header.
-
-    Custom-images in a future private bucket will need signed URLs here;
-    branch on storage_path prefix when that bucket is introduced.
+    - Main AAC images bucket (public, legacyObjectReader): return raw URL — <img> loads directly.
+    - Custom images bucket (private): return a signed URL (or proxy fallback) — requires auth.
     """
     if storage_path:
+        if storage_path.startswith("custom_images/"):
+            return _signed_url_for_custom_image(storage_path)
         if not AAC_IMAGES_BUCKET_NAME:
             return image_url
         return f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
@@ -13157,8 +13209,15 @@ def _display_image_url(image_url: str | None = None, storage_path: str | None = 
     if not image_url:
         return image_url
 
-    # Already a public GCS URL — return as-is (includes both our bucket URLs
-    # and any other public image URLs stored before the path-based approach).
+    result = _gcs_storage_path_from_url(image_url)
+    if result is None:
+        return image_url  # not one of our GCS buckets — return as-is
+
+    bucket_name, path = result
+    if bucket_name == CUSTOM_IMAGES_BUCKET_NAME:
+        return _signed_url_for_custom_image(path)
+
+    # Public main bucket — direct URL works in <img> tags
     return image_url
 
 
@@ -13179,10 +13238,15 @@ async def proxy_custom_image(
     path: str,
     current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
-    """Proxy a GCS image object so authenticated browsers can load private bucket images."""
+    """Fallback proxy for private custom-image objects in GCS.
+
+    Generates a signed URL for the object in the private custom-images bucket
+    and returns a 302 redirect so the browser fetches directly from GCS.
+    The signed URL carries auth in its query string — no Authorization header needed.
+    """
     account_id = current_account.get("account_id")
     try:
-        if not storage_client or not AAC_IMAGES_BUCKET_NAME:
+        if not CUSTOM_IMAGES_BUCKET_NAME:
             raise HTTPException(status_code=503, detail="Storage not available")
 
         # Basic path sanity-check to prevent traversal attacks
@@ -13192,41 +13256,20 @@ async def proxy_custom_image(
             raise HTTPException(status_code=400, detail="Invalid path")
 
         # custom_images paths are user-specific; restrict to the owning account.
-        # All other paths (global/, bravo_images/, etc.) are system images any authenticated user may access.
         path_parts = normalised.split("/")
         if path_parts[0] == "custom_images":
             if len(path_parts) < 3 or path_parts[1] != account_id:
                 raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
 
-        # Run blocking GCS I/O in a thread pool to avoid freezing the event loop.
+        # Generate a signed URL and redirect — avoids streaming bytes through the server.
         import asyncio
         loop = asyncio.get_event_loop()
+        signed_url = await loop.run_in_executor(None, _signed_url_for_custom_image, normalised)
 
-        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
-        blob = bucket.blob(normalised)
-
-        exists = await loop.run_in_executor(None, blob.exists)
-        if not exists:
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        image_bytes = await loop.run_in_executor(None, blob.download_as_bytes)
-
-        # Use stored content-type if available, otherwise guess from extension
-        content_type = blob.content_type or "application/octet-stream"
-        if content_type == "application/octet-stream":
-            ext = normalised.rsplit(".", 1)[-1].lower() if "." in normalised else ""
-            content_type = {
-                "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                "png": "image/png", "gif": "image/gif",
-                "webp": "image/webp"
-            }.get(ext, "application/octet-stream")
-
-        from fastapi.responses import Response
-        return Response(
-            content=image_bytes,
-            media_type=content_type,
-            headers={"Cache-Control": "private, max-age=86400"}
-        )
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=signed_url, status_code=302)
     except HTTPException:
         raise
     except Exception as e:
@@ -13283,20 +13326,20 @@ async def upload_custom_image(
         file_extension = image.filename.split('.')[-1] if '.' in image.filename else 'png'
         unique_filename = f"custom_{account_id}_{aac_user_id}_{uuid.uuid4().hex}.{file_extension}"
         storage_path = f"custom_images/{account_id}/{aac_user_id}/{unique_filename}"
-        
-        # Upload to Google Cloud Storage
-        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+
+        # Upload to the private custom-images bucket
+        bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
-        
+
         # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
             content_type=image.content_type or "image/png"
         )
-        
-        # Construct public URL
-        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
-        
+
+        # Store the canonical GCS URL; _display_image_url converts it to a signed URL at serve time.
+        image_url = f"https://storage.googleapis.com/{CUSTOM_IMAGES_BUCKET_NAME}/{storage_path}"
+
         # Create Firestore document
         doc_data = {
             "concept": concept,
@@ -13587,20 +13630,20 @@ async def upload_user_profile_image(
         file_extension = image.filename.split('.')[-1] if '.' in image.filename else 'png'
         unique_filename = f"profile_{account_id}_{aac_user_id}_{uuid.uuid4().hex}.{file_extension}"
         storage_path = f"custom_images/{account_id}/{aac_user_id}/{unique_filename}"
-        
-        # Upload to Google Cloud Storage
-        bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+
+        # Upload to the private custom-images bucket
+        bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
         blob = bucket.blob(storage_path)
-        
+
         # Upload with a usable image MIME type so browser rendering is reliable
         blob.upload_from_string(
             image_data,
             content_type=image.content_type or "image/png"
         )
-        
-        # Construct public URL
-        image_url = f"https://storage.googleapis.com/{AAC_IMAGES_BUCKET_NAME}/{storage_path}"
-        
+
+        # Store the canonical GCS URL; _display_image_url converts it to a signed URL at serve time.
+        image_url = f"https://storage.googleapis.com/{CUSTOM_IMAGES_BUCKET_NAME}/{storage_path}"
+
         # Automatically tag with user name and personal pronouns
         # Include both proper case and lowercase for better matching
         personal_pronouns = ["I", "me", "myself"]
@@ -13784,10 +13827,12 @@ async def remove_profile_image(
         
         profile_image = profile_doc.to_dict()
         
-        # Delete from Cloud Storage
+        # Delete from Cloud Storage — determine bucket from stored URL
         if storage_client and profile_image.get("storage_path"):
             try:
-                bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
+                _parsed = _gcs_storage_path_from_url(profile_image.get("image_url", ""))
+                _bucket_name = _parsed[0] if _parsed else CUSTOM_IMAGES_BUCKET_NAME or AAC_IMAGES_BUCKET_NAME
+                bucket = storage_client.bucket(_bucket_name)
                 blob = bucket.blob(profile_image["storage_path"])
                 blob.delete()
                 logging.info(f"Deleted profile image from storage: {profile_image['storage_path']}")
@@ -20097,6 +20142,7 @@ try:
     # Initialize storage client for AAC images
     storage_client = storage.Client(project=CONFIG['gcp_project_id'])
     AAC_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-aac-images"
+    CUSTOM_IMAGES_BUCKET_NAME = f"{CONFIG['gcp_project_id']}-custom-images"
     
     # Initialize Secret Manager client
     secret_client = secretmanager.SecretManagerServiceClient()
@@ -20116,6 +20162,7 @@ except ImportError as e:
     VERTEX_AI_AVAILABLE = False
     storage_client = None
     AAC_IMAGES_BUCKET_NAME = None
+    CUSTOM_IMAGES_BUCKET_NAME = None
     secret_client = None
     
     async def get_secret(secret_name: str) -> str:
