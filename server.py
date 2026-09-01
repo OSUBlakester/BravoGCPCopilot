@@ -13147,6 +13147,26 @@ def _signed_image_url_from_path(storage_path: str) -> str:
     blob = bucket.blob(storage_path)
 
     from datetime import timedelta
+    import google.auth
+    import google.auth.transport.requests
+
+    # V4 signed URLs require explicit credentials with signBlob permission.
+    # On Cloud Run, use the attached service account via IAM credentials endpoint.
+    try:
+        credentials, _ = google.auth.default()
+        if hasattr(credentials, "service_account_email"):
+            auth_req = google.auth.transport.requests.Request()
+            credentials.refresh(auth_req)
+            return blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(hours=6),
+                method="GET",
+                service_account_email=credentials.service_account_email,
+                access_token=credentials.token,
+            )
+    except Exception:
+        pass  # fall through to default attempt below
+
     return blob.generate_signed_url(version="v4", expiration=timedelta(hours=6), method="GET")
 
 
@@ -13207,8 +13227,11 @@ async def proxy_custom_image(
         # Verify the path belongs to the authenticated account.
         # Paths are custom_images/{account_id}/{aac_user_id}/filename
         path_parts = normalised.split("/")
-        if len(path_parts) < 3 or path_parts[0] != "custom_images" or path_parts[1] != account_id:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # custom_images paths are user-specific; restrict to the authenticated account.
+        # All other paths (global/, bravo_images/, etc.) are system images any authenticated user may access.
+        if path_parts[0] == "custom_images":
+            if len(path_parts) < 3 or path_parts[1] != account_id:
+                raise HTTPException(status_code=403, detail="Access denied")
 
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(normalised)
