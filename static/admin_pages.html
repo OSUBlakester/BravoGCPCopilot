@@ -382,7 +382,7 @@
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
-            <form id="contact-support-form" class="space-y-2" method="POST" action="https://formspree.io/f/myzpzero">
+            <form id="contact-support-form" class="space-y-2">
                 <input type="text" id="support-name" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <input type="email" id="support-email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <textarea id="support-message" name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>
@@ -1774,31 +1774,30 @@
     
     // Handle form submission
     if (contactSupportForm) {
-        contactSupportForm.addEventListener('submit', function(e) {
+        contactSupportForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            const formData = new FormData(contactSupportForm);
-            
-            fetch(contactSupportForm.action, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'Accept': 'application/json'
-                }
-            }).then(response => {
-                if (response.ok) {
+            supportSuccess.classList.add('hidden');
+            supportError.classList.add('hidden');
+            try {
+                const resp = await fetch('/api/support/contact', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: document.getElementById('support-name').value.trim(),
+                        email: document.getElementById('support-email').value.trim(),
+                        message: document.getElementById('support-message').value.trim(),
+                    })
+                });
+                if (resp.ok) {
                     supportSuccess.classList.remove('hidden');
-                    supportError.classList.add('hidden');
                     contactSupportForm.reset();
                     setTimeout(closeContactModal, 3000);
                 } else {
-                    supportSuccess.classList.add('hidden');
                     supportError.classList.remove('hidden');
                 }
-            }).catch(error => {
-                console.error('Error submitting form:', error);
-                supportSuccess.classList.add('hidden');
+            } catch (_) {
                 supportError.classList.remove('hidden');
-            });
+            }
         });
     }
     </script>

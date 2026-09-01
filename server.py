@@ -34545,27 +34545,66 @@ def _build_consent_email_html(child: str, verify_url: str, ttl_days: int, inner_
     )
 
 
+# In-memory rate limit store for contact support: ip -> list of UTC timestamps
+_contact_support_ip_timestamps: dict = {}
+_contact_support_global_timestamps: list = []
+_CONTACT_SUPPORT_PER_IP_HOUR_LIMIT = 5
+_CONTACT_SUPPORT_GLOBAL_DAY_LIMIT = 100
+
+
+def _contact_support_check_rate_limits(client_ip: str) -> None:
+    """Raise 429 if per-IP hourly or global daily limits are exceeded. Prunes expired entries."""
+    now = dt.utcnow()
+    hour_ago = now - timedelta(hours=1)
+    day_ago = now - timedelta(days=1)
+
+    # Per-IP hourly limit
+    ip_times = _contact_support_ip_timestamps.get(client_ip, [])
+    ip_times = [t for t in ip_times if t > hour_ago]
+    _contact_support_ip_timestamps[client_ip] = ip_times
+    if len(ip_times) >= _CONTACT_SUPPORT_PER_IP_HOUR_LIMIT:
+        raise HTTPException(status_code=429, detail="Too many support requests. Please try again later.")
+
+    # Global daily limit (protects Gmail quota shared with consent emails)
+    global _contact_support_global_timestamps
+    _contact_support_global_timestamps = [t for t in _contact_support_global_timestamps if t > day_ago]
+    if len(_contact_support_global_timestamps) >= _CONTACT_SUPPORT_GLOBAL_DAY_LIMIT:
+        raise HTTPException(status_code=429, detail="Support contact limit reached for today. Please email admin@talkwithbravo.com directly.")
+
+    # Record this request
+    ip_times.append(now)
+    _contact_support_ip_timestamps[client_ip] = ip_times
+    _contact_support_global_timestamps.append(now)
+
+
 class ContactSupportRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
+    name: str = Field("", max_length=200)
     email: str = Field(..., min_length=3, max_length=200)
     message: str = Field(..., min_length=1, max_length=5000)
 
 
 @app.post("/api/support/contact")
-async def contact_support_endpoint(request_data: ContactSupportRequest):
+async def contact_support_endpoint(request: Request, request_data: ContactSupportRequest):
     """Send a support message to admin@talkwithbravo.com via the Google Workspace email service."""
-    name = request_data.name.strip()
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host if request.client else "unknown").split(",")[0].strip()
+    _contact_support_check_rate_limits(client_ip)
+
+    name = re.sub(r"[\r\n]+", " ", request_data.name.strip())
     email = request_data.email.strip()
     message = request_data.message.strip()
 
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    display_name = name if name else email
     body_text = (
-        f"Support request from {name} <{email}>\n\n"
+        f"Support request from {display_name} <{email}>\n\n"
         f"{message}\n\n"
         f"---\nReply directly to {email} to respond."
     )
     sent = await send_system_email(
         to_address="admin@talkwithbravo.com",
-        subject=f"Bravo support: {name}",
+        subject=f"Bravo support: {display_name}",
         body_text=body_text,
         purpose="contact_support",
     )

@@ -2337,7 +2337,7 @@
             </div>
             
             <div style="padding: 1.5rem;">
-                <form id="contact-form" action="https://formspree.io/f/xnnqkvqj" method="POST">
+                <form id="contact-form">
                     <div style="display: flex; flex-direction: column; gap: 1rem;">
                         <div>
                             <label for="contact-email" style="display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem;">Your Email</label>
@@ -2443,14 +2443,15 @@
         const contactForm = document.getElementById('contact-form');
         contactForm?.addEventListener('submit', async function(e) {
             e.preventDefault();
-            
             try {
-                const response = await fetch(contactForm.action, {
+                const response = await fetch('/api/support/contact', {
                     method: 'POST',
-                    body: new FormData(contactForm),
-                    headers: { 'Accept': 'application/json' }
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('contact-email').value.trim(),
+                        message: document.getElementById('contact-message').value.trim(),
+                    })
                 });
-                
                 if (response.ok) {
                     alert('Thank you for contacting support! We will get back to you soon.');
                     contactForm.reset();
@@ -2458,7 +2459,7 @@
                 } else {
                     alert('There was a problem sending your message. Please try again.');
                 }
-            } catch (error) {
+            } catch (_) {
                 alert('There was a problem sending your message. Please try again.');
             }
         });
