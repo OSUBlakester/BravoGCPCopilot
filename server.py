@@ -34545,6 +34545,35 @@ def _build_consent_email_html(child: str, verify_url: str, ttl_days: int, inner_
     )
 
 
+class ContactSupportRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    email: str = Field(..., min_length=3, max_length=200)
+    message: str = Field(..., min_length=1, max_length=5000)
+
+
+@app.post("/api/support/contact")
+async def contact_support_endpoint(request_data: ContactSupportRequest):
+    """Send a support message to admin@talkwithbravo.com via the Google Workspace email service."""
+    name = request_data.name.strip()
+    email = request_data.email.strip()
+    message = request_data.message.strip()
+
+    body_text = (
+        f"Support request from {name} <{email}>\n\n"
+        f"{message}\n\n"
+        f"---\nReply directly to {email} to respond."
+    )
+    sent = await send_system_email(
+        to_address="admin@talkwithbravo.com",
+        subject=f"Bravo support: {name}",
+        body_text=body_text,
+        purpose="contact_support",
+    )
+    if not sent:
+        raise HTTPException(status_code=502, detail="Could not send support email.")
+    return {"success": True}
+
+
 @app.post("/api/consent/initiate")
 async def consent_initiate_endpoint(
     request_data: ConsentInitiateRequest,

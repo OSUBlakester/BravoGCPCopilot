@@ -443,7 +443,7 @@
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-[90vw] max-w-md mx-2 relative flex flex-col">
             <button id="contact-modal-close" class="absolute top-4 right-6 text-gray-500 hover:text-red-500 text-3xl font-bold focus:outline-none" aria-label="Close Contact">&times;</button>
             <h3 class="text-lg font-semibold mb-4">Contact Support</h3>
-            <form id="contact-support-form" class="space-y-2" method="POST" action="https://formspree.io/f/myzpzero">
+            <form id="contact-support-form" class="space-y-2">
                 <input type="text" id="support-name" name="name" placeholder="Your Name" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <input type="email" id="support-email" name="email" placeholder="Your Email" class="w-full px-3 py-2 border border-gray-300 rounded-md" required>
                 <textarea id="support-message" name="message" placeholder="How can we help you?" class="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required></textarea>
@@ -1338,31 +1338,39 @@
         }
     });
 
-    // --- Contact Support Form Logic (Formspree AJAX) ---
+    // --- Contact Support Form ---
     if (contactForm) {
-        contactForm.addEventListener('submit', function(e) {
+        contactForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-            const formData = new FormData(contactForm);
-            fetch('https://formspree.io/f/myzpzero', {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/json'
-                },
-                body: formData
-            })
-            .then(response => {
-                if (response.ok) {
+            const submitBtn = contactForm.querySelector('button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+            if (supportSuccess) supportSuccess.classList.add('hidden');
+            if (supportError) supportError.classList.add('hidden');
+            try {
+                const idToken = sessionStorage.getItem('firebaseIdToken');
+                const resp = await fetch('/api/support/contact', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+                    },
+                    body: JSON.stringify({
+                        name: document.getElementById('support-name').value.trim(),
+                        email: document.getElementById('support-email').value.trim(),
+                        message: document.getElementById('support-message').value.trim(),
+                    })
+                });
+                if (resp.ok) {
                     if (supportSuccess) supportSuccess.classList.remove('hidden');
-                    if (supportError) supportError.classList.add('hidden');
                     contactForm.reset();
                 } else {
-                    return response.json().then(data => { throw data; });
+                    if (supportError) supportError.classList.remove('hidden');
                 }
-            })
-            .catch(() => {
-                if (supportSuccess) supportSuccess.classList.add('hidden');
+            } catch (_) {
                 if (supportError) supportError.classList.remove('hidden');
-            });
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
         });
     }
     </script>
