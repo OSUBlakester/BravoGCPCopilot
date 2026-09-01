@@ -13181,9 +13181,11 @@ def _display_image_url(image_url: str | None = None, storage_path: str | None = 
 
 @app.get("/api/image-proxy")
 async def proxy_custom_image(
-    path: str
+    path: str,
+    current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
     """Proxy a custom-image object from GCS so browser image tags can load it."""
+    account_id = current_account.get("account_id")
     try:
         if not storage_client or not AAC_IMAGES_BUCKET_NAME:
             raise HTTPException(status_code=503, detail="Storage not available")
@@ -13193,6 +13195,12 @@ async def proxy_custom_image(
         normalised = posixpath.normpath(path).lstrip("/")
         if ".." in normalised or normalised != path.lstrip("/"):
             raise HTTPException(status_code=400, detail="Invalid path")
+
+        # Verify the path belongs to the authenticated account.
+        # Paths are custom_images/{account_id}/{aac_user_id}/filename
+        path_parts = normalised.split("/")
+        if len(path_parts) < 3 or path_parts[0] != "custom_images" or path_parts[1] != account_id:
+            raise HTTPException(status_code=403, detail="Access denied")
 
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(normalised)
