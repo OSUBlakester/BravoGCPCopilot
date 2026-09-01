@@ -151,7 +151,6 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 from firebase_admin._auth_utils import EmailAlreadyExistsError
 from google.oauth2 import service_account # Import service_account
-import openai # Add OpenAI import
 # SERVICE_ACCOUNT_KEY_PATH is now imported from config.py
 
 from google.cloud.firestore_v1 import Client as FirestoreClient # Alias to avoid conflict if other Client classes are imported
@@ -228,7 +227,6 @@ async def health_check():
             "sentence_transformer": sentence_transformer_model is not None,
             "primary_llm": _gemini_client is not None and bool(_primary_model_name),
             "fallback_llm": _gemini_client is not None and bool(_fallback_model_name),
-            "openai": openai_client is not None,
             "tts": tts_client is not None
         }
     })
@@ -317,7 +315,7 @@ template_user_data_paths = {
         "wakeWordInterjection": "hey",
         "wakeWordName": "bravo",
         "CountryCode": "US",
-        "llm_provider": "gemini",  # New field: "gemini" or "chatgpt"
+        "llm_provider": "gemini",
         "speech_rate": 180,
         "LLMOptions": 10,
         "FreestyleOptions": 20,
@@ -1728,11 +1726,6 @@ if not GEMINI_FALLBACK_MODEL:
 # Defaults to the configured primary model if not explicitly provided.
 GEMINI_FAST_WORDS_MODEL = (os.environ.get("GEMINI_FAST_WORDS_MODEL") or GEMINI_PRIMARY_MODEL).strip()
 
-# ChatGPT Models - GPT-5 requires: max_completion_tokens, temperature=1.0 (default only)
-# GPT-4o/4o-mini use: max_tokens, adjustable temperature
-CHATGPT_PRIMARY_MODEL = os.environ.get("CHATGPT_PRIMARY_MODEL", "gpt-4o-mini")
-CHATGPT_FALLBACK_MODEL = os.environ.get("CHATGPT_FALLBACK_MODEL", "gpt-4o")
-
 # Keep legacy defaults for backward compatibility
 DEFAULT_PRIMARY_LLM_MODEL_NAME = GEMINI_PRIMARY_MODEL
 DEFAULT_FALLBACK_LLM_MODEL_NAME = GEMINI_FALLBACK_MODEL
@@ -1826,7 +1819,7 @@ DEFAULT_SETTINGS = {
     "wakeWordInterjection": DEFAULT_WAKE_WORD_INTERJECTION, # Default interjection
     "wakeWordName": DEFAULT_WAKE_WORD_NAME,      # Default name
     "CountryCode": DEFAULT_COUNTRY_CODE,          # Default Country US
-    "llm_provider": "gemini", # New setting: "gemini" or "chatgpt"
+    "llm_provider": "gemini",
     "speech_rate": DEFAULT_SPEECH_RATE,            # Default speech rate in WPM
     "LLMOptions": DEFAULT_LLM_OPTIONS,           # Default LLM Options
     "FreestyleOptions": 20,  # Default Freestyle Options
@@ -3874,7 +3867,6 @@ _gemini_client: Optional[genai.Client] = None  # Vertex AI client singleton
 _primary_model_name: str = ""
 _fallback_model_name: str = ""
 _fast_words_model_name: str = ""
-openai_client: Optional[openai.OpenAI] = None # OpenAI client instance
 tts_client: Optional[google_tts.TextToSpeechClient] = None # Global instance
 firestore_db: Optional[FirestoreClient] = None
 firebase_app: Optional[firebase_admin.App] = None # NEW
@@ -3921,29 +3913,6 @@ try:
 except Exception as e_genai_config:
     logging.error(f"Fatal error initializing Gemini Vertex AI client: {e_genai_config}", exc_info=True)
     _gemini_client = None
-
-# --- Initialize OpenAI Client ---
-logging.info("Initializing OpenAI client...")
-openai_api_key = os.environ.get("OPENAI_API_KEY")
-
-if not openai_api_key:
-    logging.warning("OPENAI_API_KEY environment variable not set. OpenAI functionality will be disabled.")
-    openai_client = None
-else:
-    try:
-        openai_client = openai.OpenAI(api_key=openai_api_key)
-        logging.info(f"OpenAI client initialized successfully (API key first 5 chars): {openai_api_key[:5]}*****")
-        
-        # Test the connection with a simple API call
-        try:
-            models = openai_client.models.list()
-            logging.info("OpenAI API connection verified successfully.")
-        except Exception as e_test:
-            logging.warning(f"OpenAI API test call failed: {e_test}")
-            
-    except Exception as e_openai:
-        logging.error(f"Error initializing OpenAI client: {e_openai}", exc_info=True)
-        openai_client = None
 
 # --- Initialize Google Cloud Text-to-Speech Client ---
 tts_client = None
@@ -4541,103 +4510,6 @@ async def _delete_collection(coll_ref, batch_size=50):
         # If there are more documents to delete, call the function recursively
         await _delete_collection(coll_ref, batch_size)
 
-
-# --- OpenAI Helper Functions ---
-async def _generate_openai_content(prompt_text: str, model: str = None) -> str:
-    """Generate content using OpenAI API"""
-    global openai_client
-    
-    if not openai_client:
-        raise HTTPException(status_code=503, detail="OpenAI client not available.")
-    
-    if not model:
-        model = CHATGPT_PRIMARY_MODEL
-    
-    try:
-        logging.info(f"Sending request to OpenAI model: {model}")
-        
-        # Determine if this is a GPT-5 model (which has different parameter requirements)
-        # GPT-5 models: use max_completion_tokens, temperature fixed at 1.0 (omit parameter)
-        # GPT-4o/older: use max_tokens, temperature adjustable (0-2)
-        model_lower = model.lower()
-        is_gpt5_model = 'gpt-5' in model_lower
-        uses_completion_tokens = is_gpt5_model  # GPT-5 models use max_completion_tokens
-        
-        # Build the base request parameters
-        request_params = {
-            "model": model,
-            "messages": [
-                {
-                    "role": "system", 
-                    "content": "You are a helpful assistant that generates responses in valid JSON format as requested by the user. Always respond with properly formatted JSON."
-                },
-                {
-                    "role": "user", 
-                    "content": prompt_text
-                }
-            ],
-            "response_format": {"type": "json_object"}
-        }
-        
-        # Handle temperature parameter based on model type
-        if is_gpt5_model:
-            # GPT-5 models only support temperature=1.0 (default), so we omit it
-            logging.info(f"GPT-5 model detected: {model} - omitting temperature parameter (defaults to 1.0)")
-        else:
-            # Older models support adjustable temperature
-            request_params["temperature"] = 0.7
-            logging.info(f"Using temperature=0.7 for model: {model}")
-        
-        # Add the appropriate token limit parameter
-        if uses_completion_tokens:
-            request_params["max_completion_tokens"] = 2000
-            logging.info(f"Using max_completion_tokens for GPT-5 model: {model}")
-        else:
-            request_params["max_tokens"] = 2000
-            logging.info(f"Using max_tokens for model: {model}")
-        
-        response = await asyncio.to_thread(
-            openai_client.chat.completions.create,
-            **request_params
-        )
-        
-        # Log full response for debugging
-        logging.info(f"OpenAI API response: {response}")
-        
-        # Check if we have choices and content
-        if not response.choices:
-            logging.error("OpenAI response has no choices")
-            raise Exception("OpenAI response has no choices")
-        
-        choice = response.choices[0]
-        content = choice.message.content
-        
-        # Check for empty or None content
-        if not content:
-            logging.error(f"OpenAI returned empty content. Choice: {choice}")
-            logging.error(f"Finish reason: {choice.finish_reason}")
-            raise Exception("OpenAI returned empty content")
-        
-        logging.info(f"OpenAI response received (length: {len(content)})")
-        return content
-        
-    except Exception as e:
-        logging.error(f"OpenAI API error with model {model}: {e}")
-        raise
-
-async def _generate_openai_content_with_fallback(prompt_text: str) -> str:
-    """Generate content using OpenAI with fallback to secondary model"""
-    try:
-        # Try primary ChatGPT model first
-        return await _generate_openai_content(prompt_text, CHATGPT_PRIMARY_MODEL)
-    except Exception as e:
-        logging.warning(f"Primary OpenAI model failed: {e}. Trying fallback...")
-        try:
-            # Try fallback ChatGPT model
-            return await _generate_openai_content(prompt_text, CHATGPT_FALLBACK_MODEL)
-        except Exception as e2:
-            logging.error(f"Both OpenAI models failed. Primary: {e}, Fallback: {e2}")
-            raise HTTPException(status_code=503, detail="OpenAI service unavailable.")
 
 
 def _is_retryable_gemini_exception(exc: Exception) -> bool:
@@ -5492,7 +5364,11 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
     llm_generate_start_time = time.perf_counter()
 
     # --- Route to appropriate LLM ---
-    if llm_provider != "chatgpt" and is_starter_question_prompt:
+    if llm_provider == "chatgpt":
+        logging.error("chatgpt llm_provider requested but OpenAI is not supported; falling back to gemini.")
+        llm_provider = "gemini"
+
+    if is_starter_question_prompt:
         # Starter question prompts are dynamic and short-lived. Avoid cache warm-up/drift checks and
         # generate directly to reduce latency variance caused by cache bookkeeping/fallback paths.
         logging.info(f"⚡ Starter-question fast path (cache bypass) [{log_context}]")
@@ -5545,19 +5421,6 @@ Return ONLY valid JSON - no other text before or after the JSON array."""
                     aac_user_id,
                 )
 
-    elif llm_provider == "chatgpt":
-        logging.info(f"Using OpenAI [{log_context}]. Building full prompt manually.")
-        full_prompt_for_openai = await build_full_prompt_for_non_cached_llm(
-            account_id,
-            aac_user_id,
-            final_user_query,
-            compose_mode=request_data.compose_mode,
-            compose_body=request_data.compose_body,
-            prefetched_user_info=user_info_doc,
-            prefetched_settings=user_settings,
-            include_rich_delta_context=include_rich_delta_context,
-        )
-        llm_response_json_str = await _generate_openai_content_with_fallback(full_prompt_for_openai)
     else:
         # --- Gemini Cache-First Approach with Base + Delta Architecture + Lazy Invalidation ---
         logging.info(f"🚀 Using Gemini with Base+Delta caching [{log_context}].")
@@ -9058,7 +8921,7 @@ class SettingsModel(BaseModel):
     speech_rate: Optional[int] = Field(None, description="Speech rate in WPM (e.g., 100-300).", gt=49, lt=401) # Added speech_rate
     LLMOptions: Optional[int] = Field(None, description="Number of options returned by LLM (e.g., 0-50)", ge=0, le=50) 
     FreestyleOptions: Optional[int] = Field(20, description="Number of word options returned for freestyle communication (e.g., 1-50)", ge=1, le=50)
-    llm_provider: Optional[str] = Field(None, description="LLM provider choice: 'gemini' or 'chatgpt'.", min_length=3)
+    llm_provider: Optional[str] = Field(None, description="LLM provider (only 'gemini' is supported).", min_length=3)
     ScanningOff: Optional[bool] = Field(None, description="Enable/disable scanning of off-screen elements.") # Added ScanningOff
     scanMode: Optional[str] = Field(None, description="Scanning mode: 'auto' or 'step'")
     waitForSwitchToScan: Optional[bool] = Field(None, description="Enable/disable waiting for switch press before starting scanning on initial page load.") # Added waitForSwitchToScan
@@ -20360,49 +20223,6 @@ async def generate_subconcepts(concept: str, count: int) -> List[str]:
         logging.error(f"Error generating subconcepts: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate subconcepts: {str(e)}")
 
-async def generate_image_with_openai(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using OpenAI DALL-E 3"""
-    for attempt in range(max_retries + 1):
-        try:
-            from openai import AsyncOpenAI
-            
-            # Get OpenAI API key from environment or secrets
-            api_key = os.environ.get('OPENAI_API_KEY')
-            if not api_key:
-                # Try to get from Google Secret Manager
-                try:
-                    api_key = await get_secret("openai-api-key")
-                except:
-                    raise Exception("OpenAI API key not found in environment or secrets")
-            
-            client = AsyncOpenAI(api_key=api_key)
-            
-            # Simple AAC-focused prompt that works well
-            enhanced_prompt = f'Create an image based on the word "{prompt}". The image will be used for AAC. Therefore, it is essential that the image fully represents the meaning of the word so that the AAC user will have a good understanding of the word. The image should capture the definition of "{prompt}" well enough for the user to understand that the image represents the word "{prompt}". Consider the core meaning of the word and common and contemporary uses and expressions of the word to determine what to include in the image. Use a simple, expressive, cartoon sticker style with a transparent background.'
-            
-            # Generate image using OpenAI DALL-E 3
-            response = await client.images.generate(
-                model="dall-e-3",
-                prompt=enhanced_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1,
-            )
-            
-            # Download the image
-            image_url = response.data[0].url
-            async with aiohttp.ClientSession() as session:
-                async with session.get(image_url) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-                    else:
-                        raise Exception(f"Failed to download image: {resp.status}")
-                
-        except Exception as e:
-            logging.warning(f"Image generation attempt {attempt + 1} failed: {e}")
-            if attempt == max_retries:
-                raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
-
 async def generate_image_with_gemini_fallback(prompt: str, max_retries: int = 2) -> bytes:
     """Generate image using Google AI API (as fallback when Vertex AI doesn't work)"""
     for attempt in range(max_retries + 1):
@@ -20447,23 +20267,6 @@ async def generate_image_with_gemini_fallback(prompt: str, max_retries: int = 2)
             logging.warning(f"Fallback image generation attempt {attempt + 1} failed: {e}")
             if attempt == max_retries:
                 raise HTTPException(status_code=500, detail=f"Failed to generate image after {max_retries + 1} attempts: {str(e)}")
-
-async def generate_image_with_openai_if_available(prompt: str, max_retries: int = 2) -> bytes:
-    """Generate image using OpenAI DALL-E 3 if API key is available"""
-    try:
-        # Check if OpenAI API key is available
-        api_key = os.environ.get('OPENAI_API_KEY')
-        if not api_key:
-            try:
-                api_key = await get_secret("openai-api-key")
-            except:
-                raise Exception("No OpenAI API key available")
-        
-        # Use the OpenAI implementation
-        return await generate_image_with_openai(prompt, max_retries)
-    except:
-        # Fall back to placeholder if OpenAI is not available
-        return await generate_image_with_gemini_fallback(prompt, max_retries)
 
 async def generate_image_with_vertex_ai_imagen(
     prompt: str,
