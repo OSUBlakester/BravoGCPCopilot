@@ -13138,61 +13138,26 @@ def _gcs_storage_path_from_url(image_url: str) -> str | None:
     return None
 
 
-def _signed_image_url_from_path(storage_path: str) -> str:
-    """Generate a time-limited signed URL for a GCS image object."""
-    if not storage_client or not AAC_IMAGES_BUCKET_NAME:
-        return storage_path
-
-    bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
-    blob = bucket.blob(storage_path)
-
-    from datetime import timedelta
-    import google.auth
-    import google.auth.transport.requests
-
-    # V4 signed URLs require explicit credentials with signBlob permission.
-    # On Cloud Run, use the attached service account via IAM credentials endpoint.
-    try:
-        credentials, _ = google.auth.default()
-        if hasattr(credentials, "service_account_email"):
-            auth_req = google.auth.transport.requests.Request()
-            credentials.refresh(auth_req)
-            return blob.generate_signed_url(
-                version="v4",
-                expiration=timedelta(hours=6),
-                method="GET",
-                service_account_email=credentials.service_account_email,
-                access_token=credentials.token,
-            )
-    except Exception:
-        pass  # fall through to default attempt below
-
-    return blob.generate_signed_url(version="v4", expiration=timedelta(hours=6), method="GET")
-
-
 def _display_image_url(image_url: str | None = None, storage_path: str | None = None) -> str | None:
-    """Return a browser-loadable image URL for stored GCS images."""
+    """Return a browser-loadable URL for a GCS image.
+
+    Cloud Run uses Compute Engine credentials that cannot sign blobs without
+    extra IAM setup, so we always route through the authenticated image-proxy
+    endpoint rather than attempting signed URLs.
+    """
     from urllib.parse import quote
 
     if storage_path:
-        try:
-            return _signed_image_url_from_path(storage_path)
-        except Exception as e:
-            logging.warning(f"Failed to sign image URL for path '{storage_path}': {e}")
-            return f"/api/image-proxy?path={quote(storage_path, safe='')}"
+        return f"/api/image-proxy?path={quote(storage_path, safe='')}"
 
     if not image_url:
         return image_url
 
     path = _gcs_storage_path_from_url(image_url)
     if path is None:
-        return image_url
+        return image_url  # not a GCS URL we own — return as-is
 
-    try:
-        return _signed_image_url_from_path(path)
-    except Exception as e:
-        logging.warning(f"Failed to sign image URL for '{image_url}': {e}")
-        return f"/api/image-proxy?path={quote(path, safe='')}"
+    return f"/api/image-proxy?path={quote(path, safe='')}"
 
 
 def _rewrite_image_urls(obj):
@@ -13212,7 +13177,7 @@ async def proxy_custom_image(
     path: str,
     current_account: Annotated[Dict[str, str], Depends(verify_firebase_token_only)],
 ):
-    """Proxy a custom-image object from GCS so browser image tags can load it."""
+    """Proxy a GCS image object so authenticated browsers can load private bucket images."""
     account_id = current_account.get("account_id")
     try:
         if not storage_client or not AAC_IMAGES_BUCKET_NAME:
@@ -13224,22 +13189,25 @@ async def proxy_custom_image(
         if ".." in normalised or normalised != path.lstrip("/"):
             raise HTTPException(status_code=400, detail="Invalid path")
 
-        # Verify the path belongs to the authenticated account.
-        # Paths are custom_images/{account_id}/{aac_user_id}/filename
-        path_parts = normalised.split("/")
-        # custom_images paths are user-specific; restrict to the authenticated account.
+        # custom_images paths are user-specific; restrict to the owning account.
         # All other paths (global/, bravo_images/, etc.) are system images any authenticated user may access.
+        path_parts = normalised.split("/")
         if path_parts[0] == "custom_images":
             if len(path_parts) < 3 or path_parts[1] != account_id:
                 raise HTTPException(status_code=403, detail="Access denied")
 
+        # Run blocking GCS I/O in a thread pool to avoid freezing the event loop.
+        import asyncio
+        loop = asyncio.get_event_loop()
+
         bucket = storage_client.bucket(AAC_IMAGES_BUCKET_NAME)
         blob = bucket.blob(normalised)
 
-        if not blob.exists():
+        exists = await loop.run_in_executor(None, blob.exists)
+        if not exists:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        image_bytes = blob.download_as_bytes()
+        image_bytes = await loop.run_in_executor(None, blob.download_as_bytes)
 
         # Use stored content-type if available, otherwise guess from extension
         content_type = blob.content_type or "application/octet-stream"
