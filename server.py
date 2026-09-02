@@ -20455,7 +20455,12 @@ async def upload_image_to_storage(image_bytes: bytes, filename: str, account_id:
     goes to the public main bucket under global/.
     """
     try:
-        if account_id and CUSTOM_IMAGES_BUCKET_NAME and storage_client:
+        if account_id:
+            if not (CUSTOM_IMAGES_BUCKET_NAME and storage_client):
+                logging.error(
+                    "Private image storage unavailable — refusing to write user content to the public bucket"
+                )
+                raise HTTPException(status_code=503, detail="Image storage unavailable")
             storage_path = f"custom_images/{account_id}/illustrations/{filename}"
             bucket = storage_client.bucket(CUSTOM_IMAGES_BUCKET_NAME)
             blob = bucket.blob(storage_path)
